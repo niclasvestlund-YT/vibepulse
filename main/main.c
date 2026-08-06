@@ -224,8 +224,22 @@ void app_main(void) {
 
   /* Panelen först, nätet sedan: initsekvensen tar ~1,2 s och skärmen ska
    * visa sina streck medan WiFi:t kopplar upp, inte stå svart i tio
-   * sekunder. */
-  bsp_display_start();
+   * sekunder.
+   *
+   * Adapterns LVGL-task får 16 KB stack i stället för defaultens 8 KB:
+   * med appröttarna blev objektträdet en nivå djupare än Solelkollen-eran
+   * och första fullrenderingen sprängde 8 KB (stack overflow i "lvgl",
+   * följt av korruptionspaniker, hittat vid första flashen 2026-08-06).
+   * Övriga fält är exakt bsp_display_start()-defaulten — touchparet
+   * swap_xy/mirror_y hör ihop med MADCTL 0xA0 (spec/hardware.md). */
+  bsp_display_cfg_t disp_cfg = {
+    .lv_adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG(),
+    .rotation = ESP_LV_ADAPTER_ROTATE_0,
+    .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
+    .touch_flags = { .swap_xy = 1, .mirror_x = 0, .mirror_y = 1 },
+  };
+  disp_cfg.lv_adapter_cfg.task_stack_size = 16 * 1024;
+  bsp_display_start_with_config(&disp_cfg);
   /* Börja släckt: tick_cb:s ramp lyfter till dagsläge på ~1,3 s. Det är
    * bootens fade-in — samma ramp som nattväckningen använder. */
   bsp_display_brightness_set(0);
