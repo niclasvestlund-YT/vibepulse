@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "agent_assets.h"
+#include "agent_monitor_policy.h"
 #include "fmt_sv.h"
 #include "torget.h"
 
@@ -47,6 +48,7 @@ typedef struct {
   int64_t applied_at_us;
   bool has_snapshot;
   bool long_pressed;
+  bool manual_choice;
 } monitor_state;
 
 static monitor_state mon;
@@ -66,18 +68,6 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font,
   lv_obj_set_style_text_color(object, color, 0);
   lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
   return object;
-}
-
-static int state_priority(tk_agent_state state) {
-  switch (state) {
-    case TK_AGENT_WAITING: return 5;
-    case TK_AGENT_ERROR: return 4;
-    case TK_AGENT_WORKING: return 3;
-    case TK_AGENT_DONE: return 2;
-    case TK_AGENT_IDLE: return 1;
-    case TK_AGENT_UNKNOWN: return 0;
-  }
-  return 0;
 }
 
 static uint64_t effective_age_ms(const tk_agent_status *status,
@@ -103,22 +93,6 @@ static bool is_present(int provider, int64_t now_us) {
     return false;
   }
   return true;
-}
-
-static int best_provider(int64_t now_us) {
-  int best = -1;
-  for (int provider = 0; provider < 2; provider++) {
-    if (!is_present(provider, now_us)) continue;
-    if (best < 0 ||
-        state_priority(mon.agents[provider].state) >
-            state_priority(mon.agents[best].state) ||
-        (state_priority(mon.agents[provider].state) ==
-             state_priority(mon.agents[best].state) &&
-         mon.agents[provider].updated_ms < mon.agents[best].updated_ms)) {
-      best = provider;
-    }
-  }
-  return best;
 }
 
 static lv_color_t provider_color(int provider) {
@@ -270,7 +244,12 @@ static void render_provider(int provider, int64_t now_us) {
 }
 
 static void render_best(int64_t now_us) {
-  render_provider(best_provider(now_us), now_us);
+  bool present[2] = {is_present(0, now_us), is_present(1, now_us)};
+  int previous = mon.selected;
+  int provider = tk_agent_monitor_resolve_provider(
+      mon.agents, present, mon.selected, mon.manual_choice);
+  if (provider != previous) mon.manual_choice = false;
+  render_provider(provider, now_us);
 }
 
 static void overlay_event(lv_event_t *event) {
@@ -286,7 +265,9 @@ static void overlay_event(lv_event_t *event) {
     snprintf(mon.dismissed_event_id[provider],
              sizeof mon.dismissed_event_id[provider], "%s",
              mon.agents[provider].event_id);
-    render_best(torget_now_us());
+    mon.manual_choice = false;
+    mon.selected = -1;
+    lv_obj_add_flag(mon.overlay, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
@@ -296,10 +277,18 @@ static void provider_event(lv_event_t *event) {
   if (code == LV_EVENT_CLICKED) {
     lv_event_stop_bubbling(event);
     int64_t now_us = torget_now_us();
-    if (is_present(provider, now_us)) render_provider(provider, now_us);
-  } else if (code == LV_EVENT_LONG_PRESSED) {
+    if (is_present(provider, now_us)) {
+      mon.manual_choice = true;
+      render_provider(provider, now_us);
+    }
+  }
+}
+
+static void volume_event(lv_event_t *event) {
+  if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
+    /* Task 8 kopplar på mute. Fram till dess är ytan reserverad, men ett
+     * vanligt tryck får aldrig bubbla vidare och kvittera agentnotisen. */
     lv_event_stop_bubbling(event);
-    torget_launcher_open();
   }
 }
 
@@ -323,8 +312,6 @@ void tk_agent_monitor_create(lv_obj_t *root) {
     lv_obj_add_flag(touch, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_event_cb(touch, provider_event, LV_EVENT_CLICKED,
                         (void *)(intptr_t)provider);
-    lv_obj_add_event_cb(touch, provider_event, LV_EVENT_LONG_PRESSED,
-                        (void *)(intptr_t)provider);
     mon.provider_dots[provider] = bare(touch);
     lv_obj_set_size(mon.provider_dots[provider], 8, 8);
     lv_obj_set_style_radius(mon.provider_dots[provider], LV_RADIUS_CIRCLE, 0);
@@ -342,9 +329,15 @@ void tk_agent_monitor_create(lv_obj_t *root) {
   lv_obj_set_style_text_align(mon.project, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_set_style_text_letter_space(mon.project, 2, 0);
 
-  lv_obj_t *sound = label(mon.overlay, LV_FONT_DEFAULT, COL_MUTED);
+  lv_obj_t *sound_touch = bare(mon.overlay);
+  lv_obj_set_size(sound_touch, 44, 44);
+  lv_obj_set_pos(sound_touch, 412, 18);
+  lv_obj_add_flag(sound_touch,
+                  LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_event_cb(sound_touch, volume_event, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *sound = label(sound_touch, LV_FONT_DEFAULT, COL_MUTED);
   lv_obj_set_size(sound, 44, 44);
-  lv_obj_set_pos(sound, 412, 18);
+  lv_obj_set_pos(sound, 0, 0);
   lv_obj_set_style_text_align(sound, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_pad_top(sound, 13, 0);
   lv_obj_set_style_opa(sound, 90, 0);

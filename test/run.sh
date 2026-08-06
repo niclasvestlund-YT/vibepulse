@@ -41,3 +41,9 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -lm \
   -o /tmp/torget-agent-usage-test
 /tmp/torget-agent-usage-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_monitor_policy.c \
+  test_agent_monitor_policy.c \
+  -o /tmp/torget-agent-monitor-policy-test
+/tmp/torget-agent-monitor-policy-test

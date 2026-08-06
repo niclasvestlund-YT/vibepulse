@@ -34,6 +34,7 @@ add_executable(torget-sim
   ../components/app_tokens/tokens_parse.c
   ../components/app_tokens/agent_status_parse.c
   ../components/app_tokens/agent_usage.c
+  ../components/app_tokens/agent_monitor_policy.c
   ../components/app_tokens/agent_monitor.c
   ../components/app_tokens/agent_assets.c
   ../components/torget_fmt/fmt_sv.c
