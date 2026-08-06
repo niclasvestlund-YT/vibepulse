@@ -23,6 +23,8 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
+#include "esp_heap_caps.h"
+
 #include "bsp/esp-bsp.h"
 #include "esp_lv_adapter.h"
 #include "lvgl.h"
@@ -182,6 +184,21 @@ static void net_task(void *arg) {
 static void tick_cb(lv_timer_t *t) {
   (void)t;
   int64_t now = esp_timer_get_time();
+
+  /* Minnestelemetri var 10:e sekund: SPI-flushen till panelen behöver
+   * DMA-dugligt internminne, och tar det slut fastnar hela ritpipen i
+   * NO_MEM (sett vid första flashen 2026-08-06: TLS-hämtning + omritning
+   * sammanföll och panelen tystnade permanent). Largest block är siffran
+   * som avgör — fragmentering syns inte i totalsumman. */
+  static int heap_probe;
+  if (++heap_probe >= 100) {
+    heap_probe = 0;
+    ESP_LOGI(TAG, "heap: internt %u fritt (största block %u, lägsta någonsin %u), DMA största %u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+  }
 
   /* Väckning: ett finger på glaset räknas som aktivitet. Pollat, inte
    * event-kopplat — apparnas UI:n får sluka gesterna bäst de vill,

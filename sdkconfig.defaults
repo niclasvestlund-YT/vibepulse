@@ -37,3 +37,4 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 # Nätverkstacken får jobba på: en hämtning var 30:e sekund är ingen last, men
 # en blockerad TLS-handskakning ska inte svälta LVGL-tasken.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_LV_MEM_SIZE_KILOBYTES=96

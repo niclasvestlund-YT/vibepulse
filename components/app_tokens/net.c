@@ -31,6 +31,12 @@ static void net_task(void *arg) {
   size_t len;
 
   torget_net_wait();
+  /* Fasförskjutning: alla appars tasker släpps av torget_net_wait i samma
+   * ögonblick, och samtidiga hämtningar + första omritningen visade sig
+   * kunna svälta internminnet så SPI-flushen till panelen dog i NO_MEM.
+   * Tokenmätaren är den tålmodiga appen — den väntar tio sekunder och
+   * hamnar sedan i motfas mot Solelkollens 30-sekunderskadens. */
+  vTaskDelay(pdMS_TO_TICKS(10000));
 
   for (;;) {
     tk_tokens t;
