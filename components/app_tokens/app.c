@@ -12,6 +12,10 @@
 #include "ticker.h"
 #include "torget.h"
 
+#ifdef ESP_PLATFORM
+#include "secrets.h"
+#endif
+
 /*
  * Tre vyer, samma anatomi som Solelkollens (eyebrow, hero, hårlinje, två
  * statblock) — designsystemet är Torgets, inte appens.

@@ -47,3 +47,5 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   test_agent_monitor_policy.c \
   -o /tmp/torget-agent-monitor-policy-test
 /tmp/torget-agent-monitor-policy-test
+
+python3 test_agent_demo_wiring.py
