@@ -2,7 +2,7 @@
 
 **Datum:** 2026-08-06
 
-**Status:** Visuell riktning vald; redo för Niclas specifikationsgranskning
+**Status:** Godkänd med plattformsgranskningens fysiska AMOLED-grind
 
 **Målplattform:** Waveshare ESP32-S3-Touch-AMOLED-2.16, 480 × 480, LVGL 9.5
 
@@ -339,14 +339,24 @@ implementationsplanen; inga bibliotek skördas i förväg.
 
 ## Leveransordning
 
+**Obligatoriskt före steg 1:** läs hela
+[`docs/agentmonitor-granskning.md`](../../agentmonitor-granskning.md). Dess
+hårdvarukrav för 24-radsflush, flashlagrade bildmasker, långlivad HTTP-klient,
+lokal lease, overlayintegration, fontplacering och ljudets DMA-minne är en del
+av denna specifikation och ska finnas med i implementationsplanen.
+
 1. Statuskontrakt och syntetiska fixtures.
 2. Inkrementell statuswatcher i tokenservern med tester.
 3. Parser och en statisk overlay i simulatorn.
-4. Claude- och Codex-animationer samt samtliga färgtillstånd.
-5. Separat snabb statuspollning och hela tillståndsmaskinen.
-6. Fysisk AMOLED-granskning och justering av storlek, kontrast och fps.
-7. Lokal ljudsignal/röst med deduplicering.
-8. Full regression, dokumentation och ny fysisk verifiering.
+4. **Första fysiska AMOLED-grinden:** visa den statiska overlayn på glaset och
+   justera storlek, kontrast, radbrytning och faktisk läsbarhet innan någon
+   animationskod skrivs.
+5. Claude- och Codex-animationer samt samtliga färgtillstånd.
+6. Separat snabb statuspollning och hela tillståndsmaskinen.
+7. Andra fysiska AMOLED-grinden: verifiera fps, dirty areas, heap och
+   30 minuters stabilitet med animation och polling aktiva.
+8. Lokal ljudsignal/röst med deduplicering.
+9. Full regression, dokumentation och slutlig fysisk verifiering.
 
 Först efter att denna version fungerar stabilt tas nästa steg: säker parning,
 autentisering och eventuella godkännanden från skärmen. Den funktionen ska
