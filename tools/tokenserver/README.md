@@ -63,8 +63,10 @@ skannar eller öppnar aldrig sessionsfiler på begäran.
   `activity` är en grov kategori som exempelvis `thinking`, `reading`,
   `editing`, `searching`, `running`, `testing`, `building`,
   `waiting_input` eller `waiting_approval`.
-- `project` är endast en kontrollteckenrensad basename på högst 16 tecken;
-  `updated_ms` är tiden sedan senaste observerade händelse.
+- `project` är endast en kontrollteckenrensad basename på högst 16 UTF-8-byte;
+  `task_id` är ett opakt, kollisionssäkert id på högst 64 UTF-8-byte.
+  `updated_ms` är tiden sedan händelsens säkra tidsstämpel (filens mtime är
+  reserv när tidsstämpel saknas), inte tiden då servern råkade starta.
 - En `working`-status som inte uppdaterats på 120 sekunder visas som
   `unknown` med tom aktivitet. Den skrivs aldrig om till ett påhittat
   `done`, och enbart läsning av status ökar inte `seq`.
@@ -74,7 +76,12 @@ verktygsnamn och ett kommando för att skilja test, bygge och vanlig körning,
 men varken promptar, kommandon, meddelandetext, filinnehåll eller råa
 logghändelser sparas eller exponeras. Ofullständiga sista rader hålls lokalt
 tills nästa append; trasiga rader och tillfälligt försvunna filer stoppar
-inte följningen.
+inte följningen. Oförändrad filmetadata gör att filen inte ens öppnas igen.
+När metadata på samma filidentitet ändras verifieras däremot hela den redan
+lästa prefixen mot en sparad SHA-256-digest innan nya byte läses. Den extra
+läsningen krävs för att säkert upptäcka snabb truncate/omskrivning; arbetet
+begränsas till de tolv senast aktiva kandidatfilerna och inget färdigt
+radinnehåll sparas.
 
 Lokalt röktest från repots rot, på en alternativ port:
 

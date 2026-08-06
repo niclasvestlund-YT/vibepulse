@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import threading
 import time
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -46,7 +48,8 @@ class Event:
 
 def stable_event_id(provider: str, event: Event) -> str:
     raw = f"{provider}|{event.task_id}|{event.state}|{event.source_id}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+    return hashlib.sha256(
+        raw.encode("utf-8", errors="surrogatepass")).hexdigest()[:32]
 
 
 def sanitize_project(value: Any) -> Optional[str]:
@@ -58,7 +61,24 @@ def sanitize_project(value: Any) -> Optional[str]:
         char for char in name
         if not unicodedata.category(char).startswith("C")
     ).strip()
-    return clean[:16] or None
+    prefix = []
+    encoded_bytes = 0
+    for char in clean:
+        char_bytes = len(char.encode("utf-8"))
+        if encoded_bytes + char_bytes > 16:
+            break
+        prefix.append(char)
+        encoded_bytes += char_bytes
+    return "".join(prefix) or None
+
+
+def _bounded_task_id(value: str) -> str:
+    raw = value.encode("utf-8", errors="surrogatepass")
+    has_controls = any(unicodedata.category(char).startswith("C")
+                       for char in value)
+    if len(raw) <= 64 and not has_controls:
+        return value
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _claude_identity(event: Dict[str, Any]) -> Optional[tuple]:
@@ -68,8 +88,10 @@ def _claude_identity(event: Dict[str, Any]) -> Optional[tuple]:
         return None
     if not isinstance(source_id, str) or not source_id:
         return None
+    combined = json.dumps([session_id, source_id], ensure_ascii=True,
+                          separators=(",", ":"))
     return (
-        f"{session_id}:{source_id}",
+        hashlib.sha256(combined.encode()).hexdigest(),
         source_id,
         sanitize_project(event.get("cwd")),
     )
@@ -194,10 +216,11 @@ def classify_codex(event: Any) -> Optional[Event]:
     if not isinstance(turn_id, str) or not turn_id:
         return None
     if kind == "task_started":
-        return Event("working", "thinking", turn_id, turn_id, None)
+        return Event("working", "thinking", _bounded_task_id(turn_id),
+                     turn_id, None)
     if kind == "task_complete":
         state = "error" if _has_explicit_error(payload) else "done"
-        return Event(state, None, turn_id, turn_id, None)
+        return Event(state, None, _bounded_task_id(turn_id), turn_id, None)
     return None
 
 
@@ -232,7 +255,7 @@ class AgentStatusStore:
 
         seen_at = self._now() if observed_at is None else observed_at
         replacement = {
-            "task_id": event.task_id,
+            "task_id": _bounded_task_id(event.task_id),
             "event_id": stable_event_id(provider, event),
             "state": event.state,
             "project": sanitize_project(event.project),
@@ -278,65 +301,160 @@ class AgentStatusStore:
 class JsonlTailer:
     """Incrementally decode complete JSON objects from multiple JSONL files."""
 
-    _BOUNDARY_BYTES = 64
+    _MISSING_POLLS = 3
 
     def __init__(self):
         self._files = {}
+        self._identities = {}
+
+    @staticmethod
+    def _fresh_state(identity: tuple) -> Dict[str, Any]:
+        return {
+            "identity": identity,
+            "offset": 0,
+            "partial": b"",
+            "prefix_digest": hashlib.sha256(b"").digest(),
+            "stat_signature": None,
+            "missing_polls": 0,
+        }
+
+    def _prune_state(self, state: Dict[str, Any]) -> None:
+        identity = state["identity"]
+        if self._identities.get(identity) is state:
+            del self._identities[identity]
+        for alias, candidate in list(self._files.items()):
+            if candidate is state:
+                del self._files[alias]
+
+    def _note_missing_path(self, path: Path) -> None:
+        state = self._files.get(path)
+        if state is None:
+            return
+        state["missing_polls"] += 1
+        if state["missing_polls"] >= self._MISSING_POLLS:
+            self._prune_state(state)
+
+    def retain_paths(self, paths: Any) -> None:
+        active_paths = {Path(path) for path in paths}
+        active_identities = set()
+        path_identities = {}
+        for path in active_paths:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            identity = (stat.st_dev, stat.st_ino)
+            path_identities[path] = identity
+            active_identities.add(identity)
+
+        for alias, state in list(self._files.items()):
+            actual_identity = path_identities.get(alias)
+            if (actual_identity != state["identity"] and
+                    state["identity"] in active_identities):
+                del self._files[alias]
+
+        for identity, state in list(self._identities.items()):
+            if identity in active_identities:
+                state["missing_polls"] = 0
+                continue
+            state["missing_polls"] += 1
+            if state["missing_polls"] >= self._MISSING_POLLS:
+                self._prune_state(state)
+
+    def _state_for_identity(self, path: Path,
+                            identity: tuple) -> Dict[str, Any]:
+        previous = self._files.get(path)
+        if previous is not None and previous["identity"] != identity:
+            del self._files[path]
+
+        state = self._files.get(path)
+        if state is None:
+            state = self._identities.get(identity)
+            if state is None:
+                state = self._fresh_state(identity)
+                self._identities[identity] = state
+            self._files[path] = state
+        state["missing_polls"] = 0
+
+        for alias, candidate in list(self._files.items()):
+            if alias == path or candidate is not state:
+                continue
+            try:
+                alias_stat = alias.stat()
+                alias_identity = (alias_stat.st_dev, alias_stat.st_ino)
+            except OSError:
+                alias_identity = None
+            if alias_identity != identity:
+                del self._files[alias]
+        return state
+
+    def _reset_state(self, state: Dict[str, Any], identity: tuple) -> None:
+        old_identity = state["identity"]
+        state.clear()
+        state.update(self._fresh_state(identity))
+        if self._identities.get(old_identity) is state:
+            del self._identities[old_identity]
+        self._identities[identity] = state
+
+    @staticmethod
+    def _stat_signature(stat: os.stat_result) -> tuple:
+        return (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+    @staticmethod
+    def _digest_prefix(stream: Any, length: int) -> Optional[Any]:
+        digest = hashlib.sha256()
+        remaining = length
+        stream.seek(0)
+        while remaining:
+            chunk = stream.read(min(remaining, 64 * 1024))
+            if not chunk:
+                return None
+            digest.update(chunk)
+            remaining -= len(chunk)
+        return digest
 
     def read(self, path: Any) -> list:
         path = Path(path)
         try:
             stat = path.stat()
         except FileNotFoundError:
+            self._note_missing_path(path)
             return []
         except OSError:
             return []
 
         identity = (stat.st_dev, stat.st_ino)
-        state = self._files.get(path)
-        if (state is None or state["identity"] != identity or
-                stat.st_size < state["offset"]):
-            state = {
-                "identity": identity,
-                "offset": 0,
-                "partial": b"",
-                "boundary_digest": b"",
-                "boundary_len": 0,
-            }
+        state = self._state_for_identity(path, identity)
+        if stat.st_size < state["offset"]:
+            self._reset_state(state, identity)
+        elif (stat.st_size == state["offset"] and
+              self._stat_signature(stat) == state["stat_signature"]):
+            return []
 
         try:
             with path.open("rb") as stream:
                 opened = os.fstat(stream.fileno())
                 opened_identity = (opened.st_dev, opened.st_ino)
-                if (opened_identity != state["identity"] or
-                        opened.st_size < state["offset"]):
-                    state = {
-                        "identity": opened_identity,
-                        "offset": 0,
-                        "partial": b"",
-                        "boundary_digest": b"",
-                        "boundary_len": 0,
-                    }
-                boundary_len = state["boundary_len"]
-                if boundary_len:
-                    stream.seek(state["offset"] - boundary_len)
-                    boundary = stream.read(boundary_len)
-                    if (hashlib.sha256(boundary).digest() !=
-                            state["boundary_digest"]):
-                        state = {
-                            "identity": opened_identity,
-                            "offset": 0,
-                            "partial": b"",
-                            "boundary_digest": b"",
-                            "boundary_len": 0,
-                        }
+                opened_signature = self._stat_signature(opened)
+                if opened_identity != state["identity"]:
+                    state = self._state_for_identity(path, opened_identity)
+                if opened.st_size < state["offset"]:
+                    self._reset_state(state, opened_identity)
+
+                prefix_digest = self._digest_prefix(
+                    stream, state["offset"])
+                if (prefix_digest is None or
+                        prefix_digest.digest() != state["prefix_digest"]):
+                    self._reset_state(state, opened_identity)
+                    prefix_digest = hashlib.sha256()
+
                 stream.seek(state["offset"])
                 appended = stream.read()
+                prefix_digest.update(appended)
                 offset = stream.tell()
-                boundary_len = min(offset, self._BOUNDARY_BYTES)
-                stream.seek(offset - boundary_len)
-                boundary = stream.read(boundary_len)
+                final_stat = os.fstat(stream.fileno())
         except FileNotFoundError:
+            self._note_missing_path(path)
             return []
         except OSError:
             return []
@@ -344,8 +462,10 @@ class JsonlTailer:
         chunks = (state["partial"] + appended).split(b"\n")
         state["offset"] = offset
         state["partial"] = chunks.pop()
-        state["boundary_len"] = boundary_len
-        state["boundary_digest"] = hashlib.sha256(boundary).digest()
+        state["prefix_digest"] = prefix_digest.digest()
+        final_signature = self._stat_signature(final_stat)
+        state["stat_signature"] = (
+            final_signature if final_signature == opened_signature else None)
         self._files[path] = state
 
         records = []
@@ -366,20 +486,60 @@ class AgentStatusService:
     _RECENT_FILE_LIMIT = 12
 
     def __init__(self, projects_dir: Any, codex_sessions: Any,
-                 now: Callable[[], float] = time.monotonic):
+                 now: Callable[[], float] = time.monotonic, *,
+                 _wall_time: Callable[[], float] = time.time):
         self.projects_dir = Path(projects_dir)
         self.codex_sessions = Path(codex_sessions)
         self._now = now
+        self._wall_time = _wall_time
         self._store = AgentStatusStore(now=now)
         self._tailer = JsonlTailer()
         self._poll_lock = threading.Lock()
         self._thread_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
+        self._stopping = False
 
-    def _recent_paths(self, root: Path, pattern: str) -> list:
+    @staticmethod
+    def _event_wall_time(record: Any) -> Optional[float]:
+        if not isinstance(record, dict):
+            return None
+        candidates = [record.get("timestamp")]
+        payload = record.get("payload")
+        if isinstance(payload, dict):
+            if payload.get("type") == "task_complete":
+                candidates.extend((payload.get("completed_at"),
+                                   payload.get("started_at")))
+            else:
+                candidates.extend((payload.get("started_at"),
+                                   payload.get("completed_at")))
+        for value in candidates:
+            if not isinstance(value, str) or not value:
+                continue
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                timestamp = parsed.timestamp()
+            except (OverflowError, ValueError):
+                continue
+            if math.isfinite(timestamp):
+                return timestamp
+        return None
+
+    def _observed_at(self, record: Any, file_wall_time: Optional[float],
+                     monotonic_now: float, wall_now: float) -> float:
+        event_wall_time = self._event_wall_time(record)
+        if event_wall_time is None or event_wall_time > wall_now:
+            event_wall_time = file_wall_time
+        if event_wall_time is None or not math.isfinite(event_wall_time):
+            return monotonic_now
+        age = max(0.0, wall_now - event_wall_time)
+        return monotonic_now - age
+
+    def _discover_paths(self, root: Path, pattern: str) -> tuple:
         if not root.is_dir():
-            return []
+            return [], []
         candidates = []
         try:
             paths = root.glob(pattern)
@@ -391,9 +551,14 @@ class AgentStatusService:
                 if path.is_file():
                     candidates.append((stat.st_mtime_ns, str(path), path))
         except OSError:
-            return []
+            return [], []
+        all_paths = [item[2] for item in sorted(candidates)]
         newest = sorted(candidates, reverse=True)[:self._RECENT_FILE_LIMIT]
-        return [item[2] for item in sorted(newest)]
+        recent_paths = [item[2] for item in sorted(newest)]
+        return all_paths, recent_paths
+
+    def _recent_paths(self, root: Path, pattern: str) -> list:
+        return self._discover_paths(root, pattern)[1]
 
     def poll_once(self) -> int:
         """Apply newly read state changes and return the number changed."""
@@ -404,14 +569,32 @@ class AgentStatusService:
              classify_codex),
         )
         with self._poll_lock:
+            discovered = []
+            retained_paths = []
             for provider, root, pattern, classifier in sources:
-                for path in self._recent_paths(root, pattern):
-                    for record in self._tailer.read(path):
+                all_paths, recent_paths = self._discover_paths(root, pattern)
+                retained_paths.extend(all_paths)
+                discovered.append((provider, classifier, recent_paths))
+            self._tailer.retain_paths(retained_paths)
+            for provider, classifier, paths in discovered:
+                for path in paths:
+                    records = self._tailer.read(path)
+                    if not records:
+                        continue
+                    try:
+                        file_wall_time = path.stat().st_mtime
+                    except OSError:
+                        file_wall_time = None
+                    monotonic_now = self._now()
+                    wall_now = self._wall_time()
+                    for record in records:
                         event = classifier(record)
                         if event is None:
                             continue
                         if self._store.apply(
-                                provider, event, observed_at=self._now()):
+                                provider, event, observed_at=self._observed_at(
+                                    record, file_wall_time,
+                                    monotonic_now, wall_now)):
                             changed += 1
         return changed
 
@@ -431,6 +614,8 @@ class AgentStatusService:
 
     def start(self) -> None:
         with self._thread_lock:
+            if self._stopping:
+                return
             if self._thread is not None and self._thread.is_alive():
                 return
             self._stop.clear()
@@ -444,11 +629,17 @@ class AgentStatusService:
 
     def stop(self) -> None:
         with self._thread_lock:
+            if self._stopping:
+                return
+            self._stopping = True
             self._stop.set()
             thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=max(1.0, POLL_S * 4))
-        with self._thread_lock:
-            if self._thread is thread and (
-                    thread is None or not thread.is_alive()):
-                self._thread = None
+        try:
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=max(1.0, POLL_S * 4))
+        finally:
+            with self._thread_lock:
+                if self._thread is thread and (
+                        thread is None or not thread.is_alive()):
+                    self._thread = None
+                self._stopping = False

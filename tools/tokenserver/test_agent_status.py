@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -33,6 +34,12 @@ def claude_event(entry_type, stop_reason=None, tool_name=None, tool_input=None):
     }
 
 
+def claude_task_id(session_id, source_id):
+    pair = json.dumps([session_id, source_id], ensure_ascii=True,
+                      separators=(",", ":"))
+    return hashlib.sha256(pair.encode()).hexdigest()
+
+
 class ClassificationTests(unittest.TestCase):
     def test_claude_user_starts_work(self):
         event = classify_claude(claude_event("user"))
@@ -40,10 +47,40 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(event, Event(
             state="working",
             activity="thinking",
-            task_id="session-1:event-1",
+            task_id=claude_task_id("session-1", "event-1"),
             source_id="event-1",
             project="Torget",
         ))
+
+    def test_claude_task_identity_is_uuid_safe_and_sensitive_to_both_ids(self):
+        session_id = "123e4567-e89b-12d3-a456-426614174000"
+        source_id = "123e4567-e89b-12d3-a456-426614174001"
+        entry = claude_event("user")
+        entry["sessionId"] = session_id
+        entry["uuid"] = source_id
+
+        event = classify_claude(entry)
+        changed_session = dict(entry, sessionId=session_id[:-1] + "2")
+        changed_source = dict(entry, uuid=source_id[:-1] + "3")
+
+        self.assertEqual(len(event.task_id.encode("utf-8")), 64)
+        self.assertEqual(
+            event.task_id, claude_task_id(session_id, source_id))
+        self.assertNotEqual(
+            event.task_id, classify_claude(changed_session).task_id)
+        self.assertNotEqual(
+            event.task_id, classify_claude(changed_source).task_id)
+
+    def test_claude_task_identity_pair_encoding_is_unambiguous(self):
+        first = claude_event("user")
+        first["sessionId"] = "session|part"
+        first["uuid"] = "event"
+        second = claude_event("user")
+        second["sessionId"] = "session"
+        second["uuid"] = "part|event"
+
+        self.assertNotEqual(classify_claude(first).task_id,
+                            classify_claude(second).task_id)
 
     def test_claude_end_turn_waits_but_does_not_finish(self):
         event = classify_claude(claude_event("assistant", stop_reason="end_turn"))
@@ -162,6 +199,24 @@ class ClassificationTests(unittest.TestCase):
             project=None,
         ))
 
+    def test_codex_overlong_turn_identity_is_hashed_without_collision_truncation(self):
+        first_id = "å" * 40
+        second_id = "å" * 39 + "ä"
+
+        first = classify_codex({
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": first_id},
+        })
+        second = classify_codex({
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": second_id},
+        })
+
+        self.assertEqual(first.task_id,
+                         hashlib.sha256(first_id.encode()).hexdigest())
+        self.assertEqual(len(first.task_id.encode("utf-8")), 64)
+        self.assertNotEqual(first.task_id, second.task_id)
+
     def test_codex_task_complete_finishes_same_task(self):
         event = classify_codex({
             "type": "event_msg",
@@ -209,6 +264,13 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(sanitize_project("Tor\x00get-med-ett-långt-namn"),
                          "Torget-med-ett-l")
         self.assertIsNone(sanitize_project(None))
+
+    def test_project_sanitization_caps_utf8_bytes_without_splitting(self):
+        self.assertEqual(sanitize_project("å" * 16), "å" * 8)
+        self.assertEqual(sanitize_project("Torget-" + "å" * 10),
+                         "Torget-" + "å" * 4)
+        self.assertLessEqual(
+            len(sanitize_project("abc" + "😀" * 10).encode("utf-8")), 16)
 
 
 class StableEventIdTests(unittest.TestCase):
@@ -339,6 +401,41 @@ class StoreTests(unittest.TestCase):
             "updated_ms",
         })
 
+    def test_store_hashes_any_overlong_task_id_before_output(self):
+        store = AgentStatusStore(now=lambda: 0.0)
+        long_task_id = "😀" * 17
+        store.apply("claude", Event(
+            "working", "thinking", long_task_id, "source", "Torget"))
+
+        output_id = store.snapshot()["agents"]["claude"]["task_id"]
+
+        self.assertEqual(output_id,
+                         hashlib.sha256(long_task_id.encode()).hexdigest())
+        self.assertLessEqual(len(output_id.encode("utf-8")), 64)
+
+    def test_surrogate_ids_are_hashed_without_crashing_or_leaking(self):
+        claude = claude_event("user")
+        claude["uuid"] = "bad\ud800"
+        cases = (
+            ("claude", classify_claude(claude)),
+            ("codex", classify_codex({
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_started",
+                    "turn_id": "bad\ud800",
+                },
+            })),
+        )
+        store = AgentStatusStore(now=lambda: 0.0)
+
+        for provider, event in cases:
+            with self.subTest(provider=provider):
+                self.assertTrue(store.apply(provider, event))
+                output = store.snapshot()["agents"][provider]
+                self.assertLessEqual(len(output["task_id"].encode("utf-8")),
+                                     64)
+                self.assertNotIn("\ud800", output["event_id"])
+
 
 class JsonlTailerTests(unittest.TestCase):
     def test_reads_only_complete_lines_then_finishes_partial_append(self):
@@ -393,6 +490,64 @@ class JsonlTailerTests(unittest.TestCase):
 
             self.assertEqual(tailer.read(path), [{"replacement": True}])
 
+    def test_same_inode_rewrite_is_detected_when_final_boundary_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            original = {"first": "A" * 80}
+            replacement = {"first": "B" * 80}
+            unchanged_tail = {"tail": "Z" * 100}
+            path.write_text(
+                json.dumps(original) + "\n" +
+                json.dumps(unchanged_tail) + "\n",
+                encoding="utf-8",
+            )
+            original_inode = path.stat().st_ino
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(path), [original, unchanged_tail])
+
+            path.write_text(
+                json.dumps(replacement) + "\n" +
+                json.dumps(unchanged_tail) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(path.stat().st_ino, original_inode)
+
+            self.assertEqual(tailer.read(path), [replacement, unchanged_tail])
+            self.assertEqual(tailer.read(path), [])
+
+    def test_rewrite_during_prefix_verification_does_not_poison_fast_path(self):
+        class RewriteAfterDigestTailer(JsonlTailer):
+            def __init__(self, path, replacement):
+                super().__init__()
+                self.path = path
+                self.replacement = replacement
+                self.rewrite_after_digest = False
+
+            def _digest_prefix(self, stream, length):
+                digest = super()._digest_prefix(stream, length)
+                if self.rewrite_after_digest:
+                    self.rewrite_after_digest = False
+                    self.path.write_text(
+                        json.dumps(self.replacement) + "\n",
+                        encoding="utf-8")
+                return digest
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            original = {"old": 1}
+            replacement = {"new": 2}
+            path.write_text(json.dumps(original) + "\n", encoding="utf-8")
+            tailer = RewriteAfterDigestTailer(path, replacement)
+            self.assertEqual(tailer.read(path), [original])
+            stat = path.stat()
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+            tailer.rewrite_after_digest = True
+
+            self.assertEqual(tailer.read(path), [])
+
+            self.assertEqual(tailer.read(path), [replacement])
+            self.assertEqual(tailer.read(path), [])
+
     def test_complete_line_content_is_not_retained_for_rewrite_detection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "session.jsonl"
@@ -430,6 +585,22 @@ class JsonlTailerTests(unittest.TestCase):
 
             self.assertEqual(tailer.read(path), [])
 
+    def test_replacement_path_read_before_rotated_inode_does_not_lose_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            current = Path(temp_dir) / "current.jsonl"
+            rotated = Path(temp_dir) / "rotated.jsonl"
+            old = {"old": 1}
+            new = {"newfile": 1}
+            current.write_text(json.dumps(old) + "\n", encoding="utf-8")
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(current), [old])
+
+            current.rename(rotated)
+            current.write_text(json.dumps(new) + "\n", encoding="utf-8")
+
+            self.assertEqual(tailer.read(current), [new])
+            self.assertEqual(tailer.read(rotated), [])
+
 
 class AgentStatusServiceTests(unittest.TestCase):
     @staticmethod
@@ -443,13 +614,17 @@ class AgentStatusServiceTests(unittest.TestCase):
             claude_path = root / "claude" / "project" / "session.jsonl"
             codex_path = (root / "codex" / "2026" / "08" / "06" /
                           "rollout-test.jsonl")
-            self._write_line(claude_path, claude_event("user"))
+            claude = claude_event("user")
+            self._write_line(claude_path, claude)
             self._write_line(codex_path, {
                 "type": "event_msg",
+                "timestamp": claude["timestamp"],
                 "payload": {"type": "task_started", "turn_id": "turn-1"},
             })
+            wall_time = AgentStatusService._event_wall_time(claude)
             service = AgentStatusService(root / "claude", root / "codex",
-                                         now=lambda: 10.0)
+                                         now=lambda: 10.0,
+                                         _wall_time=lambda: wall_time)
 
             self.assertEqual(service.poll_once(), 2)
             snapshot = service.snapshot()
@@ -497,9 +672,43 @@ class AgentStatusServiceTests(unittest.TestCase):
             snapshot = service.snapshot()
             self.assertEqual(snapshot["agents"]["claude"]["state"], "done")
             self.assertEqual(snapshot["agents"]["claude"]["task_id"],
-                             "session-1:event-2")
+                             claude_task_id("session-1", "event-2"))
             self.assertEqual(service.poll_once(), 0)
             self.assertEqual(service.snapshot()["seq"], 2)
+
+    def test_renamed_active_file_transfers_offset_without_replaying_history(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_path = root / "claude" / "old.jsonl"
+            first = claude_event("user")
+            second = claude_event(
+                "assistant", tool_name="Bash",
+                tool_input={"command": "git status --short"})
+            second["uuid"] = "event-2"
+            old_path.parent.mkdir(parents=True)
+            old_path.write_text(
+                json.dumps(first) + "\n" + json.dumps(second) + "\n",
+                encoding="utf-8",
+            )
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 10.0)
+            self.assertEqual(service.poll_once(), 2)
+
+            new_path = old_path.with_name("renamed.jsonl")
+            old_path.rename(new_path)
+            completed = claude_event("result")
+            completed["uuid"] = "event-3"
+            completed["subtype"] = "success"
+            with new_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(completed) + "\n")
+
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(service.snapshot()["seq"], 3)
+            self.assertEqual(service.snapshot()["agents"]["claude"]["state"],
+                             "done")
+            self.assertNotIn(old_path, service._tailer._files)
+            self.assertIn(new_path, service._tailer._files)
+            self.assertEqual(service.poll_once(), 0)
 
     def test_missing_roots_and_start_stop_are_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -569,6 +778,54 @@ class AgentStatusServiceTests(unittest.TestCase):
             service.stop()
             self.assertFalse(poller_was_alive)
 
+    def test_start_during_stop_join_cannot_launch_replacement_worker(self):
+        class JoinPausingThread:
+            def __init__(self, thread):
+                self.thread = thread
+                self.worker_joined = threading.Event()
+                self.allow_join_return = threading.Event()
+
+            def is_alive(self):
+                return self.thread.is_alive()
+
+            def join(self, timeout=None):
+                self.thread.join(timeout=timeout)
+                if self.thread.is_alive():
+                    return
+                self.worker_joined.set()
+                if not self.allow_join_return.wait(timeout=2):
+                    raise RuntimeError("test did not release join")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            service = AgentStatusService(root / "claude", root / "codex")
+            service.start()
+            original = service._thread
+            pausing_thread = JoinPausingThread(original)
+            with service._thread_lock:
+                service._thread = pausing_thread
+
+            stop_thread = threading.Thread(target=service.stop)
+            stop_thread.start()
+            self.assertTrue(pausing_thread.worker_joined.wait(timeout=2))
+
+            service.start()
+            pausing_thread.allow_join_return.set()
+            stop_thread.join(timeout=2)
+            self.assertFalse(stop_thread.is_alive())
+            survivor = service._thread
+            survivor_was_alive = (survivor is not None and
+                                  survivor is not pausing_thread and
+                                  survivor.is_alive())
+            service.stop()
+
+            self.assertFalse(survivor_was_alive)
+            service.start()
+            restarted = service._thread
+            self.assertTrue(restarted.is_alive())
+            service.stop()
+            self.assertFalse(restarted.is_alive())
+
     def test_background_thread_survives_transient_poll_failure(self):
         class FlakyService(AgentStatusService):
             def __init__(self, root):
@@ -604,6 +861,147 @@ class AgentStatusServiceTests(unittest.TestCase):
 
             self.assertEqual(snapshot["v"], 1)
             self.assertEqual(set(snapshot["agents"]), {"claude", "codex"})
+
+    def test_startup_replay_uses_old_claude_and_codex_iso_timestamps(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            claude_path = root / "claude" / "session.jsonl"
+            codex_path = root / "codex" / "rollout-test.jsonl"
+            claude = claude_event("user")
+            claude["timestamp"] = "2000-01-01T00:00:00Z"
+            codex = {
+                "type": "event_msg",
+                "timestamp": "2000-01-01T00:00:00Z",
+                "payload": {"type": "task_started", "turn_id": "turn-old"},
+            }
+            self._write_line(claude_path, claude)
+            self._write_line(codex_path, codex)
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 500.0)
+            service._wall_time = lambda: 2_000_000_000.0
+
+            self.assertEqual(service.poll_once(), 2)
+            snapshot = service.snapshot()
+
+            for provider in ("claude", "codex"):
+                self.assertEqual(snapshot["agents"][provider]["state"],
+                                 "unknown")
+                self.assertIsNone(snapshot["agents"][provider]["activity"])
+
+    def test_old_file_mtime_is_fallback_when_timestamp_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            event = claude_event("user")
+            del event["timestamp"]
+            self._write_line(path, event)
+            wall_time = 2_000_000_000.0
+            os.utime(path, (wall_time - 121.0, wall_time - 121.0))
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 500.0)
+            service._wall_time = lambda: wall_time
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()["agents"]["claude"]
+            self.assertEqual(snapshot["state"], "unknown")
+            self.assertIsNone(snapshot["activity"])
+
+    def test_future_timestamp_falls_back_to_old_file_time(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            event = claude_event("user")
+            event["timestamp"] = "2999-01-01T00:00:00Z"
+            self._write_line(path, event)
+            wall_time = 2_000_000_000.0
+            os.utime(path, (wall_time - 121.0, wall_time - 121.0))
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 500.0,
+                                         _wall_time=lambda: wall_time)
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()["agents"]["claude"]
+            self.assertEqual(snapshot["state"], "unknown")
+            self.assertIsNone(snapshot["activity"])
+
+    def test_task_complete_age_uses_completion_before_start_time(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "codex" / "rollout-test.jsonl"
+            completion = "2026-08-06T10:00:00Z"
+            completed_wall_time = AgentStatusService._event_wall_time(
+                {"timestamp": completion})
+            self._write_line(path, {
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "turn_id": "turn-complete",
+                    "started_at": "2000-01-01T00:00:00Z",
+                    "completed_at": completion,
+                },
+            })
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 500.0,
+                _wall_time=lambda: completed_wall_time + 2.0)
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()["agents"]["codex"]
+            self.assertEqual(snapshot["state"], "done")
+            self.assertEqual(snapshot["updated_ms"], 2000)
+
+    def test_permanently_missing_partial_file_is_pruned_after_bounded_polls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            secret = "synthetic-incomplete-private-prompt"
+            path.parent.mkdir(parents=True)
+            path.write_text('{"prompt":"' + secret, encoding="utf-8")
+            service = AgentStatusService(root / "claude", root / "codex")
+            self.assertEqual(service.poll_once(), 0)
+            self.assertIn(secret, repr(service._tailer._files))
+
+            path.unlink()
+            for _ in range(4):
+                self.assertEqual(service.poll_once(), 0)
+
+            self.assertNotIn(secret, repr(service._tailer._files))
+            self.assertNotIn(path, service._tailer._files)
+            self.assertEqual(service._tailer._identities, {})
+
+    def test_existing_file_outside_recent_limit_is_not_pruned_or_replayed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "claude" / "target.jsonl"
+            started = claude_event("user")
+            self._write_line(target, started)
+            os.utime(target, (1, 1))
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 10.0,
+                                         _wall_time=lambda: 10.0)
+            self.assertEqual(service.poll_once(), 1)
+
+            for index in range(12):
+                path = root / "claude" / f"newer-{index:02d}.jsonl"
+                event = claude_event("user")
+                event["uuid"] = f"crowd-{index:02d}"
+                self._write_line(path, event)
+                os.utime(path, (10 + index, 10 + index))
+            self.assertEqual(service.poll_once(), 12)
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(service.poll_once(), 0)
+
+            completed = claude_event("result")
+            completed["uuid"] = "target-complete"
+            completed["subtype"] = "success"
+            with target.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(completed) + "\n")
+
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(service.snapshot()["agents"]["claude"]["state"],
+                             "done")
 
 
 class HandlerTests(unittest.TestCase):
@@ -647,6 +1045,75 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(payload["endpoint"], "/api/tokens")
         self.assertIn("/api/tokens", payload["endpoints"])
         self.assertIn("/api/agent-status", payload["endpoints"])
+
+    def test_real_service_endpoint_is_exact_private_bounded_and_memory_only(self):
+        markers = {
+            "prompt": "synthetic-secret-prompt",
+            "command": "synthetic-secret-command",
+            "message": "synthetic-secret-message",
+            "file": "synthetic-secret-file-content",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            claude_path = root / "claude" / "session.jsonl"
+            codex_path = root / "codex" / "rollout-test.jsonl"
+            claude = claude_event(
+                "assistant", tool_name="Bash", tool_input={
+                    "command": markers["command"],
+                    "prompt": markers["prompt"],
+                    "file_path": markers["file"],
+                    "message": markers["message"],
+                })
+            claude["sessionId"] = "123e4567-e89b-12d3-a456-426614174000"
+            claude["uuid"] = "123e4567-e89b-12d3-a456-426614174001"
+            claude["cwd"] = "/Users/test/" + "å" * 16
+            codex = {
+                "type": "event_msg",
+                "timestamp": claude["timestamp"],
+                "payload": {
+                    "type": "task_started",
+                    "turn_id": "turn-" + "x" * 100,
+                    "prompt": markers["prompt"],
+                    "command": markers["command"],
+                    "message": markers["message"],
+                    "file_content": markers["file"],
+                },
+            }
+            AgentStatusServiceTests._write_line(claude_path, claude)
+            AgentStatusServiceTests._write_line(codex_path, codex)
+            wall_time = AgentStatusService._event_wall_time(claude)
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 10.0,
+                _wall_time=lambda: wall_time)
+            self.assertEqual(service.poll_once(), 2)
+
+            def forbidden_disk_access(*args, **kwargs):
+                raise AssertionError("request thread attempted filesystem I/O")
+
+            service._discover_paths = forbidden_disk_access
+            service._recent_paths = forbidden_disk_access
+            service._tailer.read = forbidden_disk_access
+
+            sent = self._request("/api/agent-status", service)
+            self.assertEqual(sent[0][0], 200)
+            payload = sent[0][1]
+            serialized = json.dumps(payload, ensure_ascii=False)
+
+            self.assertEqual(set(payload), {"v", "seq", "agents"})
+            self.assertEqual(set(payload["agents"]), {"claude", "codex"})
+            allowed = {
+                "task_id", "event_id", "state", "project", "activity",
+                "updated_ms",
+            }
+            for agent in payload["agents"].values():
+                self.assertEqual(set(agent), allowed)
+                self.assertLessEqual(len(agent["task_id"].encode("utf-8")),
+                                     64)
+                if agent["project"] is not None:
+                    self.assertLessEqual(
+                        len(agent["project"].encode("utf-8")), 16)
+            for marker in markers.values():
+                self.assertNotIn(marker, serialized)
 
 
 if __name__ == "__main__":
