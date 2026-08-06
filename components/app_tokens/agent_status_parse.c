@@ -131,18 +131,168 @@ static bool trailing_is_whitespace(const char *json, size_t len,
   return true;
 }
 
-static bool uint32_member(const cJSON *object, const char *key,
+typedef struct {
+  const char *json;
+  size_t len;
+  size_t offset;
+} raw_cursor;
+
+static void raw_skip_whitespace(raw_cursor *cursor) {
+  while (cursor->offset < cursor->len &&
+         json_whitespace((unsigned char)cursor->json[cursor->offset])) {
+    cursor->offset++;
+  }
+}
+
+static bool raw_take(raw_cursor *cursor, char expected) {
+  raw_skip_whitespace(cursor);
+  if (cursor->offset >= cursor->len ||
+      cursor->json[cursor->offset] != expected) {
+    return false;
+  }
+  cursor->offset++;
+  return true;
+}
+
+static bool raw_skip_string(raw_cursor *cursor) {
+  raw_skip_whitespace(cursor);
+  if (cursor->offset >= cursor->len || cursor->json[cursor->offset] != '"') {
+    return false;
+  }
+  cursor->offset++;
+
+  while (cursor->offset < cursor->len) {
+    char byte = cursor->json[cursor->offset++];
+    if (byte == '"') return true;
+    if (byte == '\\') {
+      if (cursor->offset >= cursor->len) return false;
+      cursor->offset++;
+    }
+  }
+  return false;
+}
+
+static bool raw_skip_literal(raw_cursor *cursor, const char *literal,
+                             size_t literal_len) {
+  raw_skip_whitespace(cursor);
+  if (literal_len > cursor->len - cursor->offset ||
+      memcmp(cursor->json + cursor->offset, literal, literal_len) != 0) {
+    return false;
+  }
+  cursor->offset += literal_len;
+  return true;
+}
+
+static bool raw_exact_uint32(raw_cursor *cursor, uint32_t *out) {
+  raw_skip_whitespace(cursor);
+  if (cursor->offset >= cursor->len ||
+      !json_digit((unsigned char)cursor->json[cursor->offset])) {
+    return false;
+  }
+
+  uint32_t value = 0;
+  do {
+    uint32_t digit = (uint32_t)(cursor->json[cursor->offset] - '0');
+    if (value > (UINT32_MAX - digit) / 10U) return false;
+    value = value * 10U + digit;
+    cursor->offset++;
+  } while (cursor->offset < cursor->len &&
+           json_digit((unsigned char)cursor->json[cursor->offset]));
+
+  if (cursor->offset < cursor->len &&
+      (cursor->json[cursor->offset] == '.' ||
+       cursor->json[cursor->offset] == 'e' ||
+       cursor->json[cursor->offset] == 'E')) {
+    return false;
+  }
+
+  *out = value;
+  return true;
+}
+
+/* cJSON-nodens pekaridentitet väljer rätt medlem även när samma nyckelnamn
+ * finns i ett annat objekt. Samtidig gång genom råtext och träd bevarar det
+ * ursprungliga nummertoken som cJSON:s double annars hade avrundat. */
+static bool raw_find_item(raw_cursor *cursor, const cJSON *item,
+                          const cJSON *target, uint32_t *out, bool *found) {
+  raw_skip_whitespace(cursor);
+
+  if (item == target) {
+    if (!raw_exact_uint32(cursor, out)) return false;
+    *found = true;
+    return true;
+  }
+
+  if (cJSON_IsObject(item)) {
+    if (!raw_take(cursor, '{')) return false;
+    const cJSON *child = item->child;
+    if (!child) return raw_take(cursor, '}');
+
+    while (child) {
+      if (!raw_skip_string(cursor) || !raw_take(cursor, ':') ||
+          !raw_find_item(cursor, child, target, out, found)) {
+        return false;
+      }
+      child = child->next;
+      if (child) {
+        if (!raw_take(cursor, ',')) return false;
+      } else if (!raw_take(cursor, '}')) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if (cJSON_IsArray(item)) {
+    if (!raw_take(cursor, '[')) return false;
+    const cJSON *child = item->child;
+    if (!child) return raw_take(cursor, ']');
+
+    while (child) {
+      if (!raw_find_item(cursor, child, target, out, found)) return false;
+      child = child->next;
+      if (child) {
+        if (!raw_take(cursor, ',')) return false;
+      } else if (!raw_take(cursor, ']')) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if (cJSON_IsString(item)) return raw_skip_string(cursor);
+  if (cJSON_IsNull(item)) return raw_skip_literal(cursor, "null", 4);
+  if (cJSON_IsTrue(item)) return raw_skip_literal(cursor, "true", 4);
+  if (cJSON_IsFalse(item)) return raw_skip_literal(cursor, "false", 5);
+  if (cJSON_IsNumber(item)) {
+    if (cursor->offset >= cursor->len) return false;
+    size_t number_offset = cursor->offset;
+    if (!json_number_valid(cursor->json, cursor->len, &number_offset)) {
+      return false;
+    }
+    cursor->offset = number_offset + 1;
+    return true;
+  }
+
+  return false;
+}
+
+static bool raw_uint32_for_item(const char *json, size_t len,
+                                const cJSON *root, const cJSON *target,
+                                uint32_t *out) {
+  raw_cursor cursor = {.json = json, .len = len, .offset = 0};
+  if (len >= 3 && memcmp(json, "\xEF\xBB\xBF", 3) == 0) cursor.offset = 3;
+
+  bool found = false;
+  return raw_find_item(&cursor, root, target, out, &found) && found;
+}
+
+static bool uint32_member(const char *json, size_t len, const cJSON *root,
+                          const cJSON *object, const char *key,
                           uint32_t *out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
   if (!cJSON_IsNumber(item)) return false;
-
-  double value = item->valuedouble;
-  if (!(value >= 0.0 && value <= (double)UINT32_MAX)) return false;
-
-  uint32_t converted = (uint32_t)value;
-  if ((double)converted != value) return false;
-  *out = converted;
-  return true;
+  return raw_uint32_for_item(json, len, root, item, out);
 }
 
 static bool nullable_string_member(const cJSON *object, const char *key,
@@ -199,7 +349,8 @@ static bool activity_member(const cJSON *object, tk_agent_activity *out) {
   return true;
 }
 
-static bool agent_member(const cJSON *agents, const char *key,
+static bool agent_member(const char *json, size_t len, const cJSON *root,
+                         const cJSON *agents, const char *key,
                          tk_agent_status *out) {
   const cJSON *agent = cJSON_GetObjectItemCaseSensitive(agents, key);
   if (!cJSON_IsObject(agent)) return false;
@@ -212,7 +363,8 @@ static bool agent_member(const cJSON *agents, const char *key,
          nullable_string_member(agent, "project", out->project,
                                 sizeof out->project) &&
          activity_member(agent, &out->activity) &&
-         uint32_member(agent, "updated_ms", &out->updated_ms);
+         uint32_member(json, len, root, agent, "updated_ms",
+                       &out->updated_ms);
 }
 
 bool tk_agent_status_parse(const char *json, size_t len,
@@ -230,13 +382,17 @@ bool tk_agent_status_parse(const char *json, size_t len,
   if (!trailing_is_whitespace(json, len, parse_end)) goto done;
   if (!cJSON_IsObject(root)) goto done;
   if (cJSON_GetObjectItemCaseSensitive(root, "error")) goto done;
-  if (!uint32_member(root, "v", &version) || version != 1) goto done;
-  if (!uint32_member(root, "seq", &next.seq)) goto done;
+  if (!uint32_member(json, len, root, root, "v", &version) || version != 1) {
+    goto done;
+  }
+  if (!uint32_member(json, len, root, root, "seq", &next.seq)) goto done;
 
   const cJSON *agents = cJSON_GetObjectItemCaseSensitive(root, "agents");
   if (!cJSON_IsObject(agents)) goto done;
-  if (!agent_member(agents, "claude", &next.claude)) goto done;
-  if (!agent_member(agents, "codex", &next.codex)) goto done;
+  if (!agent_member(json, len, root, agents, "claude", &next.claude)) {
+    goto done;
+  }
+  if (!agent_member(json, len, root, agents, "codex", &next.codex)) goto done;
 
   *out = next;
   ok = true;

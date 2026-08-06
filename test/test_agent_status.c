@@ -31,7 +31,9 @@ static void check(const char *what, int cond) {
 
 static void check_rejected_unchanged(const char *what, const char *json,
                                      tk_agent_snapshot *out) {
-  tk_agent_snapshot before = *out;
+  memset(out, 0xa5, sizeof *out);
+  tk_agent_snapshot before;
+  memcpy(&before, out, sizeof before);
   if (tk_agent_status_parse(json, strlen(json), out)) {
     printf("FAIL %s accepterades\n", what);
     failures++;
@@ -58,6 +60,10 @@ static void check_rejected_unchanged(const char *what, const char *json,
   "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
   "\"state\":\"working\",\"project\":\"Torget\"," \
   "\"activity\":\"testing\",\"updated_ms\":-1}"
+#define CLAUDE_UNDERFLOW_UPDATED \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"working\",\"project\":\"Torget\"," \
+  "\"activity\":\"testing\",\"updated_ms\":1e-9999}"
 #define CLAUDE_LONG_PROJECT \
   "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
   "\"state\":\"working\",\"project\":\"12345678901234567\"," \
@@ -121,6 +127,21 @@ int main(void) {
       IDLE_CODEX "}}",
       &snapshot);
   check_rejected_unchanged(
+      "avrundad fraktion i version",
+      "{\"v\":1.00000000000000001,\"seq\":1,\"agents\":{" \
+      CLAUDE_WORKING "," IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "avrundad fraktion i seq",
+      "{\"v\":1,\"seq\":1.00000000000000001,\"agents\":{" \
+      CLAUDE_WORKING "," IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "underflödande exponent i seq",
+      "{\"v\":1,\"seq\":1e-9999,\"agents\":{" CLAUDE_WORKING ","
+      IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
       "seq över uint32",
       "{\"v\":1,\"seq\":4294967296,\"agents\":{" CLAUDE_WORKING ","
       IDLE_CODEX "}}",
@@ -153,6 +174,8 @@ int main(void) {
               "\"project\":\"Torget\",\"activity\":\"testing\"," \
               "\"updated_ms\":1.5}"),
       &snapshot);
+  check_rejected_unchanged("underflödande exponent i updated_ms",
+                           PAYLOAD(CLAUDE_UNDERFLOW_UPDATED), &snapshot);
   check_rejected_unchanged(
       "kontrollnolla i projekt",
       PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
@@ -161,7 +184,21 @@ int main(void) {
               "\"updated_ms\":1}"),
       &snapshot);
 
-  tk_agent_snapshot before = snapshot;
+  check("irrelevanta nummer och nummersträngar förväxlas inte",
+        PARSE("{\"v\":1,\"seq\":1,\"metadata\":{"
+              "\"v\":1.00000000000000001,\"seq\":1e-9999,"
+              "\"updated_ms\":1.5},\"agents\":{" \
+              "\"claude\":{\"task_id\":\"1e-9999\"," \
+              "\"event_id\":\"1.00000000000000001\"," \
+              "\"state\":\"working\",\"project\":\"Torget\"," \
+              "\"activity\":\"testing\",\"updated_ms\":1}," \
+              IDLE_CODEX "}}",
+              &snapshot));
+  check("nummersträng bevaras",
+        strcmp(snapshot.claude.task_id, "1e-9999") == 0);
+
+  tk_agent_snapshot before;
+  memcpy(&before, &snapshot, sizeof before);
   check("NULL json avvisas", !tk_agent_status_parse(NULL, 0, &snapshot));
   check("NULL json rör inte utdata",
         memcmp(&before, &snapshot, sizeof before) == 0);
