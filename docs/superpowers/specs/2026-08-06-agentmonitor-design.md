@@ -1,4 +1,4 @@
-# Tokenmätaren som agentmonitor
+# VibePulse som agentmonitor
 
 **Datum:** 2026-08-06
 
@@ -8,7 +8,8 @@
 
 ## Sammanfattning
 
-Tokenmätaren ska utvecklas från en stilla användningsmätare till en fysisk,
+Den tidigare Tokenmätaren byter publikt namn till **VibePulse** och utvecklas
+från en stilla användningsmätare till en fysisk,
 avläsbar agentmonitor för Claude Code och Codex. När ingen agent arbetar visas
 de vanliga tokenvyerna. När en agent börjar arbeta tar en särskild helskärmsvy
 över. Den använder ett stort pixelhusdjur, ett enda mycket stort tillståndsord
@@ -23,7 +24,7 @@ Procentvärdet finns kvar men är sekundärt medan arbete pågår.
 
 - Visa agentens verkliga tillstånd läsbart på flera meters avstånd.
 - Ge Claude och Codex egna, igenkännbara pixelkaraktärer.
-- Behålla Tokenmätarens tydliga procent och nuvarande användningsvyer.
+- Behålla VibePulse tydliga procent och nuvarande användningsvyer.
 - Visa en säker och kort beskrivning av aktiviteten när den kan härledas.
 - Meddela en avslutad eller blockerad uppgift en gång, även om användaren gått
   från skrivbordet.
@@ -38,7 +39,7 @@ Procentvärdet finns kvar men är sekundärt medan arbete pågår.
 - Bygga en röstassistent eller använda mikrofonen.
 - Göra ett generellt ljud- eller notifikationsbibliotek innan en andra app
   faktiskt behöver det.
-- Bygga om Solelkollens designsystem eller Tokenmätarens samtliga statistikvyer.
+- Bygga om Solelkollens designsystem eller VibePulse samtliga statistikvyer.
 
 ## Upplevelseprinciper
 
@@ -53,6 +54,23 @@ Procentvärdet finns kvar men är sekundärt medan arbete pågår.
    aktivitetskategori, inte användarens råa innehåll.
 6. **AMOLED på riktigt.** Äkta svart bakgrund, få ljusa pixlar, fortsatt
    pixeldrift och dämpning av långlivade slutsidor.
+
+## Namn och launcheridentitet
+
+Appens publika namn är **VibePulse**. Interna komponentnamn som `app_tokens`
+får ligga kvar i första versionen för att namnbytet inte ska skapa onödig
+plattformsrisk.
+
+Launcherikonen följer exakt Torgets befintliga Solelkollen-system: en 96 × 96
+px platta med 22 px radie, en vit IBM Plex-glyf och en 12 px accentprick.
+VibePulse använder en mörkt violett platta (`0x181636`), vit `V` och
+violett puls-prick (`0x7770FF`) samt etiketten `VIBEPULSE`. Ingen ny
+bildikon eller ändring av launcherkontraktet behövs. `V` läggs till i den
+befintliga snäva launcherfonten.
+
+Ikonen och den statiska agentoverlayn ska först bedömas som en riktig
+480 × 480-komposition och sedan på fysisk AMOLED. Mockupen är en riktning,
+inte ett skäl att hoppa över glasgrinden.
 
 ## Tillståndsmodell
 
@@ -89,13 +107,13 @@ plattformens befintliga nattlogik.
 - Uttryckligt normalt slut → `done`.
 - Uttryckligt misslyckat slut → `error`.
 - Ny uppgift från `done`, `waiting` eller `error` → `working`.
-- Tryck på en kvarstående slutsida → `idle` och ordinarie Tokenmätare.
+- Tryck på en kvarstående slutsida → `idle` och ordinarie VibePulse.
 - För gammal arbetsstatus utan bevisad process eller avslutshändelse →
   `unknown`, aldrig `done`.
 
 ## Skärmar
 
-### 1. Ordinarie Tokenmätare
+### 1. Ordinarie VibePulse
 
 De tre nuvarande vyerna för Claude-tak, Codex-tak och Claude-volym behålls i
 första leveransen. Deras procent är fortsatt stora och tydliga. Agentmonitorn
@@ -136,7 +154,7 @@ Samma komposition, men husdjuret är amber och står stilla med en långsam
 blinkning. Huvudordet är `VÄNTAR`. Den lilla raden kan vara
 `BEHÖVER DITT GODKÄNNANDE` eller `BEHÖVER ETT SVAR`. Ingen knapp för själva
 godkännandet finns i version ett; ett tryck kvitterar bara skärmens lokala
-notis och återgår till Tokenmätaren.
+notis och återgår till VibePulse.
 
 ### 4. Klar
 
@@ -297,7 +315,7 @@ implementationsplanen; inga bibliotek skördas i förväg.
 
 ## Fel- och bortkopplingsbeteende
 
-- Ingen första data: ordinarie Tokenmätare visar streck enligt befintlig
+- Ingen första data: ordinarie VibePulse visar streck enligt befintlig
   ärlighetsinvariant; agentoverlay visas inte.
 - Status-endpoint nere: behåll inte `JOBBAR` obegränsat. Efter statusens
   tvåminuterslease blir den `unknown` och overlayn lämnas.
@@ -305,7 +323,7 @@ implementationsplanen; inga bibliotek skördas i förväg.
   säkra värde endast inom tvåminutersleasen och logga orsaken.
 - Tokenendpoint nere men agentstatus fungerar: statusvyn fungerar; den lilla
   procentraden visar streck.
-- Agentstatus nere men tokenendpoint fungerar: nuvarande Tokenmätare fungerar
+- Agentstatus nere men tokenendpoint fungerar: nuvarande VibePulse fungerar
   precis som idag.
 - Ljudfel: visuellt tillstånd får aldrig påverkas.
 
@@ -326,7 +344,8 @@ implementationsplanen; inga bibliotek skördas i förväg.
   och `done`.
 - Skärmbilder granskas i faktisk 480 × 480-storlek och nedskalade till ungefär
   den visuella storleken på den fysiska skärmen.
-- Befintliga tre tokenvyer, launcher, svepning och KEY3-beteende regressionsprovas.
+- Befintliga tre tokenvyer, VibePulse-namn och V-ikon, launcher, svepning och
+  KEY3-beteende regressionsprovas.
 
 ### Fysisk AMOLED
 

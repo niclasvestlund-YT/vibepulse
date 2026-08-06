@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bygg Tokenmätaren till en sanningsenlig fysisk agentmonitor som visar Claude Code och Codex som stora animerade pixelkaraktärer i lägena JOBBAR, VÄNTAR, KLAR och FEL, med säker aktivitetsrad och lokal engångsnotis.
+**Goal:** Byt Tokenmätarens publika namn till VibePulse och bygg den till en sanningsenlig fysisk agentmonitor som visar Claude Code och Codex som stora animerade pixelkaraktärer i lägena JOBBAR, VÄNTAR, KLAR och FEL, med säker aktivitetsrad och lokal engångsnotis.
 
 **Architecture:** Macens tokenserver följer Claude- och Codex-loggar inkrementellt och publicerar ett litet, sanerat statuskontrakt ur minne. ESP32-appen parsar statusen i en separat statustask med återanvänd HTTP-klient och visar den i en appägd overlay ovanpå befintlig tileview; en lokal tvåminuterslease förhindrar fastfrusen JOBBAR-skärm. Bildassets ligger i flash, animationen invaliderar bara petens yta och ljudet körs i en egen lågprioriterad task.
 
@@ -54,6 +54,9 @@ Ingen implementationskod får skrivas innan förkontrollen är klar.
 | `test/test_agent_usage.c` | Hosttest av session/vecka/Fable-valet. |
 | `sim/main.c` | S-tangent, statuscykel och BMP-runda. |
 | `platform/fonts/plex_status_64.c` | Genererad snäv versalfont för huvudorden. |
+
+Det interna komponentnamnet `app_tokens` behålls. Det publika appnamnet,
+launcheretiketten och användardokumentationen heter VibePulse.
 
 `platform/torget.h`, `platform/torget_ui.c`, displaystart, rotation och touch ska inte ändras.
 
@@ -458,6 +461,7 @@ git commit -m "Lägg inkrementell agentstatus i tokenservern"
 - Create: `test/test_agent_usage.c`
 - Create: `sim-fixtures/agent-status-{idle,claude-working,claude-waiting,claude-done,claude-error,codex-working,codex-waiting,codex-done,codex-error,unknown}.json`
 - Modify: `platform/fonts/fetch-and-convert.sh:19-34`
+- Modify: `platform/fonts/plex_icon_64.c`
 - Modify: `components/app_tokens/app.c:81-102,420-450,455-566`
 - Modify: `components/app_tokens/app_tokens.h:1-24`
 - Modify: `components/app_tokens/CMakeLists.txt:4-10`
@@ -465,9 +469,28 @@ git commit -m "Lägg inkrementell agentstatus i tokenservern"
 - Modify: `sim/CMakeLists.txt:27-39`
 - Modify: `sim/main.c:151-212,214-262`
 
-- [ ] **Step 1: Generera den snäva 64px-statusfonten**
+- [ ] **Step 1: Byt launcheridentitet till VibePulse och generera fonterna**
 
-Lägg detta i fontskriptet:
+Byt `tokens_app.name` till `VIBEPULSE`. Ikonen ska använda samma deklarativa
+96 px-system som Solelkollen, utan ändring i `torget_icon_t`:
+
+```c
+.name = "VIBEPULSE",
+.icon = {
+  .font = &plex_icon_64,
+  .glyph = "V",
+  .plate_hex = 0x181636,
+  .glyph_hex = 0xFFFFFF,
+  .dot_hex = 0x7770FF,
+},
+```
+
+Ändra launcherfontens intervall från bara `S,T` till `S,T,V`; `T` får ligga
+kvar för bakåtkompatibilitet i fontasseten. Regenerera `plex_icon_64.c` och
+verifiera i simulatorns launcher att både Solelkollens `S` och VibePulse `V`
+visas utan fallback-glyf.
+
+Generera därefter den snäva 64px-statusfonten. Lägg detta i fontskriptet:
 
 ```sh
 # Agentmonitorns huvudord: JOBBAR, VÄNTAR, KLAR, FEL.
@@ -476,7 +499,9 @@ conv Bold 64 "0x41,0x42,0x45,0x46,0x4A,0x4B,0x4C,0x4E,0x4F,0x52,0x54,0x56,0xC4" 
 
 Run: `platform/fonts/fetch-and-convert.sh`
 
-Expected: `platform/fonts/plex_status_64.c` skapas och deklarerar `const lv_font_t plex_status_64`.
+Expected: `platform/fonts/plex_icon_64.c` innehåller `V`, VibePulse visas med
+rätt namn och ikon i launchern, och `platform/fonts/plex_status_64.c` skapas
+med `const lv_font_t plex_status_64`.
 
 - [ ] **Step 2: Importera de godkända källbilderna och generera LVGL-assets**
 
@@ -621,7 +646,7 @@ tk_agent_monitor_set_usage(
     tk_agent_usage_pick(&t->codex_session, &t->codex_week, NULL));
 ```
 
-Fable behålls samtidigt som en egen rad i Tokenmätarens vanliga vy. I appens befintliga 100 ms-timer ska `tk_agent_monitor_tick(now)` anropas. Lägg en wrapper i `app_tokens.h/.c` för simulatorn:
+Fable behålls samtidigt som en egen rad i VibePulse vanliga vy. I appens befintliga 100 ms-timer ska `tk_agent_monitor_tick(now)` anropas. Lägg en wrapper i `app_tokens.h/.c` för simulatorn:
 
 ```c
 void tokens_apply_agent_status(const tk_agent_snapshot *snapshot) {
@@ -665,12 +690,17 @@ ninja -C sim/build
 ./sim/build/torget-sim
 ```
 
-Expected: S cyklar alla tillstånd; långtryck på overlayn öppnar launchern; click döljer eventet; KEY3-motsvarigheten N byter app och korrekt overlay återkommer när Tokenmätaren visas igen. Kontrollera även `lv_mem_monitor` efter overlaybygget och logga total/ledig/största block; ingen canvasallokering får synas.
+Expected: S cyklar alla tillstånd; långtryck på overlayn öppnar launchern;
+VibePulse visas med V-ikonen; click döljer eventet; KEY3-motsvarigheten N
+byter app och korrekt overlay återkommer när VibePulse visas igen. Kontrollera
+även `lv_mem_monitor` efter overlaybygget och logga total/ledig/största block;
+ingen canvasallokering får synas.
 
 - [ ] **Step 8: Commit den statiska overlayn**
 
 ```bash
-git add platform/fonts/fetch-and-convert.sh platform/fonts/plex_status_64.c \
+git add platform/fonts/fetch-and-convert.sh platform/fonts/plex_icon_64.c \
+        platform/fonts/plex_status_64.c \
         components/app_tokens/assets components/app_tokens/agent_assets.c \
         components/app_tokens/agent_assets.h components/app_tokens/agent_usage.c \
         components/app_tokens/agent_usage.h components/app_tokens/agent_monitor.c \
@@ -679,7 +709,7 @@ git add platform/fonts/fetch-and-convert.sh platform/fonts/plex_status_64.c \
         tools/agent_assets/build-agent-images.py \
         test/test_agent_usage.c test/run.sh \
         sim-fixtures/agent-status-*.json sim/CMakeLists.txt sim/main.c
-git commit -m "Visa agentstatus som statisk overlay"
+git commit -m "Gör VibePulse till statisk agentmonitor"
 ```
 
 ### Task 4: Första fysiska AMOLED-grinden — före animation
@@ -1066,7 +1096,7 @@ README ska dokumentera S-tangenten och agent-BMP:erna. Tokenserverns README ska 
 
 ```bash
 git add README.md tools/tokenserver/README.md sim-fixtures/README.md secrets.h.example
-git commit -m "Dokumentera Tokenmätarens agentmonitor"
+git commit -m "Dokumentera VibePulse agentmonitor"
 git status --short
 git log --oneline -12
 ```
