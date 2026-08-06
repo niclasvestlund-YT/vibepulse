@@ -70,6 +70,12 @@ typedef struct {
   lv_obj_t *hero_fill, *week_fill, *model_fill;
   lv_obj_t *week_block;  /* hela VECKAN-cellen — döljs när heron ÄR veckan */
   lv_obj_t *model_block; /* hela FABLE-cellen — döljs när källan saknas */
+
+  /* NOLLAS OM räknas ner lokalt mellan hämtningarna (tid är tid — samma
+   * ärliga extrapolering som kronräknaren): snapshoten + när den togs. */
+  tk_limit hero_snap;
+  int64_t snap_us;
+  int shown_min; /* senast ritade minutvärdet — rita bara vid byte */
 } tk_limit_view;
 
 static struct {
@@ -300,15 +306,17 @@ static void set_ticker_mtok(double mtok) {
   lv_spangroup_refresh(tk.span_group); /* LVGL 9.5-regeln */
 }
 
-/* En leverantörs takvy: heron är sessionsfönstret när planen har ett,
- * annars veckofönstret (Codex prolite har bara veckan). Statraden visar
- * herofönstrets nollningstid + veckoprocenten (streck när heron redan ÄR
- * veckan — samma siffra två gånger vore brus). null = streck, alltid. */
+/* En leverantörs takvy. Heron är VECKOFÖNSTRET — det är veckobudgeten som
+ * är den knappa resursen (Niclas prioritering vid designgranskningen);
+ * 5-timmarsfönstret självläker på timmar och bor i statraden i stället
+ * (SESSIONEN-blocket, dolt på planer som saknar fönstret, som Codex
+ * prolite). Saknas veckodata faller heron tillbaka på sessionen.
+ * null = streck, alltid. */
 static void apply_limits(tk_limit_view *v, const tk_limit *session,
                          const tk_limit *week, const tk_limit *model_week) {
   char buf[24];
-  const tk_limit *hero = session->has_pct ? session : week;
-  bool hero_is_week = !session->has_pct;
+  const tk_limit *hero = week->has_pct ? week : session;
+  bool show_session_stat = week->has_pct && session->has_pct;
 
   if (hero->has_pct) {
     sv_pct_1(hero->pct, buf, sizeof buf);
@@ -318,27 +326,25 @@ static void apply_limits(tk_limit_view *v, const tk_limit *session,
   }
   lv_obj_set_style_text_color(v->pct_value, pct_color(hero), 0);
   bar_set(v->hero_fill, 432, hero->has_pct ? hero : NULL);
+  v->hero_snap = *hero;
+  v->snap_us = torget_now_us();
+  v->shown_min = -1; /* tvinga omritning */
   if (hero->has_reset) {
     fmt_reset(hero->reset_min, buf, sizeof buf);
     lv_label_set_text(v->reset_value, buf);
+    v->shown_min = hero->reset_min;
   } else {
     lv_label_set_text(v->reset_value, "–");
   }
-  /* När heron ÄR veckan (planer utan sessionsfönster, som Codex prolite)
-   * vore VECKAN-blocket samma siffra en gång till — dölj hela cellen och
-   * låt NOLLAS OM få radutrymmet. */
-  if (hero_is_week) {
-    lv_obj_add_flag(v->week_block, LV_OBJ_FLAG_HIDDEN);
-  } else {
+  /* SESSIONEN-blocket (5h-fönstret) visas bara när båda fönstren finns —
+   * annars vore det antingen herons siffra en gång till eller ett streck. */
+  if (show_session_stat) {
     lv_obj_remove_flag(v->week_block, LV_OBJ_FLAG_HIDDEN);
-    if (week->has_pct) {
-      sv_pct_1(week->pct, buf, sizeof buf);
-      lv_label_set_text(v->week_value, buf);
-      bar_set(v->week_fill, STAT_BAR_W, week);
-    } else {
-      lv_label_set_text(v->week_value, "–");
-      bar_set(v->week_fill, STAT_BAR_W, NULL);
-    }
+    sv_pct_1(session->pct, buf, sizeof buf);
+    lv_label_set_text(v->week_value, buf);
+    bar_set(v->week_fill, STAT_BAR_W, session);
+  } else {
+    lv_obj_add_flag(v->week_block, LV_OBJ_FLAG_HIDDEN);
   }
   /* FABLE-cellen: API-headrarna bär (ännu) ingen per-modell-vecka — ett
    * streckblock är bara brus, så cellen döljs tills källan finns. */
@@ -418,6 +424,23 @@ static void tick_cb(lv_timer_t *t) {
   if (tk.ticker.has_data)
     set_ticker_mtok(sg_ticker_value(&tk.ticker, now));
 
+  /* NOLLAS OM tickar ner lokalt: snapshotens minuter minus förfluten tid.
+   * Ritas bara när minutvärdet faktiskt byter. */
+  tk_limit_view *views[2] = { &tk.claude, &tk.codex };
+  for (int i = 0; i < 2; i++) {
+    tk_limit_view *v = views[i];
+    if (!v->hero_snap.has_reset) continue;
+    int mins = v->hero_snap.reset_min
+             - (int)((now - v->snap_us) / 60000000LL);
+    if (mins < 0) mins = 0;
+    if (mins != v->shown_min) {
+      char buf[24];
+      fmt_reset(mins, buf, sizeof buf);
+      lv_label_set_text(v->reset_value, buf);
+      v->shown_min = mins;
+    }
+  }
+
   bool stale = tk.has_data && (now - tk.last_success_us) > STALE_AFTER_US;
   if (stale != tk.is_stale) {
     tk.is_stale = stale;
@@ -468,7 +491,7 @@ static void tk_create(lv_obj_t *root) {
     lv_obj_t *stats = stats_row(tile);
     stat_block(stats, "NOLLAS OM", &limit_views[i]->reset_value, "", NULL);
     limit_views[i]->week_block =
-      stat_block(stats, "VECKAN", &limit_views[i]->week_value, "%",
+      stat_block(stats, "SESSIONEN", &limit_views[i]->week_value, "%",
                  &limit_views[i]->week_fill);
     /* Claude-vyn får usage-panelens tredje rad: veckofönstret för tyngsta
      * modellen (Fable på Max-planen). Codex saknar motsvarighet. */

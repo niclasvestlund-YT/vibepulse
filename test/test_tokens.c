@@ -49,22 +49,22 @@ int main(void) {
   json = read_file(FIXTURES_DIR "/tokens.json", &len);
   if (json) {
     check("fixturen parsar", tk_tokens_parse(json, len, &t));
-    check("dayTokens", t.day_tokens == 48231907.0);
-    check("takt", t.day_tokens_per_hour == 5120000.0);
-    check("sessioner", t.day_sessions == 4);
-    check("månaden", t.month_tokens == 612480233.0);
+    check("dayTokens", t.day_tokens == 219108100.0);
+    check("takt", t.day_tokens_per_hour == 56524317.0);
+    check("sessioner", t.day_sessions == 6);
+    check("månaden", t.month_tokens == 610000000.0);
+    /* 0,0 % är ett GILTIGT tal (nynollat fönster) — inte samma som null. */
     check("claude session", t.claude_session.has_pct
-          && t.claude_session.pct == 21.0
+          && t.claude_session.pct == 0.0
           && t.claude_session.has_reset
-          && t.claude_session.reset_min == 80);
-    check("claude vecka", t.claude_week.has_pct && t.claude_week.pct == 47.0);
-    check("claude fable-vecka", t.claude_model_week.has_pct
-          && t.claude_model_week.pct == 73.0
-          && t.claude_model_week.reset_min == 850);
+          && t.claude_session.reset_min == 256);
+    check("claude vecka", t.claude_week.has_pct && t.claude_week.pct == 49.0
+          && t.claude_week.reset_min == 726);
+    check("claude fable-vecka null", !t.claude_model_week.has_pct);
     check("codex session null", !t.codex_session.has_pct
           && !t.codex_session.has_reset);
-    check("codex vecka", t.codex_week.has_pct && t.codex_week.pct == 35.0
-          && t.codex_week.reset_min == 2210);
+    check("codex vecka", t.codex_week.has_pct && t.codex_week.pct == 13.0
+          && t.codex_week.reset_min == 2317);
     free(json);
   }
 
