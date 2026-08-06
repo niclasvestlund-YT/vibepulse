@@ -80,6 +80,40 @@ static void check_rejected_unchanged(const char *what, const char *json,
   "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
   "\"state\":\"working\",\"project\":\"Torget\"," \
   "\"activity\":\"reviewing\",\"updated_ms\":1}"
+#define CLAUDE_MAX_UPDATED \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"working\",\"project\":\"Torget\"," \
+  "\"activity\":\"testing\",\"updated_ms\":4294967295}"
+
+#define DEPTH_PREFIX "{\"v\":1,\"seq\":1,\"metadata\":"
+#define DEPTH_SUFFIX \
+  ",\"markers\":\"\\\"[[[[{{{{]]]]}}}}\",\"agents\":{" \
+  CLAUDE_WORKING "," IDLE_CODEX "}}"
+
+static char *depth_payload(size_t array_depth) {
+  size_t prefix_len = strlen(DEPTH_PREFIX);
+  size_t suffix_len = strlen(DEPTH_SUFFIX);
+  size_t total = prefix_len + array_depth + strlen("null") + array_depth +
+                 suffix_len + 1;
+  char *payload = malloc(total);
+  if (!payload) {
+    printf("FAIL kan inte allokera djup-payload\n");
+    failures++;
+    return NULL;
+  }
+
+  char *cursor = payload;
+  memcpy(cursor, DEPTH_PREFIX, prefix_len);
+  cursor += prefix_len;
+  memset(cursor, '[', array_depth);
+  cursor += array_depth;
+  memcpy(cursor, "null", strlen("null"));
+  cursor += strlen("null");
+  memset(cursor, ']', array_depth);
+  cursor += array_depth;
+  memcpy(cursor, DEPTH_SUFFIX, suffix_len + 1);
+  return payload;
+}
 
 int main(void) {
   size_t len;
@@ -196,6 +230,76 @@ int main(void) {
               &snapshot));
   check("nummersträng bevaras",
         strcmp(snapshot.claude.task_id, "1e-9999") == 0);
+
+  check("UINT32_MAX accepteras",
+        PARSE("{\"v\":1,\"seq\":4294967295,\"agents\":{" \
+              CLAUDE_MAX_UPDATED "," IDLE_CODEX "}}",
+              &snapshot) &&
+            snapshot.seq == UINT32_MAX &&
+            snapshot.claude.updated_ms == UINT32_MAX);
+  check("omordnade kontraktsfält accepteras",
+        PARSE("{\"agents\":{" IDLE_CODEX ","
+              "\"claude\":{\"updated_ms\":9,\"activity\":\"testing\"," \
+              "\"project\":\"Torget\",\"state\":\"working\"," \
+              "\"event_id\":\"event-9\",\"task_id\":\"turn-9\"}},"
+              "\"seq\":9,\"v\":1}",
+              &snapshot) &&
+            snapshot.seq == 9 && snapshot.claude.updated_ms == 9);
+  check("BOM accepteras",
+        PARSE("\xEF\xBB\xBF" PAYLOAD(CLAUDE_WORKING), &snapshot));
+  check("escapade egenskapsnamn accepteras",
+        PARSE("{\"\\u0076\":1,\"se\\u0071\":8,\"ag\\u0065nts\":{"
+              "\"cl\\u0061ude\":{\"task_\\u0069d\":\"turn-8\"," \
+              "\"event_\\u0069d\":\"event-8\",\"st\\u0061te\":\"working\"," \
+              "\"pro\\u006aect\":\"Torget\","
+              "\"act\\u0069vity\":\"testing\","
+              "\"updated_\\u006ds\":8}," IDLE_CODEX "}}",
+              &snapshot) &&
+            snapshot.seq == 8 && snapshot.claude.updated_ms == 8);
+  check("okänd array- och boolmetadata accepteras",
+        PARSE("{\"v\":1,\"metadata\":[true,false,{\"nested\":[null]}],"
+              "\"seq\":1,\"agents\":{" CLAUDE_WORKING "," \
+              IDLE_CODEX "}}",
+              &snapshot));
+
+  char *depth16 = depth_payload(15);
+  if (depth16) {
+    check("totalt djup 16 accepteras", PARSE(depth16, &snapshot));
+    free(depth16);
+  }
+  char *depth17 = depth_payload(16);
+  if (depth17) {
+    check_rejected_unchanged("totalt djup 17", depth17, &snapshot);
+    free(depth17);
+  }
+
+  check_rejected_unchanged(
+      "dubbel v",
+      "{\"v\":1,\"v\":1,\"seq\":1,\"agents\":{" CLAUDE_WORKING ","
+      IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "dubbel seq med ogiltig andra",
+      "{\"v\":1,\"seq\":1,\"seq\":1.5,\"agents\":{" \
+      CLAUDE_WORKING "," IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "escapad dubbel v",
+      "{\"v\":1,\"\\u0076\":1,\"seq\":1,\"agents\":{" \
+      CLAUDE_WORKING "," IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "dubbel agent",
+      "{\"v\":1,\"seq\":1,\"agents\":{" CLAUDE_WORKING "," \
+      CLAUDE_WORKING "," IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "dubbelt agentfält",
+      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
+              "\"event_id\":\"event-1\",\"state\":\"working\"," \
+              "\"state\":\"done\",\"project\":\"Torget\"," \
+              "\"activity\":\"testing\",\"updated_ms\":1}"),
+      &snapshot);
 
   tk_agent_snapshot before;
   memcpy(&before, &snapshot, sizeof before);

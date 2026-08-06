@@ -5,6 +5,10 @@
 
 #include "../../third_party/cjson/cJSON.h"
 
+/* V1-kontraktet behöver bara djup 3. Extra metadata får gott om marginal,
+ * men rekursionen i både cJSON och råtoken-vandringen hålls ESP-säker. */
+#define TK_AGENT_JSON_MAX_DEPTH 16U
+
 typedef struct {
   const char *name;
   tk_agent_state value;
@@ -34,6 +38,19 @@ static const activity_entry activity_entries[] = {
     {"building", TK_ACTIVITY_BUILDING},
     {"waiting_input", TK_ACTIVITY_WAITING_INPUT},
     {"waiting_approval", TK_ACTIVITY_WAITING_APPROVAL},
+};
+
+static const char *const root_required_keys[] = {
+    "v", "seq", "agents", NULL,
+};
+
+static const char *const agents_required_keys[] = {
+    "claude", "codex", NULL,
+};
+
+static const char *const agent_required_keys[] = {
+    "task_id", "event_id", "state", "project", "activity", "updated_ms",
+    NULL,
 };
 
 static bool json_whitespace(unsigned char byte) {
@@ -89,6 +106,7 @@ static bool json_number_valid(const char *json, size_t len, size_t *offset) {
 static bool json_lexically_valid(const char *json, size_t len) {
   bool in_string = false;
   bool escaped = false;
+  size_t depth = 0;
 
   for (size_t i = 0; i < len; i++) {
     unsigned char byte = (unsigned char)json[i];
@@ -100,6 +118,12 @@ static bool json_lexically_valid(const char *json, size_t len) {
         return false;
       } else if ((byte == '-') || json_digit(byte)) {
         if (!json_number_valid(json, len, &i)) return false;
+      } else if (byte == '{' || byte == '[') {
+        if (depth >= TK_AGENT_JSON_MAX_DEPTH) return false;
+        depth++;
+      } else if (byte == '}' || byte == ']') {
+        if (depth == 0) return false;
+        depth--;
       }
       continue;
     }
@@ -119,7 +143,7 @@ static bool json_lexically_valid(const char *json, size_t len) {
     }
   }
 
-  return true;
+  return depth == 0;
 }
 
 static bool trailing_is_whitespace(const char *json, size_t len,
@@ -295,6 +319,27 @@ static bool uint32_member(const char *json, size_t len, const cJSON *root,
   return raw_uint32_for_item(json, len, root, item, out);
 }
 
+/* cJSON lagrar avkodade egenskapsnamn i child->string, så även t.ex.
+ * "\\u0076" räknas som v. Bara kontraktsnycklar måste vara unika; okända
+ * extranycklar lämnas orörda. */
+static bool required_keys_once(const cJSON *object,
+                               const char *const *required_keys) {
+  if (!cJSON_IsObject(object)) return false;
+
+  for (size_t i = 0; required_keys[i]; i++) {
+    size_t matches = 0;
+    for (const cJSON *child = object->child; child; child = child->next) {
+      if (child->string && strcmp(child->string, required_keys[i]) == 0) {
+        matches++;
+        if (matches > 1) return false;
+      }
+    }
+    if (matches != 1) return false;
+  }
+
+  return true;
+}
+
 static bool nullable_string_member(const cJSON *object, const char *key,
                                    char *destination, size_t capacity) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
@@ -353,7 +398,7 @@ static bool agent_member(const char *json, size_t len, const cJSON *root,
                          const cJSON *agents, const char *key,
                          tk_agent_status *out) {
   const cJSON *agent = cJSON_GetObjectItemCaseSensitive(agents, key);
-  if (!cJSON_IsObject(agent)) return false;
+  if (!required_keys_once(agent, agent_required_keys)) return false;
 
   return nullable_string_member(agent, "task_id", out->task_id,
                                 sizeof out->task_id) &&
@@ -382,13 +427,14 @@ bool tk_agent_status_parse(const char *json, size_t len,
   if (!trailing_is_whitespace(json, len, parse_end)) goto done;
   if (!cJSON_IsObject(root)) goto done;
   if (cJSON_GetObjectItemCaseSensitive(root, "error")) goto done;
+  if (!required_keys_once(root, root_required_keys)) goto done;
   if (!uint32_member(json, len, root, root, "v", &version) || version != 1) {
     goto done;
   }
   if (!uint32_member(json, len, root, root, "seq", &next.seq)) goto done;
 
   const cJSON *agents = cJSON_GetObjectItemCaseSensitive(root, "agents");
-  if (!cJSON_IsObject(agents)) goto done;
+  if (!required_keys_once(agents, agents_required_keys)) goto done;
   if (!agent_member(json, len, root, agents, "claude", &next.claude)) {
     goto done;
   }
