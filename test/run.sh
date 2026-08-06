@@ -48,4 +48,11 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -o /tmp/torget-agent-monitor-policy-test
 /tmp/torget-agent-monitor-policy-test
 
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_net_policy.c \
+  test_agent_net_policy.c \
+  -o /tmp/torget-agent-net-policy-test
+/tmp/torget-agent-net-policy-test
+
 python3 test_agent_demo_wiring.py
+python3 test_agent_net_wiring.py

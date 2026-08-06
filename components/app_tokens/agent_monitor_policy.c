@@ -2,6 +2,37 @@
 
 #include <string.h>
 
+tk_agent_state tk_agent_monitor_effective_state(
+    const tk_agent_status *status, uint64_t packet_age_ms) {
+  if (!status) return TK_AGENT_UNKNOWN;
+  if (status->state != TK_AGENT_WORKING) return status->state;
+  if ((uint64_t)status->updated_ms > TK_AGENT_WORKING_LEASE_MS ||
+      packet_age_ms >
+          TK_AGENT_WORKING_LEASE_MS - (uint64_t)status->updated_ms) {
+    return TK_AGENT_UNKNOWN;
+  }
+  return TK_AGENT_WORKING;
+}
+
+bool tk_agent_monitor_status_present(const tk_agent_status *status,
+                                     const char *dismissed_event_id,
+                                     uint64_t packet_age_ms) {
+  tk_agent_state state =
+      tk_agent_monitor_effective_state(status, packet_age_ms);
+  if (state == TK_AGENT_IDLE || state == TK_AGENT_UNKNOWN) return false;
+  return !dismissed_event_id || !status->event_id[0] ||
+         strcmp(status->event_id, dismissed_event_id) != 0;
+}
+
+bool tk_agent_monitor_should_keep_awake(const tk_agent_status *status,
+                                        const char *dismissed_event_id,
+                                        uint64_t packet_age_ms) {
+  return tk_agent_monitor_effective_state(status, packet_age_ms) ==
+             TK_AGENT_WORKING &&
+         tk_agent_monitor_status_present(status, dismissed_event_id,
+                                         packet_age_ms);
+}
+
 static int state_priority(tk_agent_state state) {
   switch (state) {
     case TK_AGENT_WAITING: return 5;

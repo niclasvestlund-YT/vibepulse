@@ -22,6 +22,10 @@ void tokens_apply(const tk_tokens *t);
 /* Ett lyckat /api/agent-status-svar, redan parsat och under UI-låset. */
 void tokens_apply_agent_status(const tk_agent_snapshot *snapshot);
 
+/* Targetets 1 Hz-hämtning. Utan TK_AGENT_STATUS_URL loggas avstängt läge
+ * och ingen task eller HTTP-klient skapas. */
+void tokens_agent_net_start(void);
+
 /* Hoppa till vy 0-2 utan animation — bänkens och BMP-dumparnas ratt. */
 void tokens_show_view(int idx);
 

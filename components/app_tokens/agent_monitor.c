@@ -23,8 +23,6 @@ extern const lv_font_t plex_status_64;
 #define COL_TRACK  lv_color_hex(0x1D2634)
 #define COL_DOT_OFF lv_color_hex(0x2B3442)
 
-#define WORKING_LEASE_MS 120000ULL
-
 typedef struct {
   lv_obj_t *overlay;
   lv_obj_t *provider;
@@ -70,29 +68,17 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font,
   return object;
 }
 
-static uint64_t effective_age_ms(const tk_agent_status *status,
-                                 int64_t now_us) {
-  uint64_t elapsed_ms = 0;
+static uint64_t packet_age_ms(int64_t now_us) {
   if (now_us > mon.applied_at_us) {
-    elapsed_ms = (uint64_t)(now_us - mon.applied_at_us) / 1000ULL;
+    return (uint64_t)(now_us - mon.applied_at_us) / 1000ULL;
   }
-  return (uint64_t)status->updated_ms + elapsed_ms;
+  return 0;
 }
 
 static bool is_present(int provider, int64_t now_us) {
-  const tk_agent_status *status = &mon.agents[provider];
-  if (status->state == TK_AGENT_IDLE || status->state == TK_AGENT_UNKNOWN) {
-    return false;
-  }
-  if (status->event_id[0] &&
-      strcmp(status->event_id, mon.dismissed_event_id[provider]) == 0) {
-    return false;
-  }
-  if (status->state == TK_AGENT_WORKING &&
-      effective_age_ms(status, now_us) > WORKING_LEASE_MS) {
-    return false;
-  }
-  return true;
+  return tk_agent_monitor_status_present(
+      &mon.agents[provider], mon.dismissed_event_id[provider],
+      packet_age_ms(now_us));
 }
 
 static lv_color_t provider_color(int provider) {
@@ -418,8 +404,10 @@ void tk_agent_monitor_apply(const tk_agent_snapshot *snapshot,
   mon.agents[1] = snapshot->codex;
   mon.applied_at_us = now_us;
   mon.has_snapshot = true;
-  if (snapshot->claude.state == TK_AGENT_WORKING ||
-      snapshot->codex.state == TK_AGENT_WORKING) {
+  if (tk_agent_monitor_should_keep_awake(
+          &mon.agents[0], mon.dismissed_event_id[0], 0) ||
+      tk_agent_monitor_should_keep_awake(
+          &mon.agents[1], mon.dismissed_event_id[1], 0)) {
     torget_keep_awake();
   }
   render_best(now_us);

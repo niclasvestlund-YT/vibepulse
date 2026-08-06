@@ -606,8 +606,9 @@ static void tk_create(lv_obj_t *root) {
 
 #ifdef ESP_PLATFORM
   /* Nätverket är appens: hämttasken väntar själv på torget_net_wait().
-   * Simulatorn kompilerar inte net.c — den matar tokens_apply med fixturen. */
+   * Simulatorn kompilerar inga nätadaptrar — den matar apply med fixtures. */
   tokens_net_start();
+  tokens_agent_net_start();
 #endif
 }
 

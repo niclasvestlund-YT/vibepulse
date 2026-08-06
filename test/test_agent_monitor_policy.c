@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include "../components/app_tokens/agent_monitor_policy.h"
@@ -74,6 +75,57 @@ int main(void) {
   tk_agent_monitor_manual_choice_set(&manual, 1, agents);
   check("inga visningsbara providers ger ingen vald",
         tk_agent_monitor_resolve_provider(agents, present, &manual) == -1);
+
+  tk_agent_status fresh_work = agent(TK_AGENT_WORKING, 100, "work-fresh");
+  check("färskt arbete är närvarande",
+        tk_agent_monitor_status_present(&fresh_work, "", 0));
+  check("färskt närvarande arbete håller skärmen vaken",
+        tk_agent_monitor_should_keep_awake(&fresh_work, "", 0));
+
+  tk_agent_status stale_event =
+      agent(TK_AGENT_WORKING, 120001, "work-stale-event");
+  check("gammal eventtid gör working unknown",
+        tk_agent_monitor_effective_state(&stale_event, 0) ==
+            TK_AGENT_UNKNOWN);
+  check("gammal raw working är inte närvarande",
+        !tk_agent_monitor_status_present(&stale_event, "", 0));
+  check("gammal raw working håller inte skärmen vaken",
+        !tk_agent_monitor_should_keep_awake(&stale_event, "", 0));
+
+  tk_agent_status stale_packet =
+      agent(TK_AGENT_WORKING, 0, "work-stale-packet");
+  check("gammalt paket gör working unknown, aldrig done",
+        tk_agent_monitor_effective_state(&stale_packet, 120001) ==
+            TK_AGENT_UNKNOWN);
+  check("gammalt paket döljer working",
+        !tk_agent_monitor_status_present(&stale_packet, "", 120001));
+  check("gammalt paket håller inte skärmen vaken",
+        !tk_agent_monitor_should_keep_awake(&stale_packet, "", 120001));
+
+  tk_agent_status combined_stale =
+      agent(TK_AGENT_WORKING, 80000, "work-combined-stale");
+  check("eventtid plus paketålder följer 120-sekundersleasen",
+        tk_agent_monitor_effective_state(&combined_stale, 40001) ==
+            TK_AGENT_UNKNOWN);
+
+  tk_agent_status boundary =
+      agent(TK_AGENT_WORKING, 80000, "work-boundary");
+  check("exakt 120 sekunder är fortfarande giltigt",
+        tk_agent_monitor_effective_state(&boundary, 40000) ==
+            TK_AGENT_WORKING);
+
+  tk_agent_status dismissed =
+      agent(TK_AGENT_WORKING, 0, "work-dismissed");
+  check("kvitterat working är inte närvarande",
+        !tk_agent_monitor_status_present(&dismissed, "work-dismissed", 0));
+  check("kvitterat working håller inte skärmen vaken",
+        !tk_agent_monitor_should_keep_awake(&dismissed, "work-dismissed", 0));
+
+  tk_agent_status done = agent(TK_AGENT_DONE, 0, "done-terminal");
+  check("terminal status är närvarande",
+        tk_agent_monitor_status_present(&done, "", 0));
+  check("terminal status håller inte skärmen vaken",
+        !tk_agent_monitor_should_keep_awake(&done, "", 0));
 
   if (failures == 0) {
     printf("OK: alla agentmonitor-policytester gröna\n");
