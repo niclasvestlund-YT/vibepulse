@@ -41,7 +41,16 @@ static lv_obj_t *bare(lv_obj_t *parent) {
 /* ----------------------------------------------------------- appväxlingen */
 
 void torget_app_show(int idx) {
-  if (idx < 0 || idx >= torget_app_count) return;
+  if (idx < 0 || idx >= torget_app_count || !tg.roots[idx]) return;
+  if (idx == tg.active) return;
+  /* Dölj det som visas INNAN nästa root tänds — annars ritas apparna
+   * ovanpå varandra (hittades med KEY3, som växlar utan launchern som
+   * mellansteg och därför inte fick städningen på köpet). */
+  if (tg.active >= 0) {
+    const torget_app_t *prev = torget_apps[tg.active];
+    if (prev->leave) prev->leave();
+    lv_obj_add_flag(tg.roots[tg.active], LV_OBJ_FLAG_HIDDEN);
+  }
   lv_obj_add_flag(tg.launcher, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(tg.roots[idx], LV_OBJ_FLAG_HIDDEN);
   tg.active = idx;
