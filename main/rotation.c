@@ -10,6 +10,10 @@
 #include "esp_lv_adapter.h"
 #include "qmi8658.h"
 
+/* main.c äger panelhandtagen sedan displaystarten blev vår egen; BSP:ns
+ * bsp_display_rotation_set läser statiska handles som aldrig sätts. */
+esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation);
+
 static const char *TAG = "rotation";
 
 /* 5 Hz räcker gott för en pryl man vrider med händerna, och fem stabila
@@ -91,7 +95,7 @@ static void apply_rotation(int r) {
    * flätas. Full invalidering efteråt — panelens adressmappning har bytts,
    * varje delvis uppdatering vore skräp. */
   if (esp_lv_adapter_lock(-1) != ESP_OK) return;
-  bsp_display_rotation_set(CYCLE[(3 + r) % 4]);
+  torget_display_rotation_set(CYCLE[(3 + r) % 4]);
   s_rot = r;
   lv_obj_invalidate(lv_screen_active());
   esp_lv_adapter_unlock();

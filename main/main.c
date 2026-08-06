@@ -26,6 +26,8 @@
 #include "esp_heap_caps.h"
 
 #include "bsp/esp-bsp.h"
+#include "bsp/touch.h"
+#include "esp_lcd_panel_io.h"
 #include "esp_lv_adapter.h"
 #include "lvgl.h"
 
@@ -223,6 +225,88 @@ static void tick_cb(lv_timer_t *t) {
   }
 }
 
+/* ------------------------------------------------------------- displayen */
+
+/*
+ * Egen displaystart i stället för bsp_display_start_with_config: BSP:n
+ * hårdkodar buffer_height 50, och en 480×50×2-flush är 48 KB som SPI-
+ * drivrutinen måste bounce-kopiera till ett sammanhängande DMA-block
+ * (ritbuffertarna bor i PSRAM). Torgets interna heap har ~30 KB som
+ * största block — varje stor flush dog i NO_MEM och skärmen frös (hittat
+ * via heap-telemetrin 2026-08-06: 81 KB fritt men största block 31 KB).
+ * Med buffer_height 24 är flushen 23 KB och ryms med marginal.
+ *
+ * Allt nedan är exakt BSP:ns bsp_display_lcd_init/indev_init med publika
+ * API:er — enda avvikelserna är bufferthöjden och 16 KB LVGL-stack.
+ */
+static esp_lcd_panel_handle_t s_panel;
+static esp_lcd_panel_io_handle_t s_panel_io;
+
+/* 2-pixel-alignment (spec/hardware.md): dirty-areor rundas till jämn start
+ * och udda slut i båda axlarna, annars pixelskräp. Kopia av BSP:ns rounder. */
+static void rounder_event_cb(lv_event_t *e) {
+  lv_area_t *area = (lv_area_t *)lv_event_get_param(e);
+  area->x1 = (area->x1 >> 1) << 1;
+  area->y1 = (area->y1 >> 1) << 1;
+  area->x2 = ((area->x2 >> 1) << 1) + 1;
+  area->y2 = ((area->y2 >> 1) << 1) + 1;
+}
+
+static void display_start(void) {
+  esp_lv_adapter_config_t adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
+  /* 16 KB: appröttarna gör trädet djupare än defaultens 8 KB klarade. */
+  adapter_cfg.task_stack_size = 16 * 1024;
+  ESP_ERROR_CHECK(esp_lv_adapter_init(&adapter_cfg));
+
+  const bsp_display_config_t disp_config = {
+    .max_transfer_sz = BSP_LCD_H_RES * BSP_LCD_V_RES * BSP_LCD_BITS_PER_PIXEL / 8,
+  };
+  ESP_ERROR_CHECK(bsp_display_new(&disp_config, &s_panel, &s_panel_io));
+
+  esp_lv_adapter_display_config_t disp_cfg = {
+    .panel = s_panel,
+    .panel_io = s_panel_io,
+    .profile = {
+      .interface = ESP_LV_ADAPTER_PANEL_IF_OTHER,
+      .rotation = ESP_LV_ADAPTER_ROTATE_0,
+      .hor_res = BSP_LCD_H_RES,
+      .ver_res = BSP_LCD_V_RES,
+      .buffer_height = 24, /* 23 KB per flush — se blockkommentaren ovan */
+      .use_psram = true,
+      .enable_ppa_accel = false,
+      .require_double_buffer = true,
+    },
+    .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
+  };
+  lv_display_t *disp = esp_lv_adapter_register_display(&disp_cfg);
+  assert(disp);
+  lv_display_add_event_cb(disp, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+
+  ESP_ERROR_CHECK(bsp_display_brightness_init());
+
+  /* Touchparet hör ihop med MADCTL 0xA0 — ändra aldrig ena sidan ensam. */
+  bsp_display_cfg_t touch_cfg = {
+    .touch_flags = { .swap_xy = 1, .mirror_x = 0, .mirror_y = 1 },
+  };
+  esp_lcd_touch_handle_t tp = NULL;
+  ESP_ERROR_CHECK(bsp_touch_new(&touch_cfg, &tp));
+  esp_lv_adapter_touch_config_t adapter_touch =
+    ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
+  s_touch = esp_lv_adapter_register_touch(&adapter_touch);
+
+  ESP_ERROR_CHECK(esp_lv_adapter_start());
+}
+
+/* MADCTL-vridningen ur BSP:ns bsp_display_rotation_set — den läser BSP:ns
+ * statiska handles som aldrig sätts när vi startar displayen själva. */
+esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation) {
+  static const uint8_t MADCTL[4] = { 0x00, 0x60, 0xC0, 0xA0 };
+  if (rotation > BSP_DISPLAY_ROTATE_270) return ESP_ERR_INVALID_ARG;
+  uint32_t lcd_cmd = (0x36 << 8) | (0x02 << 24);
+  ESP_LOGI(TAG, "MADCTL 0x%02X (läge %d)", MADCTL[rotation], rotation);
+  return esp_lcd_panel_io_tx_param(s_panel_io, lcd_cmd, &MADCTL[rotation], 1);
+}
+
 /* ------------------------------------------------------------------- start */
 
 void app_main(void) {
@@ -241,26 +325,12 @@ void app_main(void) {
 
   /* Panelen först, nätet sedan: initsekvensen tar ~1,2 s och skärmen ska
    * visa sina streck medan WiFi:t kopplar upp, inte stå svart i tio
-   * sekunder.
-   *
-   * Adapterns LVGL-task får 16 KB stack i stället för defaultens 8 KB:
-   * med appröttarna blev objektträdet en nivå djupare än Solelkollen-eran
-   * och första fullrenderingen sprängde 8 KB (stack overflow i "lvgl",
-   * följt av korruptionspaniker, hittat vid första flashen 2026-08-06).
-   * Övriga fält är exakt bsp_display_start()-defaulten — touchparet
-   * swap_xy/mirror_y hör ihop med MADCTL 0xA0 (spec/hardware.md). */
-  bsp_display_cfg_t disp_cfg = {
-    .lv_adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG(),
-    .rotation = ESP_LV_ADAPTER_ROTATE_0,
-    .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
-    .touch_flags = { .swap_xy = 1, .mirror_x = 0, .mirror_y = 1 },
-  };
-  disp_cfg.lv_adapter_cfg.task_stack_size = 16 * 1024;
-  bsp_display_start_with_config(&disp_cfg);
+   * sekunder. Egen start med små flushbitar — se display_start ovan. */
+  display_start();
   /* Börja släckt: tick_cb:s ramp lyfter till dagsläge på ~1,3 s. Det är
    * bootens fade-in — samma ramp som nattväckningen använder. */
   bsp_display_brightness_set(0);
-  s_touch = bsp_display_get_input_dev();
+  /* s_touch sattes i display_start — BSP:ns accessor vet inget om vår start. */
   sg_rotation_start(s_touch); /* P24: bilden följer med när enheten vrids */
 
   /* Boot räknas som aktivitet: skärmen får sina 15 min att visa upp sig
