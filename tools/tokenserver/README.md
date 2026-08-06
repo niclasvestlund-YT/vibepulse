@@ -75,11 +75,11 @@ Integritetsgränsen är avsiktligt hård: klassificeraren kan lokalt titta på
 verktygsnamn och ett kommando för att skilja test, bygge och vanlig körning,
 men varken promptar, kommandon, meddelandetext, filinnehåll eller råa
 logghändelser sparas eller exponeras. Ofullständiga sista rader hålls lokalt
-till nästa append, men aldrig över 64 KiB. Större eller felaktigt UTF-8-kodade
-rader kastas till nästa radbrytning så att en senare giltig händelse fortfarande
-kan läsas. Läsningen sker i 64 KiB-block och tar högst 1 MiB eller 256 poster
-per fil och poll; stora historiska filer dräneras därför över flera pollar utan
-en obunden minnestopp.
+till nästa append, men aldrig över 1 MiB. Giltiga JSONL-rader på högst 1 MiB
+klassificeras; större eller felaktigt UTF-8-kodade rader kastas till nästa
+radbrytning så att en senare giltig händelse fortfarande kan läsas. Läsningen
+sker i 64 KiB-block och tar högst 1 MiB eller 256 poster per fil och poll; stora
+historiska filer dräneras därför över flera pollar utan en obunden minnestopp.
 
 De tolv aktiva kandidatfilerna per leverantör kontrolleras var 0,5 sekund. Den
 rekursiva upptäckten av nya sessioner görs däremot högst var femte sekund, och
@@ -97,15 +97,15 @@ fullträff på en omskrivning återställer följaren och spelar ersättningen e
 en gång. Det ger eventual omskrivningsdetektering utan kvadratisk livstids-I/O,
 och inget färdigt radinnehåll sparas.
 
-Efter en sådan återställning, när en tidigare följd kall fil återupptäcks eller
-när en nyupptäckt backlog inte når EOF inom första läsbudgeten, markeras
-läsningen som backfill tills observerad EOF. Historiska mellanlägen publiceras
-inte under tiden. Endast den säkert senaste klassificerade
-metadatahändelsen per leverantör och sökväg hålls kompakt i minnet och appliceras
-högst en gång när backloggen är tömd; om slutstatus redan är publik ändras varken
-`seq` eller dess observationstid. Därefter behandlas nya kompletta append-poster
-åter normalt. Återupptäcktsmarkörerna är begränsade till 96 sökvägar och
-innehåller inga råa loggposter.
+Varje befintlig fil som ses för första gången börjar som backfill, även om hela
+filen når EOF under första läsningen. Detsamma gäller efter en återställning,
+ett inodebyte på samma sökväg eller när en tidigare följd kall fil återupptäcks.
+Historiska mellanlägen publiceras inte under tiden. Endast den säkert senaste
+klassificerade metadatahändelsen per leverantör och sökväg hålls kompakt i minnet
+och appliceras högst en gång när backloggen är tömd; om slutstatus redan är
+publik ändras varken `seq` eller dess observationstid. Därefter behandlas nya
+kompletta append-poster åter normalt. Återupptäcktsmarkörerna är begränsade till
+96 sökvägar och innehåller inga råa loggposter.
 
 Lokalt röktest från repots rot, på en alternativ port:
 

@@ -332,7 +332,7 @@ class JsonlTailer:
     _MISSING_POLLS = 3
     _READ_CHUNK_BYTES = 64 * 1024
     _READ_BYTES_PER_POLL = 1024 * 1024
-    _MAX_LINE_BYTES = 64 * 1024
+    _MAX_LINE_BYTES = _READ_BYTES_PER_POLL
     _MAX_RECORDS_PER_POLL = 256
     _VERIFY_INTERVAL_S = 5.0
     _VERIFY_BYTES_PER_POLL = 1024 * 1024
@@ -470,6 +470,8 @@ class JsonlTailer:
     def _state_for_identity(self, path: Path,
                             identity: tuple) -> Dict[str, Any]:
         previous = self._files.get(path)
+        replaced = (previous is not None and
+                    previous["identity"] != identity)
         if previous is not None and previous["identity"] != identity:
             del self._files[path]
 
@@ -477,7 +479,8 @@ class JsonlTailer:
         if state is None:
             state = self._identities.get(identity)
             if state is None:
-                state = self._fresh_state(identity)
+                state = self._fresh_state(
+                    identity, backfilling=replaced)
                 self._identities[identity] = state
             self._files[path] = state
         state["missing_polls"] = 0
@@ -959,9 +962,11 @@ class AgentStatusService:
                 was_seen = self._path_was_seen(path)
                 had_state = path in self._tailer._files
                 cold_backfill = was_seen and not had_state
+                first_seen_backfill = not was_seen and not had_state
                 try:
                     records = self._tailer.read(
-                        path, backfill=cold_backfill)
+                        path, backfill=(cold_backfill or
+                                       first_seen_backfill))
                 except Exception as error:
                     self._report_error("tail-read", error)
                     continue
