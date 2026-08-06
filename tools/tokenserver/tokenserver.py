@@ -164,6 +164,10 @@ _limits_lock = threading.Lock()
 _last_limits = None
 _last_probed = 0.0
 _headers_logged = False
+# Probe-diagnostik, exponerad på "/": var i kedjan Claude-proben fastnar
+# (nyckelring → HTTP → headrar → mappning) plus de råa headernamnen.
+_probe_status = "not_run"
+_probe_headers = []
 
 
 def _read_oauth_token():
@@ -198,8 +202,10 @@ def _parse_reset_minutes(value: str, now_ts: float):
 def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
+    global _probe_status, _probe_headers
     token = _read_oauth_token()
     if not token:
+        _probe_status = "no_keychain_token"
         return None
 
     body = json.dumps({
@@ -223,9 +229,13 @@ def _probe_limits():
     except urllib.error.HTTPError as e:
         # 400 för max_tokens=0 på någon modell? Headrarna följer ofta med
         # ändå — annars ge upp tyst; skärmen visar streck.
+        _probe_status = f"http_{e.code}"
         headers = dict(e.headers) if e.headers else {}
-    except Exception:
+    except Exception as e:
+        _probe_status = f"request_failed: {type(e).__name__}"
         return None
+    else:
+        _probe_status = "http_200"
 
     now_ts = time.time()
     # Diagnostik vid första proben: headernamnen är hämtade ur Clawdmeters
@@ -268,11 +278,12 @@ def _probe_limits():
             if mins is not None:
                 found[f"{window}ResetMin"] = mins
 
+    _probe_headers = sorted(
+        f"{n}: {v}" for n, v in headers.items() if "ratelimit" in n.lower())
     if "sessionPct" not in found:
+        _probe_status += " + no_mapped_headers"
         return None
-    for key in ("sessionResetMin", "weekPct", "weekResetMin",
-                "modelPct", "modelResetMin"):
-        found.setdefault(key, None)
+    _probe_status += " + ok"
     return found
 
 
@@ -413,7 +424,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": str(e)})
         elif self.path == "/":
             self._send(200, {"service": "torget-tokenserver",
-                             "endpoint": "/api/tokens"})
+                             "endpoint": "/api/tokens",
+                             "claudeProbe": _probe_status,
+                             "ratelimitHeaders": _probe_headers})
         else:
             self._send(404, {"error": "not found"})
 
