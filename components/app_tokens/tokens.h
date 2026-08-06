@@ -3,7 +3,7 @@
 
 /*
  * Speglar Mac-tjänstens /api/tokens (kontrakt v2) minus transportfälten —
- * Tokenmätarens datakontrakt enligt glance-mönstret: platt JSON, tal inte
+ * VibePulse-datats kontrakt enligt glance-mönstret: platt JSON, tal inte
  * strängar, en takt så appen kan ticka lokalt. Tjänsten (tools/tokenserver/)
  * kombinerar tre källor:
  *

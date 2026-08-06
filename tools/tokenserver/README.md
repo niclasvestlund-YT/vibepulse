@@ -1,4 +1,4 @@
-# tokenserver — Tokenmätarens Mac-tjänst
+# tokenserver — VibePulse Mac-tjänst
 
 Serverar Claude- och Codex-användningen som platt JSON enligt glance-
 mönstret (kontrakt v2). Skärmen hämtar `/api/tokens` över LAN var 30:e

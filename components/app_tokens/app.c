@@ -7,6 +7,8 @@
 #include "lvgl.h"
 
 #include "fmt_sv.h"
+#include "agent_monitor.h"
+#include "agent_usage.h"
 #include "ticker.h"
 #include "torget.h"
 
@@ -370,6 +372,11 @@ void tokens_apply(const tk_tokens *t) {
   apply_limits(&tk.claude, &t->claude_session, &t->claude_week,
                &t->claude_model_week);
   apply_limits(&tk.codex, &t->codex_session, &t->codex_week, NULL);
+  tk_agent_monitor_set_usage(
+      true, tk_agent_usage_pick(&t->claude_session, &t->claude_week,
+                                &t->claude_model_week));
+  tk_agent_monitor_set_usage(
+      false, tk_agent_usage_pick(&t->codex_session, &t->codex_week, NULL));
 
   /* vy 3: volymen. */
   sv_group_ll(t->day_sessions, buf, sizeof buf);
@@ -391,7 +398,7 @@ void tokens_apply(const tk_tokens *t) {
 
   tk.last_success_us = now;
   /* Brinner det tokens är någon vaken vid tangentbordet — håll skärmen i
-   * dagsläge (Tokenmätarens motsvarighet till "solen är villkoret"),
+   * dagsläge (VibePulse-motsvarigheten till "solen är villkoret"),
    * och låt pulsen andas. Paus ⇒ pricken försvinner helt. */
   if (t->day_tokens_per_hour > 0) {
     torget_keep_awake();
@@ -399,6 +406,10 @@ void tokens_apply(const tk_tokens *t) {
   } else {
     lv_obj_add_flag(tk.live_dot, LV_OBJ_FLAG_HIDDEN);
   }
+}
+
+void tokens_apply_agent_status(const tk_agent_snapshot *snapshot) {
+  tk_agent_monitor_apply(snapshot, torget_now_us());
 }
 
 void tokens_show_view(int idx) {
@@ -420,6 +431,32 @@ static void set_stale(bool stale) {
 static void tick_cb(lv_timer_t *t) {
   (void)t;
   int64_t now = torget_now_us();
+  tk_agent_monitor_tick(now);
+
+#if defined(ESP_PLATFORM) && defined(TK_AGENT_DEMO)
+  static int demo_stage = -1;
+  int next_stage = (int)((now / 5000000LL) % 4);
+  if (next_stage != demo_stage) {
+    demo_stage = next_stage;
+    tk_agent_snapshot snapshot = {0};
+    snapshot.seq++;
+    snprintf(snapshot.claude.task_id, sizeof snapshot.claude.task_id,
+             "demo-task");
+    snprintf(snapshot.claude.event_id, sizeof snapshot.claude.event_id,
+             "demo-%lld-%d", (long long)(now / 20000000LL), demo_stage);
+    snprintf(snapshot.claude.project, sizeof snapshot.claude.project,
+             "Torget");
+    snapshot.claude.state = (tk_agent_state[]){TK_AGENT_WORKING,
+                                               TK_AGENT_WAITING,
+                                               TK_AGENT_DONE,
+                                               TK_AGENT_ERROR}[demo_stage];
+    snapshot.claude.activity = demo_stage == 0 ? TK_ACTIVITY_TESTING :
+                               demo_stage == 1 ? TK_ACTIVITY_WAITING_APPROVAL :
+                                                 TK_ACTIVITY_NONE;
+    snapshot.codex.state = TK_AGENT_IDLE;
+    tokens_apply_agent_status(&snapshot);
+  }
+#endif
 
   if (tk.ticker.has_data)
     set_ticker_mtok(sg_ticker_value(&tk.ticker, now));
@@ -557,6 +594,10 @@ static void tk_create(lv_obj_t *root) {
     lv_obj_set_style_bg_color(tk.dots[i], i == 0 ? COL_ACCENT : COL_DOT_OFF, 0);
   }
 
+  /* Agentmonitorn är en helskärms-syskonoverlay ovanpå tileview + prickar.
+   * Den börjar dold och rör därför inte den ordinarie VibePulse-vyn. */
+  tk_agent_monitor_create(root);
+
   lv_timer_create(tick_cb, TICK_EVERY_MS, NULL);
 
 #ifdef ESP_PLATFORM
@@ -568,15 +609,14 @@ static void tk_create(lv_obj_t *root) {
 
 const torget_app_t tokens_app = {
   .api_version = TORGET_APP_API_VERSION,
-  .name = "TOKENMÄTAREN",
+  .name = "VIBEPULSE",
   .icon = {
-    /* Djup terrakottabrun platta, T-glyf, terrakottaprick — samma
-     * proportioner som Solelkollens ikon, egen accent. */
+    /* V + puls-prick i samma deklarativa 96-pixelsystem som Solelkollen. */
     .font = &plex_icon_64,
-    .glyph = "T",
-    .plate_hex = 0x3A2114,
+    .glyph = "V",
+    .plate_hex = 0x181636,
     .glyph_hex = 0xFFFFFF,
-    .dot_hex = 0xD97757,
+    .dot_hex = 0x7770FF,
   },
   .create = tk_create,
   .enter = NULL,

@@ -123,7 +123,7 @@ int main(void) {
   json = read_file(FIXTURES_DIR "/agent-status-claude-working.json", &len);
   if (json) {
     check("fixturen parsar", tk_agent_status_parse(json, len, &snapshot));
-    check("seq", snapshot.seq == 184);
+    check("seq", snapshot.seq == 201);
     check("Claude arbetar", snapshot.claude.state == TK_AGENT_WORKING);
     check("Claude testar", snapshot.claude.activity == TK_ACTIVITY_TESTING);
     check("projekt", strcmp(snapshot.claude.project, "Torget") == 0);

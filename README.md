@@ -30,11 +30,11 @@ components/
   torget_fmt/             sv-SE-formatering, hosttestad
   torget_ticker/          den lokala tickern, hosttestad
   app_solelkollen/        app 1: fyra vyer, /api/glance + /api/glance-sverige
-  app_tokens/             app 2: Tokenmätaren (Claude/Codex-tak + Mtok-volym)
+  app_tokens/             app 2: VibePulse (agentstatus + Claude/Codex-usage)
 sim/                      SDL-simulatorn: hela plattformen + apparna på Macen
 sim-fixtures/             inspelade API-svar simulatorn och testerna delar
 test/                     hosttester, körs med clang utan ESP-IDF: ./test/run.sh
-tools/tokenserver/        Mac-tjänsten som serverar Tokenmätarens JSON över LAN
+tools/tokenserver/        Mac-tjänsten som serverar VibePulse-data över LAN
 spec/                     hardware.md (alla hårdvarufällor) + ui-spec.md (designsystemet)
 third_party/cjson/        vendrad cJSON 1.7.18 — samma parser på Macen som på kortet
 ```
@@ -65,7 +65,7 @@ det hemma i appen eller platform/, aldrig i något värdlager.
 
 ```
 . ~/esp/esp-idf/export.sh
-cp secrets.h.example secrets.h     # fyll i WiFi + Tokenmätarens URL
+cp secrets.h.example secrets.h     # fyll i WiFi + VibePulse-tjänstens URL
 idf.py set-target esp32s3          # engångs, skapar sdkconfig
 idf.py build
 idf.py -p /dev/cu.usbmodem101 flash monitor
@@ -82,11 +82,11 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 ./sim/build/torget-sim
 ```
 
-Tangent 1-4 väljer Solelkollen-fixtur, T matar om Tokenmätaren, N växlar
-app (KEY3-knappens bänkmotsvarighet), L öppnar launchern (långtryck med
+Tangent 1-4 väljer Solelkollen-fixtur, T matar om VibePulse-usage, S cyklar
+agentstatus, N växlar app (KEY3-knappens bänkmotsvarighet), L öppnar launchern (långtryck med
 musen fungerar också — det är enhetens gest). På enheten växlar KEY3
 (GPIO18) app med ett tryck.
-En obevakad körning BMP-dumpar alla vyer + launchern + Tokenmätaren till
+En obevakad körning BMP-dumpar alla vyer + launchern + VibePulse till
 /tmp/torget-*.bmp — pixelverifieringens facit.
 
 ## Hosttesterna
@@ -98,7 +98,7 @@ En obevakad körning BMP-dumpar alla vyer + launchern + Tokenmätaren till
 Kompilerar kärnorna + båda parsrarna med clang under -Wall -Wextra -Werror
 och kör dem mot de riktiga fixture-filerna plus fientliga indata.
 
-## Tokenmätarens tjänst
+## VibePulse-tjänsten
 
 `tools/tokenserver/` — liten Python-stdlib-tjänst som skannar Claude
 Code-loggarna och serverar `/api/tokens` över LAN. Se README:n där för

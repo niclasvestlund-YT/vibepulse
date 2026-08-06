@@ -1,1 +1,1 @@
-{"v":1,"seq":184,"agents":{"claude":{"task_id":"claude-turn-7","event_id":"claude-event-11","state":"working","project":"Torget","activity":"testing","updated_ms":420},"codex":{"task_id":null,"event_id":null,"state":"idle","project":null,"activity":null,"updated_ms":0}}}
+{"v":1,"seq":201,"agents":{"claude":{"task_id":"claude-task-201","event_id":"claude-working-201","state":"working","project":"Torget","activity":"testing","updated_ms":0},"codex":{"task_id":null,"event_id":null,"state":"idle","project":null,"activity":null,"updated_ms":0}}}

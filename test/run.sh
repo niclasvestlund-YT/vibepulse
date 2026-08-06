@@ -34,3 +34,10 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   test_agent_status.c /tmp/torget-cjson.o \
   -o /tmp/torget-agent-status-test
 /tmp/torget-agent-status-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_usage.c \
+  test_agent_usage.c \
+  -lm \
+  -o /tmp/torget-agent-usage-test
+/tmp/torget-agent-usage-test
