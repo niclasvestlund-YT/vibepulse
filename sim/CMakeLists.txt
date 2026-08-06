@@ -32,6 +32,7 @@ add_executable(torget-sim
   ../components/app_solelkollen/glance_parse.c
   ../components/app_tokens/app.c
   ../components/app_tokens/tokens_parse.c
+  ../components/app_tokens/agent_status_parse.c
   ../components/torget_fmt/fmt_sv.c
   ../components/torget_ticker/ticker.c
   ../third_party/cjson/cJSON.c

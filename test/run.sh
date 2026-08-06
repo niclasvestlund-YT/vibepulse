@@ -27,3 +27,10 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   test_tokens.c /tmp/torget-cjson.o \
   -o /tmp/torget-tokens-test
 /tmp/torget-tokens-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  -DFIXTURES_DIR="\"$(cd ../sim-fixtures && pwd)\"" \
+  ../components/app_tokens/agent_status_parse.c \
+  test_agent_status.c /tmp/torget-cjson.o \
+  -o /tmp/torget-agent-status-test
+/tmp/torget-agent-status-test

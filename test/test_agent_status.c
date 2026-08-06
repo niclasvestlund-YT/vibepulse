@@ -1,0 +1,178 @@
+/*
+ * Agentstatusens kontraktstester: den riktiga simulatorfixturen plus
+ * fientliga payloads. Avvisade svar får aldrig skriva över senaste goda
+ * snapshoten.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../components/app_tokens/agent_status_parse.h"
+
+static int failures = 0;
+
+static char *read_file(const char *path, size_t *len_out) {
+  FILE *f = fopen(path, "rb");
+  if (!f) { printf("FAIL kan inte läsa %s\n", path); failures++; return NULL; }
+  fseek(f, 0, SEEK_END);
+  long n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  char *buf = malloc((size_t)n + 1);
+  fread(buf, 1, (size_t)n, f);
+  buf[n] = '\0';
+  fclose(f);
+  if (len_out) *len_out = (size_t)n;
+  return buf;
+}
+
+static void check(const char *what, int cond) {
+  if (!cond) { printf("FAIL %s\n", what); failures++; }
+}
+
+static void check_rejected_unchanged(const char *what, const char *json,
+                                     tk_agent_snapshot *out) {
+  tk_agent_snapshot before = *out;
+  if (tk_agent_status_parse(json, strlen(json), out)) {
+    printf("FAIL %s accepterades\n", what);
+    failures++;
+  }
+  if (memcmp(&before, out, sizeof before) != 0) {
+    printf("FAIL %s rörde utdata\n", what);
+    failures++;
+  }
+}
+
+/* Alla literaler parsas med strlen; inga handräknade payloadlängder. */
+#define PARSE(s, out) tk_agent_status_parse((s), strlen(s), (out))
+#define IDLE_CODEX \
+  "\"codex\":{\"task_id\":null,\"event_id\":null,\"state\":\"idle\"," \
+  "\"project\":null,\"activity\":null,\"updated_ms\":0}"
+#define PAYLOAD(CLAUDE) \
+  "{\"v\":1,\"seq\":1,\"agents\":{" CLAUDE "," IDLE_CODEX "}}"
+
+#define CLAUDE_WORKING \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"working\",\"project\":\"Torget\"," \
+  "\"activity\":\"testing\",\"updated_ms\":1}"
+#define CLAUDE_NEGATIVE_UPDATED \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"working\",\"project\":\"Torget\"," \
+  "\"activity\":\"testing\",\"updated_ms\":-1}"
+#define CLAUDE_LONG_PROJECT \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"working\",\"project\":\"12345678901234567\"," \
+  "\"activity\":\"testing\",\"updated_ms\":1}"
+#define CLAUDE_CONTROL_PROJECT \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"working\",\"project\":\"Tor\\u0001get\"," \
+  "\"activity\":\"testing\",\"updated_ms\":1}"
+#define CLAUDE_UNKNOWN_STATE \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"reviewing\",\"project\":\"Torget\"," \
+  "\"activity\":\"testing\",\"updated_ms\":1}"
+#define CLAUDE_UNKNOWN_ACTIVITY \
+  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+  "\"state\":\"working\",\"project\":\"Torget\"," \
+  "\"activity\":\"reviewing\",\"updated_ms\":1}"
+
+int main(void) {
+  size_t len;
+  char *json;
+  tk_agent_snapshot snapshot = {0};
+
+  json = read_file(FIXTURES_DIR "/agent-status-claude-working.json", &len);
+  if (json) {
+    check("fixturen parsar", tk_agent_status_parse(json, len, &snapshot));
+    check("seq", snapshot.seq == 184);
+    check("Claude arbetar", snapshot.claude.state == TK_AGENT_WORKING);
+    check("Claude testar", snapshot.claude.activity == TK_ACTIVITY_TESTING);
+    check("projekt", strcmp(snapshot.claude.project, "Torget") == 0);
+    check("Codex vilar", snapshot.codex.state == TK_AGENT_IDLE);
+    free(json);
+  }
+
+  check_rejected_unchanged(
+      "fel version",
+      "{\"v\":2,\"seq\":1,\"agents\":{" CLAUDE_WORKING "," IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged("error-form", "{\"error\":\"nope\"}",
+                           &snapshot);
+  check_rejected_unchanged("negativ updated_ms",
+                           PAYLOAD(CLAUDE_NEGATIVE_UPDATED), &snapshot);
+  check_rejected_unchanged("17 teckens projekt",
+                           PAYLOAD(CLAUDE_LONG_PROJECT), &snapshot);
+  check_rejected_unchanged("kontrolltecken i projekt",
+                           PAYLOAD(CLAUDE_CONTROL_PROJECT), &snapshot);
+
+  check("okänd state parsar", PARSE(PAYLOAD(CLAUDE_UNKNOWN_STATE), &snapshot));
+  check("okänd state mappas", snapshot.claude.state == TK_AGENT_UNKNOWN);
+  check("okänd activity parsar",
+        PARSE(PAYLOAD(CLAUDE_UNKNOWN_ACTIVITY), &snapshot));
+  check("okänd activity mappas",
+        snapshot.claude.activity == TK_ACTIVITY_UNKNOWN);
+
+  check_rejected_unchanged("trasig JSON", "{\"v\":1", &snapshot);
+  check_rejected_unchanged("skräp efter JSON",
+                           PAYLOAD(CLAUDE_WORKING) "x", &snapshot);
+  check_rejected_unchanged("rot som inte är objekt", "[]", &snapshot);
+  check_rejected_unchanged(
+      "fraktionell seq",
+      "{\"v\":1,\"seq\":1.5,\"agents\":{" CLAUDE_WORKING ","
+      IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "seq över uint32",
+      "{\"v\":1,\"seq\":4294967296,\"agents\":{" CLAUDE_WORKING ","
+      IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "seq med inledande nolla",
+      "{\"v\":1,\"seq\":01,\"agents\":{" CLAUDE_WORKING ","
+      IDLE_CODEX "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "saknad Codex",
+      "{\"v\":1,\"seq\":1,\"agents\":{" CLAUDE_WORKING "}}",
+      &snapshot);
+  check_rejected_unchanged(
+      "saknad agentnyckel",
+      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
+              "\"event_id\":\"event-1\",\"state\":\"working\"," \
+              "\"project\":\"Torget\",\"updated_ms\":1}"),
+      &snapshot);
+  check_rejected_unchanged(
+      "fel typ i agentsträng",
+      PAYLOAD("\"claude\":{\"task_id\":7,\"event_id\":\"event-1\"," \
+              "\"state\":\"working\",\"project\":\"Torget\"," \
+              "\"activity\":\"testing\",\"updated_ms\":1}"),
+      &snapshot);
+  check_rejected_unchanged(
+      "fraktionell updated_ms",
+      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
+              "\"event_id\":\"event-1\",\"state\":\"working\"," \
+              "\"project\":\"Torget\",\"activity\":\"testing\"," \
+              "\"updated_ms\":1.5}"),
+      &snapshot);
+  check_rejected_unchanged(
+      "kontrollnolla i projekt",
+      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
+              "\"event_id\":\"event-1\",\"state\":\"working\"," \
+              "\"project\":\"Tor\\u0000get\",\"activity\":\"testing\"," \
+              "\"updated_ms\":1}"),
+      &snapshot);
+
+  tk_agent_snapshot before = snapshot;
+  check("NULL json avvisas", !tk_agent_status_parse(NULL, 0, &snapshot));
+  check("NULL json rör inte utdata",
+        memcmp(&before, &snapshot, sizeof before) == 0);
+  check("NULL out avvisas",
+        !tk_agent_status_parse(PAYLOAD(CLAUDE_WORKING),
+                               strlen(PAYLOAD(CLAUDE_WORKING)), NULL));
+
+  if (failures == 0) {
+    printf("OK: alla agentstatus-tester gröna\n");
+    return 0;
+  }
+  printf("%d test föll\n", failures);
+  return 1;
+}

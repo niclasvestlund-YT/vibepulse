@@ -2,7 +2,7 @@
 # användningen. app.c och tokens_parse.c delas byte-identiskt med
 # simulatorn; net.c finns bara i det här bygget.
 idf_component_register(
-  SRCS "app.c" "tokens_parse.c" "net.c"
+  SRCS "app.c" "tokens_parse.c" "agent_status_parse.c" "net.c"
   INCLUDE_DIRS "."
   REQUIRES torget_app torget_fmt torget_ticker cjson
   # secrets.h bor i repytroten (gitignorad), därav "../..".
