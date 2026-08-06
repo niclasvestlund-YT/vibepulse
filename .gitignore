@@ -8,6 +8,7 @@ sim/build*/
 managed_components/
 sdkconfig
 sdkconfig.old
+.worktrees/
 
 # Font-TTF:erna hämtas av platform/fonts/fetch-and-convert.sh; bara de
 # genererade .c-filerna committas så bygget aldrig behöver node eller nät.
