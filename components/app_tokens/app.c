@@ -67,6 +67,7 @@ extern const lv_font_t plex_icon_64;
 typedef struct {
   lv_obj_t *pct_value, *reset_value, *week_value, *model_value;
   lv_obj_t *hero_fill, *week_fill, *model_fill;
+  lv_obj_t *week_block; /* hela VECKAN-cellen — döljs när heron ÄR veckan */
 } tk_limit_view;
 
 static struct {
@@ -158,7 +159,8 @@ static lv_obj_t *hero_row(lv_obj_t *tile) {
 }
 
 /* Ett statblock, valfritt med en liten progressbar under värdet (usage-
- * panelens rad-språk): fill_out != NULL skapar 120×4-baren. */
+ * panelens rad-språk): fill_out != NULL skapar 120×4-baren. Returnerar
+ * CELLEN (flex-barnet) så en vy kan dölja hela blocket. */
 #define STAT_BAR_W 120
 
 static lv_obj_t *stat_block(lv_obj_t *parent, const char *label_text,
@@ -198,7 +200,7 @@ static lv_obj_t *stat_block(lv_obj_t *parent, const char *label_text,
     lv_obj_set_style_bg_opa(*fill_out, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(*fill_out, COL_LVL_LOW, 0);
   }
-  return row;
+  return side;
 }
 
 /* --------------------------------------------------------------- animering */
@@ -317,13 +319,21 @@ static void apply_limits(tk_limit_view *v, const tk_limit *session,
   } else {
     lv_label_set_text(v->reset_value, "–");
   }
-  if (!hero_is_week && week->has_pct) {
-    sv_pct_1(week->pct, buf, sizeof buf);
-    lv_label_set_text(v->week_value, buf);
-    bar_set(v->week_fill, STAT_BAR_W, week);
+  /* När heron ÄR veckan (planer utan sessionsfönster, som Codex prolite)
+   * vore VECKAN-blocket samma siffra en gång till — dölj hela cellen och
+   * låt NOLLAS OM få radutrymmet. */
+  if (hero_is_week) {
+    lv_obj_add_flag(v->week_block, LV_OBJ_FLAG_HIDDEN);
   } else {
-    lv_label_set_text(v->week_value, "–");
-    bar_set(v->week_fill, STAT_BAR_W, NULL);
+    lv_obj_remove_flag(v->week_block, LV_OBJ_FLAG_HIDDEN);
+    if (week->has_pct) {
+      sv_pct_1(week->pct, buf, sizeof buf);
+      lv_label_set_text(v->week_value, buf);
+      bar_set(v->week_fill, STAT_BAR_W, week);
+    } else {
+      lv_label_set_text(v->week_value, "–");
+      bar_set(v->week_fill, STAT_BAR_W, NULL);
+    }
   }
   if (v->model_value) {
     if (model_week && model_week->has_pct) {
@@ -450,8 +460,9 @@ static void tk_create(lv_obj_t *root) {
 
     lv_obj_t *stats = stats_row(tile);
     stat_block(stats, "NOLLAS OM", &limit_views[i]->reset_value, "", NULL);
-    stat_block(stats, "VECKAN", &limit_views[i]->week_value, "%",
-               &limit_views[i]->week_fill);
+    limit_views[i]->week_block =
+      stat_block(stats, "VECKAN", &limit_views[i]->week_value, "%",
+                 &limit_views[i]->week_fill);
     /* Claude-vyn får usage-panelens tredje rad: veckofönstret för tyngsta
      * modellen (Fable på Max-planen). Codex saknar motsvarighet. */
     if (i == 0)
