@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import unicodedata
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,15 @@ class Event:
     task_id: str
     source_id: str
     project: str | None
+
+
+@dataclass(frozen=True)
+class _Observation:
+    event: Event
+    event_id: str
+    observed_at: float
+    order_at: float
+    sequence: int
 
 
 def stable_event_id(provider: str, event: Event) -> str:
@@ -250,7 +260,9 @@ class AgentStatusStore:
 
     def apply(self, provider: str, event: Event,
               observed_at: Optional[float] = None,
-              order_at: Optional[float] = None) -> bool:
+              order_at: Optional[float] = None,
+              refresh_unchanged: bool = True,
+              event_id_override: Optional[str] = None) -> bool:
         if provider not in self._agents:
             raise ValueError(f"unsupported provider: {provider}")
         if event.state not in STATES:
@@ -266,7 +278,8 @@ class AgentStatusStore:
             ordered_at = seen_at
         replacement = {
             "task_id": _bounded_task_id(event.task_id),
-            "event_id": stable_event_id(provider, event),
+            "event_id": (event_id_override or
+                         stable_event_id(provider, event)),
             "state": event.state,
             "project": sanitize_project(event.project),
             "activity": event.activity,
@@ -284,7 +297,7 @@ class AgentStatusStore:
             if changed:
                 self._agents[provider] = replacement
                 self._seq += 1
-            else:
+            elif refresh_unchanged:
                 current["observed_at"] = max(current["observed_at"], seen_at)
                 current["order_at"] = max(current["order_at"], ordered_at)
             return changed
@@ -334,7 +347,8 @@ class JsonlTailer:
         self._use_counter = 0
         self._discovery_needed = False
 
-    def _fresh_state(self, identity: tuple) -> Dict[str, Any]:
+    def _fresh_state(self, identity: tuple,
+                     backfilling: bool = False) -> Dict[str, Any]:
         return {
             "identity": identity,
             "offset": 0,
@@ -350,6 +364,9 @@ class JsonlTailer:
             "verify_length": None,
             "verify_expected": None,
             "verify_hasher": None,
+            "backfilling": backfilling,
+            "last_read_backfill": False,
+            "last_read_caught_up": False,
         }
 
     def _touch(self, state: Dict[str, Any]) -> None:
@@ -386,6 +403,8 @@ class JsonlTailer:
         state = self._files.get(path)
         if state is None:
             return
+        state["last_read_backfill"] = state["backfilling"]
+        state["last_read_caught_up"] = False
         self._discovery_needed = True
         state["missing_polls"] += 1
         if state["missing_polls"] >= self._MISSING_POLLS:
@@ -480,10 +499,35 @@ class JsonlTailer:
     def _reset_state(self, state: Dict[str, Any], identity: tuple) -> None:
         old_identity = state["identity"]
         state.clear()
-        state.update(self._fresh_state(identity))
+        state.update(self._fresh_state(identity, backfilling=True))
         if self._identities.get(old_identity) is state:
             del self._identities[old_identity]
         self._identities[identity] = state
+
+    @staticmethod
+    def _finish_read(state: Dict[str, Any], caught_up: bool) -> None:
+        backfill = state["backfilling"]
+        state["last_read_backfill"] = backfill
+        state["last_read_caught_up"] = caught_up
+        if backfill and caught_up:
+            state["backfilling"] = False
+
+    def read_status(self, path: Any) -> tuple:
+        state = self._files.get(Path(path))
+        if state is None:
+            return False, False
+        return (state["last_read_backfill"],
+                state["last_read_caught_up"])
+
+    def read_identity(self, path: Any) -> Optional[tuple]:
+        state = self._files.get(Path(path))
+        return None if state is None else state["identity"]
+
+    def continue_backfill(self, path: Any) -> None:
+        state = self._files.get(Path(path))
+        if state is not None:
+            state["backfilling"] = True
+            state["last_read_backfill"] = True
 
     @staticmethod
     def _stat_signature(stat: os.stat_result) -> tuple:
@@ -608,7 +652,7 @@ class JsonlTailer:
             position = consumed
         return len(chunk)
 
-    def read(self, path: Any) -> list:
+    def read(self, path: Any, backfill: bool = False) -> list:
         path = Path(path)
         try:
             stat = path.stat()
@@ -616,10 +660,18 @@ class JsonlTailer:
             self._note_missing_path(path)
             return []
         except OSError:
+            state = self._files.get(path)
+            if state is not None:
+                state["last_read_backfill"] = state["backfilling"]
+                state["last_read_caught_up"] = False
             return []
 
         identity = (stat.st_dev, stat.st_ino)
         state = self._state_for_identity(path, identity)
+        if backfill:
+            state["backfilling"] = True
+        state["last_read_backfill"] = state["backfilling"]
+        state["last_read_caught_up"] = False
         now = self._now()
         if stat.st_size < state["offset"]:
             self._reset_state(state, identity)
@@ -633,6 +685,7 @@ class JsonlTailer:
         if (stat.st_size == state["offset"] and
                 current_signature == state["stat_signature"] and
                 not verification_due):
+            self._finish_read(state, caught_up=True)
             return []
 
         try:
@@ -686,12 +739,16 @@ class JsonlTailer:
             self._note_missing_path(path)
             return []
         except OSError:
+            state["last_read_backfill"] = state["backfilling"]
+            state["last_read_caught_up"] = False
             return []
 
         final_signature = self._stat_signature(final_stat)
         state["stat_signature"] = (
             final_signature if final_signature == opened_signature else None)
         self._files[path] = state
+        self._finish_read(
+            state, caught_up=state["offset"] >= final_stat.st_size)
         return records
 
 
@@ -701,6 +758,7 @@ class AgentStatusService:
     _RECENT_FILE_LIMIT = 12
     _DISCOVERY_INTERVAL_S = 5.0
     _DIAGNOSTIC_INTERVAL_S = 30.0
+    _SEEN_PATH_LIMIT = 96
 
     def __init__(self, projects_dir: Any, codex_sessions: Any,
                  now: Callable[[], float] = time.monotonic, *,
@@ -721,6 +779,10 @@ class AgentStatusService:
         self._next_discovery_at = float("-inf")
         self._diagnostic = _diagnostic or self._default_diagnostic
         self._last_diagnostic = {}
+        self._seen_paths = OrderedDict()
+        self._seen_overflow = False
+        self._backfills = {}
+        self._observation_sequence = 0
 
     @staticmethod
     def _default_diagnostic(message: str) -> None:
@@ -815,6 +877,39 @@ class AgentStatusService:
              classify_codex),
         )
 
+    def _path_was_seen(self, path: Path) -> bool:
+        return self._seen_overflow or path in self._seen_paths
+
+    def _remember_path(self, path: Path) -> None:
+        self._seen_paths[path] = True
+        self._seen_paths.move_to_end(path)
+        if len(self._seen_paths) > self._SEEN_PATH_LIMIT:
+            self._seen_paths.popitem(last=False)
+            self._seen_overflow = True
+
+    def _observation(self, provider: str, event: Event, record: Any,
+                     file_wall_time: Optional[float],
+                     monotonic_now: float, wall_now: float) -> _Observation:
+        order_at = self._resolved_wall_time(
+            record, file_wall_time, wall_now)
+        observed_at = monotonic_now - max(0.0, wall_now - order_at)
+        self._observation_sequence += 1
+        compact_event = Event(
+            event.state, event.activity, _bounded_task_id(event.task_id), "",
+            sanitize_project(event.project))
+        return _Observation(
+            compact_event, stable_event_id(provider, event), observed_at,
+            order_at, self._observation_sequence)
+
+    def _apply_observation(self, provider: str, observation: _Observation,
+                           refresh_unchanged: bool = True) -> bool:
+        return self._store.apply(
+            provider, observation.event,
+            observed_at=observation.observed_at,
+            order_at=observation.order_at,
+            refresh_unchanged=refresh_unchanged,
+            event_id_override=observation.event_id)
+
     def _refresh_discovery(self, sources: tuple) -> None:
         retained = {}
         active = []
@@ -844,6 +939,12 @@ class AgentStatusService:
                        len(next_active[provider]))
             next_active[provider].extend(grace[:room])
         self._active_paths = next_active
+        tracked_paths = set(self._tailer._files)
+        tracked_paths.update(
+            path for paths in next_active.values() for path in paths)
+        for key in list(self._backfills):
+            if key[1] not in tracked_paths:
+                del self._backfills[key]
         self._tailer.take_discovery_request()
         self._next_discovery_at = self._now() + self._DISCOVERY_INTERVAL_S
 
@@ -855,13 +956,30 @@ class AgentStatusService:
             for path in self._active_paths[provider]:
                 if path in skipped:
                     continue
+                was_seen = self._path_was_seen(path)
+                had_state = path in self._tailer._files
+                cold_backfill = was_seen and not had_state
                 try:
-                    records = self._tailer.read(path)
+                    records = self._tailer.read(
+                        path, backfill=cold_backfill)
                 except Exception as error:
                     self._report_error("tail-read", error)
                     continue
-                if not records:
+                read_backfill, caught_up = self._tailer.read_status(path)
+                if not was_seen and not had_state and not caught_up:
+                    self._tailer.continue_backfill(path)
+                    read_backfill = True
+                if path in self._tailer._files:
+                    self._remember_path(path)
+                identity = self._tailer.read_identity(path)
+                if identity is None:
                     continue
+                key = (provider, path, identity)
+                for pending_key in list(self._backfills):
+                    if (pending_key[:2] == key[:2] and
+                            pending_key[2] != identity):
+                        del self._backfills[pending_key]
+                is_backfill = read_backfill or key in self._backfills
                 try:
                     file_wall_time = path.stat().st_mtime
                 except OSError:
@@ -877,18 +995,31 @@ class AgentStatusService:
                     if event is None:
                         continue
                     try:
-                        order_at = self._resolved_wall_time(
-                            record, file_wall_time, wall_now)
-                        observed_at = self._observed_at(
-                            record, file_wall_time, monotonic_now, wall_now)
-                        if self._store.apply(
-                                provider, event,
-                                observed_at=observed_at,
-                                order_at=order_at):
+                        observation = self._observation(
+                            provider, event, record, file_wall_time,
+                            monotonic_now, wall_now)
+                        if is_backfill:
+                            current = self._backfills.get(key)
+                            if (current is None or
+                                    (observation.order_at,
+                                     observation.sequence) >=
+                                    (current.order_at, current.sequence)):
+                                self._backfills[key] = observation
+                        elif self._apply_observation(provider, observation):
                             changed += 1
                     except Exception as error:
                         self._report_error("apply", error)
                         continue
+                if is_backfill and caught_up:
+                    observation = self._backfills.pop(key, None)
+                    if observation is not None:
+                        try:
+                            if self._apply_observation(
+                                    provider, observation,
+                                    refresh_unchanged=False):
+                                changed += 1
+                        except Exception as error:
+                            self._report_error("apply", error)
         return changed
 
     def poll_once(self) -> int:

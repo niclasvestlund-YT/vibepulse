@@ -97,6 +97,16 @@ fullträff på en omskrivning återställer följaren och spelar ersättningen e
 en gång. Det ger eventual omskrivningsdetektering utan kvadratisk livstids-I/O,
 och inget färdigt radinnehåll sparas.
 
+Efter en sådan återställning, när en tidigare följd kall fil återupptäcks eller
+när en nyupptäckt backlog inte når EOF inom första läsbudgeten, markeras
+läsningen som backfill tills observerad EOF. Historiska mellanlägen publiceras
+inte under tiden. Endast den säkert senaste klassificerade
+metadatahändelsen per leverantör och sökväg hålls kompakt i minnet och appliceras
+högst en gång när backloggen är tömd; om slutstatus redan är publik ändras varken
+`seq` eller dess observationstid. Därefter behandlas nya kompletta append-poster
+åter normalt. Återupptäcktsmarkörerna är begränsade till 96 sökvägar och
+innehåller inga råa loggposter.
+
 Lokalt röktest från repots rot, på en alternativ port:
 
 ```

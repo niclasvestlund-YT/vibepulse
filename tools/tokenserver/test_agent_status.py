@@ -823,6 +823,163 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 0)
             self.assertEqual(service.snapshot()["seq"], 1)
 
+    def test_timestamp_less_private_rewrite_does_not_replay_public_transitions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            working = claude_event("user")
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            working["private"] = "A"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(path, (900, 900))
+            now = [0.0]
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: 1000.0)
+            self.assertEqual(service.poll_once(), 2)
+            baseline = service.snapshot()
+            original_inode = path.stat().st_ino
+
+            working["private"] = "B"
+            path.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(path, (901, 901))
+            self.assertEqual(path.stat().st_ino, original_inode)
+
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(service.snapshot(), baseline)
+
+    def test_large_rewrite_backfill_never_publishes_intermediate_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            working = claude_event("user")
+            working["private"] = "synthetic-backfill-private-prompt"
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            padding_size = (2 * JsonlTailer._READ_BYTES_PER_POLL +
+                            200_000)
+            data = (
+                json.dumps(working).encode() + b"\n" +
+                b'{"private":"' + b"A" * padding_size + b'"}\n' +
+                json.dumps(completed).encode() + b"\n"
+            )
+            path.parent.mkdir(parents=True)
+            path.write_bytes(data)
+            os.utime(path, (900, 900))
+            now = [0.0]
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: 1000.0)
+            for _ in range(8):
+                changed = service.poll_once()
+                if service._tailer._files[path]["offset"] == len(data):
+                    self.assertEqual(changed, 1)
+                    break
+                self.assertEqual(changed, 0)
+                self.assertEqual(service.snapshot()["seq"], 0)
+            baseline = service.snapshot()
+            self.assertEqual(baseline["seq"], 1)
+            self.assertEqual(baseline["agents"]["claude"]["state"], "done")
+
+            replacement = bytearray(data)
+            replacement[JsonlTailer._READ_BYTES_PER_POLL + 100_000] = ord("B")
+            path.write_bytes(replacement)
+            os.utime(path, (901, 901))
+
+            for _ in range(8):
+                self.assertEqual(service.poll_once(), 0)
+                self.assertEqual(service.snapshot(), baseline)
+                self.assertNotIn(
+                    "synthetic-backfill-private-prompt",
+                    repr(service._backfills))
+
+            live = claude_event("assistant", stop_reason="end_turn")
+            live["uuid"] = "event-live"
+            del live["timestamp"]
+            with path.open("ab") as stream:
+                stream.write(json.dumps(live).encode() + b"\n")
+            os.utime(path, (902, 902))
+            now[0] += 0.5
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], baseline["seq"] + 1)
+            self.assertEqual(snapshot["agents"]["claude"]["state"],
+                             "waiting")
+
+    def test_cold_eviction_replays_only_genuinely_appended_final_event(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "claude" / "target.jsonl"
+            working = claude_event("user")
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(target, (1, 1))
+            now = [0.0]
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: 1000.0)
+            self.assertEqual(service.poll_once(), 2)
+            baseline_seq = service.snapshot()["seq"]
+            target_stat = target.stat()
+            target_identity = (target_stat.st_dev, target_stat.st_ino)
+
+            fillers = []
+            for index in range(12):
+                filler = root / "claude" / f"filler-{index:02d}.jsonl"
+                self._write_line(filler, {"ignored": index})
+                os.utime(filler, (10 + index, 10 + index))
+                fillers.append(filler)
+            now[0] = service._DISCOVERY_INTERVAL_S
+            self.assertEqual(service.poll_once(), 0)
+
+            for wave in range(4):
+                for index, filler in enumerate(fillers):
+                    replacement = root / f"replacement-{wave}-{index}.tmp"
+                    replacement.write_text(
+                        json.dumps({"ignored": [wave, index]}) + "\n",
+                        encoding="utf-8")
+                    os.replace(replacement, filler)
+                    os.utime(filler, (10 + index, 10 + index))
+                now[0] += 0.1
+                self.assertEqual(service.poll_once(), 0)
+            self.assertNotIn(target_identity, service._tailer._identities)
+
+            live = claude_event("user")
+            live["uuid"] = "event-live"
+            del live["timestamp"]
+            with target.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(live) + "\n")
+            os.utime(target, (999, 999))
+            now[0] = 2 * service._DISCOVERY_INTERVAL_S
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], baseline_seq + 1)
+            self.assertEqual(snapshot["agents"]["claude"]["state"],
+                             "working")
+            self.assertEqual(snapshot["agents"]["claude"]["task_id"],
+                             claude_task_id("session-1", "event-live"))
+
     def test_fast_active_poll_does_not_repeat_recursive_discovery(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1068,11 +1225,14 @@ class AgentStatusServiceTests(unittest.TestCase):
             def __init__(self, delegate):
                 self.delegate = delegate
 
-            def apply(self, provider, event, observed_at=None, order_at=None):
-                if event.source_id == "bad-apply":
+            def apply(self, provider, event, observed_at=None, order_at=None,
+                      refresh_unchanged=True, event_id_override=None):
+                if event.task_id == claude_task_id(
+                        "session-1", "bad-apply"):
                     raise LookupError("synthetic-private-apply-prompt")
                 return self.delegate.apply(
-                    provider, event, observed_at, order_at)
+                    provider, event, observed_at, order_at,
+                    refresh_unchanged, event_id_override)
 
             def snapshot(self):
                 return self.delegate.snapshot()
