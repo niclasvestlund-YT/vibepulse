@@ -27,7 +27,9 @@
 
 #include "bsp/esp-bsp.h"
 #include "bsp/touch.h"
+#include "driver/gpio.h"
 #include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
 #include "esp_lv_adapter.h"
 #include "lvgl.h"
 
@@ -208,6 +210,17 @@ static void tick_cb(lv_timer_t *t) {
   if (s_touch && lv_indev_get_state(s_touch) == LV_INDEV_STATE_PRESSED)
     s_last_touch_us = now;
 
+  /* KEY3 (GPIO18, aktiv låg): fysisk appväxlare — ett tryck, nästa app.
+   * Pollad i 10 Hz-ticken (naturlig avstudsning: en flank per nedtryck,
+   * släpp krävs mellan). Körs i LVGL-tasken, så inga lås behövs. */
+  static bool key3_was_down;
+  bool key3_down = gpio_get_level(GPIO_NUM_18) == 0;
+  if (key3_down && !key3_was_down) {
+    torget_app_next();
+    s_last_touch_us = now; /* ett knapptryck är aktivitet, precis som touch */
+  }
+  key3_was_down = key3_down;
+
   int target = ((now - s_last_activity_us) > NIGHT_AFTER_US
                 && (now - s_last_touch_us) > WAKE_HOLD_US)
                ? BRIGHT_NIGHT : BRIGHT_DAY;
@@ -298,12 +311,31 @@ static void display_start(void) {
 }
 
 /* MADCTL-vridningen ur BSP:ns bsp_display_rotation_set — den läser BSP:ns
- * statiska handles som aldrig sätts när vi startar displayen själva. */
+ * statiska handles som aldrig sätts när vi startar displayen själva.
+ *
+ * PLUS panelens gap: CO5300-glasets fönster börjar på kontrollerkolumn 6
+ * (initsekvensens CASET är 0x0006..0x01DD) och drivrutinen adderar
+ * x_gap/y_gap till varje adressfönster — men BSP:n justerar aldrig gapet
+ * vid rotation. I bootläget 0xA0 går mappningen jämnt ut; i andra lägen
+ * hamnar 6-pixelremsan oskriven vid en kant (den vita linjen, hittad på
+ * foto 2026-08-06 i läge 0xC0). Konstanterna nedan kalibreras med P24-
+ * metoden: ETT strukturerat fyrlägestest, en konstant per läge — aldrig
+ * fotoforensik. Ser du en ljus kantlinje i ett läge: justera det lägets
+ * par (6 på den axel linjen sitter, spegelvänt om den flyttar till
+ * motsatt kant). */
 esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation) {
   static const uint8_t MADCTL[4] = { 0x00, 0x60, 0xC0, 0xA0 };
+  static const int GAP[4][2] = { /* {x_gap, y_gap} per läge */
+    {0, 0},  /* 0x00 */
+    {6, 0},  /* 0x60 */
+    {0, 6},  /* 0xC0 — linjen satt i botten: skjut raderna +6 */
+    {0, 0},  /* 0xA0 — bootläget, verifierat rent */
+  };
   if (rotation > BSP_DISPLAY_ROTATE_270) return ESP_ERR_INVALID_ARG;
   uint32_t lcd_cmd = (0x36 << 8) | (0x02 << 24);
-  ESP_LOGI(TAG, "MADCTL 0x%02X (läge %d)", MADCTL[rotation], rotation);
+  ESP_LOGI(TAG, "MADCTL 0x%02X gap %d/%d (läge %d)", MADCTL[rotation],
+           GAP[rotation][0], GAP[rotation][1], rotation);
+  esp_lcd_panel_set_gap(s_panel, GAP[rotation][0], GAP[rotation][1]);
   return esp_lcd_panel_io_tx_param(s_panel_io, lcd_cmd, &MADCTL[rotation], 1);
 }
 
@@ -332,6 +364,15 @@ void app_main(void) {
   bsp_display_brightness_set(0);
   /* s_touch sattes i display_start — BSP:ns accessor vet inget om vår start. */
   sg_rotation_start(s_touch); /* P24: bilden följer med när enheten vrids */
+
+  /* KEY3 (GPIO18, aktiv låg enligt spec/hardware.md): intern pullup,
+   * pollas av tick_cb som appväxlare. */
+  gpio_config_t key3 = {
+    .pin_bit_mask = 1ULL << GPIO_NUM_18,
+    .mode = GPIO_MODE_INPUT,
+    .pull_up_en = GPIO_PULLUP_ENABLE,
+  };
+  ESP_ERROR_CHECK(gpio_config(&key3));
 
   /* Boot räknas som aktivitet: skärmen får sina 15 min att visa upp sig
    * innan första nattdimningen, även om ingen app hunnit rapportera liv. */

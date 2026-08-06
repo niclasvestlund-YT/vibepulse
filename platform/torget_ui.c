@@ -48,6 +48,10 @@ void torget_app_show(int idx) {
   if (torget_apps[idx]->enter) torget_apps[idx]->enter();
 }
 
+void torget_app_next(void) {
+  torget_app_show(tg.active < 0 ? 0 : (tg.active + 1) % torget_app_count);
+}
+
 void torget_launcher_open(void) {
   if (tg.active >= 0) {
     const torget_app_t *app = torget_apps[tg.active];

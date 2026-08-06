@@ -30,7 +30,7 @@ components/
   torget_fmt/             sv-SE-formatering, hosttestad
   torget_ticker/          den lokala tickern, hosttestad
   app_solelkollen/        app 1: fyra vyer, /api/glance + /api/glance-sverige
-  app_tokens/             app 2: Tokenmätaren (Claude Code-användning, Mtok)
+  app_tokens/             app 2: Tokenmätaren (Claude/Codex-tak + Mtok-volym)
 sim/                      SDL-simulatorn: hela plattformen + apparna på Macen
 sim-fixtures/             inspelade API-svar simulatorn och testerna delar
 test/                     hosttester, körs med clang utan ESP-IDF: ./test/run.sh
@@ -82,8 +82,10 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 ./sim/build/torget-sim
 ```
 
-Tangent 1-4 väljer Solelkollen-fixtur, T matar om Tokenmätaren, L öppnar
-launchern (långtryck med musen fungerar också — det är enhetens gest).
+Tangent 1-4 väljer Solelkollen-fixtur, T matar om Tokenmätaren, N växlar
+app (KEY3-knappens bänkmotsvarighet), L öppnar launchern (långtryck med
+musen fungerar också — det är enhetens gest). På enheten växlar KEY3
+(GPIO18) app med ett tryck.
 En obevakad körning BMP-dumpar alla vyer + launchern + Tokenmätaren till
 /tmp/torget-*.bmp — pixelverifieringens facit.
 

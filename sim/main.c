@@ -188,21 +188,24 @@ static void platform_tour_cb(lv_timer_t *t) {
 }
 
 /* Tangent 1-4: Solelkollen-fixtur. T: mata Tokenmätaren. L: launchern.
- * LVGL:s SDL-drivrutin pumpar eventen, så ren tangentbordspollning räcker —
- * ingen indev-rördragning för ett bänkverktyg. */
+ * N: nästa app (KEY3-knappens bänkmotsvarighet). LVGL:s SDL-drivrutin
+ * pumpar eventen, så ren tangentbordspollning räcker — ingen indev-
+ * rördragning för ett bänkverktyg. */
 static void poll_keys(lv_timer_t *t) {
   (void)t;
-  static bool held[6];
+  static bool held[7];
   const Uint8 *ks = SDL_GetKeyboardState(NULL);
-  const SDL_Scancode keys[6] = { SDL_SCANCODE_1, SDL_SCANCODE_2,
+  const SDL_Scancode keys[7] = { SDL_SCANCODE_1, SDL_SCANCODE_2,
                                  SDL_SCANCODE_3, SDL_SCANCODE_4,
-                                 SDL_SCANCODE_T, SDL_SCANCODE_L };
-  for (int i = 0; i < 6; i++) {
+                                 SDL_SCANCODE_T, SDL_SCANCODE_L,
+                                 SDL_SCANCODE_N };
+  for (int i = 0; i < 7; i++) {
     bool down = ks[keys[i]];
     if (down && !held[i]) {
       if (i < 4) apply_fixture(i);
       else if (i == 4) feed_tokens();
-      else torget_launcher_open();
+      else if (i == 5) torget_launcher_open();
+      else torget_app_next();
     }
     held[i] = down;
   }

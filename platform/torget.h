@@ -55,6 +55,10 @@ void torget_launcher_open(void);
  * bänken använder den för att BMP-dumpa alla appar obevakat. */
 void torget_app_show(int idx);
 
+/* Nästa app i registret (från launchern: app 0). KEY3-knappens väg på
+ * targetet, tangent N i bänken — appväxling utan att röra glaset. */
+void torget_app_next(void);
+
 /* Pixeldriften mot inbränning: allt UI bor i en låda som vandrar ett par
  * pixlar per minut. Apparna behöver aldrig bry sig; exponerad för värdlager
  * som vill styra takten i test. */
