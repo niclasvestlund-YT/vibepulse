@@ -43,6 +43,11 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+if __package__:
+    from .agent_status import AgentStatusService
+else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
+    from agent_status import AgentStatusService
+
 RECOMPUTE_EVERY_S = 30
 LIMITS_EVERY_S = 120  # rate-limit-proben: snäll mot API:t, färsk nog för hyllan
 
@@ -420,6 +425,7 @@ def get_snapshot(projects_dir: Path):
 
 class Handler(BaseHTTPRequestHandler):
     projects_dir = None  # sätts i main
+    agent_status = None  # bakgrundstjänst, sätts i main
 
     def _send(self, code, payload):
         body = json.dumps(payload).encode()
@@ -435,9 +441,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, get_snapshot(self.projects_dir))
             except Exception as e:  # skärmen avvisar error-formen per kontrakt
                 self._send(500, {"error": str(e)})
+        elif self.path == "/api/agent-status":
+            self._send(200, self.agent_status.snapshot())
         elif self.path == "/":
             self._send(200, {"service": "torget-tokenserver",
                              "endpoint": "/api/tokens",
+                             "endpoints": ["/api/tokens", "/api/agent-status"],
                              "claudeProbe": _probe_status,
                              "ratelimitHeaders": _probe_headers})
         else:
@@ -463,9 +472,26 @@ def main():
           f"{snap['dayTokens']:,} tokens idag, {snap['daySessions']} sessioner, "
           f"{snap['monthTokens']:,} denna månad".replace(",", " "))
 
-    srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
-    print(f"serverar http://0.0.0.0:{args.port}/api/tokens (LAN — exponera inte utåt)")
-    srv.serve_forever()
+    status_service = AgentStatusService(
+        projects_dir=Handler.projects_dir,
+        codex_sessions=CODEX_SESSIONS,
+    )
+    status_service.poll_once()
+    status_service.start()
+    Handler.agent_status = status_service
+
+    srv = None
+    try:
+        srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+        print(f"serverar http://0.0.0.0:{args.port}/api/tokens och "
+              f"/api/agent-status (LAN — exponera inte utåt)")
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        status_service.stop()
+        if srv is not None:
+            srv.server_close()
 
 
 if __name__ == "__main__":
