@@ -48,7 +48,7 @@ typedef struct {
   int64_t applied_at_us;
   bool has_snapshot;
   bool long_pressed;
-  bool manual_choice;
+  tk_agent_manual_choice manual_choice;
 } monitor_state;
 
 static monitor_state mon;
@@ -245,10 +245,12 @@ static void render_provider(int provider, int64_t now_us) {
 
 static void render_best(int64_t now_us) {
   bool present[2] = {is_present(0, now_us), is_present(1, now_us)};
-  int previous = mon.selected;
   int provider = tk_agent_monitor_resolve_provider(
-      mon.agents, present, mon.selected, mon.manual_choice);
-  if (provider != previous) mon.manual_choice = false;
+      mon.agents, present, &mon.manual_choice);
+  if (mon.manual_choice.active &&
+      provider != mon.manual_choice.provider) {
+    tk_agent_monitor_manual_choice_clear(&mon.manual_choice);
+  }
   render_provider(provider, now_us);
 }
 
@@ -265,7 +267,7 @@ static void overlay_event(lv_event_t *event) {
     snprintf(mon.dismissed_event_id[provider],
              sizeof mon.dismissed_event_id[provider], "%s",
              mon.agents[provider].event_id);
-    mon.manual_choice = false;
+    tk_agent_monitor_manual_choice_clear(&mon.manual_choice);
     mon.selected = -1;
     lv_obj_add_flag(mon.overlay, LV_OBJ_FLAG_HIDDEN);
   }
@@ -278,7 +280,8 @@ static void provider_event(lv_event_t *event) {
     lv_event_stop_bubbling(event);
     int64_t now_us = torget_now_us();
     if (is_present(provider, now_us)) {
-      mon.manual_choice = true;
+      tk_agent_monitor_manual_choice_set(&mon.manual_choice, provider,
+                                         mon.agents);
       render_provider(provider, now_us);
     }
   }
