@@ -8,10 +8,13 @@ text, command contents, and file contents never enter the store or snapshots.
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import math
 import os
 import re
+import stat as stat_module
+import sys
 import threading
 import time
 import unicodedata
@@ -240,12 +243,14 @@ class AgentStatusStore:
                 "project": None,
                 "activity": None,
                 "observed_at": observed_at,
+                "order_at": None,
             }
             for provider in ("claude", "codex")
         }
 
     def apply(self, provider: str, event: Event,
-              observed_at: Optional[float] = None) -> bool:
+              observed_at: Optional[float] = None,
+              order_at: Optional[float] = None) -> bool:
         if provider not in self._agents:
             raise ValueError(f"unsupported provider: {provider}")
         if event.state not in STATES:
@@ -254,6 +259,11 @@ class AgentStatusStore:
             raise ValueError(f"unsupported activity: {event.activity}")
 
         seen_at = self._now() if observed_at is None else observed_at
+        if not math.isfinite(seen_at):
+            seen_at = self._now()
+        ordered_at = seen_at if order_at is None else order_at
+        if not math.isfinite(ordered_at):
+            ordered_at = seen_at
         replacement = {
             "task_id": _bounded_task_id(event.task_id),
             "event_id": stable_event_id(provider, event),
@@ -261,10 +271,14 @@ class AgentStatusStore:
             "project": sanitize_project(event.project),
             "activity": event.activity,
             "observed_at": seen_at,
+            "order_at": ordered_at,
         }
         public_fields = ("task_id", "event_id", "state", "project", "activity")
         with self._lock:
             current = self._agents[provider]
+            if (current["order_at"] is not None and
+                    ordered_at < current["order_at"]):
+                return False
             changed = any(current[key] != replacement[key]
                           for key in public_fields)
             if changed:
@@ -272,6 +286,7 @@ class AgentStatusStore:
                 self._seq += 1
             else:
                 current["observed_at"] = max(current["observed_at"], seen_at)
+                current["order_at"] = max(current["order_at"], ordered_at)
             return changed
 
     def snapshot(self) -> Dict[str, Any]:
@@ -302,21 +317,44 @@ class JsonlTailer:
     """Incrementally decode complete JSON objects from multiple JSONL files."""
 
     _MISSING_POLLS = 3
+    _READ_CHUNK_BYTES = 64 * 1024
+    _READ_BYTES_PER_POLL = 1024 * 1024
+    _MAX_LINE_BYTES = 64 * 1024
+    _MAX_RECORDS_PER_POLL = 256
+    _VERIFY_INTERVAL_S = 5.0
+    _VERIFY_BYTES_PER_POLL = 1024 * 1024
+    _SAMPLE_BYTES = 4096
+    _MAX_ACTIVE_IDENTITIES = 24
+    _MAX_TRACKED_IDENTITIES = 48
 
-    def __init__(self):
+    def __init__(self, now: Callable[[], float] = time.monotonic):
+        self._now = now
         self._files = {}
         self._identities = {}
+        self._use_counter = 0
+        self._discovery_needed = False
 
-    @staticmethod
-    def _fresh_state(identity: tuple) -> Dict[str, Any]:
+    def _fresh_state(self, identity: tuple) -> Dict[str, Any]:
         return {
             "identity": identity,
             "offset": 0,
             "partial": b"",
-            "prefix_digest": hashlib.sha256(b"").digest(),
+            "discarding_line": False,
+            "prefix_hasher": hashlib.sha256(),
+            "sample_digest": None,
             "stat_signature": None,
             "missing_polls": 0,
+            "last_used": self._use_counter,
+            "next_verify_at": self._now() + self._VERIFY_INTERVAL_S,
+            "verify_offset": None,
+            "verify_length": None,
+            "verify_expected": None,
+            "verify_hasher": None,
         }
+
+    def _touch(self, state: Dict[str, Any]) -> None:
+        self._use_counter += 1
+        state["last_used"] = self._use_counter
 
     def _prune_state(self, state: Dict[str, Any]) -> None:
         identity = state["identity"]
@@ -326,40 +364,89 @@ class JsonlTailer:
             if candidate is state:
                 del self._files[alias]
 
+    def _enforce_identity_limit(
+            self, protected: Optional[Dict[str, Any]] = None) -> None:
+        while len(self._identities) > self._MAX_TRACKED_IDENTITIES:
+            aliased = {id(state) for state in self._files.values()}
+            candidates = [
+                state for state in self._identities.values()
+                if state is not protected and id(state) not in aliased
+            ]
+            if not candidates:
+                candidates = [
+                    state for state in self._identities.values()
+                    if state is not protected
+                ]
+            if not candidates:
+                return
+            self._prune_state(min(
+                candidates, key=lambda state: state["last_used"]))
+
     def _note_missing_path(self, path: Path) -> None:
         state = self._files.get(path)
         if state is None:
             return
+        self._discovery_needed = True
         state["missing_polls"] += 1
         if state["missing_polls"] >= self._MISSING_POLLS:
             self._prune_state(state)
 
-    def retain_paths(self, paths: Any) -> None:
-        active_paths = {Path(path) for path in paths}
-        active_identities = set()
-        path_identities = {}
-        for path in active_paths:
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            identity = (stat.st_dev, stat.st_ino)
-            path_identities[path] = identity
-            active_identities.add(identity)
+    def take_discovery_request(self) -> bool:
+        requested = self._discovery_needed
+        self._discovery_needed = False
+        return requested
+
+    def retain_paths(self, paths: Any, active_paths: Any = None) -> None:
+        if isinstance(paths, dict):
+            path_identities = {
+                Path(path): identity for path, identity in paths.items()
+            }
+        else:
+            path_identities = {}
+            for raw_path in paths:
+                path = Path(raw_path)
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                path_identities[path] = (stat.st_dev, stat.st_ino)
+
+        if active_paths is None:
+            active = set(path_identities)
+        else:
+            active = {Path(path) for path in active_paths}
+        existing_identities = set(path_identities.values())
+        active_identities = {
+            path_identities[path] for path in active
+            if path in path_identities
+        }
+        recovering_identities = {
+            state["identity"] for alias, state in self._files.items()
+            if alias in active and alias not in path_identities
+        }
 
         for alias, state in list(self._files.items()):
             actual_identity = path_identities.get(alias)
-            if (actual_identity != state["identity"] and
-                    state["identity"] in active_identities):
+            if ((actual_identity is not None and
+                 actual_identity != state["identity"]) or
+                    (actual_identity is None and
+                     state["identity"] in existing_identities) or
+                    alias not in active):
                 del self._files[alias]
 
         for identity, state in list(self._identities.items()):
-            if identity in active_identities:
+            if identity in existing_identities:
                 state["missing_polls"] = 0
-                continue
-            state["missing_polls"] += 1
-            if state["missing_polls"] >= self._MISSING_POLLS:
-                self._prune_state(state)
+                if identity not in active_identities:
+                    state["partial"] = b""
+                    state["discarding_line"] = False
+            else:
+                if identity not in recovering_identities:
+                    state["missing_polls"] += 1
+                    if state["missing_polls"] >= self._MISSING_POLLS:
+                        self._prune_state(state)
+
+        self._enforce_identity_limit()
 
     def _state_for_identity(self, path: Path,
                             identity: tuple) -> Dict[str, Any]:
@@ -375,6 +462,8 @@ class JsonlTailer:
                 self._identities[identity] = state
             self._files[path] = state
         state["missing_polls"] = 0
+        self._touch(state)
+        self._enforce_identity_limit(protected=state)
 
         for alias, candidate in list(self._files.items()):
             if alias == path or candidate is not state:
@@ -413,6 +502,112 @@ class JsonlTailer:
             remaining -= len(chunk)
         return digest
 
+    @classmethod
+    def _sample_prefix(cls, stream: Any, length: int) -> Optional[bytes]:
+        digest = hashlib.sha256()
+        digest.update(str(length).encode("ascii"))
+        ranges = [(0, min(length, cls._SAMPLE_BYTES))]
+        if length > cls._SAMPLE_BYTES:
+            start = max(cls._SAMPLE_BYTES, length - cls._SAMPLE_BYTES)
+            ranges.append((start, length - start))
+        for start, size in ranges:
+            stream.seek(start)
+            chunk = stream.read(size)
+            if len(chunk) != size:
+                return None
+            digest.update(start.to_bytes(8, "big"))
+            digest.update(chunk)
+        return digest.digest()
+
+    @staticmethod
+    def _clear_verification(state: Dict[str, Any]) -> None:
+        state["verify_offset"] = None
+        state["verify_length"] = None
+        state["verify_expected"] = None
+        state["verify_hasher"] = None
+
+    def _start_verification(self, state: Dict[str, Any]) -> None:
+        state["verify_offset"] = 0
+        state["verify_length"] = state["offset"]
+        state["verify_expected"] = state["prefix_hasher"].digest()
+        state["verify_hasher"] = hashlib.sha256()
+
+    def _advance_verification(self, stream: Any,
+                              state: Dict[str, Any]) -> Optional[bool]:
+        """Advance a bounded full-prefix check; return False on mismatch."""
+        if state["verify_hasher"] is None:
+            self._start_verification(state)
+        length = state["verify_length"]
+        offset = state["verify_offset"]
+        remaining = length - offset
+        budget = min(remaining, self._VERIFY_BYTES_PER_POLL)
+
+        if offset == 0 and length <= self._VERIFY_BYTES_PER_POLL:
+            digest = self._digest_prefix(stream, length)
+            if digest is None:
+                return False
+            state["verify_hasher"] = digest
+            state["verify_offset"] = length
+        else:
+            stream.seek(offset)
+            while budget:
+                chunk = stream.read(min(budget, self._READ_CHUNK_BYTES))
+                if not chunk:
+                    return False
+                state["verify_hasher"].update(chunk)
+                state["verify_offset"] += len(chunk)
+                budget -= len(chunk)
+
+        if state["verify_offset"] < length:
+            return None
+        matches = (state["verify_hasher"].digest() ==
+                   state["verify_expected"])
+        self._clear_verification(state)
+        if matches:
+            state["next_verify_at"] = self._now() + self._VERIFY_INTERVAL_S
+        return matches
+
+    def _consume_chunk(self, state: Dict[str, Any], chunk: bytes,
+                       records: list) -> int:
+        position = 0
+        while position < len(chunk):
+            newline = chunk.find(b"\n", position)
+            if newline < 0:
+                fragment = chunk[position:]
+                if not state["discarding_line"]:
+                    if len(state["partial"]) + len(fragment) <= self._MAX_LINE_BYTES:
+                        state["partial"] += fragment
+                    else:
+                        state["partial"] = b""
+                        state["discarding_line"] = True
+                return len(chunk)
+
+            fragment = chunk[position:newline]
+            consumed = newline + 1
+            if state["discarding_line"]:
+                state["discarding_line"] = False
+                state["partial"] = b""
+                position = consumed
+                continue
+            if len(state["partial"]) + len(fragment) > self._MAX_LINE_BYTES:
+                state["partial"] = b""
+                position = consumed
+                continue
+
+            raw_line = state["partial"] + fragment
+            state["partial"] = b""
+            if raw_line.strip():
+                try:
+                    record = json.loads(raw_line.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeError):
+                    record = None
+                if record is not None:
+                    records.append(record)
+                    if len(records) >= self._MAX_RECORDS_PER_POLL:
+                        return consumed
+            position = consumed
+        return len(chunk)
+
     def read(self, path: Any) -> list:
         path = Path(path)
         try:
@@ -425,10 +620,19 @@ class JsonlTailer:
 
         identity = (stat.st_dev, stat.st_ino)
         state = self._state_for_identity(path, identity)
+        now = self._now()
         if stat.st_size < state["offset"]:
             self._reset_state(state, identity)
-        elif (stat.st_size == state["offset"] and
-              self._stat_signature(stat) == state["stat_signature"]):
+        current_signature = self._stat_signature(stat)
+        verification_due = (
+            state["verify_hasher"] is not None or
+            now >= state["next_verify_at"] or
+            (stat.st_size == state["offset"] and
+             current_signature != state["stat_signature"])
+        )
+        if (stat.st_size == state["offset"] and
+                current_signature == state["stat_signature"] and
+                not verification_due):
             return []
 
         try:
@@ -441,17 +645,42 @@ class JsonlTailer:
                 if opened.st_size < state["offset"]:
                     self._reset_state(state, opened_identity)
 
-                prefix_digest = self._digest_prefix(
-                    stream, state["offset"])
-                if (prefix_digest is None or
-                        prefix_digest.digest() != state["prefix_digest"]):
-                    self._reset_state(state, opened_identity)
-                    prefix_digest = hashlib.sha256()
+                if state["offset"] and opened.st_size > state["offset"]:
+                    sample = self._sample_prefix(stream, state["offset"])
+                    if sample != state["sample_digest"]:
+                        self._reset_state(state, opened_identity)
 
-                stream.seek(state["offset"])
-                appended = stream.read()
-                prefix_digest.update(appended)
-                offset = stream.tell()
+                verification_due = (
+                    state["verify_hasher"] is not None or
+                    self._now() >= state["next_verify_at"] or
+                    (opened.st_size == state["offset"] and
+                     opened_signature != state["stat_signature"])
+                )
+                if verification_due:
+                    verification = self._advance_verification(stream, state)
+                else:
+                    verification = True
+                if verification is False:
+                    self._reset_state(state, opened_identity)
+
+                records = []
+                offset = state["offset"]
+                stream.seek(offset)
+                remaining = self._READ_BYTES_PER_POLL
+                while remaining and len(records) < self._MAX_RECORDS_PER_POLL:
+                    chunk = stream.read(min(remaining, self._READ_CHUNK_BYTES))
+                    if not chunk:
+                        break
+                    consumed = self._consume_chunk(state, chunk, records)
+                    accepted = chunk[:consumed]
+                    state["prefix_hasher"].update(accepted)
+                    offset += consumed
+                    remaining -= consumed
+                    if consumed < len(chunk):
+                        stream.seek(offset)
+                        break
+                state["offset"] = offset
+                state["sample_digest"] = self._sample_prefix(stream, offset)
                 final_stat = os.fstat(stream.fileno())
         except FileNotFoundError:
             self._note_missing_path(path)
@@ -459,24 +688,10 @@ class JsonlTailer:
         except OSError:
             return []
 
-        chunks = (state["partial"] + appended).split(b"\n")
-        state["offset"] = offset
-        state["partial"] = chunks.pop()
-        state["prefix_digest"] = prefix_digest.digest()
         final_signature = self._stat_signature(final_stat)
         state["stat_signature"] = (
             final_signature if final_signature == opened_signature else None)
         self._files[path] = state
-
-        records = []
-        for raw_line in chunks:
-            if not raw_line.strip():
-                continue
-            try:
-                records.append(json.loads(raw_line.decode(
-                    "utf-8", errors="replace")))
-            except (json.JSONDecodeError, UnicodeError):
-                continue
         return records
 
 
@@ -484,21 +699,45 @@ class AgentStatusService:
     """Poll recent Claude/Codex logs outside HTTP request threads."""
 
     _RECENT_FILE_LIMIT = 12
+    _DISCOVERY_INTERVAL_S = 5.0
+    _DIAGNOSTIC_INTERVAL_S = 30.0
 
     def __init__(self, projects_dir: Any, codex_sessions: Any,
                  now: Callable[[], float] = time.monotonic, *,
-                 _wall_time: Callable[[], float] = time.time):
+                 _wall_time: Callable[[], float] = time.time,
+                 _diagnostic: Optional[Callable[[str], None]] = None):
         self.projects_dir = Path(projects_dir)
         self.codex_sessions = Path(codex_sessions)
         self._now = now
         self._wall_time = _wall_time
         self._store = AgentStatusStore(now=now)
-        self._tailer = JsonlTailer()
+        self._tailer = JsonlTailer(now=now)
         self._poll_lock = threading.Lock()
         self._thread_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
         self._stopping = False
+        self._active_paths = {"claude": [], "codex": []}
+        self._next_discovery_at = float("-inf")
+        self._diagnostic = _diagnostic or self._default_diagnostic
+        self._last_diagnostic = {}
+
+    @staticmethod
+    def _default_diagnostic(message: str) -> None:
+        print(message, file=sys.stderr)
+
+    def _report_error(self, context: str, error: Exception) -> None:
+        error_name = type(error).__name__
+        key = (context, error_name)
+        now = self._now()
+        last = self._last_diagnostic.get(key)
+        if last is not None and now - last < self._DIAGNOSTIC_INTERVAL_S:
+            return
+        self._last_diagnostic[key] = now
+        try:
+            self._diagnostic(f"agent-status {context}: {error_name}")
+        except Exception:
+            pass
 
     @staticmethod
     def _event_wall_time(record: Any) -> Optional[float]:
@@ -527,20 +766,29 @@ class AgentStatusService:
                 return timestamp
         return None
 
-    def _observed_at(self, record: Any, file_wall_time: Optional[float],
-                     monotonic_now: float, wall_now: float) -> float:
+    def _resolved_wall_time(self, record: Any,
+                            file_wall_time: Optional[float],
+                            wall_now: float) -> float:
         event_wall_time = self._event_wall_time(record)
         if event_wall_time is None or event_wall_time > wall_now:
             event_wall_time = file_wall_time
-        if event_wall_time is None or not math.isfinite(event_wall_time):
-            return monotonic_now
+        if (event_wall_time is None or not math.isfinite(event_wall_time) or
+                event_wall_time > wall_now):
+            return wall_now
+        return event_wall_time
+
+    def _observed_at(self, record: Any, file_wall_time: Optional[float],
+                     monotonic_now: float, wall_now: float) -> float:
+        event_wall_time = self._resolved_wall_time(
+            record, file_wall_time, wall_now)
         age = max(0.0, wall_now - event_wall_time)
         return monotonic_now - age
 
     def _discover_paths(self, root: Path, pattern: str) -> tuple:
         if not root.is_dir():
-            return [], []
+            return {}, []
         candidates = []
+        identities = {}
         try:
             paths = root.glob(pattern)
             for path in paths:
@@ -548,55 +796,116 @@ class AgentStatusService:
                     stat = path.stat()
                 except OSError:
                     continue
-                if path.is_file():
+                if stat_module.S_ISREG(stat.st_mode):
+                    identities[path] = (stat.st_dev, stat.st_ino)
                     candidates.append((stat.st_mtime_ns, str(path), path))
         except OSError:
-            return [], []
-        all_paths = [item[2] for item in sorted(candidates)]
-        newest = sorted(candidates, reverse=True)[:self._RECENT_FILE_LIMIT]
+            return {}, []
+        newest = heapq.nlargest(self._RECENT_FILE_LIMIT, candidates)
         recent_paths = [item[2] for item in sorted(newest)]
-        return all_paths, recent_paths
+        return identities, recent_paths
 
     def _recent_paths(self, root: Path, pattern: str) -> list:
         return self._discover_paths(root, pattern)[1]
 
-    def poll_once(self) -> int:
-        """Apply newly read state changes and return the number changed."""
-        changed = 0
-        sources = (
+    def _sources(self) -> tuple:
+        return (
             ("claude", self.projects_dir, "**/*.jsonl", classify_claude),
             ("codex", self.codex_sessions, "**/rollout-*.jsonl",
              classify_codex),
         )
-        with self._poll_lock:
-            discovered = []
-            retained_paths = []
-            for provider, root, pattern, classifier in sources:
-                all_paths, recent_paths = self._discover_paths(root, pattern)
-                retained_paths.extend(all_paths)
-                discovered.append((provider, classifier, recent_paths))
-            self._tailer.retain_paths(retained_paths)
-            for provider, classifier, paths in discovered:
-                for path in paths:
+
+    def _refresh_discovery(self, sources: tuple) -> None:
+        retained = {}
+        active = []
+        previous_active = self._active_paths
+        next_active = {"claude": [], "codex": []}
+        for provider, root, pattern, _ in sources:
+            try:
+                identities, recent_paths = self._discover_paths(root, pattern)
+            except Exception as error:
+                self._report_error("discovery", error)
+                continue
+            retained.update(identities)
+            active.extend(recent_paths)
+            next_active[provider] = recent_paths
+        missing_previous = [
+            path for paths in previous_active.values() for path in paths
+            if path not in retained
+        ]
+        self._tailer.retain_paths(
+            retained, active_paths=active + missing_previous)
+        for provider, paths in previous_active.items():
+            grace = [
+                path for path in paths
+                if path not in retained and path in self._tailer._files
+            ]
+            room = max(0, self._RECENT_FILE_LIMIT -
+                       len(next_active[provider]))
+            next_active[provider].extend(grace[:room])
+        self._active_paths = next_active
+        self._tailer.take_discovery_request()
+        self._next_discovery_at = self._now() + self._DISCOVERY_INTERVAL_S
+
+    def _poll_active(self, sources: tuple,
+                     skip_paths: Optional[set] = None) -> int:
+        changed = 0
+        skipped = skip_paths or set()
+        for provider, _, _, classifier in sources:
+            for path in self._active_paths[provider]:
+                if path in skipped:
+                    continue
+                try:
                     records = self._tailer.read(path)
-                    if not records:
+                except Exception as error:
+                    self._report_error("tail-read", error)
+                    continue
+                if not records:
+                    continue
+                try:
+                    file_wall_time = path.stat().st_mtime
+                except OSError:
+                    file_wall_time = None
+                monotonic_now = self._now()
+                wall_now = self._wall_time()
+                for record in records:
+                    try:
+                        event = classifier(record)
+                    except Exception as error:
+                        self._report_error("classify", error)
+                        continue
+                    if event is None:
                         continue
                     try:
-                        file_wall_time = path.stat().st_mtime
-                    except OSError:
-                        file_wall_time = None
-                    monotonic_now = self._now()
-                    wall_now = self._wall_time()
-                    for record in records:
-                        event = classifier(record)
-                        if event is None:
-                            continue
+                        order_at = self._resolved_wall_time(
+                            record, file_wall_time, wall_now)
+                        observed_at = self._observed_at(
+                            record, file_wall_time, monotonic_now, wall_now)
                         if self._store.apply(
-                                provider, event, observed_at=self._observed_at(
-                                    record, file_wall_time,
-                                    monotonic_now, wall_now)):
+                                provider, event,
+                                observed_at=observed_at,
+                                order_at=order_at):
                             changed += 1
+                    except Exception as error:
+                        self._report_error("apply", error)
+                        continue
         return changed
+
+    def poll_once(self) -> int:
+        """Apply newly read state changes and return the number changed."""
+        sources = self._sources()
+        with self._poll_lock:
+            if self._now() >= self._next_discovery_at:
+                self._refresh_discovery(sources)
+            polled_paths = {
+                path for paths in self._active_paths.values()
+                for path in paths
+            }
+            changed = self._poll_active(sources)
+            if self._tailer.take_discovery_request():
+                self._refresh_discovery(sources)
+                changed += self._poll_active(sources, skip_paths=polled_paths)
+            return changed
 
     def snapshot(self) -> Dict[str, Any]:
         return self._store.snapshot()
@@ -605,10 +914,8 @@ class AgentStatusService:
         while not self._stop.is_set():
             try:
                 self.poll_once()
-            except Exception:
-                # A transient filesystem or malformed-record failure must not
-                # kill status updates for future appends.
-                pass
+            except Exception as error:
+                self._report_error("poll", error)
             if self._stop.wait(POLL_S):
                 break
 

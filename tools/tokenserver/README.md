@@ -75,13 +75,27 @@ Integritetsgränsen är avsiktligt hård: klassificeraren kan lokalt titta på
 verktygsnamn och ett kommando för att skilja test, bygge och vanlig körning,
 men varken promptar, kommandon, meddelandetext, filinnehåll eller råa
 logghändelser sparas eller exponeras. Ofullständiga sista rader hålls lokalt
-tills nästa append; trasiga rader och tillfälligt försvunna filer stoppar
-inte följningen. Oförändrad filmetadata gör att filen inte ens öppnas igen.
-När metadata på samma filidentitet ändras verifieras däremot hela den redan
-lästa prefixen mot en sparad SHA-256-digest innan nya byte läses. Den extra
-läsningen krävs för att säkert upptäcka snabb truncate/omskrivning; arbetet
-begränsas till de tolv senast aktiva kandidatfilerna och inget färdigt
-radinnehåll sparas.
+till nästa append, men aldrig över 64 KiB. Större eller felaktigt UTF-8-kodade
+rader kastas till nästa radbrytning så att en senare giltig händelse fortfarande
+kan läsas. Läsningen sker i 64 KiB-block och tar högst 1 MiB eller 256 poster
+per fil och poll; stora historiska filer dräneras därför över flera pollar utan
+en obunden minnestopp.
+
+De tolv aktiva kandidatfilerna per leverantör kontrolleras var 0,5 sekund. Den
+rekursiva upptäckten av nya sessioner görs däremot högst var femte sekund, och
+återanvänder samma stat-resultat för urval och identitetsavstämning. Högst 48
+filidentiteter behålls; råa partialbuffertar och sökvägsalias för kalla filer
+släpps. Kort rotation eller tillfällig frånvaro kan ändå återanvända
+inode-bundet offset och digest utan historikreplay.
+
+Oförändrade snabba pollar öppnar inte filen. Append kontrollerar bara ett
+begränsat prefixprov, medan en ny full SHA-256-verifiering startar högst en gång
+per fem sekunder och läser högst 1 MiB per poll. Stora prefix verifieras alltså
+stegvis.
+Shrink, inodebyte och misstänkta signaturer hanteras omedelbart; en senare
+fullträff på en omskrivning återställer följaren och spelar ersättningen exakt
+en gång. Det ger eventual omskrivningsdetektering utan kvadratisk livstids-I/O,
+och inget färdigt radinnehåll sparas.
 
 Lokalt röktest från repots rot, på en alternativ port:
 

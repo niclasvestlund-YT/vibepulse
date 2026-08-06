@@ -5,8 +5,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from tools.tokenserver import tokenserver
+from tools.tokenserver import agent_status, tokenserver
 from tools.tokenserver.agent_status import (
     Event,
     AgentStatusStore,
@@ -461,6 +462,113 @@ class JsonlTailerTests(unittest.TestCase):
 
             self.assertEqual(JsonlTailer().read(path), [{"valid": True}])
 
+    def test_malformed_utf8_lines_are_skipped_before_valid_record(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_bytes(
+                b'{"private":"\xff"}\n'
+                b'{"private":"\xfe"}\n'
+                b'{"valid":true}\n')
+
+            self.assertEqual(JsonlTailer().read(path), [{"valid": True}])
+
+    def test_oversized_unterminated_line_is_bounded_and_later_record_resumes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            secret = b"synthetic-oversized-private-prompt"
+            path.write_bytes(
+                b'{"prompt":"' + secret +
+                b"x" * (3 * 1024 * 1024))
+            tailer = JsonlTailer()
+
+            self.assertEqual(tailer.read(path), [])
+            state = tailer._files[path]
+            self.assertLessEqual(len(state["partial"]),
+                                 tailer._MAX_LINE_BYTES)
+            self.assertNotIn(secret.decode(), repr(state))
+            self.assertLessEqual(state["offset"], tailer._READ_BYTES_PER_POLL)
+
+            with path.open("ab") as stream:
+                stream.write(b'"}\n{"valid":true}\n')
+            records = []
+            for _ in range(8):
+                records.extend(tailer.read(path))
+                if records:
+                    break
+
+            self.assertEqual(records, [{"valid": True}])
+
+    def test_record_budget_drains_large_backlog_across_polls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            total = JsonlTailer._MAX_RECORDS_PER_POLL + 5
+            path.write_bytes(b"".join(
+                json.dumps({"record": index}).encode() + b"\n"
+                for index in range(total)))
+            tailer = JsonlTailer()
+
+            first = tailer.read(path)
+            second = tailer.read(path)
+
+            self.assertEqual(len(first), tailer._MAX_RECORDS_PER_POLL)
+            self.assertEqual(first + second,
+                             [{"record": index} for index in range(total)])
+
+    def test_reconciliation_bounds_cold_states_and_drops_cold_partial(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            tailer = JsonlTailer()
+            paths = []
+            identities = {}
+            for index in range(JsonlTailer._MAX_TRACKED_IDENTITIES + 5):
+                path = root / f"session-{index:02d}.jsonl"
+                path.write_text(
+                    '{"private":"cold-secret-' + str(index),
+                    encoding="utf-8")
+                paths.append(path)
+                tailer.read(path)
+                stat = path.stat()
+                identities[path] = (stat.st_dev, stat.st_ino)
+
+            active = paths[-JsonlTailer._MAX_ACTIVE_IDENTITIES:]
+            tailer.retain_paths(identities, active_paths=active)
+
+            self.assertLessEqual(len(tailer._identities),
+                                 tailer._MAX_TRACKED_IDENTITIES)
+            self.assertLessEqual(len(tailer._files),
+                                 tailer._MAX_TRACKED_IDENTITIES)
+            for path in paths[:-JsonlTailer._MAX_ACTIVE_IDENTITIES]:
+                state = tailer._identities.get(identities[path])
+                if state is not None:
+                    self.assertEqual(state["partial"], b"")
+                    self.assertNotIn("cold-secret", repr(state))
+
+    def test_inode_churn_enforces_identity_cap_before_next_discovery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            tailer = JsonlTailer()
+            paths = [root / f"active-{index:02d}.jsonl"
+                     for index in range(12)]
+            for index, path in enumerate(paths):
+                path.write_text(
+                    '{"private":"base-secret-' + str(index),
+                    encoding="utf-8")
+                tailer.read(path)
+
+            for wave in range(4):
+                for index, path in enumerate(paths):
+                    replacement = root / f"replacement-{wave}-{index}.tmp"
+                    replacement.write_text(
+                        '{"private":"wave-' + str(wave) + "-secret-" +
+                        str(index), encoding="utf-8")
+                    os.replace(replacement, path)
+                    tailer.read(path)
+
+            self.assertLessEqual(len(tailer._identities),
+                                 tailer._MAX_TRACKED_IDENTITIES)
+            self.assertLessEqual(len(tailer._files), len(paths))
+            self.assertNotIn("base-secret", repr(tailer._identities))
+
     def test_truncation_resets_only_that_files_offset_and_buffer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             first = Path(temp_dir) / "first.jsonl"
@@ -560,6 +668,71 @@ class JsonlTailerTests(unittest.TestCase):
 
             self.assertNotIn(secret, repr(tailer._files))
 
+    def test_full_prefix_verification_uses_bounded_cadence(self):
+        class CountingTailer(JsonlTailer):
+            def __init__(self, now):
+                super().__init__(now=now)
+                self.digest_calls = 0
+
+            def _digest_prefix(self, stream, length):
+                self.digest_calls += 1
+                return super()._digest_prefix(stream, length)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_bytes(b'{"first":1}\n')
+            now = [0.0]
+            tailer = CountingTailer(now=lambda: now[0])
+            self.assertEqual(tailer.read(path), [{"first": 1}])
+            baseline = tailer.digest_calls
+
+            now[0] = 0.5
+            with path.open("ab") as stream:
+                stream.write(b'{"second":2}\n')
+            self.assertEqual(tailer.read(path), [{"second": 2}])
+            self.assertEqual(tailer.digest_calls, baseline)
+
+            now[0] = tailer._VERIFY_INTERVAL_S
+            self.assertEqual(tailer.read(path), [])
+            self.assertEqual(tailer.digest_calls, baseline + 1)
+
+    def test_large_prefix_verification_is_budgeted_and_replays_mismatch_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            padding_size = 2 * JsonlTailer._VERIFY_BYTES_PER_POLL + 200_000
+            original = (b'{"first":1}\n' + b"x" * padding_size +
+                        b'\n{"last":2}\n')
+            path.write_bytes(original)
+            now = [0.0]
+            tailer = JsonlTailer(now=lambda: now[0])
+            initial = []
+            for _ in range(8):
+                initial.extend(tailer.read(path))
+                if tailer._files[path]["offset"] == len(original):
+                    break
+            self.assertEqual(initial, [{"first": 1}, {"last": 2}])
+
+            replacement = bytearray(original)
+            replacement[JsonlTailer._VERIFY_BYTES_PER_POLL + 100_000] = ord("y")
+            path.write_bytes(replacement)
+            now[0] = tailer._VERIFY_INTERVAL_S
+
+            self.assertEqual(tailer.read(path), [])
+            state = tailer._files[path]
+            self.assertEqual(state["verify_offset"],
+                             tailer._VERIFY_BYTES_PER_POLL)
+
+            replayed = []
+            for _ in range(8):
+                replayed.extend(tailer.read(path))
+                state = tailer._files[path]
+                if (state["verify_offset"] is None and
+                        state["offset"] == len(replacement)):
+                    break
+
+            self.assertEqual(replayed, [{"first": 1}, {"last": 2}])
+            self.assertEqual(tailer.read(path), [])
+
     def test_file_disappearance_is_tolerated(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "session.jsonl"
@@ -650,6 +823,40 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 0)
             self.assertEqual(service.snapshot()["seq"], 1)
 
+    def test_fast_active_poll_does_not_repeat_recursive_discovery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            first = claude_event("user")
+            self._write_line(path, first)
+            now = [0.0]
+            wall_time = AgentStatusService._event_wall_time(first)
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: wall_time)
+            original_discover = service._discover_paths
+            discovery_calls = []
+
+            def counted_discovery(discovery_root, pattern):
+                discovery_calls.append((discovery_root, pattern))
+                return original_discover(discovery_root, pattern)
+
+            service._discover_paths = counted_discovery
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(len(discovery_calls), 2)
+
+            second = claude_event("assistant", stop_reason="end_turn")
+            second["uuid"] = "event-2"
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(second) + "\n")
+            now[0] = 0.5
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(len(discovery_calls), 2)
+
+            now[0] = service._DISCOVERY_INTERVAL_S
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(len(discovery_calls), 4)
+
     def test_newest_file_rotation_starts_new_file_without_replaying_old(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -657,8 +864,9 @@ class AgentStatusServiceTests(unittest.TestCase):
             started = claude_event("user")
             self._write_line(old_path, started)
             os.utime(old_path, (1, 1))
+            now = [10.0]
             service = AgentStatusService(root / "claude", root / "codex",
-                                         now=lambda: 10.0)
+                                         now=lambda: now[0])
             self.assertEqual(service.poll_once(), 1)
 
             new_path = root / "claude" / "new.jsonl"
@@ -667,6 +875,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             completed["subtype"] = "success"
             self._write_line(new_path, completed)
             os.utime(new_path, (2, 2))
+            now[0] += service._DISCOVERY_INTERVAL_S
 
             self.assertEqual(service.poll_once(), 1)
             snapshot = service.snapshot()
@@ -828,8 +1037,10 @@ class AgentStatusServiceTests(unittest.TestCase):
 
     def test_background_thread_survives_transient_poll_failure(self):
         class FlakyService(AgentStatusService):
-            def __init__(self, root):
-                super().__init__(root / "claude", root / "codex")
+            def __init__(self, root, diagnostics):
+                super().__init__(
+                    root / "claude", root / "codex",
+                    _diagnostic=diagnostics.append)
                 self.poll_count = 0
                 self.recovered = threading.Event()
 
@@ -841,13 +1052,75 @@ class AgentStatusServiceTests(unittest.TestCase):
                 return 0
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            service = FlakyService(Path(temp_dir))
+            diagnostics = []
+            service = FlakyService(Path(temp_dir), diagnostics)
             service.start()
             try:
                 self.assertTrue(service.recovered.wait(timeout=2))
                 self.assertTrue(service._thread.is_alive())
             finally:
                 service.stop()
+            self.assertEqual(diagnostics,
+                             ["agent-status poll: OSError"])
+
+    def test_record_failures_are_isolated_and_diagnostics_are_sanitized(self):
+        class ApplyFailsOnce:
+            def __init__(self, delegate):
+                self.delegate = delegate
+
+            def apply(self, provider, event, observed_at=None, order_at=None):
+                if event.source_id == "bad-apply":
+                    raise LookupError("synthetic-private-apply-prompt")
+                return self.delegate.apply(
+                    provider, event, observed_at, order_at)
+
+            def snapshot(self):
+                return self.delegate.snapshot()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            records = []
+            for source_id in (
+                    "bad-classify-1", "bad-classify-2", "bad-apply",
+                    "valid-final"):
+                record = claude_event("user")
+                record["uuid"] = source_id
+                records.append(record)
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8")
+            diagnostics = []
+            wall_time = AgentStatusService._event_wall_time(records[0])
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 0.0,
+                _wall_time=lambda: wall_time,
+                _diagnostic=diagnostics.append)
+            service._store = ApplyFailsOnce(service._store)
+            original_classifier = agent_status.classify_claude
+
+            def classify_with_failures(record):
+                if record.get("uuid", "").startswith("bad-classify"):
+                    raise RuntimeError("synthetic-private-classifier-command")
+                return original_classifier(record)
+
+            with mock.patch.object(
+                    agent_status, "classify_claude",
+                    side_effect=classify_with_failures):
+                self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()["agents"]["claude"]
+            self.assertEqual(snapshot["state"], "working")
+            self.assertEqual(snapshot["task_id"],
+                             claude_task_id("session-1", "valid-final"))
+            self.assertEqual(diagnostics, [
+                "agent-status classify: RuntimeError",
+                "agent-status apply: LookupError",
+            ])
+            serialized = " ".join(diagnostics)
+            self.assertNotIn("synthetic-private", serialized)
+            self.assertNotIn(str(path), serialized)
 
     def test_snapshot_does_not_require_roots_to_exist(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -971,6 +1244,31 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertNotIn(path, service._tailer._files)
             self.assertEqual(service._tailer._identities, {})
 
+    def test_one_missing_service_poll_retains_identity_for_short_recovery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            moved = root / "session.moved"
+            event = claude_event("user")
+            self._write_line(path, event)
+            wall_time = AgentStatusService._event_wall_time(event)
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 10.0,
+                _wall_time=lambda: wall_time)
+            self.assertEqual(service.poll_once(), 1)
+            stat = path.stat()
+            identity = (stat.st_dev, stat.st_ino)
+            offset = service._tailer._identities[identity]["offset"]
+
+            path.rename(moved)
+            self.assertEqual(service.poll_once(), 0)
+
+            self.assertIn(identity, service._tailer._identities)
+            self.assertEqual(
+                service._tailer._identities[identity]["offset"], offset)
+            moved.rename(path)
+            self.assertEqual(service.poll_once(), 0)
+
     def test_existing_file_outside_recent_limit_is_not_pruned_or_replayed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -978,8 +1276,9 @@ class AgentStatusServiceTests(unittest.TestCase):
             started = claude_event("user")
             self._write_line(target, started)
             os.utime(target, (1, 1))
+            now = [10.0]
             service = AgentStatusService(root / "claude", root / "codex",
-                                         now=lambda: 10.0,
+                                         now=lambda: now[0],
                                          _wall_time=lambda: 10.0)
             self.assertEqual(service.poll_once(), 1)
 
@@ -989,6 +1288,7 @@ class AgentStatusServiceTests(unittest.TestCase):
                 event["uuid"] = f"crowd-{index:02d}"
                 self._write_line(path, event)
                 os.utime(path, (10 + index, 10 + index))
+            now[0] += service._DISCOVERY_INTERVAL_S
             self.assertEqual(service.poll_once(), 12)
             self.assertEqual(service.poll_once(), 0)
             self.assertEqual(service.poll_once(), 0)
@@ -998,10 +1298,41 @@ class AgentStatusServiceTests(unittest.TestCase):
             completed["subtype"] = "success"
             with target.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(completed) + "\n")
+            now[0] += service._DISCOVERY_INTERVAL_S
 
             self.assertEqual(service.poll_once(), 1)
             self.assertEqual(service.snapshot()["agents"]["claude"]["state"],
                              "done")
+
+    def test_older_event_in_newer_mtime_file_cannot_overwrite_newer_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            working_path = root / "claude" / "working.jsonl"
+            touched_old_path = root / "claude" / "touched-old.jsonl"
+            working = claude_event("user")
+            working["timestamp"] = "2026-08-06T12:00:00Z"
+            completed = claude_event("result")
+            completed["uuid"] = "older-complete"
+            completed["subtype"] = "success"
+            completed["timestamp"] = "2026-08-06T11:00:00Z"
+            self._write_line(working_path, working)
+            self._write_line(touched_old_path, completed)
+            os.utime(working_path, (1, 1))
+            os.utime(touched_old_path, (2, 2))
+            wall_time = AgentStatusService._event_wall_time(
+                {"timestamp": "2026-08-06T12:00:30Z"})
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 500.0,
+                _wall_time=lambda: wall_time)
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], 1)
+            self.assertEqual(snapshot["agents"]["claude"]["state"],
+                             "working")
+            self.assertEqual(snapshot["agents"]["claude"]["updated_ms"],
+                             30000)
 
 
 class HandlerTests(unittest.TestCase):
