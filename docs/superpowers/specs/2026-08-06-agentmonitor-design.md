@@ -100,7 +100,8 @@ plattformens befintliga nattlogik.
 De tre nuvarande vyerna för Claude-tak, Codex-tak och Claude-volym behålls i
 första leveransen. Deras procent är fortsatt stora och tydliga. Agentmonitorn
 läggs ovanpå appens tileview och förändrar därför inte befintlig svepning,
-hämtning eller formatering.
+hämtning eller formatering. För Claude Max ligger Fable-fönstret kvar som en
+egen rad; det får aldrig räknas bort eller slås ihop med veckofönstret.
 
 ### 2. Arbetar
 
@@ -112,8 +113,10 @@ Skärmen innehåller, uppifrån och ned:
 - tillståndsordet `JOBBAR`, skärmens största text efter husdjuret;
 - tre små aktivitetsrutor som går vänster–mitten–höger;
 - en valfri, kontrollerad aktivitetsrad, exempelvis `KÖR TESTER`;
-- aktuell användning i en liten bottenrad, exempelvis `21,0 % JUST NU`, med
-  en tunn mätare.
+- den begränsning som ligger närmast taket i en liten bottenrad, exempelvis
+  `73,0 % FABLE`, med en tunn mätare. Claude jämför sessionen, veckan och
+  Fable-fönstret; Codex jämför sina tillgängliga fönster. Null-fönster
+  ignoreras. Procentsatserna summeras eller medelvärdesbildas aldrig.
 
 Layouten låses till en 24 px säker kant. Toppraden ligger kring y=24–54,
 husdjuret i en högst 180 × 180 px-yta kring y=66–240, huvudordet kring
