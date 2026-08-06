@@ -171,16 +171,18 @@ _probe_headers = []
 
 
 def _read_oauth_token():
-    """Claude Codes accessToken ur macOS-nyckelringen. None om otillgänglig."""
+    """Claude Codes accessToken ur macOS-nyckelringen: (token, expires_at_ms).
+    (None, None) om otillgänglig."""
     try:
         raw = subprocess.run(
             ["security", "find-generic-password",
              "-s", "Claude Code-credentials", "-w"],
             capture_output=True, text=True, timeout=10,
         ).stdout.strip()
-        return (json.loads(raw).get("claudeAiOauth") or {}).get("accessToken")
+        oauth = json.loads(raw).get("claudeAiOauth") or {}
+        return oauth.get("accessToken"), oauth.get("expiresAt")
     except Exception:
-        return None
+        return None, None
 
 
 def _parse_reset_minutes(value: str, now_ts: float):
@@ -203,9 +205,15 @@ def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
     global _probe_status, _probe_headers
-    token = _read_oauth_token()
+    token, expires_at = _read_oauth_token()
     if not token:
         _probe_status = "no_keychain_token"
+        return None
+    if expires_at and expires_at / 1000 < time.time():
+        # Tokenen har gått ut; Claude Code förnyar den i nyckelringen nästa
+        # gång den pratar med API:t — vi behöver bara vänta och läsa om.
+        _probe_status = (f"token_expired_"
+                         f"{datetime.fromtimestamp(expires_at / 1000):%H:%M}")
         return None
 
     body = json.dumps({
@@ -227,9 +235,14 @@ def _probe_limits():
         with urllib.request.urlopen(req, timeout=15) as resp:
             headers = dict(resp.headers)
     except urllib.error.HTTPError as e:
-        # 400 för max_tokens=0 på någon modell? Headrarna följer ofta med
-        # ändå — annars ge upp tyst; skärmen visar streck.
-        _probe_status = f"http_{e.code}"
+        # Felsvar: ta med felkroppens början i diagnosen — 401-orsaken
+        # (utgången token? fel scope?) står där. Headrarna följer ofta
+        # med ändå.
+        try:
+            detail = e.read(200).decode(errors="replace")
+        except Exception:
+            detail = ""
+        _probe_status = f"http_{e.code} {detail}".strip()
         headers = dict(e.headers) if e.headers else {}
     except Exception as e:
         _probe_status = f"request_failed: {type(e).__name__}"
