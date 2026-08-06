@@ -1,0 +1,5 @@
+## Kontraktet uttrycker sig i LVGL-typer (lv_obj_t, lv_font_t) — samma
+## version som BSP:n löser till (9.5-serien; sim pinnar exakt samma, P20).
+dependencies:
+  idf: ">=5.5"
+  lvgl/lvgl: "9.*"

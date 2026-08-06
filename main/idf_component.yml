@@ -1,0 +1,9 @@
+## Waveshares BSP drar in allt panelnära: esp_lcd_co5300 (QSPI, big-endian
+## RGB565, 2-pixelrounder), esp_lcd_touch_cst9217 och esp_lvgl_adapter med
+## LVGL 9. Vi skriver alltså ingen egen drivrutin — se beslutsloggen i
+## ../README.md och reconen i ../spec/hardware.md.
+dependencies:
+  idf: ">=5.5"
+  waveshare/esp32_s3_touch_amoled_2_16: "^2.0.1"
+  ## IMU:n för auto-rotationen (P24) — samma leverantör som BSP:n.
+  waveshare/qmi8658: "^2.0.0"

@@ -1,0 +1,14 @@
+# WiFi-lösenord och LAN-adresser stannar på den här disken (mönstret ärvt
+# från Solceller: känsligt committas aldrig, se secrets.h.example).
+secrets.h
+
+# Byggträd är regenererbara.
+build/
+sim/build*/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# Font-TTF:erna hämtas av platform/fonts/fetch-and-convert.sh; bara de
+# genererade .c-filerna committas så bygget aldrig behöver node eller nät.
+platform/fonts/src/

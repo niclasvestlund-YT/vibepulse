@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Tokenmätarens tjänst som launchd-agent: startar vid inloggning och
+     återstartas om den dör. Antar repot i ~/Torget; redigera annars. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>se.torget.tokenserver</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-u</string>
+    <string>tokenserver.py</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/niclasvestlund/Torget/tools/tokenserver</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/torget-tokenserver.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/torget-tokenserver.log</string>
+</dict>
+</plist>

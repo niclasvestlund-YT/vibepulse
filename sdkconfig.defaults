@@ -1,0 +1,39 @@
+# Startvärden för targetbygget. Flash-, PSRAM- och CPU-raderna är hämtade ur
+# Waveshares egen demo (spec/hardware.md): kortet har oktal-PSRAM som måste
+# klockas rätt, annars startar panelen inte alls.
+CONFIG_IDF_TARGET="esp32s3"
+
+# 16 MB QIO-flash
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# 8 MB oktal-PSRAM med XIP: LVGL:s ritbuffertar (480x50 dubbelbuffrat) bor här
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_FREERTOS_HZ=1000
+
+# LVGL: bara de widgets UI:t faktiskt använder. Montserrat 14 finns kvar som
+# LV_FONT_DEFAULT — våra Plex-fonter sätts explicit på varje etikett, men
+# LVGL vill ha en defaultfont som existerar.
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_USE_SPAN=y
+CONFIG_LV_USE_TILEVIEW=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_DEF_REFR_PERIOD=15
+
+# HTTPS mot solelkollen.se via certifikatbunten: ingen pinning att underhålla,
+# överlever certrotation (beslutsloggen i README).
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# Nätverkstacken får jobba på: en hämtning var 30:e sekund är ingen last, men
+# en blockerad TLS-handskakning ska inte svälta LVGL-tasken.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144

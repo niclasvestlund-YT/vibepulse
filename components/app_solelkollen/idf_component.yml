@@ -1,0 +1,6 @@
+## Appen uttrycker sitt UI i LVGL — samma version som plattformen (9.5-
+## serien via BSP:n). Det här är fröet till P25-VISION: en app är en
+## ESP-IDF-komponent med egna beroenden, publicerbar i eget repo.
+dependencies:
+  idf: ">=5.5"
+  lvgl/lvgl: "9.*"

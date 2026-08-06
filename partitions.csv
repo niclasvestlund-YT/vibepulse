@@ -1,0 +1,7 @@
+# 16 MB flash, ingen OTA (omflashning sker över USB-C — beslut i roadmapen).
+# 4 MB app är rundhänt: LVGL, åtta inbäddade Plex-fonter och certifikatbunten
+# ryms med marginal, och marginalen är gratis på ett 16 MB-kort.
+# Name,   Type, SubType, Offset,  Size
+nvs,      data, nvs,     ,        24K
+phy_init, data, phy,     ,        4K
+factory,  app,  factory, ,        4M
