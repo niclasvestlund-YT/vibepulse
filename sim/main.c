@@ -167,7 +167,8 @@ static void next_fixture(lv_timer_t *t) {
   apply_fixture(fixture_idx + 1);
 }
 
-/* Plattformsrundan efter fixturdumparna: launcher → Tokenmätaren → hem. */
+/* Plattformsrundan efter fixturdumparna: launcher → Tokenmätarens tre vyer
+ * → hem. En obevakad körning bevisar hela plattformen. */
 static void platform_tour_cb(lv_timer_t *t) {
   static int stage;
   (void)t;
@@ -175,7 +176,12 @@ static void platform_tour_cb(lv_timer_t *t) {
     case 0: torget_launcher_open(); break;
     case 1: dump_frame("launcher"); break;
     case 2: torget_app_show(1); break;
-    case 3: dump_frame("tokens"); break;
+    case 3: dump_frame("tokens-claude"); break;
+    case 4: tokens_show_view(1); break;
+    case 5: dump_frame("tokens-codex"); break;
+    case 6: tokens_show_view(2); break;
+    case 7: dump_frame("tokens-volym"); break;
+    case 8: tokens_show_view(0); break;
     default: torget_app_show(0); break;
   }
   lv_timer_set_period(t, 500);
@@ -239,7 +245,7 @@ int main(void) {
    * launchern och Tokenmätaren också — en obevakad körning bevisar hela
    * plattformen, inte bara första appen. */
   lv_timer_t *tour = lv_timer_create(platform_tour_cb, 6500, NULL);
-  lv_timer_set_repeat_count(tour, 5);
+  lv_timer_set_repeat_count(tour, 10);
 
   while (1) {
     uint32_t idle = lv_timer_handler();

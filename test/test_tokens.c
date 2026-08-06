@@ -33,6 +33,14 @@ static void check(const char *what, int cond) {
  * är ett test av testet, inte av parsern. */
 #define PARSE(s, out) tk_tokens_parse((s), strlen(s), (out))
 
+/* Minsta giltiga v2-kropp med alla limits null — bas för mutationstesterna. */
+#define BASE_NULLS \
+  "\"claudeSessionPct\":null,\"claudeSessionResetMin\":null," \
+  "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null," \
+  "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null," \
+  "\"codexSessionPct\":null,\"codexSessionResetMin\":null," \
+  "\"codexWeekPct\":null,\"codexWeekResetMin\":null"
+
 int main(void) {
   size_t len;
   char *json;
@@ -45,32 +53,56 @@ int main(void) {
     check("takt", t.day_tokens_per_hour == 5120000.0);
     check("sessioner", t.day_sessions == 4);
     check("månaden", t.month_tokens == 612480233.0);
+    check("claude session", t.claude_session.has_pct
+          && t.claude_session.pct == 21.0
+          && t.claude_session.has_reset
+          && t.claude_session.reset_min == 80);
+    check("claude vecka", t.claude_week.has_pct && t.claude_week.pct == 47.0);
+    check("claude fable-vecka", t.claude_model_week.has_pct
+          && t.claude_model_week.pct == 73.0
+          && t.claude_model_week.reset_min == 850);
+    check("codex session null", !t.codex_session.has_pct
+          && !t.codex_session.has_reset);
+    check("codex vecka", t.codex_week.has_pct && t.codex_week.pct == 35.0
+          && t.codex_week.reset_min == 2210);
     free(json);
   }
 
-  /* En vilande dag är giltig: nollor är ärliga när inget brunnit. */
-  check("nollor ok",
-        PARSE("{\"v\":1,\"dayTokens\":0,\"dayTokensPerHour\":0,"
-              "\"daySessions\":0,\"monthTokens\":0}", &t)
-        && t.day_tokens == 0);
+  /* En vilande dag med alla limits null är giltig: nollor och streck är
+   * ärliga när inget brunnit och inga källor svarar. */
+  check("nollor + null ok",
+        PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+              "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS "}", &t)
+        && t.day_tokens == 0 && !t.claude_session.has_pct);
 
   /* Fientliga indata: allt som inte är hela kontraktet avvisas utan att
    * röra utdata. */
   tk_tokens before = t;
   check("error-formen avvisas",
         !PARSE("{\"error\":\"scan failed\"}", &t));
-  check("fel version avvisas",
+  check("gammal version avvisas",
+        !PARSE("{\"v\":1,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t));
+  check("saknat volymfält avvisas",
+        !PARSE("{\"v\":2,\"dayTokens\":1," BASE_NULLS "}", &t));
+  check("saknat limitfält avvisas",
         !PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
                "\"daySessions\":1,\"monthTokens\":1}", &t));
-  check("saknat fält avvisas",
-        !PARSE("{\"v\":1,\"dayTokens\":1}", &t));
-  check("negativt avvisas",
-        !PARSE("{\"v\":1,\"dayTokens\":-5,\"dayTokensPerHour\":0,"
-               "\"daySessions\":1,\"monthTokens\":1}", &t));
+  check("negativ volym avvisas",
+        !PARSE("{\"v\":2,\"dayTokens\":-5,\"dayTokensPerHour\":0,"
+               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t));
+  check("negativ limit avvisas",
+        !PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+               "\"daySessions\":1,\"monthTokens\":1,"
+               "\"claudeSessionPct\":-3,\"claudeSessionResetMin\":null,"
+               "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+               "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+               "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+               "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t));
   check("sträng i talfält avvisas",
-        !PARSE("{\"v\":1,\"dayTokens\":\"48\",\"dayTokensPerHour\":0,"
-               "\"daySessions\":1,\"monthTokens\":1}", &t));
-  check("trunkerad avvisas", !PARSE("{\"v\":1,\"dayTok", &t));
+        !PARSE("{\"v\":2,\"dayTokens\":\"48\",\"dayTokensPerHour\":0,"
+               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t));
+  check("trunkerad avvisas", !PARSE("{\"v\":2,\"dayTok", &t));
   check("html avvisas", !PARSE("<html>502</html>", &t));
   check("avvisning rör inte utdata", memcmp(&before, &t, sizeof t) == 0);
 

@@ -18,4 +18,7 @@ extern const torget_app_t tokens_app;
  * håller skärmen vaken när tokens brinner. Kallas under torget_ui_lock(). */
 void tokens_apply(const tk_tokens *t);
 
+/* Hoppa till vy 0-2 utan animation — bänkens och BMP-dumparnas ratt. */
+void tokens_show_view(int idx);
+
 #endif

@@ -34,13 +34,17 @@ Autostart: se README.md härintill (launchd-plist medföljer).
 import argparse
 import json
 import os
+import re
+import subprocess
 import threading
 import time
+import urllib.request
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 RECOMPUTE_EVERY_S = 30
+LIMITS_EVERY_S = 120  # rate-limit-proben: snäll mot API:t, färsk nog för hyllan
 
 # (day, ts, tokens, session, key) per loggrad med usage — det minsta som
 # behövs för dag-, månads-, takt- och sessionsaggregaten.
@@ -148,13 +152,246 @@ def _compute(projects_dir: Path):
     }
 
 
+# ---------------------------------------------------------------------------
+# Rate-limit-proben (Clawdmeter-mönstret): läs Claude Codes egen OAuth-token
+# ur nyckelringen och gör en minimal API-förfrågan — svaret är ointressant,
+# HEADRARNA är datat (anthropic-ratelimit-unified-*: sessionens 5h-fönster
+# och veckofönstret, i procent + återställningstid). max_tokens=0 betyder
+# att inget genereras: proben är i praktiken gratis. Tokenen lämnar aldrig
+# Macen; skärmen får bara procenttal.
+
+_limits_lock = threading.Lock()
+_last_limits = None
+_last_probed = 0.0
+_headers_logged = False
+
+
+def _read_oauth_token():
+    """Claude Codes accessToken ur macOS-nyckelringen. None om otillgänglig."""
+    try:
+        raw = subprocess.run(
+            ["security", "find-generic-password",
+             "-s", "Claude Code-credentials", "-w"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        return (json.loads(raw).get("claudeAiOauth") or {}).get("accessToken")
+    except Exception:
+        return None
+
+
+def _parse_reset_minutes(value: str, now_ts: float):
+    """Reset-headern kan vara epok-sekunder, sekunder-kvar eller ISO-tid."""
+    try:
+        n = float(value)
+        # Stort tal = epoktid; litet = sekunder kvar.
+        remaining = (n - now_ts) if n > 1e9 else n
+        return max(0, int(round(remaining / 60)))
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return max(0, int(round((dt.timestamp() - now_ts) / 60)))
+    except ValueError:
+        return None
+
+
+def _probe_limits():
+    """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
+    weekPct, weekResetMin} eller None om något saknas på vägen."""
+    token = _read_oauth_token()
+    if not token:
+        return None
+
+    body = json.dumps({
+        "model": "claude-haiku-4-5",  # billigaste proben; headrarna är desamma
+        "max_tokens": 0,              # prefill utan output — i praktiken gratis
+        "messages": [{"role": "user", "content": "ping"}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "oauth-2025-04-20",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            headers = dict(resp.headers)
+    except urllib.error.HTTPError as e:
+        # 400 för max_tokens=0 på någon modell? Headrarna följer ofta med
+        # ändå — annars ge upp tyst; skärmen visar streck.
+        headers = dict(e.headers) if e.headers else {}
+    except Exception:
+        return None
+
+    now_ts = time.time()
+    # Diagnostik vid första proben: headernamnen är hämtade ur Clawdmeters
+    # beskrivning, inte ur egen observation — loggen är facit om de skiljer.
+    global _headers_logged
+    if not _headers_logged:
+        _headers_logged = True
+        for name, value in sorted(headers.items()):
+            if "ratelimit" in name.lower():
+                print(f"ratelimit-header: {name}: {value}")
+    # Tre fönster, samma som Claudes egen usage-panel: 5-timmars, veckan
+    # (alla modeller) och veckan för tyngsta modellen (Fable/Opus). Fönster-
+    # namnet i headern varierar ("5h", "7d", "7d_opus", ...) — mappa på
+    # innehåll, inte exakt namn.
+    found = {}
+    for name, value in headers.items():
+        m = re.match(
+            r"(?i)anthropic-ratelimit-unified-(.+?)[-_]"
+            r"(utilization|reset|resets[-_]at)$", name)
+        if not m:
+            continue
+        raw = m.group(1).lower()
+        if "5h" in raw:
+            window = "session"
+        elif any(x in raw for x in ("opus", "fable", "sonnet", "model")):
+            window = "model"
+        elif "7d" in raw or "week" in raw:
+            window = "week"
+        else:
+            continue
+        kind = m.group(2).lower()
+        if kind == "utilization":
+            try:
+                pct = float(value)
+                found[f"{window}Pct"] = round(pct * 100 if pct <= 1.0 else pct, 1)
+            except ValueError:
+                pass
+        else:
+            mins = _parse_reset_minutes(value, now_ts)
+            if mins is not None:
+                found[f"{window}ResetMin"] = mins
+
+    if "sessionPct" not in found:
+        return None
+    for key in ("sessionResetMin", "weekPct", "weekResetMin",
+                "modelPct", "modelResetMin"):
+        found.setdefault(key, None)
+    return found
+
+
+def get_limits():
+    global _last_limits, _last_probed
+    with _limits_lock:
+        if time.monotonic() - _last_probed > LIMITS_EVERY_S:
+            _last_limits = _probe_limits()
+            _last_probed = time.monotonic()
+        return _last_limits
+
+
+# ---------------------------------------------------------------------------
+# Codex-limits: PASSIV läsning — Codex CLI skriver sina rate-limits i
+# rollout-filerna (~/.codex/sessions/**/rollout-*.jsonl) varje gång den kör:
+# used_percent, window_minutes (10080 = veckofönstret) och resets_at (epok).
+# Vi läser senaste snapshoten; har fönstret hunnit nollas sedan dess (resets_at
+# passerat) är siffran meningslös och vi serverar null — aldrig gamla procent
+# som låtsas vara färska.
+
+CODEX_SESSIONS = Path(os.path.expanduser("~/.codex/sessions"))
+
+
+def _find_rate_limits(obj):
+    """Djupsök efter "rate_limits"-objektet i en rolloutrad (formatet har
+    flyttat mellan Codex-versioner — nyckeln är stabil, vägen dit inte)."""
+    if isinstance(obj, dict):
+        if "rate_limits" in obj and isinstance(obj["rate_limits"], dict):
+            return obj["rate_limits"]
+        for v in obj.values():
+            hit = _find_rate_limits(v)
+            if hit:
+                return hit
+    elif isinstance(obj, list):
+        for v in obj:
+            hit = _find_rate_limits(v)
+            if hit:
+                return hit
+    return None
+
+
+def _codex_window(win, now_ts):
+    """{used_percent, window_minutes, resets_at} → (pct, reset_min) eller None."""
+    if not isinstance(win, dict):
+        return None
+    pct = win.get("used_percent")
+    resets_at = win.get("resets_at")
+    if pct is None:
+        return None
+    reset_min = None
+    if isinstance(resets_at, (int, float)):
+        if resets_at < now_ts:
+            return None  # fönstret har nollats sedan snapshoten — siffran ljuger
+        reset_min = max(0, int(round((resets_at - now_ts) / 60)))
+    return round(float(pct), 1), reset_min, win.get("window_minutes")
+
+
+def _read_codex_limits():
+    """Senaste rate_limits-snapshoten ur de nyaste rollout-filerna."""
+    if not CODEX_SESSIONS.is_dir():
+        return {}
+    try:
+        newest = sorted(CODEX_SESSIONS.glob("**/rollout-*.jsonl"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+    except OSError:
+        return {}
+    now_ts = time.time()
+    for path in newest:
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if '"rate_limits"' not in line:
+                continue
+            try:
+                rl = _find_rate_limits(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+            if not rl:
+                continue
+            out = {}
+            for key in ("primary", "secondary"):
+                win = _codex_window(rl.get(key), now_ts)
+                if not win:
+                    continue
+                pct, reset_min, window_minutes = win
+                # <= 10 h räknas som sessionsfönstret, längre som veckan.
+                bucket = "codexSession" if (window_minutes or 0) <= 600 else "codexWeek"
+                out.setdefault(f"{bucket}Pct", pct)
+                out.setdefault(f"{bucket}ResetMin", reset_min)
+            return out
+    return {}
+
+
 def get_snapshot(projects_dir: Path):
     global _last_result, _last_computed
     with _cache_lock:
         if _last_result is None or time.monotonic() - _last_computed > RECOMPUTE_EVERY_S:
             _last_result = _compute(projects_dir)
             _last_computed = time.monotonic()
-        return _last_result
+        result = dict(_last_result)
+
+    # null = ärlig frånvaro (nyckelring/probe/loggar otillgängliga) — skärmen
+    # visar streck, aldrig hittade procent. Samma regel som sharePct.
+    claude = get_limits() or {}
+    codex = _read_codex_limits()
+    result["claudeSessionPct"] = claude.get("sessionPct")
+    result["claudeSessionResetMin"] = claude.get("sessionResetMin")
+    result["claudeWeekPct"] = claude.get("weekPct")
+    result["claudeWeekResetMin"] = claude.get("weekResetMin")
+    result["claudeModelWeekPct"] = claude.get("modelPct")
+    result["claudeModelWeekResetMin"] = claude.get("modelResetMin")
+    result["codexSessionPct"] = codex.get("codexSessionPct")
+    result["codexSessionResetMin"] = codex.get("codexSessionResetMin")
+    result["codexWeekPct"] = codex.get("codexWeekPct")
+    result["codexWeekResetMin"] = codex.get("codexWeekResetMin")
+    result["v"] = 2
+    return result
 
 
 class Handler(BaseHTTPRequestHandler):
