@@ -29,6 +29,7 @@
  */
 
 extern const lv_font_t plex_num_146;
+extern const lv_font_t plex_num_118;
 extern const lv_font_t plex_num_50;
 extern const lv_font_t plex_num_38;
 extern const lv_font_t plex_text_32;
@@ -67,7 +68,8 @@ extern const lv_font_t plex_icon_64;
 typedef struct {
   lv_obj_t *pct_value, *reset_value, *week_value, *model_value;
   lv_obj_t *hero_fill, *week_fill, *model_fill;
-  lv_obj_t *week_block; /* hela VECKAN-cellen — döljs när heron ÄR veckan */
+  lv_obj_t *week_block;  /* hela VECKAN-cellen — döljs när heron ÄR veckan */
+  lv_obj_t *model_block; /* hela FABLE-cellen — döljs när källan saknas */
 } tk_limit_view;
 
 static struct {
@@ -79,7 +81,7 @@ static struct {
   tk_limit_view claude, codex;
   /* vy 3: volymen */
   lv_obj_t *live_dot; /* andas när tokens brinner — mätarens hjärtslag */
-  lv_span_t *sp_whole, *sp_frac, *sp_tick;
+  lv_span_t *sp_whole, *sp_frac;
   lv_obj_t *span_group; /* LVGL 9.5: set_text ritar INTE om — refresh krävs */
   lv_obj_t *sessions_value, *month_value;
 
@@ -283,6 +285,10 @@ static void fmt_reset(int minutes, char *out, size_t cap) {
 
 /* ------------------------------------------------------------- tillstånd */
 
+/* Två decimaler, inte kronräknarens 2+2: en Mtok-hero med tresiffrig
+ * heldel OCH fyra decimaler klippte enheten vid skärmkanten (hittat på
+ * foto, reproducerat i bänken). 0,01 Mtok = 10 000 tokens per steg —
+ * svansen lever ändå i allt utom total stiltje. */
 static void set_ticker_mtok(double mtok) {
   if (!tk.has_data) return;
   sv_ticker_str s;
@@ -291,7 +297,6 @@ static void set_ticker_mtok(double mtok) {
   char frac[8];
   snprintf(frac, sizeof frac, ",%s", s.frac);
   lv_span_set_text(tk.sp_frac, frac);
-  lv_span_set_text(tk.sp_tick, s.tail);
   lv_spangroup_refresh(tk.span_group); /* LVGL 9.5-regeln */
 }
 
@@ -335,14 +340,16 @@ static void apply_limits(tk_limit_view *v, const tk_limit *session,
       bar_set(v->week_fill, STAT_BAR_W, NULL);
     }
   }
-  if (v->model_value) {
+  /* FABLE-cellen: API-headrarna bär (ännu) ingen per-modell-vecka — ett
+   * streckblock är bara brus, så cellen döljs tills källan finns. */
+  if (v->model_block) {
     if (model_week && model_week->has_pct) {
+      lv_obj_remove_flag(v->model_block, LV_OBJ_FLAG_HIDDEN);
       sv_pct_1(model_week->pct, buf, sizeof buf);
       lv_label_set_text(v->model_value, buf);
       bar_set(v->model_fill, STAT_BAR_W, model_week);
     } else {
-      lv_label_set_text(v->model_value, "–");
-      bar_set(v->model_fill, STAT_BAR_W, NULL);
+      lv_obj_add_flag(v->model_block, LV_OBJ_FLAG_HIDDEN);
     }
   }
 }
@@ -466,8 +473,9 @@ static void tk_create(lv_obj_t *root) {
     /* Claude-vyn får usage-panelens tredje rad: veckofönstret för tyngsta
      * modellen (Fable på Max-planen). Codex saknar motsvarighet. */
     if (i == 0)
-      stat_block(stats, "FABLE", &limit_views[i]->model_value, "%",
-                 &limit_views[i]->model_fill);
+      limit_views[i]->model_block =
+        stat_block(stats, "FABLE", &limit_views[i]->model_value, "%",
+                   &limit_views[i]->model_fill);
   }
 
   /* --- vy 3: volymen ------------------------------------------------------ */
@@ -485,25 +493,24 @@ static void tk_create(lv_obj_t *root) {
   lv_obj_add_flag(tk.live_dot, LV_OBJ_FLAG_HIDDEN);
   breath_start(tk.live_dot);
 
+  /* 118-valör (årsvyns storlek): tresiffriga Mtok-dagar + enheten ryms
+   * först då bevisligen på raden. */
   lv_obj_t *h2 = hero_row(t2);
   lv_obj_t *spans = lv_spangroup_create(h2);
   tk.span_group = spans;
   lv_spangroup_set_align(spans, LV_TEXT_ALIGN_LEFT);
   lv_obj_remove_flag(spans, LV_OBJ_FLAG_CLICKABLE);
   tk.sp_whole = lv_spangroup_new_span(spans);
-  lv_style_set_text_font(lv_span_get_style(tk.sp_whole), &plex_num_146);
+  lv_style_set_text_font(lv_span_get_style(tk.sp_whole), &plex_num_118);
   lv_style_set_text_color(lv_span_get_style(tk.sp_whole), COL_WHITE);
   tk.sp_frac = lv_spangroup_new_span(spans);
   lv_style_set_text_font(lv_span_get_style(tk.sp_frac), &plex_num_50);
   lv_style_set_text_color(lv_span_get_style(tk.sp_frac), COL_FRAC);
-  tk.sp_tick = lv_spangroup_new_span(spans);
-  lv_style_set_text_font(lv_span_get_style(tk.sp_tick), &plex_num_50);
-  lv_style_set_text_color(lv_span_get_style(tk.sp_tick), COL_TICK);
 
   lv_obj_t *unit2 = label(h2, &plex_text_32, COL_LABEL);
   lv_label_set_text(unit2, "Mtok");
   lv_obj_set_style_pad_left(unit2, 11, 0);
-  lv_obj_set_style_translate_y(unit2, -18, 0);
+  lv_obj_set_style_translate_y(unit2, -14, 0);
 
   lv_obj_t *stats2 = stats_row(t2);
   stat_block(stats2, "SESSIONER", &tk.sessions_value, "", NULL);
@@ -512,7 +519,6 @@ static void tk_create(lv_obj_t *root) {
   /* Utan data: streck, aldrig nollor. */
   lv_span_set_text(tk.sp_whole, "–");
   lv_span_set_text(tk.sp_frac, "");
-  lv_span_set_text(tk.sp_tick, "");
   lv_spangroup_refresh(tk.span_group);
 
   /* --- prickarna ---------------------------------------------------------- */
