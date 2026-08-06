@@ -131,7 +131,6 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 }
 
 static void wifi_start(void) {
-  s_net_events = xEventGroupCreate();
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   esp_netif_create_default_wifi_sta();
@@ -216,6 +215,12 @@ void app_main(void) {
     nvs = nvs_flash_init();
   }
   ESP_ERROR_CHECK(nvs);
+
+  /* Eventgruppen FÖRE UI-bygget: apparnas hämttasker startar i create()
+   * och blockerar direkt i torget_net_wait() — fanns gruppen inte än
+   * assertade FreeRTOS och kortet bootloopade (hittat vid första flashen
+   * 2026-08-06). Ordningen är en del av kontraktet, inte en detalj. */
+  s_net_events = xEventGroupCreate();
 
   /* Panelen först, nätet sedan: initsekvensen tar ~1,2 s och skärmen ska
    * visa sina streck medan WiFi:t kopplar upp, inte stå svart i tio
