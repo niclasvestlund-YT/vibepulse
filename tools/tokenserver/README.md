@@ -6,8 +6,9 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
 
 1. **Volymen** — `~/.claude/projects/**/*.jsonl` skannas inkrementellt:
    dagens/månadens tokens, brinntakt, sessioner.
-2. **Claudes tak** (Clawdmeter-mönstret) — tjänsten läser Claude Codes
-   OAuth-token ur macOS-nyckelringen och gör en minimal API-förfrågan
+2. **Claudes tak** (Clawdmeter-mönstret) — tjänsten läser Claude Desktops
+   aktiva, injicerade OAuth-token eller Claude Codes nyckelringsfallback och
+   gör en minimal API-förfrågan
    (`max_tokens: 0` — prefill utan output, i praktiken gratis) var 120:e
    sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
    5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
@@ -25,7 +26,7 @@ curl http://localhost:8737/api/tokens
 
 ## Agentstatus
 
-`/api/agent-status` är ett separat v1-kontrakt för Claude Codes och Codex
+`/api/agent-status` är ett separat v2-kontrakt för Claude Codes och Codex
 pågående aktivitet. En bakgrundstråd följer de senast aktiva JSONL-filerna
 inkrementellt var 0,5 sekund: Claude under `~/.claude/projects` och Codex
 under `~/.codex/sessions`. HTTP-tråden läser bara en låst minnesbild; den
@@ -33,34 +34,44 @@ skannar eller öppnar aldrig sessionsfiler på begäran.
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "seq": 12,
   "agents": {
     "claude": {
-      "task_id": "session-id:event-id",
-      "event_id": "4e50fb6a90293d167abb52a531c581fd",
-      "state": "working",
-      "project": "Torget",
-      "activity": "testing",
-      "model": "FABLE 5",
-      "effort": "XHIGH",
-      "updated_ms": 240
+      "active_count": 2,
+      "jobs": [{
+        "task_id": "opaque-session-hash",
+        "event_id": "4e50fb6a90293d167abb52a531c581fd",
+        "state": "working",
+        "project": "Torget",
+        "activity": "testing",
+        "model": "FABLE 5",
+        "effort": "XHIGH",
+        "updated_ms": 240
+      }]
     },
     "codex": {
-      "task_id": "turn-id",
-      "event_id": "c625c56abf9d8d7f13408a21179198c0",
-      "state": "done",
-      "project": null,
-      "activity": null,
-      "model": "GPT-5.6 SOL",
-      "effort": "XHIGH",
-      "updated_ms": 1900
+      "active_count": 0,
+      "jobs": [{
+        "task_id": "turn-id",
+        "event_id": "c625c56abf9d8d7f13408a21179198c0",
+        "state": "done",
+        "project": null,
+        "activity": null,
+        "model": "GPT-5.6 SOL",
+        "effort": "XHIGH",
+        "updated_ms": 1900
+      }]
     }
   }
 }
 ```
 
-- `seq` ökar bara när en agents publika status faktiskt ändras.
+- Varje provider innehåller högst fyra prioriterade publika `jobs`, men
+  `active_count` räknar samtliga kända `working`, `waiting` och `error` även
+  när listan är full. Servern håller högst 16 metadatajobb per provider.
+- Jobb rangordnas `waiting`, `error`, `working`, `done`; nyare jobb går före
+  inom samma tillstånd. `seq` ökar när lagrad publik status ändras.
 - `task_id` är sessionsloggens opaka uppgiftsidentitet och `event_id` ett
   stabilt hash-id för leverantör, uppgift, tillstånd och källhändelse.
 - `state` är `idle`, `working`, `waiting`, `done`, `error` eller `unknown`.
@@ -71,9 +82,9 @@ skannar eller öppnar aldrig sessionsfiler på begäran.
   `task_id` är ett opakt, kollisionssäkert id på högst 64 UTF-8-byte.
   `updated_ms` är tiden sedan händelsens säkra tidsstämpel (filens mtime är
   reserv när tidsstämpel saknas), inte tiden då servern råkade starta.
-- En `working`-status som inte uppdaterats på 120 sekunder visas som
-  `unknown` med tom aktivitet. Den skrivs aldrig om till ett påhittat
-  `done`, och enbart läsning av status ökar inte `seq`.
+- Ett `working`-jobb som inte uppdaterats på 120 sekunder faller ur den
+  publika listan som okänt. Det skrivs aldrig om till ett påhittat `done`,
+  och enbart läsning av status ökar inte `seq`.
 
 Integritetsgränsen är avsiktligt hård: klassificeraren kan lokalt titta på
 verktygsnamn och ett kommando för att skilja test, bygge och vanlig körning,
@@ -118,9 +129,10 @@ python3 tools/tokenserver/tokenserver.py --port 8738
 curl http://127.0.0.1:8738/api/agent-status
 ```
 
-**Första körningen frågar macOS om nyckelringsåtkomst** ("security vill
-använda ... Claude Code-credentials") — välj "Tillåt alltid" så tjänsten
-kan probea utan att fråga om. Startloggen skriver dessutom ut de exakta
+När Claude Desktop körs används dess färska processtoken utan dialog. Vid
+fristående Claude Code kan första körningen fråga macOS om nyckelringsåtkomst
+("security vill använda ... Claude Code-credentials") — välj "Tillåt alltid"
+så tjänsten kan probea utan att fråga om. Startloggen skriver dessutom ut de exakta
 `anthropic-ratelimit-*`-headrarna vid första proben — facit om mappningen
 någonsin behöver justeras.
 

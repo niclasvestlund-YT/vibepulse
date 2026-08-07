@@ -27,7 +27,17 @@ from typing import Any, Callable, Dict, Optional
 
 LEASE_S = 120.0
 POLL_S = 0.5
+PUBLIC_JOB_LIMIT = 4
+TRACKED_JOB_LIMIT = 16
 STATES = {"idle", "working", "waiting", "done", "error", "unknown"}
+STATE_PRIORITY = {
+    "waiting": 5,
+    "error": 4,
+    "working": 3,
+    "done": 2,
+    "idle": 1,
+    "unknown": 0,
+}
 ACTIVITIES = {
     "thinking",
     "reading",
@@ -140,10 +150,9 @@ def _claude_identity(event: Dict[str, Any]) -> Optional[tuple]:
         return None
     if not isinstance(source_id, str) or not source_id:
         return None
-    combined = json.dumps([session_id, source_id], ensure_ascii=True,
-                          separators=(",", ":"))
     return (
-        hashlib.sha256(combined.encode()).hexdigest(),
+        hashlib.sha256(session_id.encode(
+            "utf-8", errors="surrogatepass")).hexdigest(),
         source_id,
         sanitize_project(event.get("cwd")),
     )
@@ -335,21 +344,7 @@ class AgentStatusStore:
         self._now = now
         self._lock = threading.Lock()
         self._seq = 0
-        observed_at = now()
-        self._agents = {
-            provider: {
-                "task_id": "",
-                "event_id": "",
-                "state": "idle",
-                "project": None,
-                "activity": None,
-                "model": None,
-                "effort": None,
-                "observed_at": observed_at,
-                "order_at": None,
-            }
-            for provider in ("claude", "codex")
-        }
+        self._agents = {provider: {} for provider in ("claude", "codex")}
 
     def apply(self, provider: str, event: Event,
               observed_at: Optional[float] = None,
@@ -369,8 +364,9 @@ class AgentStatusStore:
         ordered_at = seen_at if order_at is None else order_at
         if not math.isfinite(ordered_at):
             ordered_at = seen_at
+        task_id = _bounded_task_id(event.task_id)
         replacement = {
-            "task_id": _bounded_task_id(event.task_id),
+            "task_id": task_id,
             "event_id": (event_id_override or
                          stable_event_id(provider, event)),
             "state": event.state,
@@ -385,49 +381,76 @@ class AgentStatusStore:
             "task_id", "event_id", "state", "project", "activity",
             "model", "effort")
         with self._lock:
-            current = self._agents[provider]
-            if (current["order_at"] is not None and
+            records = self._agents[provider]
+            current = records.get(task_id)
+            if (current is not None and current["order_at"] is not None and
                     ordered_at < current["order_at"]):
                 return False
-            if current["task_id"] == replacement["task_id"]:
+            if current is not None:
                 if replacement["model"] is None:
                     replacement["model"] = current["model"]
                 if replacement["effort"] is None:
                     replacement["effort"] = current["effort"]
-            changed = any(current[key] != replacement[key]
-                          for key in public_fields)
+            changed = (current is None or any(
+                current[key] != replacement[key] for key in public_fields))
             if changed:
-                self._agents[provider] = replacement
+                records[task_id] = replacement
+                if len(records) > TRACKED_JOB_LIMIT:
+                    evicted = min(records.values(), key=lambda record: (
+                        STATE_PRIORITY[record["state"]],
+                        record["order_at"],
+                        record["task_id"],
+                    ))
+                    del records[evicted["task_id"]]
                 self._seq += 1
             elif refresh_unchanged:
                 current["observed_at"] = max(current["observed_at"], seen_at)
                 current["order_at"] = max(current["order_at"], ordered_at)
             return changed
 
+    @staticmethod
+    def _effective(record: Dict[str, Any], now: float) -> Dict[str, Any]:
+        age_s = max(0.0, now - record["observed_at"])
+        state = record["state"]
+        activity = record["activity"]
+        if state == "working" and age_s > LEASE_S:
+            state = "unknown"
+            activity = None
+        return {
+            "task_id": record["task_id"],
+            "event_id": record["event_id"],
+            "state": state,
+            "project": record["project"],
+            "activity": activity,
+            "model": record["model"],
+            "effort": record["effort"],
+            "updated_ms": min(0xFFFFFFFF, int(age_s * 1000)),
+        }
+
     def snapshot(self) -> Dict[str, Any]:
         now = self._now()
         agents = {}
         with self._lock:
-            for provider, stored in self._agents.items():
-                age_s = max(0.0, now - stored["observed_at"])
-                updated_ms = min(0xFFFFFFFF, int(age_s * 1000))
-                state = stored["state"]
-                activity = stored["activity"]
-                if state == "working" and age_s > LEASE_S:
-                    state = "unknown"
-                    activity = None
+            for provider, records in self._agents.items():
+                public = [self._effective(record, now)
+                          for record in records.values()]
+                public = [job for job in public
+                          if job["state"] not in ("idle", "unknown")]
+                active_count = sum(
+                    job["state"] in ("working", "waiting", "error")
+                    for job in public
+                )
+                public.sort(key=lambda job: (
+                    -STATE_PRIORITY[job["state"]],
+                    job["updated_ms"],
+                    job["task_id"],
+                ))
                 agents[provider] = {
-                    "task_id": stored["task_id"],
-                    "event_id": stored["event_id"],
-                    "state": state,
-                    "project": stored["project"],
-                    "activity": activity,
-                    "model": stored["model"],
-                    "effort": stored["effort"],
-                    "updated_ms": updated_ms,
+                    "active_count": active_count,
+                    "jobs": public[:PUBLIC_JOB_LIMIT],
                 }
             seq = self._seq
-        return {"v": 1, "seq": seq, "agents": agents}
+        return {"v": 2, "seq": seq, "agents": agents}
 
 
 class JsonlTailer:
@@ -889,6 +912,7 @@ class AgentStatusService:
         self._seen_paths = OrderedDict()
         self._seen_overflow = False
         self._backfills = {}
+        self._stream_tasks = {}
         self._observation_sequence = 0
 
     @staticmethod
@@ -1009,6 +1033,49 @@ class AgentStatusService:
             compact_event, stable_event_id(provider, event), observed_at,
             order_at, self._observation_sequence)
 
+    @staticmethod
+    def _fallback_stream_task(key: tuple) -> str:
+        provider, path, identity = key
+        raw = json.dumps(
+            [provider, str(path), list(identity)], ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    def _bind_stream_task(self, provider: str, key: tuple,
+                          record: Any, event: Event) -> Event:
+        """Keep Codex response items attached to their current turn.
+
+        Some live tool records omit turn metadata even though the surrounding
+        lifecycle records identify it. The mapping stores only a bounded task
+        identifier per file identity; tool arguments and output never enter
+        it.
+        """
+        if provider != "codex" or not isinstance(record, dict):
+            return event
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            return event
+
+        if record.get("type") != "response_item":
+            self._stream_tasks[key] = event.task_id
+            return event
+
+        metadata = payload.get("internal_chat_message_metadata_passthrough")
+        turn_id = metadata.get("turn_id") if isinstance(metadata, dict) else None
+        if isinstance(turn_id, str) and turn_id:
+            task_id = _bounded_task_id(turn_id)
+            self._stream_tasks[key] = task_id
+        else:
+            task_id = self._stream_tasks.get(key)
+            if task_id is None:
+                task_id = self._fallback_stream_task(key)
+                self._stream_tasks[key] = task_id
+        return Event(
+            event.state, event.activity, task_id, event.source_id,
+            event.project, event.model, event.effort,
+        )
+
     def _apply_observation(self, provider: str, observation: _Observation,
                            refresh_unchanged: bool = True) -> bool:
         return self._store.apply(
@@ -1053,6 +1120,15 @@ class AgentStatusService:
         for key in list(self._backfills):
             if key[1] not in tracked_paths:
                 del self._backfills[key]
+        tracked_streams = set()
+        for provider, paths in next_active.items():
+            for path in paths:
+                identity = self._tailer.read_identity(path)
+                if identity is not None:
+                    tracked_streams.add((provider, path, identity))
+        for key in list(self._stream_tasks):
+            if key not in tracked_streams:
+                del self._stream_tasks[key]
         self._tailer.take_discovery_request()
         self._next_discovery_at = self._now() + self._DISCOVERY_INTERVAL_S
 
@@ -1105,6 +1181,8 @@ class AgentStatusService:
                     if event is None:
                         continue
                     try:
+                        event = self._bind_stream_task(
+                            provider, key, record, event)
                         observation = self._observation(
                             provider, event, record, file_wall_time,
                             monotonic_now, wall_now)

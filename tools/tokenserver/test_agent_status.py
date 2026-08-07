@@ -35,10 +35,18 @@ def claude_event(entry_type, stop_reason=None, tool_name=None, tool_input=None):
     }
 
 
-def claude_task_id(session_id, source_id):
-    pair = json.dumps([session_id, source_id], ensure_ascii=True,
-                      separators=(",", ":"))
-    return hashlib.sha256(pair.encode()).hexdigest()
+def claude_task_id(session_id):
+    return hashlib.sha256(
+        session_id.encode("utf-8", errors="surrogatepass")
+    ).hexdigest()
+
+
+def provider_jobs(snapshot, provider):
+    return snapshot["agents"][provider]["jobs"]
+
+
+def top_job(snapshot, provider):
+    return provider_jobs(snapshot, provider)[0]
 
 
 class ClassificationTests(unittest.TestCase):
@@ -71,12 +79,12 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(event, Event(
             state="working",
             activity="thinking",
-            task_id=claude_task_id("session-1", "event-1"),
+            task_id=claude_task_id("session-1"),
             source_id="event-1",
             project="Torget",
         ))
 
-    def test_claude_task_identity_is_uuid_safe_and_sensitive_to_both_ids(self):
+    def test_claude_events_in_one_session_share_task_identity(self):
         session_id = "123e4567-e89b-12d3-a456-426614174000"
         source_id = "123e4567-e89b-12d3-a456-426614174001"
         entry = claude_event("user")
@@ -88,23 +96,24 @@ class ClassificationTests(unittest.TestCase):
         changed_source = dict(entry, uuid=source_id[:-1] + "3")
 
         self.assertEqual(len(event.task_id.encode("utf-8")), 64)
-        self.assertEqual(
-            event.task_id, claude_task_id(session_id, source_id))
+        self.assertEqual(event.task_id, claude_task_id(session_id))
         self.assertNotEqual(
             event.task_id, classify_claude(changed_session).task_id)
-        self.assertNotEqual(
-            event.task_id, classify_claude(changed_source).task_id)
+        self.assertEqual(event.task_id,
+                         classify_claude(changed_source).task_id)
+        self.assertNotEqual(event.source_id,
+                            classify_claude(changed_source).source_id)
 
-    def test_claude_task_identity_pair_encoding_is_unambiguous(self):
+    def test_claude_task_identity_ignores_event_uuid(self):
         first = claude_event("user")
-        first["sessionId"] = "session|part"
-        first["uuid"] = "event"
-        second = claude_event("user")
-        second["sessionId"] = "session"
-        second["uuid"] = "part|event"
+        first["sessionId"] = "session"
+        first["uuid"] = "event-1"
+        second = dict(first, uuid="event-2")
 
-        self.assertNotEqual(classify_claude(first).task_id,
-                            classify_claude(second).task_id)
+        self.assertEqual(classify_claude(first).task_id,
+                         classify_claude(second).task_id)
+        self.assertNotEqual(classify_claude(first).source_id,
+                            classify_claude(second).source_id)
 
     def test_claude_end_turn_waits_but_does_not_finish(self):
         event = classify_claude(claude_event("assistant", stop_reason="end_turn"))
@@ -414,21 +423,48 @@ class StableEventIdTests(unittest.TestCase):
 
 
 class StoreTests(unittest.TestCase):
+    @staticmethod
+    def _job(snapshot, provider, task_id=None):
+        jobs = snapshot["agents"][provider]["jobs"]
+        if task_id is None:
+            return jobs[0]
+        return next(job for job in jobs if job["task_id"] == task_id)
+
     def test_initial_snapshot_has_two_idle_agents_and_exact_shape(self):
         store = AgentStatusStore(now=lambda: 10.0)
 
         snapshot = store.snapshot()
 
         self.assertEqual(set(snapshot), {"v", "seq", "agents"})
-        self.assertEqual(snapshot["v"], 1)
+        self.assertEqual(snapshot["v"], 2)
         self.assertEqual(snapshot["seq"], 0)
         self.assertEqual(set(snapshot["agents"]), {"claude", "codex"})
         for agent in snapshot["agents"].values():
-            self.assertEqual(set(agent), {
-                "task_id", "event_id", "state", "project", "activity",
-                "model", "effort", "updated_ms",
-            })
-            self.assertEqual(agent["state"], "idle")
+            self.assertEqual(agent, {"active_count": 0, "jobs": []})
+
+    def test_snapshot_bounds_jobs_and_reports_all_active(self):
+        store = AgentStatusStore(now=lambda: 10.0)
+        for index in range(6):
+            store.apply("claude", Event(
+                "working", "editing", f"task-{index}", f"source-{index}",
+                f"Project-{index}"), order_at=float(index))
+
+        provider = store.snapshot()["agents"]["claude"]
+
+        self.assertEqual(provider["active_count"], 6)
+        self.assertEqual(len(provider["jobs"]), 4)
+
+    def test_two_done_jobs_survive_as_distinct_events(self):
+        store = AgentStatusStore(now=lambda: 10.0)
+        store.apply("codex", Event(
+            "done", None, "turn-a", "end-a", "Buddy"))
+        store.apply("codex", Event(
+            "done", None, "turn-b", "end-b", "Torget"))
+
+        jobs = store.snapshot()["agents"]["codex"]["jobs"]
+
+        self.assertEqual({job["task_id"] for job in jobs},
+                         {"turn-a", "turn-b"})
 
     def test_apply_increments_only_for_changed_public_content(self):
         now = [10.0]
@@ -443,7 +479,7 @@ class StoreTests(unittest.TestCase):
 
         self.assertEqual(first["seq"], 1)
         self.assertEqual(second["seq"], 1)
-        self.assertEqual(second["agents"]["claude"]["updated_ms"], 5000)
+        self.assertEqual(self._job(second, "claude")["updated_ms"], 5000)
 
     def test_activity_task_event_and_project_changes_increment_sequence(self):
         store = AgentStatusStore(now=lambda: 0.0)
@@ -468,11 +504,11 @@ class StoreTests(unittest.TestCase):
 
         store.apply("codex", Event(
             "working", "editing", "turn-7", "tool-7", None))
-        same_task = store.snapshot()["agents"]["codex"]
+        same_task = self._job(store.snapshot(), "codex", "turn-7")
 
         store.apply("codex", Event(
             "working", "thinking", "turn-8", "context-8", None))
-        other_task = store.snapshot()["agents"]["codex"]
+        other_task = self._job(store.snapshot(), "codex", "turn-8")
 
         self.assertEqual(same_task["model"], "GPT-5.6 SOL")
         self.assertEqual(same_task["effort"], "XHIGH")
@@ -499,8 +535,10 @@ class StoreTests(unittest.TestCase):
         first = store.snapshot()
         second = store.snapshot()
 
-        self.assertEqual(first["agents"]["claude"]["state"], "unknown")
-        self.assertIsNone(first["agents"]["claude"]["activity"])
+        self.assertEqual(first["agents"]["claude"], {
+            "active_count": 0,
+            "jobs": [],
+        })
         self.assertEqual(first["seq"], 1)
         self.assertEqual(second["seq"], 1)
 
@@ -510,20 +548,21 @@ class StoreTests(unittest.TestCase):
             "working", "reading", "task", "source", "Torget"))
 
         snapshot = store.snapshot()
-        snapshot["agents"]["claude"]["state"] = "done"
+        snapshot["agents"]["claude"]["jobs"][0]["state"] = "done"
 
-        self.assertEqual(store.snapshot()["agents"]["claude"]["state"],
-                         "working")
+        self.assertEqual(
+            self._job(store.snapshot(), "claude")["state"], "working")
 
     def test_updated_ms_is_nonnegative_integer_and_clamped(self):
         now = [-1.0]
         store = AgentStatusStore(now=lambda: now[0])
         store.apply("claude", Event(
             "waiting", None, "task", "source", None), observed_at=0.0)
-        self.assertEqual(store.snapshot()["agents"]["claude"]["updated_ms"], 0)
+        self.assertEqual(
+            self._job(store.snapshot(), "claude")["updated_ms"], 0)
 
         now[0] = 10 ** 20
-        age = store.snapshot()["agents"]["claude"]["updated_ms"]
+        age = self._job(store.snapshot(), "claude")["updated_ms"]
         self.assertIs(type(age), int)
         self.assertEqual(age, 0xFFFFFFFF)
 
@@ -539,6 +578,9 @@ class StoreTests(unittest.TestCase):
         self.assertNotIn(secret, repr(snapshot))
         self.assertNotIn("source_id", repr(snapshot))
         self.assertEqual(set(snapshot["agents"]["claude"]), {
+            "active_count", "jobs",
+        })
+        self.assertEqual(set(self._job(snapshot, "claude")), {
             "task_id", "event_id", "state", "project", "activity",
             "model", "effort", "updated_ms",
         })
@@ -549,7 +591,8 @@ class StoreTests(unittest.TestCase):
         store.apply("claude", Event(
             "working", "thinking", long_task_id, "source", "Torget"))
 
-        output_id = store.snapshot()["agents"]["claude"]["task_id"]
+        output_id = self._job(
+            store.snapshot(), "claude")["task_id"]
 
         self.assertEqual(output_id,
                          hashlib.sha256(long_task_id.encode()).hexdigest())
@@ -573,7 +616,7 @@ class StoreTests(unittest.TestCase):
         for provider, event in cases:
             with self.subTest(provider=provider):
                 self.assertTrue(store.apply(provider, event))
-                output = store.snapshot()["agents"][provider]
+                output = self._job(store.snapshot(), provider)
                 self.assertLessEqual(len(output["task_id"].encode("utf-8")),
                                      64)
                 self.assertNotIn("\ud800", output["event_id"])
@@ -946,11 +989,56 @@ class AgentStatusServiceTests(unittest.TestCase):
 
             self.assertEqual(service.poll_once(), 2)
             snapshot = service.snapshot()
-            self.assertEqual(snapshot["agents"]["claude"]["state"],
+            self.assertEqual(top_job(snapshot, "claude")["state"],
                              "working")
-            self.assertEqual(snapshot["agents"]["codex"]["state"],
+            self.assertEqual(top_job(snapshot, "codex")["state"],
                              "working")
             self.assertEqual(service.poll_once(), 0)
+
+    def test_stateless_codex_tool_events_stay_on_current_turn(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "codex" / "rollout-live.jsonl"
+            self._write_line(path, {
+                "type": "event_msg",
+                "timestamp": "2026-08-06T12:00:00Z",
+                "payload": {"type": "task_started", "turn_id": "turn-a"},
+            })
+            wall_time = AgentStatusService._event_wall_time({
+                "timestamp": "2026-08-06T12:00:02Z",
+            })
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 10.0,
+                _wall_time=lambda: wall_time)
+            self.assertEqual(service.poll_once(), 1)
+
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "type": "response_item",
+                    "timestamp": "2026-08-06T12:00:01Z",
+                    "payload": {
+                        "type": "custom_tool_call",
+                        "id": "tool-without-turn",
+                        "name": "exec",
+                    },
+                }) + "\n")
+            self.assertEqual(service.poll_once(), 1)
+
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "type": "event_msg",
+                    "timestamp": "2026-08-06T12:00:02Z",
+                    "payload": {
+                        "type": "task_complete",
+                        "turn_id": "turn-a",
+                    },
+                }) + "\n")
+            self.assertEqual(service.poll_once(), 1)
+
+            jobs = service.snapshot()["agents"]["codex"]["jobs"]
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual((jobs[0]["task_id"], jobs[0]["state"]),
+                             ("turn-a", "done"))
 
     def test_live_codex_activity_recovers_after_a_newer_task_completed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -975,8 +1063,10 @@ class AgentStatusServiceTests(unittest.TestCase):
                 _wall_time=lambda: wall_time)
 
             service.poll_once()
+            initial_jobs = provider_jobs(service.snapshot(), "codex")
             self.assertEqual(
-                service.snapshot()["agents"]["codex"]["state"], "done")
+                {job["task_id"]: job["state"] for job in initial_jobs},
+                {"other": "done"})
 
             private_marker = "synthetic-private-live-reasoning"
             with active_path.open("a", encoding="utf-8") as stream:
@@ -994,7 +1084,7 @@ class AgentStatusServiceTests(unittest.TestCase):
                 }) + "\n")
 
             self.assertEqual(service.poll_once(), 1)
-            codex = service.snapshot()["agents"]["codex"]
+            codex = top_job(service.snapshot(), "codex")
             self.assertEqual((codex["state"], codex["activity"]),
                              ("working", "thinking"))
             self.assertEqual(codex["task_id"], "active")
@@ -1072,7 +1162,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 1)
             snapshot = service.snapshot()
             self.assertEqual(snapshot["seq"], 1)
-            self.assertEqual(snapshot["agents"]["claude"]["state"], "done")
+            self.assertEqual(top_job(snapshot, "claude")["state"], "done")
 
             live = claude_event("assistant", stop_reason="end_turn")
             live["uuid"] = "event-live"
@@ -1083,7 +1173,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 1)
             snapshot = service.snapshot()
             self.assertEqual(snapshot["seq"], 2)
-            self.assertEqual(snapshot["agents"]["claude"]["state"],
+            self.assertEqual(top_job(snapshot, "claude")["state"],
                              "waiting")
 
     def test_small_same_path_replacement_backfills_without_public_replay(self):
@@ -1154,7 +1244,7 @@ class AgentStatusServiceTests(unittest.TestCase):
                 self.assertEqual(service.snapshot()["seq"], 0)
             baseline = service.snapshot()
             self.assertEqual(baseline["seq"], 1)
-            self.assertEqual(baseline["agents"]["claude"]["state"], "done")
+            self.assertEqual(top_job(baseline, "claude")["state"], "done")
 
             replacement = bytearray(data)
             replacement[JsonlTailer._READ_BYTES_PER_POLL + 100_000] = ord("B")
@@ -1179,7 +1269,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 1)
             snapshot = service.snapshot()
             self.assertEqual(snapshot["seq"], baseline["seq"] + 1)
-            self.assertEqual(snapshot["agents"]["claude"]["state"],
+            self.assertEqual(top_job(snapshot, "claude")["state"],
                              "waiting")
 
     def test_cold_eviction_replays_only_genuinely_appended_final_event(self):
@@ -1238,10 +1328,10 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 1)
             snapshot = service.snapshot()
             self.assertEqual(snapshot["seq"], baseline_seq + 1)
-            self.assertEqual(snapshot["agents"]["claude"]["state"],
+            self.assertEqual(top_job(snapshot, "claude")["state"],
                              "working")
-            self.assertEqual(snapshot["agents"]["claude"]["task_id"],
-                             claude_task_id("session-1", "event-live"))
+            self.assertEqual(top_job(snapshot, "claude")["task_id"],
+                             claude_task_id("session-1"))
 
     def test_fast_active_poll_does_not_repeat_recursive_discovery(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1299,9 +1389,9 @@ class AgentStatusServiceTests(unittest.TestCase):
 
             self.assertEqual(service.poll_once(), 1)
             snapshot = service.snapshot()
-            self.assertEqual(snapshot["agents"]["claude"]["state"], "done")
-            self.assertEqual(snapshot["agents"]["claude"]["task_id"],
-                             claude_task_id("session-1", "event-2"))
+            self.assertEqual(top_job(snapshot, "claude")["state"], "done")
+            self.assertEqual(top_job(snapshot, "claude")["task_id"],
+                             claude_task_id("session-1"))
             self.assertEqual(service.poll_once(), 0)
             self.assertEqual(service.snapshot()["seq"], 2)
 
@@ -1333,8 +1423,8 @@ class AgentStatusServiceTests(unittest.TestCase):
 
             self.assertEqual(service.poll_once(), 1)
             self.assertEqual(service.snapshot()["seq"], 2)
-            self.assertEqual(service.snapshot()["agents"]["claude"]["state"],
-                             "done")
+            self.assertEqual(
+                top_job(service.snapshot(), "claude")["state"], "done")
             self.assertNotIn(old_path, service._tailer._files)
             self.assertIn(new_path, service._tailer._files)
             self.assertEqual(service.poll_once(), 0)
@@ -1485,13 +1575,13 @@ class AgentStatusServiceTests(unittest.TestCase):
 
     def test_record_failures_are_isolated_and_diagnostics_are_sanitized(self):
         class ApplyFailsOnce:
-            def __init__(self, delegate):
+            def __init__(self, delegate, fail_event_id):
                 self.delegate = delegate
+                self.fail_event_id = fail_event_id
 
             def apply(self, provider, event, observed_at=None, order_at=None,
                       refresh_unchanged=True, event_id_override=None):
-                if event.task_id == claude_task_id(
-                        "session-1", "bad-apply"):
+                if event_id_override == self.fail_event_id:
                     raise LookupError("synthetic-private-apply-prompt")
                 return self.delegate.apply(
                     provider, event, observed_at, order_at,
@@ -1519,7 +1609,9 @@ class AgentStatusServiceTests(unittest.TestCase):
                 root / "claude", root / "codex", now=lambda: 0.0,
                 _wall_time=lambda: wall_time,
                 _diagnostic=diagnostics.append)
-            service._store = ApplyFailsOnce(service._store)
+            failed_event = classify_claude(records[2])
+            service._store = ApplyFailsOnce(
+                service._store, stable_event_id("claude", failed_event))
             original_classifier = agent_status.classify_claude
 
             def classify_with_failures(record):
@@ -1536,10 +1628,10 @@ class AgentStatusServiceTests(unittest.TestCase):
                         json.dumps(record) + "\n" for record in records))
                 self.assertEqual(service.poll_once(), 1)
 
-            snapshot = service.snapshot()["agents"]["claude"]
+            snapshot = top_job(service.snapshot(), "claude")
             self.assertEqual(snapshot["state"], "working")
             self.assertEqual(snapshot["task_id"],
-                             claude_task_id("session-1", "valid-final"))
+                             claude_task_id("session-1"))
             self.assertEqual(diagnostics, [
                 "agent-status classify: RuntimeError",
                 "agent-status apply: LookupError",
@@ -1558,7 +1650,7 @@ class AgentStatusServiceTests(unittest.TestCase):
 
             snapshot = service.snapshot()
 
-            self.assertEqual(snapshot["v"], 1)
+            self.assertEqual(snapshot["v"], 2)
             self.assertEqual(set(snapshot["agents"]), {"claude", "codex"})
 
     def test_startup_replay_uses_old_claude_and_codex_iso_timestamps(self):
@@ -1583,9 +1675,10 @@ class AgentStatusServiceTests(unittest.TestCase):
             snapshot = service.snapshot()
 
             for provider in ("claude", "codex"):
-                self.assertEqual(snapshot["agents"][provider]["state"],
-                                 "unknown")
-                self.assertIsNone(snapshot["agents"][provider]["activity"])
+                self.assertEqual(snapshot["agents"][provider], {
+                    "active_count": 0,
+                    "jobs": [],
+                })
 
     def test_old_file_mtime_is_fallback_when_timestamp_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1603,8 +1696,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 1)
 
             snapshot = service.snapshot()["agents"]["claude"]
-            self.assertEqual(snapshot["state"], "unknown")
-            self.assertIsNone(snapshot["activity"])
+            self.assertEqual(snapshot, {"active_count": 0, "jobs": []})
 
     def test_future_timestamp_falls_back_to_old_file_time(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1622,8 +1714,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(service.poll_once(), 1)
 
             snapshot = service.snapshot()["agents"]["claude"]
-            self.assertEqual(snapshot["state"], "unknown")
-            self.assertIsNone(snapshot["activity"])
+            self.assertEqual(snapshot, {"active_count": 0, "jobs": []})
 
     def test_task_complete_age_uses_completion_before_start_time(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1647,7 +1738,7 @@ class AgentStatusServiceTests(unittest.TestCase):
 
             self.assertEqual(service.poll_once(), 1)
 
-            snapshot = service.snapshot()["agents"]["codex"]
+            snapshot = top_job(service.snapshot(), "codex")
             self.assertEqual(snapshot["state"], "done")
             self.assertEqual(snapshot["updated_ms"], 2000)
 
@@ -1727,8 +1818,8 @@ class AgentStatusServiceTests(unittest.TestCase):
             now[0] += service._DISCOVERY_INTERVAL_S
 
             self.assertEqual(service.poll_once(), 1)
-            self.assertEqual(service.snapshot()["agents"]["claude"]["state"],
-                             "done")
+            self.assertEqual(
+                top_job(service.snapshot(), "claude")["state"], "done")
 
     def test_older_event_in_newer_mtime_file_cannot_overwrite_newer_status(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1755,9 +1846,9 @@ class AgentStatusServiceTests(unittest.TestCase):
 
             snapshot = service.snapshot()
             self.assertEqual(snapshot["seq"], 1)
-            self.assertEqual(snapshot["agents"]["claude"]["state"],
+            self.assertEqual(top_job(snapshot, "claude")["state"],
                              "working")
-            self.assertEqual(snapshot["agents"]["claude"]["updated_ms"],
+            self.assertEqual(top_job(snapshot, "claude")["updated_ms"],
                              30000)
 
 
@@ -1858,17 +1949,20 @@ class HandlerTests(unittest.TestCase):
 
             self.assertEqual(set(payload), {"v", "seq", "agents"})
             self.assertEqual(set(payload["agents"]), {"claude", "codex"})
-            allowed = {
+            allowed_job = {
                 "task_id", "event_id", "state", "project", "activity",
                 "model", "effort", "updated_ms",
             }
-            for agent in payload["agents"].values():
-                self.assertEqual(set(agent), allowed)
-                self.assertLessEqual(len(agent["task_id"].encode("utf-8")),
-                                     64)
-                if agent["project"] is not None:
+            for provider in payload["agents"].values():
+                self.assertEqual(set(provider), {"active_count", "jobs"})
+                self.assertLessEqual(len(provider["jobs"]), 4)
+                for job in provider["jobs"]:
+                    self.assertEqual(set(job), allowed_job)
                     self.assertLessEqual(
-                        len(agent["project"].encode("utf-8")), 16)
+                        len(job["task_id"].encode("utf-8")), 64)
+                    if job["project"] is not None:
+                        self.assertLessEqual(
+                            len(job["project"].encode("utf-8")), 16)
             for marker in markers.values():
                 self.assertNotIn(marker, serialized)
 
@@ -1894,7 +1988,7 @@ class HandlerTests(unittest.TestCase):
 
             self.assertEqual(service.poll_once(), 1)
             snapshot = service.snapshot()
-            self.assertEqual(snapshot["agents"]["codex"]["state"], "done")
+            self.assertEqual(top_job(snapshot, "codex")["state"], "done")
             self.assertNotIn(marker, json.dumps(snapshot))
 
             sent = self._request("/api/agent-status", service)
