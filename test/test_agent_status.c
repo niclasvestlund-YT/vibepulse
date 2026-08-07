@@ -131,6 +131,64 @@ int main(void) {
     free(json);
   }
 
+  check("modell och effort accepteras",
+        PARSE("{\"v\":1,\"seq\":2,\"agents\":{" \
+              "\"claude\":{\"task_id\":\"turn-2\"," \
+              "\"event_id\":\"event-2\",\"state\":\"working\"," \
+              "\"project\":\"Torget\",\"activity\":\"editing\"," \
+              "\"model\":\"FABLE 5\",\"effort\":\"XHIGH\"," \
+              "\"updated_ms\":2}," IDLE_CODEX "}}", &snapshot));
+  check("modell markeras som tillgänglig", snapshot.claude.has_model);
+  check("modell bevaras", strcmp(snapshot.claude.model, "FABLE 5") == 0);
+  check("effort markeras som tillgänglig", snapshot.claude.has_effort);
+  check("effort bevaras", strcmp(snapshot.claude.effort, "XHIGH") == 0);
+
+  check("saknad modellmetadata är bakåtkompatibel",
+        PARSE(PAYLOAD(CLAUDE_WORKING), &snapshot));
+  check("saknad modell är explicit", !snapshot.claude.has_model &&
+        snapshot.claude.model[0] == '\0');
+  check("saknad effort är explicit", !snapshot.claude.has_effort &&
+        snapshot.claude.effort[0] == '\0');
+
+  check("null modellmetadata accepteras",
+        PARSE("{\"v\":1,\"seq\":3,\"agents\":{" \
+              "\"claude\":{\"task_id\":\"turn-3\"," \
+              "\"event_id\":\"event-3\",\"state\":\"working\"," \
+              "\"project\":\"Torget\",\"activity\":\"reading\"," \
+              "\"model\":null,\"effort\":null,\"updated_ms\":3}," \
+              IDLE_CODEX "}}", &snapshot));
+  check("null modell är otillgänglig",
+        !snapshot.claude.has_model && !snapshot.claude.has_effort);
+
+  check_rejected_unchanged(
+      "modell med fel typ",
+      "{\"v\":1,\"seq\":4,\"agents\":{" \
+      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
+      "\"state\":\"working\",\"project\":\"Torget\"," \
+      "\"activity\":\"reading\",\"model\":7,\"updated_ms\":4}," \
+      IDLE_CODEX "}}", &snapshot);
+  check_rejected_unchanged(
+      "25 byte modell",
+      "{\"v\":1,\"seq\":4,\"agents\":{" \
+      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
+      "\"state\":\"working\",\"project\":\"Torget\"," \
+      "\"activity\":\"reading\",\"model\":\"1234567890123456789012345\"," \
+      "\"updated_ms\":4}," IDLE_CODEX "}}", &snapshot);
+  check_rejected_unchanged(
+      "13 byte effort",
+      "{\"v\":1,\"seq\":4,\"agents\":{" \
+      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
+      "\"state\":\"working\",\"project\":\"Torget\"," \
+      "\"activity\":\"reading\",\"effort\":\"1234567890123\"," \
+      "\"updated_ms\":4}," IDLE_CODEX "}}", &snapshot);
+  check_rejected_unchanged(
+      "dubbelt modellfält",
+      "{\"v\":1,\"seq\":4,\"agents\":{" \
+      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
+      "\"state\":\"working\",\"project\":\"Torget\"," \
+      "\"activity\":\"reading\",\"model\":\"FABLE 5\"," \
+      "\"model\":\"OPUS 5\",\"updated_ms\":4}," IDLE_CODEX "}}", &snapshot);
+
   check_rejected_unchanged(
       "fel version",
       "{\"v\":2,\"seq\":1,\"agents\":{" CLAUDE_WORKING "," IDLE_CODEX "}}",

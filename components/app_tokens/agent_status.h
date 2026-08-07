@@ -1,10 +1,13 @@
 #ifndef AGENT_STATUS_H
 #define AGENT_STATUS_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define TK_AGENT_ID_CAP 65
 #define TK_AGENT_PROJECT_CAP 17
+#define TK_AGENT_MODEL_CAP 25
+#define TK_AGENT_EFFORT_CAP 13
 
 typedef enum {
   TK_AGENT_IDLE,
@@ -33,6 +36,10 @@ typedef struct {
   char task_id[TK_AGENT_ID_CAP];
   char event_id[TK_AGENT_ID_CAP];
   char project[TK_AGENT_PROJECT_CAP];
+  char model[TK_AGENT_MODEL_CAP];
+  char effort[TK_AGENT_EFFORT_CAP];
+  bool has_model;
+  bool has_effort;
   tk_agent_state state;
   tk_agent_activity activity;
   uint32_t updated_ms;

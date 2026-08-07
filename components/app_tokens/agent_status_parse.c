@@ -358,6 +358,38 @@ static bool nullable_string_member(const cJSON *object, const char *key,
   return true;
 }
 
+static bool optional_nullable_string_member(const cJSON *object,
+                                            const char *key,
+                                            char *destination,
+                                            size_t capacity,
+                                            bool *has_value) {
+  size_t matches = 0;
+  const cJSON *item = NULL;
+  for (const cJSON *child = object->child; child; child = child->next) {
+    if (child->string && strcmp(child->string, key) == 0) {
+      item = child;
+      matches++;
+      if (matches > 1) return false;
+    }
+  }
+
+  *has_value = false;
+  destination[0] = '\0';
+  if (!item || cJSON_IsNull(item)) return true;
+  if (!cJSON_IsString(item) || !item->valuestring) return false;
+
+  const unsigned char *source = (const unsigned char *)item->valuestring;
+  size_t length = 0;
+  while (source[length] != '\0') {
+    if (source[length] < 0x20 || length + 1 >= capacity) return false;
+    length++;
+  }
+
+  memcpy(destination, source, length + 1);
+  *has_value = true;
+  return true;
+}
+
 static bool state_member(const cJSON *object, tk_agent_state *out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, "state");
   if (!cJSON_IsString(item) || !item->valuestring) return false;
@@ -408,6 +440,12 @@ static bool agent_member(const char *json, size_t len, const cJSON *root,
          nullable_string_member(agent, "project", out->project,
                                 sizeof out->project) &&
          activity_member(agent, &out->activity) &&
+         optional_nullable_string_member(agent, "model", out->model,
+                                         sizeof out->model,
+                                         &out->has_model) &&
+         optional_nullable_string_member(agent, "effort", out->effort,
+                                         sizeof out->effort,
+                                         &out->has_effort) &&
          uint32_member(json, len, root, agent, "updated_ms",
                        &out->updated_ms);
 }
