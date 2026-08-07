@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "lvgl.h"
 
@@ -71,7 +72,7 @@ static void dump_frame(const char *tag) {
   /* QA-dumpar får inte bero på var SDL:s nästa refresh råkar ligga. Tvinga
    * layout + redraw före snapshot så ett helt tillstånd fångas atomiskt. */
   lv_obj_update_layout(lv_screen_active());
-  lv_refr_now(NULL);
+  lv_obj_invalidate(lv_screen_active());
   lv_draw_buf_t *buf = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_XRGB8888);
   if (!buf) { printf("snapshot: misslyckades (%s)\n", tag); return; }
 
@@ -185,6 +186,39 @@ static void feed_tokens(void) {
   feed_tokens_file("tokens.json");
 }
 
+static tk_limit forecast_limit(double pct, int reset_min) {
+  tk_limit value = {0};
+  value.pct = pct;
+  value.reset_min = reset_min;
+  value.has_pct = 1;
+  value.has_reset = 1;
+  return value;
+}
+
+static void feed_forecast_outcomes(void) {
+  tk_tokens tokens = {0};
+  tokens.claude_week = forecast_limit(47, 300);
+  tokens.claude_forecast.state = TK_FORECAST_AT_RESET;
+  tokens.claude_forecast.pct_at_reset = 85;
+  tokens.claude_forecast.pace_factor = 1.4;
+  tokens.claude_forecast.has_pct_at_reset = 1;
+  tokens.claude_forecast.has_pace_factor = 1;
+
+  tokens.codex_week = forecast_limit(35, 2210);
+  tokens.codex_forecast.state = TK_FORECAST_EXHAUSTS;
+  struct tm saturday = {0};
+  saturday.tm_year = 126;
+  saturday.tm_mon = 7;
+  saturday.tm_mday = 8;
+  saturday.tm_hour = 5;
+  saturday.tm_isdst = -1;
+  tokens.codex_forecast.at_epoch = (int64_t)mktime(&saturday);
+  tokens.codex_forecast.offset_min = -540;
+  tokens.codex_forecast.has_at_epoch = 1;
+  tokens.codex_forecast.has_offset_min = 1;
+  tokens_apply(&tokens);
+}
+
 static void apply_agent_fixture(int idx) {
   int count = (int)(sizeof AGENT_FIXTURES / sizeof AGENT_FIXTURES[0]);
   agent_fixture_idx = (idx % count + count) % count;
@@ -222,7 +256,7 @@ static void platform_tour_cb(lv_timer_t *t) {
     case 7: tokens_show_view(1); apply_agent_fixture(5); break;
     case 8: dump_frame("vibepulse-codex-static"); break;
     case 9: tokens_show_view(2); break;
-    case 10: dump_frame("vibepulse-forecast-shell"); break;
+    case 10: dump_frame("vibepulse-forecast-collecting"); break;
     case 11: tokens_show_view(3); break;
     case 12: dump_frame("vibepulse-volume"); break;
     case 13:
@@ -282,7 +316,12 @@ static void run_vibepulse_static_qa(void) {
   dump_frame("vibepulse-codex-static");
 
   tokens_show_view(2);
-  dump_frame("vibepulse-forecast-shell");
+  dump_frame("vibepulse-forecast-collecting");
+  feed_forecast_outcomes();
+  dump_frame("vibepulse-forecast-outcomes");
+  feed_tokens_file("tokens-missing.json");
+  dump_frame("vibepulse-forecast-unavailable");
+  feed_tokens();
   tokens_show_view(3);
   dump_frame("vibepulse-volume");
 

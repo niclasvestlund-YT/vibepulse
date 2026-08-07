@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "../components/app_tokens/usage_presenter.h"
 
@@ -93,6 +94,56 @@ int main(void) {
   check("saknad quota förklaras utan hittepåvärde",
         strcmp(view.cards[0].reset_text, "QUOTA SAKNAS") == 0);
   check("saknat delta är tomt", view.cards[0].delta_text[0] == '\0');
+
+  tk_tokens forecasts = {0};
+  forecasts.claude_week = limit(47, 300, 7);
+  forecasts.claude_forecast.state = TK_FORECAST_AT_RESET;
+  forecasts.claude_forecast.has_pct_at_reset = 1;
+  forecasts.claude_forecast.pct_at_reset = 85;
+  forecasts.claude_forecast.has_pace_factor = 1;
+  forecasts.claude_forecast.pace_factor = 1.4;
+  forecasts.codex_week = limit(35, 2210, 5);
+  forecasts.codex_forecast.state = TK_FORECAST_EXHAUSTS;
+  forecasts.codex_forecast.has_at_epoch = 1;
+  struct tm saturday = {0};
+  saturday.tm_year = 126;
+  saturday.tm_mon = 7;
+  saturday.tm_mday = 8;
+  saturday.tm_hour = 5;
+  saturday.tm_isdst = -1;
+  forecasts.codex_forecast.at_epoch = (int64_t)mktime(&saturday);
+  forecasts.codex_forecast.has_offset_min = 1;
+  forecasts.codex_forecast.offset_min = -540;
+
+  usage_forecast_page_view forecast_page = {0};
+  usage_presenter_build_forecasts(&forecasts, &forecast_page);
+  check("veckotakt visar båda providers", forecast_page.row_count == 2);
+  check("Claude behåller riktig veckoprocent",
+        strcmp(forecast_page.rows[0].pct_text, "47%") == 0);
+  check("Claude visar prognos vid reset",
+        strcmp(forecast_page.rows[0].headline, "85% VID RESET") == 0);
+  check("Claude visar maxningsfaktor med en decimal",
+        strcmp(forecast_page.rows[0].detail,
+               "ÖKA 1,4× FÖR ATT MAXA") == 0);
+  check("Codex visar sann sluttid",
+        strcmp(forecast_page.rows[1].headline,
+               "QUOTAN TAR SLUT LÖR 05:00") == 0);
+  check("Codex avrundar tidsskillnad till timmar",
+        strcmp(forecast_page.rows[1].detail, "9 H TIDIGT") == 0);
+
+  tk_tokens collecting = {0};
+  collecting.claude_week = limit(5, 9841, 1);
+  collecting.claude_forecast.state = TK_FORECAST_COLLECTING;
+  usage_presenter_build_forecasts(&collecting, &forecast_page);
+  check("insamling visar riktig procent",
+        strcmp(forecast_page.rows[0].pct_text, "5%") == 0);
+  check("insamling har exakt ärlig copy",
+        strcmp(forecast_page.rows[0].headline, "SAMLAR TAKT") == 0 &&
+        forecast_page.rows[0].detail[0] == '\0');
+  check("saknad prognos är tydlig utan låtsasvärde",
+        strcmp(forecast_page.rows[1].pct_text, "–") == 0 &&
+        strcmp(forecast_page.rows[1].headline, "PROGNOS SAKNAS") == 0 &&
+        forecast_page.rows[1].detail[0] == '\0');
 
   if (failures == 0) {
     printf("OK: alla usage-presentertester gröna\n");

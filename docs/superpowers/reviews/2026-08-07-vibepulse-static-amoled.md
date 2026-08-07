@@ -15,7 +15,9 @@ Den statiska implementationen renderades från samma `app.c`,
 - `/tmp/torget-vibepulse-claude-static.bmp`
 - `/tmp/torget-vibepulse-claude-long-copy.bmp`
 - `/tmp/torget-vibepulse-codex-static.bmp`
-- `/tmp/torget-vibepulse-forecast-shell.bmp`
+- `/tmp/torget-vibepulse-forecast-collecting.bmp`
+- `/tmp/torget-vibepulse-forecast-outcomes.bmp`
+- `/tmp/torget-vibepulse-forecast-unavailable.bmp`
 - `/tmp/torget-vibepulse-volume.bmp`
 - `/tmp/torget-vibepulse-claude-missing.bmp`
 - `/tmp/torget-vibepulse-claude-restored.bmp`

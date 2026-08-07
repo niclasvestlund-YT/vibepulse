@@ -75,6 +75,7 @@ static struct {
   lv_obj_t *dots[TK_USAGE_SCREEN_VIEWS];
   provider_page claude;
   provider_page codex;
+  usage_card_widgets forecast_cards[2];
   lv_obj_t *volume_value;
   lv_obj_t *volume_sessions;
   lv_obj_t *volume_month;
@@ -315,6 +316,34 @@ static void apply_provider(provider_page *page, const tk_tokens *tokens,
   }
 }
 
+static void apply_forecast_row(usage_card_widgets *widgets,
+                               const usage_forecast_row_view *row) {
+  lv_color_t provider_color = row->provider == USAGE_PROVIDER_CLAUDE
+                                  ? COL_CLAUDE : COL_CODEX;
+  lv_label_set_text(widgets->label, row->label);
+  lv_label_set_text(widgets->delta, "");
+  lv_label_set_text(widgets->pct, row->pct_text);
+  lv_label_set_text(widgets->reset_short, row->headline);
+  lv_label_set_text(widgets->reset, row->detail);
+  lv_obj_add_flag(widgets->pct_suffix, LV_OBJ_FLAG_HIDDEN);
+
+  double pct = row->has_pct ? row->pct : 0.0;
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  int fill = (int)llround(pct * widgets->track_w / 100.0);
+  lv_obj_set_width(widgets->before_fill, fill);
+  lv_obj_set_width(widgets->today_fill, 0);
+  lv_obj_set_style_bg_color(widgets->before_fill, provider_color, 0);
+}
+
+static void apply_forecasts(const tk_tokens *tokens) {
+  usage_forecast_page_view view;
+  usage_presenter_build_forecasts(tokens, &view);
+  for (int i = 0; i < 2; i++) {
+    apply_forecast_row(&ui.forecast_cards[i], &view.rows[i]);
+  }
+}
+
 static void apply_metadata(provider_page *page,
                            const tk_agent_status *agent) {
   lv_label_set_text(page->model,
@@ -323,23 +352,12 @@ static void apply_metadata(provider_page *page,
                     agent && agent->has_effort ? agent->effort : "");
 }
 
-static void create_forecast_shell(void) {
+static void create_forecast_page(void) {
   lv_obj_t *tile = new_tile(2);
   provider_page page = {0};
   create_header(tile, &page, "VECKOTAKT");
-  usage_card_widgets claude = {0}, codex = {0};
-  create_card(tile, &claude, CARD_1_Y, CARD_H, false);
-  create_card(tile, &codex, CARD_2_Y, CARD_H, false);
-  lv_label_set_text(claude.label, "CLAUDE · VECKA");
-  lv_label_set_text(codex.label, "CODEX · VECKA");
-  lv_label_set_text(claude.pct, "–");
-  lv_label_set_text(codex.pct, "–");
-  lv_obj_add_flag(claude.pct_suffix, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_flag(codex.pct_suffix, LV_OBJ_FLAG_HIDDEN);
-  lv_label_set_text(claude.reset_short, "SAMLAR TAKT");
-  lv_label_set_text(codex.reset_short, "SAMLAR TAKT");
-  lv_label_set_text(claude.reset, "PROGNOS EFTER AMOLED-TITT");
-  lv_label_set_text(codex.reset, "PROGNOS EFTER AMOLED-TITT");
+  create_card(tile, &ui.forecast_cards[0], CARD_1_Y, CARD_H, false);
+  create_card(tile, &ui.forecast_cards[1], CARD_2_Y, CARD_H, false);
   create_pager(tile, 2);
 }
 
@@ -402,7 +420,7 @@ void usage_screen_create(lv_obj_t *root) {
   lv_obj_set_size(codex_footer, CONTENT_W, FOOTER_H);
   tk_agent_monitor_create_footer(codex_footer, false);
 
-  create_forecast_shell();
+  create_forecast_page();
   create_volume_page();
 }
 
@@ -410,6 +428,7 @@ void usage_screen_apply_tokens(const tk_tokens *tokens) {
   if (!tokens) return;
   apply_provider(&ui.claude, tokens, USAGE_PROVIDER_CLAUDE);
   apply_provider(&ui.codex, tokens, USAGE_PROVIDER_CODEX);
+  apply_forecasts(tokens);
 }
 
 void usage_screen_apply_agent(const tk_agent_snapshot *snapshot,

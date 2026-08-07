@@ -1,4 +1,7 @@
+import json
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +35,85 @@ class StubHistory:
 
 
 class ClaudeLimitHeaderTests(unittest.TestCase):
+    def test_desktop_process_token_wins_over_expired_keychain_token(self):
+        process_command = (
+            "/Users/test/Library/Application Support/Claude/claude-code/"
+            "2.1.219/claude.app/Contents/MacOS/claude "
+            "CLAUDE_CODE_OAUTH_TOKEN=fresh-process-token"
+        )
+        expired_keychain = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "expired-keychain-token",
+                "expiresAt": 1,
+            },
+        })
+
+        def run(command, **_kwargs):
+            if command[0] == "pgrep":
+                return mock.Mock(stdout="123\n")
+            if command[0] == "ps":
+                return mock.Mock(stdout=process_command)
+            if command[0] == "security":
+                return mock.Mock(stdout=expired_keychain)
+            raise AssertionError(command)
+
+        with mock.patch.object(tokenserver.subprocess, "run",
+                               side_effect=run):
+            token, expires_at = tokenserver._read_oauth_token()
+
+        self.assertEqual(token, "fresh-process-token")
+        self.assertIsNone(expires_at)
+
+    def test_unrelated_process_token_is_ignored(self):
+        unrelated_command = (
+            "/usr/bin/python3 worker.py "
+            "CLAUDE_CODE_OAUTH_TOKEN=unrelated-secret"
+        )
+        keychain = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "keychain-token",
+                "expiresAt": 1_900_000_000_000,
+            },
+        })
+
+        def run(command, **_kwargs):
+            if command[0] == "pgrep":
+                return mock.Mock(stdout="456\n")
+            if command[0] == "ps":
+                return mock.Mock(stdout=unrelated_command)
+            if command[0] == "security":
+                return mock.Mock(stdout=keychain)
+            raise AssertionError(command)
+
+        with mock.patch.object(tokenserver.subprocess, "run",
+                               side_effect=run):
+            token, expires_at = tokenserver._read_oauth_token()
+
+        self.assertEqual(token, "keychain-token")
+        self.assertEqual(expires_at, 1_900_000_000_000)
+
+    def test_keychain_remains_fallback_without_desktop_process(self):
+        keychain = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "standalone-token",
+                "expiresAt": 1_900_000_000_000,
+            },
+        })
+
+        def run(command, **_kwargs):
+            if command[0] == "pgrep":
+                return mock.Mock(stdout="")
+            if command[0] == "security":
+                return mock.Mock(stdout=keychain)
+            raise AssertionError(command)
+
+        with mock.patch.object(tokenserver.subprocess, "run",
+                               side_effect=run):
+            token, expires_at = tokenserver._read_oauth_token()
+
+        self.assertEqual(token, "standalone-token")
+        self.assertEqual(expires_at, 1_900_000_000_000)
+
     def _headers(self, model_bucket):
         return {
             "anthropic-ratelimit-unified-5h-utilization": "0.12",
@@ -101,6 +183,221 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(snapshot["claudeModelWeekPct"], 73.0)
         self.assertIsNone(snapshot["claudeModelWeekLabel"])
 
+    def test_stale_limits_refresh_in_background_without_blocking_response(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_probe():
+            started.set()
+            release.wait(timeout=1)
+            return {"weekPct": 48.0}
+
+        previous = (
+            tokenserver._last_limits,
+            tokenserver._last_probed,
+            tokenserver._limits_refreshing,
+        )
+        try:
+            tokenserver._last_limits = {"weekPct": 47.0}
+            tokenserver._last_probed = 0.0
+            tokenserver._limits_refreshing = False
+            with mock.patch.object(
+                    tokenserver, "_probe_limits", side_effect=slow_probe):
+                before = time.perf_counter()
+                limits = tokenserver.get_limits()
+                elapsed = time.perf_counter() - before
+                self.assertTrue(started.wait(timeout=0.2))
+                self.assertLess(elapsed, 0.1)
+                self.assertEqual(limits, {"weekPct": 47.0})
+                release.set()
+                for _ in range(20):
+                    if not tokenserver._limits_refreshing:
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(tokenserver._last_limits,
+                                 {"weekPct": 48.0})
+        finally:
+            release.set()
+            (tokenserver._last_limits,
+             tokenserver._last_probed,
+             tokenserver._limits_refreshing) = previous
+
+    def test_failed_background_refresh_keeps_last_good_limits(self):
+        previous = (
+            tokenserver._last_limits,
+            tokenserver._last_probed,
+            tokenserver._limits_refreshing,
+        )
+        try:
+            tokenserver._last_limits = {"weekPct": 47.0}
+            tokenserver._last_probed = 0.0
+            tokenserver._limits_refreshing = False
+            with mock.patch.object(
+                    tokenserver, "_probe_limits", return_value=None):
+                self.assertEqual(tokenserver.get_limits(),
+                                 {"weekPct": 47.0})
+                for _ in range(20):
+                    if not tokenserver._limits_refreshing:
+                        break
+                    time.sleep(0.01)
+            self.assertEqual(tokenserver._last_limits, {"weekPct": 47.0})
+        finally:
+            (tokenserver._last_limits,
+             tokenserver._last_probed,
+             tokenserver._limits_refreshing) = previous
+
+
+class CodexLimitLogTests(unittest.TestCase):
+    def test_latest_rate_limit_is_read_from_tail_without_read_text(self):
+        rate_limits = {
+            "primary": {
+                "used_percent": 35.0,
+                "window_minutes": 10080,
+                "resets_at": 1_900_000_000,
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout-large.jsonl"
+            path.write_bytes(
+                b'{"type":"noise"}\n' * 100_000 +
+                json.dumps({"rate_limits": rate_limits}).encode() + b"\n")
+
+            with mock.patch.object(
+                    Path, "read_text",
+                    side_effect=AssertionError("full file read is forbidden")):
+                found = tokenserver._read_latest_rate_limits(path)
+
+        self.assertEqual(found, rate_limits)
+
+    def test_reverse_scan_stops_at_configured_byte_limit(self):
+        rate_limits = {"primary": {"used_percent": 35.0}}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout-no-recent-limit.jsonl"
+            path.write_bytes(
+                json.dumps({"rate_limits": rate_limits}).encode() + b"\n" +
+                b'{"type":"noise"}\n' * 10_000)
+
+            found = tokenserver._read_latest_rate_limits(
+                path, block_size=4096, max_bytes=64 * 1024)
+
+        self.assertIsNone(found)
+
+    def test_codex_scan_refreshes_in_background_without_blocking(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_scan():
+            started.set()
+            release.wait(timeout=1)
+            return {"codexWeekPct": 49.0}
+
+        previous = (
+            tokenserver._last_codex_limits,
+            tokenserver._last_codex_read,
+            tokenserver._codex_refreshing,
+        )
+        try:
+            tokenserver._last_codex_limits = {"codexWeekPct": 48.0}
+            tokenserver._last_codex_read = 0.0
+            tokenserver._codex_refreshing = False
+            with mock.patch.object(
+                    tokenserver, "_scan_codex_limits",
+                    side_effect=slow_scan):
+                before = time.perf_counter()
+                limits = tokenserver._read_codex_limits()
+                elapsed = time.perf_counter() - before
+                self.assertTrue(started.wait(timeout=0.2))
+                self.assertLess(elapsed, 0.1)
+                self.assertEqual(limits, {"codexWeekPct": 48.0})
+                release.set()
+                for _ in range(20):
+                    if not tokenserver._codex_refreshing:
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(tokenserver._last_codex_limits,
+                                 {"codexWeekPct": 49.0})
+        finally:
+            release.set()
+            (tokenserver._last_codex_limits,
+             tokenserver._last_codex_read,
+             tokenserver._codex_refreshing) = previous
+
+
+class IncrementalUsageLogTests(unittest.TestCase):
+    def setUp(self):
+        self.previous_cache = tokenserver._file_cache
+        tokenserver._file_cache = {}
+
+    def tearDown(self):
+        tokenserver._file_cache = self.previous_cache
+
+    @staticmethod
+    def _line(message_id, tokens):
+        return json.dumps({
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "sessionId": "session-a",
+            "requestId": f"request-{message_id}",
+            "message": {
+                "id": message_id,
+                "usage": {"input_tokens": tokens},
+            },
+        }) + "\n"
+
+    def test_growing_log_is_parsed_only_from_previous_end(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            path = projects / "session.jsonl"
+            path.write_text(self._line("first", 5))
+            first_size = path.stat().st_size
+            first = tokenserver._compute(projects)
+
+            with path.open("a") as output:
+                output.write(self._line("second", 7))
+            with mock.patch.object(
+                    tokenserver, "_parse_file",
+                    wraps=tokenserver._parse_file) as parse_file:
+                second = tokenserver._compute(projects)
+
+        self.assertEqual(first["dayTokens"], 5)
+        self.assertEqual(second["dayTokens"], 12)
+        self.assertEqual(parse_file.call_args.kwargs["start_offset"], first_size)
+
+    def test_atomically_replaced_larger_log_is_reparsed_from_start(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            path = projects / "session.jsonl"
+            path.write_text(self._line("old", 5))
+            first = tokenserver._compute(projects)
+
+            replacement = projects / "replacement.jsonl"
+            replacement.write_text(
+                self._line("new", 7) + '{"type":"noise"}\n' * 20)
+            os.replace(replacement, path)
+            with mock.patch.object(
+                    tokenserver, "_parse_file",
+                    wraps=tokenserver._parse_file) as parse_file:
+                second = tokenserver._compute(projects)
+
+        self.assertEqual(first["dayTokens"], 5)
+        self.assertEqual(second["dayTokens"], 7)
+        self.assertEqual(parse_file.call_args.kwargs["start_offset"], 0)
+
+    def test_partial_last_line_is_completed_on_next_increment(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            path = projects / "session.jsonl"
+            pending = self._line("second", 7)
+            split_at = len(pending) // 2
+            path.write_text(self._line("first", 5) + pending[:split_at])
+
+            first = tokenserver._compute(projects)
+            with path.open("a") as output:
+                output.write(pending[split_at:])
+            second = tokenserver._compute(projects)
+
+        self.assertEqual(first["dayTokens"], 5)
+        self.assertEqual(second["dayTokens"], 12)
+
 
 class UsageSnapshotTests(unittest.TestCase):
     @staticmethod
@@ -125,6 +422,53 @@ class UsageSnapshotTests(unittest.TestCase):
             tokenserver._last_computed = 0.0
             return tokenserver.get_snapshot(
                 Path("/unused"), history=history, now_ts=now_ts)
+
+    def test_stale_usage_totals_refresh_in_background(self):
+        started = threading.Event()
+        release = threading.Event()
+        old_base = self._base()
+        new_base = dict(old_base, dayTokens=999)
+
+        def slow_compute(_projects_dir):
+            started.set()
+            release.wait(timeout=1)
+            return new_base
+
+        previous = (
+            tokenserver._last_result,
+            tokenserver._last_computed,
+            tokenserver._snapshot_refreshing,
+        )
+        try:
+            tokenserver._last_result = old_base
+            tokenserver._last_computed = (
+                time.monotonic() - tokenserver.RECOMPUTE_EVERY_S - 1)
+            tokenserver._snapshot_refreshing = False
+            with mock.patch.object(
+                    tokenserver, "_compute", side_effect=slow_compute), \
+                    mock.patch.object(tokenserver, "get_limits",
+                                      return_value={}), \
+                    mock.patch.object(tokenserver, "_read_codex_limits",
+                                      return_value={}):
+                before = time.perf_counter()
+                snapshot = tokenserver.get_snapshot(
+                    Path("/unused"), history=StubHistory(),
+                    now_ts=1_800_000_000)
+                elapsed = time.perf_counter() - before
+                self.assertTrue(started.wait(timeout=0.2))
+                self.assertLess(elapsed, 0.1)
+                self.assertEqual(snapshot["dayTokens"], 123)
+                release.set()
+                for _ in range(20):
+                    if not tokenserver._snapshot_refreshing:
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(tokenserver._last_result["dayTokens"], 999)
+        finally:
+            release.set()
+            (tokenserver._last_result,
+             tokenserver._last_computed,
+             tokenserver._snapshot_refreshing) = previous
 
     def test_snapshot_emits_today_hour_deltas_and_real_forecasts(self):
         local_tz = datetime.now().astimezone().tzinfo

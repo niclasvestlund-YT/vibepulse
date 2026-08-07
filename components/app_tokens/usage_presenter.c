@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static void format_reset(const tk_limit *limit, char *out, size_t capacity) {
   if (!limit->has_reset) return;
@@ -114,4 +115,97 @@ void usage_presenter_build_provider(const tk_tokens *tokens,
   build_card(&out->cards[0], USAGE_CARD_ALL_WEEK, "ALLA · VECKA",
              &tokens->codex_week);
   out->card_count = 1;
+}
+
+static void format_pace(double factor, char *out, size_t capacity) {
+  int tenths = (int)(factor * 10.0 + 0.5);
+  snprintf(out, capacity, "ÖKA %d,%d× FÖR ATT MAXA",
+           tenths / 10, tenths % 10);
+}
+
+static int format_exhaustion(const tk_forecast *forecast, char *out,
+                             size_t capacity) {
+  if (!forecast->has_at_epoch) return 0;
+  time_t timestamp = (time_t)forecast->at_epoch;
+  struct tm *local = localtime(&timestamp);
+  if (!local || local->tm_wday < 0 || local->tm_wday > 6) return 0;
+  static const char *weekdays[] = {
+      "SÖN", "MÅN", "TIS", "ONS", "TOR", "FRE", "LÖR",
+  };
+  snprintf(out, capacity, "QUOTAN TAR SLUT %s %02d:%02d",
+           weekdays[local->tm_wday], local->tm_hour, local->tm_min);
+  return 1;
+}
+
+static void format_offset(const tk_forecast *forecast, char *out,
+                          size_t capacity) {
+  if (!forecast->has_offset_min) return;
+  int64_t minutes = forecast->offset_min;
+  int64_t magnitude = minutes < 0 ? -minutes : minutes;
+  long long hours = (long long)((magnitude + 30) / 60);
+  if (minutes < 0) {
+    snprintf(out, capacity, "%lld H TIDIGT", hours);
+  } else if (minutes > 0) {
+    snprintf(out, capacity, "%lld H SENT", hours);
+  } else {
+    snprintf(out, capacity, "VID RESET");
+  }
+}
+
+static void build_forecast_row(usage_forecast_row_view *out,
+                               usage_provider provider, const char *label,
+                               const tk_limit *week,
+                               const tk_forecast *forecast) {
+  memset(out, 0, sizeof *out);
+  out->provider = provider;
+  snprintf(out->label, sizeof out->label, "%s", label);
+  if (week->has_pct) {
+    out->has_pct = 1;
+    out->pct = week->pct;
+    snprintf(out->pct_text, sizeof out->pct_text, "%.0f%%", week->pct);
+  } else {
+    snprintf(out->pct_text, sizeof out->pct_text, "–");
+    snprintf(out->headline, sizeof out->headline, "PROGNOS SAKNAS");
+    return;
+  }
+
+  switch (forecast->state) {
+    case TK_FORECAST_COLLECTING:
+      snprintf(out->headline, sizeof out->headline, "SAMLAR TAKT");
+      break;
+    case TK_FORECAST_AT_RESET:
+      if (!forecast->has_pct_at_reset || !forecast->has_pace_factor) {
+        snprintf(out->headline, sizeof out->headline, "PROGNOS SAKNAS");
+        break;
+      }
+      snprintf(out->headline, sizeof out->headline, "%d%% VID RESET",
+               forecast->pct_at_reset);
+      format_pace(forecast->pace_factor, out->detail, sizeof out->detail);
+      break;
+    case TK_FORECAST_EXHAUSTS:
+      if (!format_exhaustion(forecast, out->headline,
+                             sizeof out->headline)) {
+        snprintf(out->headline, sizeof out->headline, "PROGNOS SAKNAS");
+        break;
+      }
+      format_offset(forecast, out->detail, sizeof out->detail);
+      break;
+    case TK_FORECAST_UNAVAILABLE:
+    default:
+      snprintf(out->headline, sizeof out->headline, "PROGNOS SAKNAS");
+      break;
+  }
+}
+
+void usage_presenter_build_forecasts(const tk_tokens *tokens,
+                                     usage_forecast_page_view *out) {
+  if (!tokens || !out) return;
+  memset(out, 0, sizeof *out);
+  build_forecast_row(&out->rows[0], USAGE_PROVIDER_CLAUDE,
+                     "CLAUDE · VECKA", &tokens->claude_week,
+                     &tokens->claude_forecast);
+  build_forecast_row(&out->rows[1], USAGE_PROVIDER_CODEX,
+                     "CODEX · VECKA", &tokens->codex_week,
+                     &tokens->codex_forecast);
+  out->row_count = 2;
 }

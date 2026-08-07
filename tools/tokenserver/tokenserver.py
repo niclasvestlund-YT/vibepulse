@@ -56,9 +56,10 @@ LIMITS_EVERY_S = 120  # rate-limit-proben: snäll mot API:t, färsk nog för hyl
 # (day, ts, tokens, session, key) per loggrad med usage — det minsta som
 # behövs för dag-, månads-, takt- och sessionsaggregaten.
 _cache_lock = threading.Lock()
-_file_cache = {}   # path -> {"stat": (mtime, size), "records": [...]}
+_file_cache = {}   # path -> stat, parsed offset, month and compact records
 _last_result = None
 _last_computed = 0.0
+_snapshot_refreshing = False
 _history_lock = threading.Lock()
 _default_usage_history = None
 
@@ -75,15 +76,27 @@ def _get_usage_history(path=None):
         return _default_usage_history
 
 
-def _parse_file(path: Path, month_start: datetime):
-    """Alla usage-rader i en sessionslogg, som kompakta poster."""
+def _parse_file(path: Path, month_start: datetime, start_offset=0):
+    """Parse complete usage rows from ``start_offset`` and return new offset."""
     records = []
+    parsed_until = start_offset
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
+        with open(path, "rb") as f:
+            f.seek(start_offset)
+            while True:
+                line_start = f.tell()
+                raw_line = f.readline()
+                if not raw_line:
+                    break
+                if not raw_line.endswith(b"\n"):
+                    # A writer may still be appending this JSON row. Resume at
+                    # its beginning next time instead of losing the fragment.
+                    parsed_until = line_start
+                    break
+                parsed_until = f.tell()
                 try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
+                    entry = json.loads(raw_line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
                     continue  # halvskriven sista rad — nästa skanning tar den
                 usage = (entry.get("message") or {}).get("usage")
                 ts_raw = entry.get("timestamp")
@@ -116,12 +129,13 @@ def _parse_file(path: Path, month_start: datetime):
                 ))
     except OSError:
         pass  # borttagen under läsning — nästa skanning ser det
-    return records
+    return records, parsed_until
 
 
 def _compute(projects_dir: Path):
     now = datetime.now().astimezone()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_key = month_start.strftime("%Y-%m")
     today = now.strftime("%Y-%m-%d")
     hour_ago = now.timestamp() - 3600
 
@@ -138,10 +152,32 @@ def _compute(projects_dir: Path):
         live_paths.add(path)
         cached = _file_cache.get(path)
         stat_key = (st.st_mtime, st.st_size)
-        if cached and cached["stat"] == stat_key:
+        identity = (st.st_dev, st.st_ino)
+        if (cached and cached["stat"] == stat_key and
+                cached.get("identity") == identity):
             continue
-        _file_cache[path] = {"stat": stat_key,
-                             "records": _parse_file(path, month_start)}
+        can_append = (
+            cached is not None and
+            cached.get("month") == month_key and
+            cached.get("identity") == identity and
+            st.st_size > cached["stat"][1]
+        )
+        if can_append:
+            new_records, parsed_until = _parse_file(
+                path, month_start, start_offset=cached["offset"])
+            cached["records"].extend(new_records)
+            cached["stat"] = stat_key
+            cached["offset"] = parsed_until
+        else:
+            records, parsed_until = _parse_file(
+                path, month_start, start_offset=0)
+            _file_cache[path] = {
+                "stat": stat_key,
+                "identity": identity,
+                "offset": parsed_until,
+                "month": month_key,
+                "records": records,
+            }
     for stale in set(_file_cache) - live_paths:
         del _file_cache[stale]
 
@@ -175,7 +211,8 @@ def _compute(projects_dir: Path):
 
 # ---------------------------------------------------------------------------
 # Rate-limit-proben (Clawdmeter-mönstret): läs Claude Codes egen OAuth-token
-# ur nyckelringen och gör en minimal API-förfrågan — svaret är ointressant,
+# från den aktiva Claude Desktop-processen eller nyckelringen och gör en
+# minimal API-förfrågan — svaret är ointressant,
 # HEADRARNA är datat (anthropic-ratelimit-unified-*: sessionens 5h-fönster
 # och veckofönstret, i procent + återställningstid). max_tokens=0 betyder
 # att inget genereras: proben är i praktiken gratis. Tokenen lämnar aldrig
@@ -184,6 +221,7 @@ def _compute(projects_dir: Path):
 _limits_lock = threading.Lock()
 _last_limits = None
 _last_probed = 0.0
+_limits_refreshing = False
 _headers_logged = False
 # Probe-diagnostik, exponerad på "/": var i kedjan Claude-proben fastnar
 # (nyckelring → HTTP → headrar → mappning) plus de råa headernamnen.
@@ -191,9 +229,64 @@ _probe_status = "not_run"
 _probe_headers = []
 
 
+_CLAUDE_DESKTOP_PROCESS = re.compile(
+    r"^/Users/[^/\s]+/Library/Application Support/Claude/claude-code/"
+    r"[^/\s]+/claude\.app/Contents/MacOS/claude(?:\s|$)"
+)
+_CLAUDE_PROCESS_TOKEN = re.compile(
+    r"(?:^|\s)CLAUDE_CODE_OAUTH_TOKEN=([^\s]+)"
+)
+
+
+def _read_process_oauth_token():
+    """Return Claude Desktop's injected child token without logging it.
+
+    Claude Desktop refreshes OAuth itself and injects the current token into
+    its bundled Claude Code process. The older keychain record can therefore
+    be expired even while Claude Code is actively working. Only PIDs matching
+    Claude Desktop's bundled binary are inspected; unrelated process
+    environments are deliberately ignored.
+    """
+    try:
+        pid_output = subprocess.run(
+            [
+                "pgrep", "-f",
+                "/Library/Application Support/Claude/claude-code/.*"
+                "/claude.app/Contents/MacOS/claude",
+            ],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        return None
+
+    for raw_pid in pid_output.splitlines():
+        pid = raw_pid.strip()
+        if not pid.isdigit():
+            continue
+        try:
+            command = subprocess.run(
+                ["ps", "eww", "-p", pid, "-o", "command="],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+        except Exception:
+            continue
+        if not _CLAUDE_DESKTOP_PROCESS.match(command):
+            continue
+        match = _CLAUDE_PROCESS_TOKEN.search(command)
+        if match:
+            return match.group(1)
+    return None
+
+
 def _read_oauth_token():
-    """Claude Codes accessToken ur macOS-nyckelringen: (token, expires_at_ms).
-    (None, None) om otillgänglig."""
+    """Claude Codes active accessToken as ``(token, expires_at_ms)``.
+
+    Prefer Claude Desktop's refreshed process token. Standalone Claude Code
+    continues to use the macOS keychain fallback.
+    """
+    process_token = _read_process_oauth_token()
+    if process_token:
+        return process_token, None
     try:
         raw = subprocess.run(
             ["security", "find-generic-password",
@@ -270,7 +363,7 @@ def _probe_limits():
     global _probe_status, _probe_headers
     token, expires_at = _read_oauth_token()
     if not token:
-        _probe_status = "no_keychain_token"
+        _probe_status = "no_claude_oauth_token"
         return None
     if expires_at and expires_at / 1000 < time.time():
         # Tokenen har gått ut; Claude Code förnyar den i nyckelringen nästa
@@ -337,12 +430,31 @@ def _probe_limits():
     return found
 
 
-def get_limits():
-    global _last_limits, _last_probed
+def _refresh_limits():
+    global _last_limits, _last_probed, _limits_refreshing
+    try:
+        refreshed = _probe_limits()
+    except Exception:
+        refreshed = None
     with _limits_lock:
-        if time.monotonic() - _last_probed > LIMITS_EVERY_S:
-            _last_limits = _probe_limits()
-            _last_probed = time.monotonic()
+        if refreshed is not None:
+            _last_limits = refreshed
+        _last_probed = time.monotonic()
+        _limits_refreshing = False
+
+
+def get_limits():
+    global _limits_refreshing
+    with _limits_lock:
+        if ((_last_probed == 0.0 or
+             time.monotonic() - _last_probed > LIMITS_EVERY_S) and
+                not _limits_refreshing):
+            _limits_refreshing = True
+            threading.Thread(
+                target=_refresh_limits,
+                name="claude-limit-probe",
+                daemon=True,
+            ).start()
         return _last_limits
 
 
@@ -355,6 +467,12 @@ def get_limits():
 # som låtsas vara färska.
 
 CODEX_SESSIONS = Path(os.path.expanduser("~/.codex/sessions"))
+CODEX_LIMITS_EVERY_S = 30
+CODEX_LIMIT_SCAN_BYTES = 1024 * 1024
+_codex_limits_lock = threading.Lock()
+_last_codex_limits = None
+_last_codex_read = 0.0
+_codex_refreshing = False
 
 
 def _find_rate_limits(obj):
@@ -391,7 +509,47 @@ def _codex_window(win, now_ts):
     return round(float(pct), 1), reset_min, win.get("window_minutes")
 
 
-def _read_codex_limits():
+def _read_latest_rate_limits(path: Path, block_size=64 * 1024,
+                             max_bytes=CODEX_LIMIT_SCAN_BYTES):
+    """Read a rollout backwards and stop at its newest rate-limit event.
+
+    Active Codex rollouts can grow past 100 MB. Reading and splitting the
+    complete file on every display poll is both slow and memory hungry, while
+    the relevant event is normally within the final few kilobytes.
+    """
+    try:
+        with path.open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            position = source.tell()
+            fragment = b""
+            remaining = max_bytes
+            while position > 0 and remaining > 0:
+                read_size = min(block_size, position, remaining)
+                position -= read_size
+                remaining -= read_size
+                source.seek(position)
+                parts = (source.read(read_size) + fragment).split(b"\n")
+                fragment = parts.pop(0)
+                for raw_line in reversed(parts):
+                    if b'"rate_limits"' not in raw_line:
+                        continue
+                    try:
+                        found = _find_rate_limits(json.loads(raw_line))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    if found:
+                        return found
+            if position == 0 and b'"rate_limits"' in fragment:
+                try:
+                    return _find_rate_limits(json.loads(fragment))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+    except OSError:
+        pass
+    return None
+
+
+def _scan_codex_limits():
     """Senaste rate_limits-snapshoten ur de nyaste rollout-filerna."""
     if not CODEX_SESSIONS.is_dir():
         return {}
@@ -402,31 +560,51 @@ def _read_codex_limits():
         return {}
     now_ts = time.time()
     for path in newest:
-        try:
-            lines = path.read_text(errors="replace").splitlines()
-        except OSError:
+        rl = _read_latest_rate_limits(path)
+        if not rl:
             continue
-        for line in reversed(lines):
-            if '"rate_limits"' not in line:
+        out = {}
+        for key in ("primary", "secondary"):
+            win = _codex_window(rl.get(key), now_ts)
+            if not win:
                 continue
-            try:
-                rl = _find_rate_limits(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-            if not rl:
-                continue
-            out = {}
-            for key in ("primary", "secondary"):
-                win = _codex_window(rl.get(key), now_ts)
-                if not win:
-                    continue
-                pct, reset_min, window_minutes = win
-                # <= 10 h räknas som sessionsfönstret, längre som veckan.
-                bucket = "codexSession" if (window_minutes or 0) <= 600 else "codexWeek"
-                out.setdefault(f"{bucket}Pct", pct)
-                out.setdefault(f"{bucket}ResetMin", reset_min)
-            return out
+            pct, reset_min, window_minutes = win
+            # <= 10 h räknas som sessionsfönstret, längre som veckan.
+            bucket = (
+                "codexSession" if (window_minutes or 0) <= 600
+                else "codexWeek"
+            )
+            out.setdefault(f"{bucket}Pct", pct)
+            out.setdefault(f"{bucket}ResetMin", reset_min)
+        return out
     return {}
+
+
+def _refresh_codex_limits():
+    global _last_codex_limits, _last_codex_read, _codex_refreshing
+    try:
+        refreshed = _scan_codex_limits()
+    except Exception:
+        refreshed = {}
+    with _codex_limits_lock:
+        _last_codex_limits = refreshed
+        _last_codex_read = time.monotonic()
+        _codex_refreshing = False
+
+
+def _read_codex_limits():
+    global _codex_refreshing
+    with _codex_limits_lock:
+        if ((_last_codex_read == 0.0 or
+             time.monotonic() - _last_codex_read > CODEX_LIMITS_EVERY_S) and
+                not _codex_refreshing):
+            _codex_refreshing = True
+            threading.Thread(
+                target=_refresh_codex_limits,
+                name="codex-limit-scan",
+                daemon=True,
+            ).start()
+        return dict(_last_codex_limits or {})
 
 
 def _reset_at(now_ts, reset_minutes):
@@ -444,12 +622,34 @@ def _add_forecast(result, prefix, forecast):
     result[f"{prefix}ForecastOffsetMin"] = forecast.offset_minutes
 
 
-def get_snapshot(projects_dir: Path, history=None, now_ts=None):
-    global _last_result, _last_computed
+def _refresh_usage_totals(projects_dir):
+    global _last_result, _last_computed, _snapshot_refreshing
+    try:
+        refreshed = _compute(projects_dir)
+    except Exception:
+        refreshed = None
     with _cache_lock:
-        if _last_result is None or time.monotonic() - _last_computed > RECOMPUTE_EVERY_S:
+        if refreshed is not None:
+            _last_result = refreshed
+        _last_computed = time.monotonic()
+        _snapshot_refreshing = False
+
+
+def get_snapshot(projects_dir: Path, history=None, now_ts=None):
+    global _last_result, _last_computed, _snapshot_refreshing
+    with _cache_lock:
+        if _last_result is None:
             _last_result = _compute(projects_dir)
             _last_computed = time.monotonic()
+        elif (time.monotonic() - _last_computed > RECOMPUTE_EVERY_S and
+              not _snapshot_refreshing):
+            _snapshot_refreshing = True
+            threading.Thread(
+                target=_refresh_usage_totals,
+                args=(projects_dir,),
+                name="usage-total-refresh",
+                daemon=True,
+            ).start()
         result = dict(_last_result)
 
     # null = ärlig frånvaro (nyckelring/probe/loggar otillgängliga) — skärmen
