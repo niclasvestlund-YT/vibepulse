@@ -40,6 +40,7 @@
 static const char *TAG = "torget";
 
 #define TICK_EVERY_MS 100 /* ~10 Hz: ljusrampen är mjuk, CPU:n sover */
+#define DISPLAY_FLUSH_ROWS 12
 
 /* Nattläge: AMOLED tål mörker bäst av allt, och skärmen står i ett hem.
  * Aktivitet är villkoret, inte klockan: apparna rapporterar liv via
@@ -247,7 +248,9 @@ static void tick_cb(lv_timer_t *t) {
  * (ritbuffertarna bor i PSRAM). Torgets interna heap har ~30 KB som
  * största block — varje stor flush dog i NO_MEM och skärmen frös (hittat
  * via heap-telemetrin 2026-08-06: 81 KB fritt men största block 31 KB).
- * Med buffer_height 24 är flushen 23 KB och ryms med marginal.
+ * 24 rader fungerade normalt men kunde ändå tappa SPI-kön när TLS
+ * fragmenterade internminnet. Tolv rader är 11 520 byte: tre köade
+ * transaktioner ryms även under samtidiga HTTPS-hämtningar.
  *
  * Allt nedan är exakt BSP:ns bsp_display_lcd_init/indev_init med publika
  * API:er — enda avvikelserna är bufferthöjden och 16 KB LVGL-stack.
@@ -272,7 +275,8 @@ static void display_start(void) {
   ESP_ERROR_CHECK(esp_lv_adapter_init(&adapter_cfg));
 
   const bsp_display_config_t disp_config = {
-    .max_transfer_sz = BSP_LCD_H_RES * BSP_LCD_V_RES * BSP_LCD_BITS_PER_PIXEL / 8,
+    .max_transfer_sz = BSP_LCD_H_RES * DISPLAY_FLUSH_ROWS *
+                       BSP_LCD_BITS_PER_PIXEL / 8,
   };
   ESP_ERROR_CHECK(bsp_display_new(&disp_config, &s_panel, &s_panel_io));
 
@@ -284,7 +288,7 @@ static void display_start(void) {
       .rotation = ESP_LV_ADAPTER_ROTATE_0,
       .hor_res = BSP_LCD_H_RES,
       .ver_res = BSP_LCD_V_RES,
-      .buffer_height = 24, /* 23 KB per flush — se blockkommentaren ovan */
+      .buffer_height = DISPLAY_FLUSH_ROWS,
       .use_psram = true,
       .enable_ppa_accel = false,
       .require_double_buffer = true,

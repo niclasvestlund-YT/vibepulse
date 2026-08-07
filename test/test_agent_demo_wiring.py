@@ -31,6 +31,9 @@ monitor_source = (
 usage_source = (
     Path(__file__).parent / "../components/app_tokens/usage_screen.c"
 ).resolve().read_text(encoding="utf-8")
+platform_source = (
+    Path(__file__).parent / "../main/main.c"
+).resolve().read_text(encoding="utf-8")
 
 assert "LV_EVENT_CLICKED" in monitor_source
 assert "tk_completion_queue_dismiss" in monitor_source
@@ -38,3 +41,10 @@ assert "LV_EVENT_LONG_PRESSED" in monitor_source
 assert "torget_launcher_open" in monitor_source
 assert usage_source.count("tk_agent_monitor_create(root)") == 1
 assert "tk_agent_monitor_create_footer" not in usage_source
+
+# En QSPI-flush måste fortfarande rymmas när TLS tillfälligt fragmenterar
+# internminnet. Tolv rader är 11 520 byte och samma gräns ska styra både
+# SPI-bussen och LVGL-adaptern.
+assert "#define DISPLAY_FLUSH_ROWS 12" in platform_source
+assert ".buffer_height = DISPLAY_FLUSH_ROWS" in platform_source
+assert "BSP_LCD_H_RES * DISPLAY_FLUSH_ROWS" in platform_source
