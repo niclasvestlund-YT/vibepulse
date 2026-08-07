@@ -52,36 +52,38 @@ tk_agent_http_fetch_result tk_agent_http_fetch_bounded(
     return TK_AGENT_HTTP_FETCH_IO_ERROR;
   }
   response->status = io->get_status(context);
-  if (response->overflow || content_length >= TK_AGENT_HTTP_BODY_CAP) {
+  bool known_overflow =
+      response->overflow || content_length >= TK_AGENT_HTTP_BODY_CAP;
+  if (known_overflow) {
     response->overflow = true;
-    io->close(context);
-    return TK_AGENT_HTTP_FETCH_OVERFLOW;
   }
-  if (response->status != 200) {
-    io->close(context);
-    return TK_AGENT_HTTP_FETCH_OK;
-  }
+  bool capture = response->status == 200 && !known_overflow;
 
   char scratch[TK_AGENT_HTTP_READ_CHUNK];
-  while (!io->is_complete(context)) {
-    size_t remaining = TK_AGENT_HTTP_BODY_CAP - 1U - response->len;
-    int capacity = remaining < sizeof scratch
-                       ? (int)remaining + 1
-                       : (int)sizeof scratch;
+  size_t drained = 0;
+  for (;;) {
+    size_t budget = TK_AGENT_HTTP_BODY_CAP - drained;
+    int capacity = budget < sizeof scratch ? (int)budget
+                                            : (int)sizeof scratch;
     int read_len = io->read(context, scratch, capacity);
-    if (read_len < 0 ||
+    if (read_len < 0 || read_len > capacity ||
         (read_len == 0 && !io->is_complete(context))) {
       io->close(context);
       return TK_AGENT_HTTP_FETCH_IO_ERROR;
     }
-    if (read_len > capacity ||
+    if (read_len == 0) break;
+
+    drained += (size_t)read_len;
+    if (capture &&
         !tk_agent_http_response_append(response, scratch,
                                        (size_t)read_len)) {
       response->overflow = true;
       io->close(context);
       return TK_AGENT_HTTP_FETCH_OVERFLOW;
     }
+    if (drained == TK_AGENT_HTTP_BODY_CAP) break;
   }
   io->close(context);
-  return TK_AGENT_HTTP_FETCH_OK;
+  return known_overflow ? TK_AGENT_HTTP_FETCH_OVERFLOW
+                        : TK_AGENT_HTTP_FETCH_OK;
 }
