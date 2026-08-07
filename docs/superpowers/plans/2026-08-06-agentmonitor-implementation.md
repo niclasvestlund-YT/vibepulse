@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bygg Tokenmätaren till en sanningsenlig fysisk agentmonitor som visar Claude Code och Codex som stora animerade pixelkaraktärer i lägena JOBBAR, VÄNTAR, KLAR och FEL, med säker aktivitetsrad och lokal engångsnotis.
+**Goal:** Byt Tokenmätarens publika namn till VibePulse och bygg den till en sanningsenlig fysisk agentmonitor som visar Claude Code och Codex som stora animerade pixelkaraktärer i lägena JOBBAR, VÄNTAR, KLAR och FEL, med säker aktivitetsrad och lokal engångsnotis.
 
 **Architecture:** Macens tokenserver följer Claude- och Codex-loggar inkrementellt och publicerar ett litet, sanerat statuskontrakt ur minne. ESP32-appen parsar statusen i en separat statustask med återanvänd HTTP-klient och visar den i en appägd overlay ovanpå befintlig tileview; en lokal tvåminuterslease förhindrar fastfrusen JOBBAR-skärm. Bildassets ligger i flash, animationen invaliderar bara petens yta och ljudet körs i en egen lågprioriterad task.
 
@@ -37,6 +37,7 @@ Ingen implementationskod får skrivas innan förkontrollen är klar.
 |---|---|
 | `components/app_tokens/agent_status.h` | Delad statusmodell och enumvärden. |
 | `components/app_tokens/agent_status_parse.c/.h` | Strikt cJSON-parser för `/api/agent-status`. |
+| `components/app_tokens/agent_usage.c/.h` | Hosttestat val av den aktiva gräns som ligger närmast taket. |
 | `components/app_tokens/agent_monitor.c/.h` | Overlay, prioritetsval, lokal lease, dismissal och LVGL-animation. |
 | `components/app_tokens/agent_assets.c/.h` | Genererade flashlagrade LVGL-bilder; ingen runtime-avkodning. |
 | `components/app_tokens/agent_net.c` | Återanvänd 1 Hz-klient för statusendpointen. |
@@ -50,8 +51,12 @@ Ingen implementationskod får skrivas innan förkontrollen är klar.
 | `tools/tokenserver/tokenserver.py` | Startar statuswatchern och exponerar endpointen. |
 | `sim-fixtures/agent-status-*.json` | En deterministisk payload per visuell status. |
 | `test/test_agent_status.c` | C-parserns kontrakts- och fientliga tester. |
+| `test/test_agent_usage.c` | Hosttest av session/vecka/Fable-valet. |
 | `sim/main.c` | S-tangent, statuscykel och BMP-runda. |
 | `platform/fonts/plex_status_64.c` | Genererad snäv versalfont för huvudorden. |
+
+Det interna komponentnamnet `app_tokens` behålls. Det publika appnamnet,
+launcheretiketten och användardokumentationen heter VibePulse.
 
 `platform/torget.h`, `platform/torget_ui.c`, displaystart, rotation och touch ska inte ändras.
 
@@ -449,19 +454,43 @@ git commit -m "Lägg inkrementell agentstatus i tokenservern"
 - Create: `components/app_tokens/agent_assets.c`
 - Create: `components/app_tokens/agent_assets.h`
 - Create: `tools/agent_assets/build-agent-images.py`
+- Create: `components/app_tokens/agent_usage.c`
+- Create: `components/app_tokens/agent_usage.h`
 - Create: `components/app_tokens/agent_monitor.c`
 - Create: `components/app_tokens/agent_monitor.h`
+- Create: `test/test_agent_usage.c`
 - Create: `sim-fixtures/agent-status-{idle,claude-working,claude-waiting,claude-done,claude-error,codex-working,codex-waiting,codex-done,codex-error,unknown}.json`
 - Modify: `platform/fonts/fetch-and-convert.sh:19-34`
+- Modify: `platform/fonts/plex_icon_64.c`
 - Modify: `components/app_tokens/app.c:81-102,420-450,455-566`
 - Modify: `components/app_tokens/app_tokens.h:1-24`
 - Modify: `components/app_tokens/CMakeLists.txt:4-10`
+- Modify: `test/run.sh:25-29`
 - Modify: `sim/CMakeLists.txt:27-39`
 - Modify: `sim/main.c:151-212,214-262`
 
-- [ ] **Step 1: Generera den snäva 64px-statusfonten**
+- [ ] **Step 1: Byt launcheridentitet till VibePulse och generera fonterna**
 
-Lägg detta i fontskriptet:
+Byt `tokens_app.name` till `VIBEPULSE`. Ikonen ska använda samma deklarativa
+96 px-system som Solelkollen, utan ändring i `torget_icon_t`:
+
+```c
+.name = "VIBEPULSE",
+.icon = {
+  .font = &plex_icon_64,
+  .glyph = "V",
+  .plate_hex = 0x181636,
+  .glyph_hex = 0xFFFFFF,
+  .dot_hex = 0x7770FF,
+},
+```
+
+Ändra launcherfontens intervall från bara `S,T` till `S,T,V`; `T` får ligga
+kvar för bakåtkompatibilitet i fontasseten. Regenerera `plex_icon_64.c` och
+verifiera i simulatorns launcher att både Solelkollens `S` och VibePulse `V`
+visas utan fallback-glyf.
+
+Generera därefter den snäva 64px-statusfonten. Lägg detta i fontskriptet:
 
 ```sh
 # Agentmonitorns huvudord: JOBBAR, VÄNTAR, KLAR, FEL.
@@ -470,7 +499,9 @@ conv Bold 64 "0x41,0x42,0x45,0x46,0x4A,0x4B,0x4C,0x4E,0x4F,0x52,0x54,0x56,0xC4" 
 
 Run: `platform/fonts/fetch-and-convert.sh`
 
-Expected: `platform/fonts/plex_status_64.c` skapas och deklarerar `const lv_font_t plex_status_64`.
+Expected: `platform/fonts/plex_icon_64.c` innehåller `V`, VibePulse visas med
+rätt namn och ikon i launchern, och `platform/fonts/plex_status_64.c` skapas
+med `const lv_font_t plex_status_64`.
 
 - [ ] **Step 2: Importera de godkända källbilderna och generera LVGL-assets**
 
@@ -497,7 +528,53 @@ const lv_image_dsc_t tk_img_claude_open = {
 
 Codex får en separat I4-bild för molnet och A8-bilder för `>` och `_`, härledda från originalet. Ingen `lv_canvas`, PNG-avkodning eller runtime-allokering är tillåten.
 
-- [ ] **Step 3: Skapa overlayns publika API**
+- [ ] **Step 3: Välj och testa den usage-gräns som ligger närmast taket**
+
+Skriv först `test/test_agent_usage.c` med minst dessa fall och lägg det som ett eget clang-mål i `test/run.sh`:
+
+```c
+tk_limit session = {.pct = 21, .has_pct = true};
+tk_limit week = {.pct = 49, .has_pct = true};
+tk_limit fable = {.pct = 73, .has_pct = true};
+tk_agent_usage u = tk_agent_usage_pick(&session, &week, &fable);
+check(u.window == TK_USAGE_FABLE && u.pct == 73,
+      "Fable ska vinna när den ligger närmast taket");
+
+session.pct = 95;
+u = tk_agent_usage_pick(&session, &week, &fable);
+check(u.window == TK_USAGE_SESSION && u.pct == 95,
+      "sessionen ska kunna vinna över Fable");
+
+fable.has_pct = false;
+u = tk_agent_usage_pick(&session, &week, &fable);
+check(u.window == TK_USAGE_SESSION,
+      "null eller saknad Fable ska ignoreras");
+```
+
+Testet ska vara rött innan implementationen skapas. Exportera sedan:
+
+```c
+typedef enum {
+  TK_USAGE_NONE,
+  TK_USAGE_SESSION,
+  TK_USAGE_WEEK,
+  TK_USAGE_FABLE,
+} tk_usage_window;
+
+typedef struct {
+  bool has_pct;
+  double pct;
+  tk_usage_window window;
+} tk_agent_usage;
+
+tk_agent_usage tk_agent_usage_pick(const tk_limit *session,
+                                    const tk_limit *week,
+                                    const tk_limit *fable);
+```
+
+Välj högsta giltiga procent. Summera eller medelvärdesbilda aldrig fönstren. `NULL`, `has_pct == false` och icke-finita procenttal ignoreras. Vid exakt lika procent gäller den stabila ordningen Fable > vecka > session. Kör testet igen och se det bli grönt.
+
+- [ ] **Step 4: Skapa overlayns publika API**
 
 `agent_monitor.h` ska exportera exakt:
 
@@ -505,7 +582,7 @@ Codex får en separat I4-bild för molnet och A8-bilder för `>` och `_`, härle
 void tk_agent_monitor_create(lv_obj_t *root);
 void tk_agent_monitor_apply(const tk_agent_snapshot *snapshot, int64_t now_us);
 void tk_agent_monitor_tick(int64_t now_us);
-void tk_agent_monitor_set_usage(bool claude, bool has_pct, double pct);
+void tk_agent_monitor_set_usage(bool claude, tk_agent_usage usage);
 ```
 
 `agent_monitor.c` ska skapa overlayn som syskon till tileviewen i appens `root`, efter tileview och prickar så att den ligger överst. Den börjar med `LV_OBJ_FLAG_HIDDEN`, storlek 480 × 480, svart bakgrund och 24 px säker kant. Lägg till:
@@ -547,7 +624,9 @@ Lås färgerna i samma modul:
 
 Prioritet ska vara waiting > error > working > done > idle; vid lika prioritet vinner lägst `updated_ms`. Ett avvisat/dismissat `event_id` får inte visas igen förrän eventet ändras. Toppraden ska ha en Claude- och en Codexpunkt med minst 44 × 44 px gemensam touchyta; ett click växlar till den andra aktiva agenten tills en högre prioritet anländer. Reservera också högersta 44 × 44 px för `LV_SYMBOL_VOLUME_MAX` i låg opacity redan nu, så första glasgrinden granskar den slutliga toppradens geometri; Task 8 aktiverar reglaget.
 
-- [ ] **Step 4: Koppla overlayn till den befintliga appen**
+Bottenetiketten ska komma från `usage.window`: `SESSIONEN`, `VECKAN` eller `FABLE`. Saknas giltig usage visas streck och ingen fylld bar. Procent, bar och färg följer alltid det valda fönstret, så Claude Max kan visa exempelvis `73,0 % FABLE` när Fable ligger närmast taket.
+
+- [ ] **Step 5: Koppla overlayn till den befintliga appen**
 
 I slutet av `tk_create(root)`, efter prickarna men före nätstarten:
 
@@ -555,7 +634,19 @@ I slutet av `tk_create(root)`, efter prickarna men före nätstarten:
 tk_agent_monitor_create(root);
 ```
 
-I `tokens_apply()` ska Claudes och Codex aktuella procent skickas till `tk_agent_monitor_set_usage`. I appens befintliga 100 ms-timer ska `tk_agent_monitor_tick(now)` anropas. Lägg en wrapper i `app_tokens.h/.c` för simulatorn:
+I `tokens_apply()` ska respektive providers närmaste aktiva gräns skickas till monitorn:
+
+```c
+tk_agent_monitor_set_usage(
+    true,
+    tk_agent_usage_pick(&t->claude_session, &t->claude_week,
+                        &t->claude_model_week));
+tk_agent_monitor_set_usage(
+    false,
+    tk_agent_usage_pick(&t->codex_session, &t->codex_week, NULL));
+```
+
+Fable behålls samtidigt som en egen rad i VibePulse vanliga vy. I appens befintliga 100 ms-timer ska `tk_agent_monitor_tick(now)` anropas. Lägg en wrapper i `app_tokens.h/.c` för simulatorn:
 
 ```c
 void tokens_apply_agent_status(const tk_agent_snapshot *snapshot) {
@@ -565,7 +656,7 @@ void tokens_apply_agent_status(const tk_agent_snapshot *snapshot) {
 
 Inkludera `secrets.h` endast under `#ifdef ESP_PLATFORM`. Lägg dessutom ett lokalt fysiskt QA-läge bakom `#if defined(ESP_PLATFORM) && defined(TK_AGENT_DEMO)`. En 5-sekunderstimer ska cykla syntetiska Claude `working → waiting → done → error` med unika event-id:n. Makrot definieras bara i gitignorerade `secrets.h` under den första AMOLED-grinden och påverkar aldrig normal firmware.
 
-- [ ] **Step 5: Lägg statusfixturer och S-cykel i simulatorn**
+- [ ] **Step 6: Lägg statusfixturer och S-cykel i simulatorn**
 
 Varje fixture ska följa kontrakt v1 och ändra exakt en agent. Använd seq 200–209, unika `event_id`, projekt `Torget` och följande state/activity:
 
@@ -586,7 +677,9 @@ Utöka `poll_keys` till åtta tangenter och bind `SDL_SCANCODE_S`. Varje ny S-fl
 
 Utöka `platform_tour_cb` med statiska BMP:er för Claude/Codex working, waiting och done. Filnamnen ska bli `/tmp/torget-agent-claude-working.bmp` etc.
 
-- [ ] **Step 6: Verifiera statiskt i bänken**
+Lägg också en deterministisk Claude Max-usage i simulatorn: session 21 %, vecka 49 % och Fable 73 %. Claude-overlayn ska då visa `73,0 % FABLE`.
+
+- [ ] **Step 7: Verifiera statiskt i bänken**
 
 Run:
 
@@ -597,19 +690,26 @@ ninja -C sim/build
 ./sim/build/torget-sim
 ```
 
-Expected: S cyklar alla tillstånd; långtryck på overlayn öppnar launchern; click döljer eventet; KEY3-motsvarigheten N byter app och korrekt overlay återkommer när Tokenmätaren visas igen. Kontrollera även `lv_mem_monitor` efter overlaybygget och logga total/ledig/största block; ingen canvasallokering får synas.
+Expected: S cyklar alla tillstånd; långtryck på overlayn öppnar launchern;
+VibePulse visas med V-ikonen; click döljer eventet; KEY3-motsvarigheten N
+byter app och korrekt overlay återkommer när VibePulse visas igen. Kontrollera
+även `lv_mem_monitor` efter overlaybygget och logga total/ledig/största block;
+ingen canvasallokering får synas.
 
-- [ ] **Step 7: Commit den statiska overlayn**
+- [ ] **Step 8: Commit den statiska overlayn**
 
 ```bash
-git add platform/fonts/fetch-and-convert.sh platform/fonts/plex_status_64.c \
+git add platform/fonts/fetch-and-convert.sh platform/fonts/plex_icon_64.c \
+        platform/fonts/plex_status_64.c \
         components/app_tokens/assets components/app_tokens/agent_assets.c \
-        components/app_tokens/agent_assets.h components/app_tokens/agent_monitor.c \
+        components/app_tokens/agent_assets.h components/app_tokens/agent_usage.c \
+        components/app_tokens/agent_usage.h components/app_tokens/agent_monitor.c \
         components/app_tokens/agent_monitor.h components/app_tokens/app.c \
         components/app_tokens/app_tokens.h components/app_tokens/CMakeLists.txt \
         tools/agent_assets/build-agent-images.py \
+        test/test_agent_usage.c test/run.sh \
         sim-fixtures/agent-status-*.json sim/CMakeLists.txt sim/main.c
-git commit -m "Visa agentstatus som statisk overlay"
+git commit -m "Gör VibePulse till statisk agentmonitor"
 ```
 
 ### Task 4: Första fysiska AMOLED-grinden — före animation
@@ -637,6 +737,7 @@ Låt QA-timern cykla Claude working, waiting, done och error. Fotografera rakt f
 
 - `JOBBAR`, `VÄNTAR` och `KLAR` läses utan att gå fram till skärmen;
 - procenten är synlig men tydligt sekundär;
+- Claude Max visar `FABLE` när Fable ligger närmast taket;
 - projekt- och aktivitetsrad inte klipps;
 - vitt, korall, amber och rött skiljs på panelen;
 - inga ljusa kantlinjer eller gamla apppixlar syns efter KEY3/rotation.
@@ -995,7 +1096,7 @@ README ska dokumentera S-tangenten och agent-BMP:erna. Tokenserverns README ska 
 
 ```bash
 git add README.md tools/tokenserver/README.md sim-fixtures/README.md secrets.h.example
-git commit -m "Dokumentera Tokenmätarens agentmonitor"
+git commit -m "Dokumentera VibePulse agentmonitor"
 git status --short
 git log --oneline -12
 ```

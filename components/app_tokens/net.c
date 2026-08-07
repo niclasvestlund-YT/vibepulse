@@ -1,5 +1,5 @@
 /*
- * Tokenmätarens hämttask — appens eget nätverk. Tjänsten bor på LAN:et
+ * VibePulse-hämttasken — appens eget nätverk. Tjänsten bor på LAN:et
  * (tools/tokenserver på Macen, vanlig HTTP utan certifikat) och svarar på
  * någon sekund; 30 s-kadensen ger tickern färsk takt utan att störa Macen.
  *
@@ -13,7 +13,9 @@
 #include "esp_log.h"
 
 #include "app_tokens.h"
+#ifdef ESP_PLATFORM
 #include "secrets.h"
+#endif
 #include "tokens_parse.h"
 #include "torget.h"
 #include "torget_http.h"
@@ -34,7 +36,7 @@ static void net_task(void *arg) {
   /* Fasförskjutning: alla appars tasker släpps av torget_net_wait i samma
    * ögonblick, och samtidiga hämtningar + första omritningen visade sig
    * kunna svälta internminnet så SPI-flushen till panelen dog i NO_MEM.
-   * Tokenmätaren är den tålmodiga appen — den väntar tio sekunder och
+   * VibePulse är den tålmodiga appen — den väntar tio sekunder och
    * hamnar sedan i motfas mot Solelkollens 30-sekunderskadens. */
   vTaskDelay(pdMS_TO_TICKS(10000));
 
@@ -64,7 +66,7 @@ void tokens_net_start(void) {
 #else /* ingen TK_TOKENS_URL i secrets.h */
 
 void tokens_net_start(void) {
-  ESP_LOGW(TAG, "TK_TOKENS_URL saknas i secrets.h — Tokenmätaren visar streck");
+  ESP_LOGW(TAG, "TK_TOKENS_URL saknas i secrets.h — VibePulse visar streck");
 }
 
 #endif

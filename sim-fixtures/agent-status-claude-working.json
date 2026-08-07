@@ -1,0 +1,1 @@
+{"v":2,"seq":201,"agents":{"claude":{"active_count":1,"jobs":[{"task_id":"claude-task-201","event_id":"claude-working-201","state":"working","project":"Torget","activity":"editing","model":"FABLE 5","effort":"XHIGH","updated_ms":0}]},"codex":{"active_count":0,"jobs":[]}}}

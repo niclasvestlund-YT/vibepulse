@@ -1,0 +1,20 @@
+{
+  "v": 2,
+  "dayTokens": 219108100,
+  "dayTokensPerHour": 0,
+  "daySessions": 6,
+  "monthTokens": 610000000,
+  "claudeSessionPct": null,
+  "claudeSessionResetMin": null,
+  "claudeWeekPct": null,
+  "claudeWeekResetMin": null,
+  "claudeModelWeekPct": null,
+  "claudeModelWeekResetMin": null,
+  "codexSessionPct": null,
+  "codexSessionResetMin": null,
+  "codexWeekPct": null,
+  "codexWeekResetMin": null,
+  "claudeModelWeekLabel": null,
+  "claudeForecastState": "unavailable",
+  "codexForecastState": "unavailable"
+}

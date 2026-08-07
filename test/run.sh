@@ -27,3 +27,44 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   test_tokens.c /tmp/torget-cjson.o \
   -o /tmp/torget-tokens-test
 /tmp/torget-tokens-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/usage_presenter.c \
+  test_usage_presenter.c \
+  -o /tmp/torget-usage-presenter-test
+/tmp/torget-usage-presenter-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  -DFIXTURES_DIR="\"$(cd ../sim-fixtures && pwd)\"" \
+  ../components/app_tokens/agent_status_parse.c \
+  test_agent_status.c /tmp/torget-cjson.o \
+  -o /tmp/torget-agent-status-test
+/tmp/torget-agent-status-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_usage.c \
+  test_agent_usage.c \
+  -lm \
+  -o /tmp/torget-agent-usage-test
+/tmp/torget-agent-usage-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_monitor_policy.c \
+  test_agent_monitor_policy.c \
+  -o /tmp/torget-agent-monitor-policy-test
+/tmp/torget-agent-monitor-policy-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_completion_policy.c \
+  test_agent_completion_policy.c \
+  -o /tmp/torget-agent-completion-policy-test
+/tmp/torget-agent-completion-policy-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_net_policy.c \
+  test_agent_net_policy.c \
+  -o /tmp/torget-agent-net-policy-test
+/tmp/torget-agent-net-policy-test
+
+python3 test_agent_demo_wiring.py
+python3 test_agent_net_wiring.py

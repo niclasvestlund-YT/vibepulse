@@ -40,6 +40,7 @@
 static const char *TAG = "torget";
 
 #define TICK_EVERY_MS 100 /* ~10 Hz: ljusrampen är mjuk, CPU:n sover */
+#define DISPLAY_FLUSH_ROWS 12
 
 /* Nattläge: AMOLED tål mörker bäst av allt, och skärmen står i ett hem.
  * Aktivitet är villkoret, inte klockan: apparna rapporterar liv via
@@ -117,6 +118,30 @@ static void scan_debug(void) {
 
 static bool s_first_start = true;
 
+/* Reservnätet (telefonens internetdelning — beslut 2026-08-07) är valfritt:
+ * gamla secrets.h utan TG_WIFI2_* bygger oförändrat via tomma defaultar. */
+#ifndef TG_WIFI2_SSID
+#define TG_WIFI2_SSID ""
+#define TG_WIFI2_PASS ""
+#endif
+
+static const char *const s_ssid[2] = { TG_WIFI_SSID, TG_WIFI2_SSID };
+static const char *const s_pass[2] = { TG_WIFI_PASS, TG_WIFI2_PASS };
+static int s_nat;         /* vilket av näten vi jagar just nu             */
+static int s_nat_missar;  /* missar i rad på DET nätet                    */
+
+/* 4 missar ≈ 10-15 s per nät innan vi provar det andra — snabbt nog för
+ * bilen, trögt nog att inte fladdra när hemmanätet har en dålig stund. */
+#define NAT_MISSAR_INNAN_BYTE 4
+
+static void wifi_apply(int idx) {
+  wifi_config_t cfg = { 0 };
+  strlcpy((char *)cfg.sta.ssid, s_ssid[idx], sizeof cfg.sta.ssid);
+  strlcpy((char *)cfg.sta.password, s_pass[idx], sizeof cfg.sta.password);
+  cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
+}
+
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
   (void)arg;
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -126,12 +151,22 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     xEventGroupClearBits(s_net_events, WIFI_GOT_IP);
     /* Orsakskoden är diagnosen: 201 = nätet syns inte alls (fel namn, eller
      * bara 5 GHz — S3:an hör enbart 2,4 GHz), 15/204 = fel lösenord. */
-    ESP_LOGW(TAG, "WiFi tappat (orsak %d), återansluter",
-             ((wifi_event_sta_disconnected_t *)data)->reason);
+    ESP_LOGW(TAG, "WiFi tappat (\"%s\", orsak %d), återansluter",
+             s_ssid[s_nat], ((wifi_event_sta_disconnected_t *)data)->reason);
+    /* Växelbruk hem/hotspot: efter NAT_MISSAR_INNAN_BYTE missar i rad provas
+     * det andra nätet (om ifyllt). Ingen prioritet — det som svarar vinner,
+     * och tappas det börjar jakten om. */
+    if (s_ssid[1][0] != '\0' && ++s_nat_missar >= NAT_MISSAR_INNAN_BYTE) {
+      s_nat = !s_nat;
+      s_nat_missar = 0;
+      ESP_LOGI(TAG, "provar \"%s\" i stället", s_ssid[s_nat]);
+      wifi_apply(s_nat);
+    }
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_wifi_connect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-    ESP_LOGI(TAG, "WiFi uppe");
+    ESP_LOGI(TAG, "WiFi uppe (\"%s\")", s_ssid[s_nat]);
+    s_nat_missar = 0;
     xEventGroupSetBits(s_net_events, WIFI_GOT_IP);
   }
 }
@@ -148,13 +183,8 @@ static void wifi_start(void) {
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
     IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL, NULL));
 
-  wifi_config_t cfg = { 0 };
-  strlcpy((char *)cfg.sta.ssid, TG_WIFI_SSID, sizeof cfg.sta.ssid);
-  strlcpy((char *)cfg.sta.password, TG_WIFI_PASS, sizeof cfg.sta.password);
-  cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
+  wifi_apply(0);                  /* hemmanätet först; växelbruket tar över */
   ESP_ERROR_CHECK(esp_wifi_start());
 }
 
@@ -247,7 +277,9 @@ static void tick_cb(lv_timer_t *t) {
  * (ritbuffertarna bor i PSRAM). Torgets interna heap har ~30 KB som
  * största block — varje stor flush dog i NO_MEM och skärmen frös (hittat
  * via heap-telemetrin 2026-08-06: 81 KB fritt men största block 31 KB).
- * Med buffer_height 24 är flushen 23 KB och ryms med marginal.
+ * 24 rader fungerade normalt men kunde ändå tappa SPI-kön när TLS
+ * fragmenterade internminnet. Tolv rader är 11 520 byte: tre köade
+ * transaktioner ryms även under samtidiga HTTPS-hämtningar.
  *
  * Allt nedan är exakt BSP:ns bsp_display_lcd_init/indev_init med publika
  * API:er — enda avvikelserna är bufferthöjden och 16 KB LVGL-stack.
@@ -272,7 +304,8 @@ static void display_start(void) {
   ESP_ERROR_CHECK(esp_lv_adapter_init(&adapter_cfg));
 
   const bsp_display_config_t disp_config = {
-    .max_transfer_sz = BSP_LCD_H_RES * BSP_LCD_V_RES * BSP_LCD_BITS_PER_PIXEL / 8,
+    .max_transfer_sz = BSP_LCD_H_RES * DISPLAY_FLUSH_ROWS *
+                       BSP_LCD_BITS_PER_PIXEL / 8,
   };
   ESP_ERROR_CHECK(bsp_display_new(&disp_config, &s_panel, &s_panel_io));
 
@@ -284,7 +317,7 @@ static void display_start(void) {
       .rotation = ESP_LV_ADAPTER_ROTATE_0,
       .hor_res = BSP_LCD_H_RES,
       .ver_res = BSP_LCD_V_RES,
-      .buffer_height = 24, /* 23 KB per flush — se blockkommentaren ovan */
+      .buffer_height = DISPLAY_FLUSH_ROWS,
       .use_psram = true,
       .enable_ppa_accel = false,
       .require_double_buffer = true,

@@ -582,4 +582,3 @@ lv_font_t plex_icon_64 = {
 
 
 #endif /*#if PLEX_ICON_64*/
-

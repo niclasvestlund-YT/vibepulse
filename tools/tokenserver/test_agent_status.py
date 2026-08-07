@@ -1,0 +1,2002 @@
+import hashlib
+import json
+import os
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from tools.tokenserver import agent_status, tokenserver
+from tools.tokenserver.agent_status import (
+    Event,
+    AgentStatusStore,
+    AgentStatusService,
+    JsonlTailer,
+    classify_claude,
+    classify_codex,
+    sanitize_project,
+    stable_event_id,
+)
+
+
+def claude_event(entry_type, stop_reason=None, tool_name=None, tool_input=None):
+    content = []
+    if tool_name is not None:
+        content.append({"type": "tool_use", "name": tool_name,
+                        "input": tool_input or {}})
+    return {
+        "type": entry_type,
+        "sessionId": "session-1",
+        "uuid": "event-1",
+        "cwd": "/Users/test/Torget",
+        "timestamp": "2026-08-06T10:00:00Z",
+        "message": {"stop_reason": stop_reason, "content": content},
+    }
+
+
+def claude_task_id(session_id):
+    return hashlib.sha256(
+        session_id.encode("utf-8", errors="surrogatepass")
+    ).hexdigest()
+
+
+def provider_jobs(snapshot, provider):
+    return snapshot["agents"][provider]["jobs"]
+
+
+def top_job(snapshot, provider):
+    return provider_jobs(snapshot, provider)[0]
+
+
+class ClassificationTests(unittest.TestCase):
+    def test_claude_reads_model_and_effort_only_from_top_level_message(self):
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "model": "claude-opus-5"})
+        entry["message"]["model"] = "claude-fable-5"
+        entry["message"]["effort"] = "xhigh"
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.model, "FABLE 5")
+        self.assertEqual(event.effort, "XHIGH")
+        self.assertNotIn("OPUS", repr(event))
+
+    def test_claude_does_not_take_model_from_nested_tool_input(self):
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "model": "claude-opus-5"})
+
+        event = classify_claude(entry)
+
+        self.assertIsNone(event.model)
+        self.assertIsNone(event.effort)
+
+    def test_claude_user_starts_work(self):
+        event = classify_claude(claude_event("user"))
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="thinking",
+            task_id=claude_task_id("session-1"),
+            source_id="event-1",
+            project="Torget",
+        ))
+
+    def test_claude_events_in_one_session_share_task_identity(self):
+        session_id = "123e4567-e89b-12d3-a456-426614174000"
+        source_id = "123e4567-e89b-12d3-a456-426614174001"
+        entry = claude_event("user")
+        entry["sessionId"] = session_id
+        entry["uuid"] = source_id
+
+        event = classify_claude(entry)
+        changed_session = dict(entry, sessionId=session_id[:-1] + "2")
+        changed_source = dict(entry, uuid=source_id[:-1] + "3")
+
+        self.assertEqual(len(event.task_id.encode("utf-8")), 64)
+        self.assertEqual(event.task_id, claude_task_id(session_id))
+        self.assertNotEqual(
+            event.task_id, classify_claude(changed_session).task_id)
+        self.assertEqual(event.task_id,
+                         classify_claude(changed_source).task_id)
+        self.assertNotEqual(event.source_id,
+                            classify_claude(changed_source).source_id)
+
+    def test_claude_task_identity_ignores_event_uuid(self):
+        first = claude_event("user")
+        first["sessionId"] = "session"
+        first["uuid"] = "event-1"
+        second = dict(first, uuid="event-2")
+
+        self.assertEqual(classify_claude(first).task_id,
+                         classify_claude(second).task_id)
+        self.assertNotEqual(classify_claude(first).source_id,
+                            classify_claude(second).source_id)
+
+    def test_claude_end_turn_waits_but_does_not_finish(self):
+        event = classify_claude(claude_event("assistant", stop_reason="end_turn"))
+
+        self.assertEqual(event.state, "waiting")
+        self.assertIsNone(event.activity)
+        self.assertNotEqual(event.state, "done")
+
+    def test_claude_success_result_finishes(self):
+        entry = claude_event("result")
+        entry["subtype"] = "success"
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.state, "done")
+        self.assertIsNone(event.activity)
+
+    def test_claude_success_with_explicit_error_does_not_false_finish(self):
+        entry = claude_event("result")
+        entry["subtype"] = "success"
+        entry["error"] = {}
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.state, "error")
+
+    def test_claude_ask_user_question_waits_for_input(self):
+        event = classify_claude(claude_event(
+            "assistant", tool_name="AskUserQuestion"))
+
+        self.assertEqual((event.state, event.activity),
+                         ("waiting", "waiting_input"))
+
+    def test_claude_permission_tool_waits_for_approval(self):
+        event = classify_claude(claude_event(
+            "assistant", tool_name="RequestPermission"))
+
+        self.assertEqual((event.state, event.activity),
+                         ("waiting", "waiting_approval"))
+
+    def test_claude_permission_status_waits_for_approval(self):
+        entry = claude_event("system")
+        entry["subtype"] = "permission_denied"
+
+        event = classify_claude(entry)
+
+        self.assertEqual((event.state, event.activity),
+                         ("waiting", "waiting_approval"))
+
+    def test_claude_editing_tools(self):
+        for tool_name in ("Edit", "Write", "apply_patch"):
+            with self.subTest(tool_name=tool_name):
+                event = classify_claude(claude_event(
+                    "assistant", tool_name=tool_name))
+                self.assertEqual((event.state, event.activity),
+                                 ("working", "editing"))
+
+    def test_claude_read_tool(self):
+        event = classify_claude(claude_event("assistant", tool_name="Read"))
+
+        self.assertEqual((event.state, event.activity),
+                         ("working", "reading"))
+
+    def test_claude_search_tools(self):
+        for tool_name in ("Glob", "Grep"):
+            with self.subTest(tool_name=tool_name):
+                event = classify_claude(claude_event(
+                    "assistant", tool_name=tool_name))
+                self.assertEqual((event.state, event.activity),
+                                 ("working", "searching"))
+
+    def test_claude_test_command(self):
+        event = classify_claude(claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "./test/run.sh"}))
+
+        self.assertEqual((event.state, event.activity),
+                         ("working", "testing"))
+
+    def test_claude_build_command(self):
+        event = classify_claude(claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "cmake --build build"}))
+
+        self.assertEqual((event.state, event.activity),
+                         ("working", "building"))
+
+    def test_claude_ordinary_command(self):
+        event = classify_claude(claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status --short"}))
+
+        self.assertEqual((event.state, event.activity),
+                         ("working", "running"))
+
+    def test_claude_event_never_retains_a_command(self):
+        secret_command = "printf private-prompt-and-command"
+        event = classify_claude(claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": secret_command}))
+
+        self.assertNotIn(secret_command, repr(event))
+
+    def test_codex_task_started_uses_turn_as_task_identity(self):
+        event = classify_codex({
+            "type": "event_msg",
+            "timestamp": "2026-08-06T10:00:00Z",
+            "payload": {"type": "task_started", "turn_id": "turn-7"},
+        })
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="thinking",
+            task_id="turn-7",
+            source_id="turn-7",
+            project=None,
+        ))
+
+    def test_codex_turn_context_reads_top_level_model_effort_and_project(self):
+        event = classify_codex({
+            "type": "turn_context",
+            "payload": {
+                "turn_id": "turn-7",
+                "cwd": "/Users/test/Torget",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "settings": {"model": "nested-private-model"},
+            },
+        })
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="thinking",
+            task_id="turn-7",
+            source_id="turn-7",
+            project="Torget",
+            model="GPT-5.6 SOL",
+            effort="XHIGH",
+        ))
+        self.assertNotIn("nested-private-model", repr(event))
+
+    def test_metadata_is_control_free_and_bounded_by_utf8_bytes(self):
+        entry = claude_event("assistant", tool_name="Read")
+        entry["message"]["model"] = "ok\x00" + "😀" * 20
+        entry["message"]["effort"] = "max\n" + "å" * 20
+
+        event = classify_claude(entry)
+
+        self.assertLessEqual(len(event.model.encode("utf-8")), 24)
+        self.assertLessEqual(len(event.effort.encode("utf-8")), 12)
+        self.assertNotIn("\x00", event.model)
+        self.assertNotIn("\n", event.effort)
+
+    def test_codex_overlong_turn_identity_is_hashed_without_collision_truncation(self):
+        first_id = "å" * 40
+        second_id = "å" * 39 + "ä"
+
+        first = classify_codex({
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": first_id},
+        })
+        second = classify_codex({
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": second_id},
+        })
+
+        self.assertEqual(first.task_id,
+                         hashlib.sha256(first_id.encode()).hexdigest())
+        self.assertEqual(len(first.task_id.encode("utf-8")), 64)
+        self.assertNotEqual(first.task_id, second.task_id)
+
+    def test_codex_task_complete_finishes_same_task(self):
+        event = classify_codex({
+            "type": "event_msg",
+            "timestamp": "2026-08-06T10:00:01Z",
+            "payload": {"type": "task_complete", "turn_id": "turn-7"},
+        })
+
+        self.assertEqual((event.state, event.activity, event.task_id),
+                         ("done", None, "turn-7"))
+
+    def test_codex_task_complete_with_explicit_error_does_not_false_finish(self):
+        event = classify_codex({
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "turn_id": "turn-7",
+                "error": {},
+            },
+        })
+
+        self.assertEqual(event.state, "error")
+
+    def test_codex_reasoning_refreshes_live_work_between_lifecycle_events(self):
+        event = classify_codex({
+            "type": "response_item",
+            "payload": {
+                "type": "reasoning",
+                "id": "reasoning-7",
+                "internal_chat_message_metadata_passthrough": {
+                    "turn_id": "turn-7",
+                },
+                "encrypted_content": "synthetic-private-reasoning",
+            },
+        })
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="thinking",
+            task_id="turn-7",
+            source_id="reasoning-7",
+            project=None,
+        ))
+        self.assertNotIn("synthetic-private-reasoning", repr(event))
+
+    def test_codex_tool_calls_refresh_live_work_without_retaining_arguments(self):
+        event = classify_codex({
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call",
+                "id": "tool-7",
+                "call_id": "call-7",
+                "name": "exec",
+                "input": "synthetic-private-command",
+            },
+        })
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="running",
+            task_id="tool-7",
+            source_id="tool-7",
+            project=None,
+        ))
+        self.assertNotIn("synthetic-private-command", repr(event))
+
+    def test_codex_tool_output_returns_to_thinking(self):
+        event = classify_codex({
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call_output",
+                "id": "output-7",
+                "call_id": "call-7",
+                "output": "synthetic-private-output",
+            },
+        })
+
+        self.assertEqual((event.state, event.activity, event.task_id),
+                         ("working", "thinking", "output-7"))
+        self.assertNotIn("synthetic-private-output", repr(event))
+
+    def test_codex_response_item_without_stable_identity_is_ignored(self):
+        self.assertIsNone(classify_codex({
+            "type": "response_item",
+            "payload": {"type": "reasoning"},
+        }))
+
+    def test_malformed_and_unrelated_events_are_ignored(self):
+        malformed_content = claude_event("assistant")
+        malformed_content["message"]["content"] = [{"unexpected": True}]
+        cases = (
+            None,
+            {},
+            {"type": "assistant", "message": "not-a-dict"},
+            {"type": "attachment", "sessionId": "s", "uuid": "u"},
+            malformed_content,
+        )
+        for entry in cases:
+            with self.subTest(entry=entry):
+                self.assertIsNone(classify_claude(entry))
+
+        self.assertIsNone(classify_codex({
+            "type": "response_item", "payload": {"type": "message"},
+        }))
+        self.assertIsNone(classify_codex({
+            "type": "event_msg", "payload": {"type": "task_started"},
+        }))
+
+    def test_project_sanitization_removes_controls_and_caps_characters(self):
+        self.assertEqual(sanitize_project("Tor\x00get-med-ett-långt-namn"),
+                         "Torget-med-ett-l")
+        self.assertIsNone(sanitize_project(None))
+
+    def test_project_sanitization_caps_utf8_bytes_without_splitting(self):
+        self.assertEqual(sanitize_project("å" * 16), "å" * 8)
+        self.assertEqual(sanitize_project("Torget-" + "å" * 10),
+                         "Torget-" + "å" * 4)
+        self.assertLessEqual(
+            len(sanitize_project("abc" + "😀" * 10).encode("utf-8")), 16)
+
+
+class StableEventIdTests(unittest.TestCase):
+    def test_stable_event_id_is_deterministic_and_sensitive_to_contract_fields(self):
+        event = Event("working", "thinking", "task", "source", "project")
+
+        first = stable_event_id("claude", event)
+
+        self.assertEqual(first, stable_event_id("claude", event))
+        self.assertEqual(len(first), 32)
+        self.assertNotEqual(first, stable_event_id("codex", event))
+        self.assertNotEqual(first, stable_event_id(
+            "claude", Event("done", None, "task", "source", "project")))
+        self.assertNotEqual(first, stable_event_id(
+            "claude", Event("working", "thinking", "other", "source", "project")))
+        self.assertNotEqual(first, stable_event_id(
+            "claude", Event("working", "thinking", "task", "other", "project")))
+
+
+class StoreTests(unittest.TestCase):
+    @staticmethod
+    def _job(snapshot, provider, task_id=None):
+        jobs = snapshot["agents"][provider]["jobs"]
+        if task_id is None:
+            return jobs[0]
+        return next(job for job in jobs if job["task_id"] == task_id)
+
+    def test_initial_snapshot_has_two_idle_agents_and_exact_shape(self):
+        store = AgentStatusStore(now=lambda: 10.0)
+
+        snapshot = store.snapshot()
+
+        self.assertEqual(set(snapshot), {"v", "seq", "agents"})
+        self.assertEqual(snapshot["v"], 2)
+        self.assertEqual(snapshot["seq"], 0)
+        self.assertEqual(set(snapshot["agents"]), {"claude", "codex"})
+        for agent in snapshot["agents"].values():
+            self.assertEqual(agent, {"active_count": 0, "jobs": []})
+
+    def test_snapshot_bounds_jobs_and_reports_all_active(self):
+        store = AgentStatusStore(now=lambda: 10.0)
+        for index in range(6):
+            store.apply("claude", Event(
+                "working", "editing", f"task-{index}", f"source-{index}",
+                f"Project-{index}"), order_at=float(index))
+
+        provider = store.snapshot()["agents"]["claude"]
+
+        self.assertEqual(provider["active_count"], 6)
+        self.assertEqual(len(provider["jobs"]), 4)
+
+    def test_two_done_jobs_survive_as_distinct_events(self):
+        store = AgentStatusStore(now=lambda: 10.0)
+        store.apply("codex", Event(
+            "done", None, "turn-a", "end-a", "Buddy"))
+        store.apply("codex", Event(
+            "done", None, "turn-b", "end-b", "Torget"))
+
+        jobs = store.snapshot()["agents"]["codex"]["jobs"]
+
+        self.assertEqual({job["task_id"] for job in jobs},
+                         {"turn-a", "turn-b"})
+
+    def test_apply_increments_only_for_changed_public_content(self):
+        now = [10.0]
+        store = AgentStatusStore(now=lambda: now[0])
+        event = Event("working", "thinking", "task", "source", "Torget")
+
+        self.assertTrue(store.apply("claude", event, observed_at=2.0))
+        first = store.snapshot()
+        now[0] = 20.0
+        self.assertFalse(store.apply("claude", event, observed_at=15.0))
+        second = store.snapshot()
+
+        self.assertEqual(first["seq"], 1)
+        self.assertEqual(second["seq"], 1)
+        self.assertEqual(self._job(second, "claude")["updated_ms"], 5000)
+
+    def test_activity_task_event_and_project_changes_increment_sequence(self):
+        store = AgentStatusStore(now=lambda: 0.0)
+        events = (
+            Event("working", "thinking", "task", "source", "Torget"),
+            Event("working", "reading", "task", "source", "Torget"),
+            Event("working", "reading", "task-2", "source", "Torget"),
+            Event("working", "reading", "task-2", "source-2", "Torget"),
+            Event("working", "reading", "task-2", "source-2", "Other"),
+        )
+
+        for event in events:
+            self.assertTrue(store.apply("claude", event))
+
+        self.assertEqual(store.snapshot()["seq"], len(events))
+
+    def test_metadata_carries_forward_only_for_the_same_task(self):
+        store = AgentStatusStore(now=lambda: 0.0)
+        store.apply("codex", Event(
+            "working", "thinking", "turn-7", "context-7", "Torget",
+            model="GPT-5.6 SOL", effort="XHIGH"))
+
+        store.apply("codex", Event(
+            "working", "editing", "turn-7", "tool-7", None))
+        same_task = self._job(store.snapshot(), "codex", "turn-7")
+
+        store.apply("codex", Event(
+            "working", "thinking", "turn-8", "context-8", None))
+        other_task = self._job(store.snapshot(), "codex", "turn-8")
+
+        self.assertEqual(same_task["model"], "GPT-5.6 SOL")
+        self.assertEqual(same_task["effort"], "XHIGH")
+        self.assertIsNone(other_task["model"])
+        self.assertIsNone(other_task["effort"])
+
+    def test_invalid_provider_state_and_activity_are_rejected(self):
+        store = AgentStatusStore()
+
+        with self.assertRaises(ValueError):
+            store.apply("other", Event("working", None, "t", "s", None))
+        with self.assertRaises(ValueError):
+            store.apply("claude", Event("bogus", None, "t", "s", None))
+        with self.assertRaises(ValueError):
+            store.apply("claude", Event("working", "bogus", "t", "s", None))
+
+    def test_old_working_entry_reads_as_unknown_without_mutation_or_seq_change(self):
+        now = [121.0]
+        store = AgentStatusStore(now=lambda: now[0])
+        store.apply("claude", Event(
+            "working", "testing", "task", "source", "Torget"),
+            observed_at=0.0)
+
+        first = store.snapshot()
+        second = store.snapshot()
+
+        self.assertEqual(first["agents"]["claude"], {
+            "active_count": 0,
+            "jobs": [],
+        })
+        self.assertEqual(first["seq"], 1)
+        self.assertEqual(second["seq"], 1)
+
+    def test_snapshot_is_a_deep_copy(self):
+        store = AgentStatusStore(now=lambda: 0.0)
+        store.apply("claude", Event(
+            "working", "reading", "task", "source", "Torget"))
+
+        snapshot = store.snapshot()
+        snapshot["agents"]["claude"]["jobs"][0]["state"] = "done"
+
+        self.assertEqual(
+            self._job(store.snapshot(), "claude")["state"], "working")
+
+    def test_updated_ms_is_nonnegative_integer_and_clamped(self):
+        now = [-1.0]
+        store = AgentStatusStore(now=lambda: now[0])
+        store.apply("claude", Event(
+            "waiting", None, "task", "source", None), observed_at=0.0)
+        self.assertEqual(
+            self._job(store.snapshot(), "claude")["updated_ms"], 0)
+
+        now[0] = 10 ** 20
+        age = self._job(store.snapshot(), "claude")["updated_ms"]
+        self.assertIs(type(age), int)
+        self.assertEqual(age, 0xFFFFFFFF)
+
+    def test_snapshot_exposes_only_allowed_sanitized_fields(self):
+        secret = "private prompt and command"
+        store = AgentStatusStore(now=lambda: 0.0)
+        event = classify_claude(claude_event(
+            "assistant", tool_name="Bash", tool_input={"command": secret}))
+        store.apply("claude", event)
+
+        snapshot = store.snapshot()
+
+        self.assertNotIn(secret, repr(snapshot))
+        self.assertNotIn("source_id", repr(snapshot))
+        self.assertEqual(set(snapshot["agents"]["claude"]), {
+            "active_count", "jobs",
+        })
+        self.assertEqual(set(self._job(snapshot, "claude")), {
+            "task_id", "event_id", "state", "project", "activity",
+            "model", "effort", "updated_ms",
+        })
+
+    def test_store_hashes_any_overlong_task_id_before_output(self):
+        store = AgentStatusStore(now=lambda: 0.0)
+        long_task_id = "😀" * 17
+        store.apply("claude", Event(
+            "working", "thinking", long_task_id, "source", "Torget"))
+
+        output_id = self._job(
+            store.snapshot(), "claude")["task_id"]
+
+        self.assertEqual(output_id,
+                         hashlib.sha256(long_task_id.encode()).hexdigest())
+        self.assertLessEqual(len(output_id.encode("utf-8")), 64)
+
+    def test_surrogate_ids_are_hashed_without_crashing_or_leaking(self):
+        claude = claude_event("user")
+        claude["uuid"] = "bad\ud800"
+        cases = (
+            ("claude", classify_claude(claude)),
+            ("codex", classify_codex({
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_started",
+                    "turn_id": "bad\ud800",
+                },
+            })),
+        )
+        store = AgentStatusStore(now=lambda: 0.0)
+
+        for provider, event in cases:
+            with self.subTest(provider=provider):
+                self.assertTrue(store.apply(provider, event))
+                output = self._job(store.snapshot(), provider)
+                self.assertLessEqual(len(output["task_id"].encode("utf-8")),
+                                     64)
+                self.assertNotIn("\ud800", output["event_id"])
+
+
+class JsonlTailerTests(unittest.TestCase):
+    def test_reads_only_complete_lines_then_finishes_partial_append(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_bytes(b'{"first":1}\n{"half":')
+            tailer = JsonlTailer()
+
+            self.assertEqual(tailer.read(path), [{"first": 1}])
+
+            with path.open("ab") as stream:
+                stream.write(b'true}\n{"second":2}\n')
+            self.assertEqual(tailer.read(path), [
+                {"half": True},
+                {"second": 2},
+            ])
+            self.assertEqual(tailer.read(path), [])
+
+    def test_invalid_complete_line_is_skipped_before_later_valid_line(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_bytes(b'not-json\n{"valid":true}\n')
+
+            self.assertEqual(JsonlTailer().read(path), [{"valid": True}])
+
+    def test_malformed_utf8_lines_are_skipped_before_valid_record(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_bytes(
+                b'{"private":"\xff"}\n'
+                b'{"private":"\xfe"}\n'
+                b'{"valid":true}\n')
+
+            self.assertEqual(JsonlTailer().read(path), [{"valid": True}])
+
+    def test_oversized_unterminated_line_is_bounded_and_later_record_resumes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            secret = b"synthetic-oversized-private-prompt"
+            path.write_bytes(
+                b'{"prompt":"' + secret +
+                b"x" * (3 * 1024 * 1024))
+            tailer = JsonlTailer()
+
+            self.assertEqual(tailer.read(path), [])
+            self.assertEqual(tailer._MAX_LINE_BYTES,
+                             tailer._READ_BYTES_PER_POLL)
+            self.assertEqual(tailer.read(path), [])
+            state = tailer._files[path]
+            self.assertLessEqual(len(state["partial"]),
+                                 tailer._MAX_LINE_BYTES)
+            self.assertNotIn(secret.decode(), repr(state))
+            self.assertLessEqual(
+                state["offset"], 2 * tailer._READ_BYTES_PER_POLL)
+
+            with path.open("ab") as stream:
+                stream.write(b'"}\n{"valid":true}\n')
+            records = []
+            for _ in range(8):
+                records.extend(tailer.read(path))
+                if records:
+                    break
+
+            self.assertEqual(records, [{"valid": True}])
+
+    def test_record_budget_drains_large_backlog_across_polls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            total = JsonlTailer._MAX_RECORDS_PER_POLL + 5
+            path.write_bytes(b"".join(
+                json.dumps({"record": index}).encode() + b"\n"
+                for index in range(total)))
+            tailer = JsonlTailer()
+
+            first = tailer.read(path)
+            second = tailer.read(path)
+
+            self.assertEqual(len(first), tailer._MAX_RECORDS_PER_POLL)
+            self.assertEqual(first + second,
+                             [{"record": index} for index in range(total)])
+
+    def test_reconciliation_bounds_cold_states_and_drops_cold_partial(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            tailer = JsonlTailer()
+            paths = []
+            identities = {}
+            for index in range(JsonlTailer._MAX_TRACKED_IDENTITIES + 5):
+                path = root / f"session-{index:02d}.jsonl"
+                path.write_text(
+                    '{"private":"cold-secret-' + str(index),
+                    encoding="utf-8")
+                paths.append(path)
+                tailer.read(path)
+                stat = path.stat()
+                identities[path] = (stat.st_dev, stat.st_ino)
+
+            active = paths[-JsonlTailer._MAX_ACTIVE_IDENTITIES:]
+            tailer.retain_paths(identities, active_paths=active)
+
+            self.assertLessEqual(len(tailer._identities),
+                                 tailer._MAX_TRACKED_IDENTITIES)
+            self.assertLessEqual(len(tailer._files),
+                                 tailer._MAX_TRACKED_IDENTITIES)
+            for path in paths[:-JsonlTailer._MAX_ACTIVE_IDENTITIES]:
+                state = tailer._identities.get(identities[path])
+                if state is not None:
+                    self.assertEqual(state["partial"], b"")
+                    self.assertNotIn("cold-secret", repr(state))
+
+    def test_inode_churn_enforces_identity_cap_before_next_discovery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            tailer = JsonlTailer()
+            paths = [root / f"active-{index:02d}.jsonl"
+                     for index in range(12)]
+            for index, path in enumerate(paths):
+                path.write_text(
+                    '{"private":"base-secret-' + str(index),
+                    encoding="utf-8")
+                tailer.read(path)
+
+            for wave in range(4):
+                for index, path in enumerate(paths):
+                    replacement = root / f"replacement-{wave}-{index}.tmp"
+                    replacement.write_text(
+                        '{"private":"wave-' + str(wave) + "-secret-" +
+                        str(index), encoding="utf-8")
+                    os.replace(replacement, path)
+                    tailer.read(path)
+
+            self.assertLessEqual(len(tailer._identities),
+                                 tailer._MAX_TRACKED_IDENTITIES)
+            self.assertLessEqual(len(tailer._files), len(paths))
+            self.assertNotIn("base-secret", repr(tailer._identities))
+
+    def test_truncation_resets_only_that_files_offset_and_buffer(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first = Path(temp_dir) / "first.jsonl"
+            second = Path(temp_dir) / "second.jsonl"
+            first.write_bytes(b'{"old_partial_with_padding":')
+            second.write_bytes(b'{"kept":')
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(first), [])
+            self.assertEqual(tailer.read(second), [])
+
+            first.write_bytes(b'{"new":true}\n')
+            self.assertEqual(tailer.read(first), [{"new": True}])
+            with second.open("ab") as stream:
+                stream.write(b'true}\n')
+            self.assertEqual(tailer.read(second), [{"kept": True}])
+
+    def test_same_inode_truncate_and_regrow_resets_offset(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_bytes(b'{"old":1}\n')
+            original_inode = path.stat().st_ino
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(path), [{"old": 1}])
+
+            path.write_bytes(b'{"replacement":true}\n')
+            self.assertEqual(path.stat().st_ino, original_inode)
+
+            self.assertEqual(tailer.read(path), [{"replacement": True}])
+
+    def test_same_inode_rewrite_is_detected_when_final_boundary_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            original = {"first": "A" * 80}
+            replacement = {"first": "B" * 80}
+            unchanged_tail = {"tail": "Z" * 100}
+            path.write_text(
+                json.dumps(original) + "\n" +
+                json.dumps(unchanged_tail) + "\n",
+                encoding="utf-8",
+            )
+            original_inode = path.stat().st_ino
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(path), [original, unchanged_tail])
+
+            path.write_text(
+                json.dumps(replacement) + "\n" +
+                json.dumps(unchanged_tail) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(path.stat().st_ino, original_inode)
+
+            self.assertEqual(tailer.read(path), [replacement, unchanged_tail])
+            self.assertEqual(tailer.read(path), [])
+
+    def test_rewrite_during_prefix_verification_does_not_poison_fast_path(self):
+        class RewriteAfterDigestTailer(JsonlTailer):
+            def __init__(self, path, replacement):
+                super().__init__()
+                self.path = path
+                self.replacement = replacement
+                self.rewrite_after_digest = False
+
+            def _digest_prefix(self, stream, length):
+                digest = super()._digest_prefix(stream, length)
+                if self.rewrite_after_digest:
+                    self.rewrite_after_digest = False
+                    self.path.write_text(
+                        json.dumps(self.replacement) + "\n",
+                        encoding="utf-8")
+                return digest
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            original = {"old": 1}
+            replacement = {"new": 2}
+            path.write_text(json.dumps(original) + "\n", encoding="utf-8")
+            tailer = RewriteAfterDigestTailer(path, replacement)
+            self.assertEqual(tailer.read(path), [original])
+            stat = path.stat()
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+            tailer.rewrite_after_digest = True
+
+            self.assertEqual(tailer.read(path), [])
+
+            self.assertEqual(tailer.read(path), [replacement])
+            self.assertEqual(tailer.read(path), [])
+
+    def test_complete_line_content_is_not_retained_for_rewrite_detection(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            secret = "synthetic-private-message-content"
+            path.write_text(json.dumps({"message": secret}) + "\n",
+                            encoding="utf-8")
+            tailer = JsonlTailer()
+
+            tailer.read(path)
+
+            self.assertNotIn(secret, repr(tailer._files))
+
+    def test_full_prefix_verification_uses_bounded_cadence(self):
+        class CountingTailer(JsonlTailer):
+            def __init__(self, now):
+                super().__init__(now=now)
+                self.digest_calls = 0
+
+            def _digest_prefix(self, stream, length):
+                self.digest_calls += 1
+                return super()._digest_prefix(stream, length)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_bytes(b'{"first":1}\n')
+            now = [0.0]
+            tailer = CountingTailer(now=lambda: now[0])
+            self.assertEqual(tailer.read(path), [{"first": 1}])
+            baseline = tailer.digest_calls
+
+            now[0] = 0.5
+            with path.open("ab") as stream:
+                stream.write(b'{"second":2}\n')
+            self.assertEqual(tailer.read(path), [{"second": 2}])
+            self.assertEqual(tailer.digest_calls, baseline)
+
+            now[0] = tailer._VERIFY_INTERVAL_S
+            self.assertEqual(tailer.read(path), [])
+            self.assertEqual(tailer.digest_calls, baseline + 1)
+
+    def test_large_prefix_verification_is_budgeted_and_replays_mismatch_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            padding_size = 2 * JsonlTailer._VERIFY_BYTES_PER_POLL + 200_000
+            original = (b'{"first":1}\n' + b"x" * padding_size +
+                        b'\n{"last":2}\n')
+            path.write_bytes(original)
+            now = [0.0]
+            tailer = JsonlTailer(now=lambda: now[0])
+            initial = []
+            for _ in range(8):
+                initial.extend(tailer.read(path))
+                if tailer._files[path]["offset"] == len(original):
+                    break
+            self.assertEqual(initial, [{"first": 1}, {"last": 2}])
+
+            replacement = bytearray(original)
+            replacement[JsonlTailer._VERIFY_BYTES_PER_POLL + 100_000] = ord("y")
+            path.write_bytes(replacement)
+            now[0] = tailer._VERIFY_INTERVAL_S
+
+            self.assertEqual(tailer.read(path), [])
+            state = tailer._files[path]
+            self.assertEqual(state["verify_offset"],
+                             tailer._VERIFY_BYTES_PER_POLL)
+
+            replayed = []
+            for _ in range(8):
+                replayed.extend(tailer.read(path))
+                state = tailer._files[path]
+                if (state["verify_offset"] is None and
+                        state["offset"] == len(replacement)):
+                    break
+
+            self.assertEqual(replayed, [{"first": 1}, {"last": 2}])
+            self.assertEqual(tailer.read(path), [])
+
+    def test_file_disappearance_is_tolerated(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            path.write_text('{"event":1}\n', encoding="utf-8")
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(path), [{"event": 1}])
+
+            path.unlink()
+
+            self.assertEqual(tailer.read(path), [])
+
+    def test_temporarily_missing_file_resumes_without_replay(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "session.jsonl"
+            moved = Path(temp_dir) / "session.moved"
+            path.write_text('{"event":1}\n', encoding="utf-8")
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(path), [{"event": 1}])
+
+            path.rename(moved)
+            self.assertEqual(tailer.read(path), [])
+            moved.rename(path)
+
+            self.assertEqual(tailer.read(path), [])
+
+    def test_replacement_path_read_before_rotated_inode_does_not_lose_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            current = Path(temp_dir) / "current.jsonl"
+            rotated = Path(temp_dir) / "rotated.jsonl"
+            old = {"old": 1}
+            new = {"newfile": 1}
+            current.write_text(json.dumps(old) + "\n", encoding="utf-8")
+            tailer = JsonlTailer()
+            self.assertEqual(tailer.read(current), [old])
+
+            current.rename(rotated)
+            current.write_text(json.dumps(new) + "\n", encoding="utf-8")
+
+            self.assertEqual(tailer.read(current), [new])
+            self.assertEqual(tailer.read(rotated), [])
+
+
+class AgentStatusServiceTests(unittest.TestCase):
+    @staticmethod
+    def _write_line(path, event):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+
+    def test_poll_discovers_claude_and_codex_and_counts_changes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            claude_path = root / "claude" / "project" / "session.jsonl"
+            codex_path = (root / "codex" / "2026" / "08" / "06" /
+                          "rollout-test.jsonl")
+            claude = claude_event("user")
+            self._write_line(claude_path, claude)
+            self._write_line(codex_path, {
+                "type": "event_msg",
+                "timestamp": claude["timestamp"],
+                "payload": {"type": "task_started", "turn_id": "turn-1"},
+            })
+            wall_time = AgentStatusService._event_wall_time(claude)
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 10.0,
+                                         _wall_time=lambda: wall_time)
+
+            self.assertEqual(service.poll_once(), 2)
+            snapshot = service.snapshot()
+            self.assertEqual(top_job(snapshot, "claude")["state"],
+                             "working")
+            self.assertEqual(top_job(snapshot, "codex")["state"],
+                             "working")
+            self.assertEqual(service.poll_once(), 0)
+
+    def test_stateless_codex_tool_events_stay_on_current_turn(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "codex" / "rollout-live.jsonl"
+            self._write_line(path, {
+                "type": "event_msg",
+                "timestamp": "2026-08-06T12:00:00Z",
+                "payload": {"type": "task_started", "turn_id": "turn-a"},
+            })
+            wall_time = AgentStatusService._event_wall_time({
+                "timestamp": "2026-08-06T12:00:02Z",
+            })
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 10.0,
+                _wall_time=lambda: wall_time)
+            self.assertEqual(service.poll_once(), 1)
+
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "type": "response_item",
+                    "timestamp": "2026-08-06T12:00:01Z",
+                    "payload": {
+                        "type": "custom_tool_call",
+                        "id": "tool-without-turn",
+                        "name": "exec",
+                    },
+                }) + "\n")
+            self.assertEqual(service.poll_once(), 1)
+
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "type": "event_msg",
+                    "timestamp": "2026-08-06T12:00:02Z",
+                    "payload": {
+                        "type": "task_complete",
+                        "turn_id": "turn-a",
+                    },
+                }) + "\n")
+            self.assertEqual(service.poll_once(), 1)
+
+            jobs = service.snapshot()["agents"]["codex"]["jobs"]
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual((jobs[0]["task_id"], jobs[0]["state"]),
+                             ("turn-a", "done"))
+
+    def test_live_codex_activity_recovers_after_a_newer_task_completed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            active_path = root / "codex" / "rollout-active.jsonl"
+            completed_path = root / "codex" / "rollout-completed.jsonl"
+            self._write_line(active_path, {
+                "type": "event_msg",
+                "timestamp": "2026-08-06T12:00:00Z",
+                "payload": {"type": "task_started", "turn_id": "active"},
+            })
+            self._write_line(completed_path, {
+                "type": "event_msg",
+                "timestamp": "2026-08-06T12:01:00Z",
+                "payload": {"type": "task_complete", "turn_id": "other"},
+            })
+            wall_time = AgentStatusService._event_wall_time({
+                "timestamp": "2026-08-06T12:02:01Z",
+            })
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 500.0,
+                _wall_time=lambda: wall_time)
+
+            service.poll_once()
+            initial_jobs = provider_jobs(service.snapshot(), "codex")
+            self.assertEqual(
+                {job["task_id"]: job["state"] for job in initial_jobs},
+                {"other": "done"})
+
+            private_marker = "synthetic-private-live-reasoning"
+            with active_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "type": "response_item",
+                    "timestamp": "2026-08-06T12:02:00Z",
+                    "payload": {
+                        "type": "reasoning",
+                        "id": "reasoning-active",
+                        "internal_chat_message_metadata_passthrough": {
+                            "turn_id": "active",
+                        },
+                        "encrypted_content": private_marker,
+                    },
+                }) + "\n")
+
+            self.assertEqual(service.poll_once(), 1)
+            codex = top_job(service.snapshot(), "codex")
+            self.assertEqual((codex["state"], codex["activity"]),
+                             ("working", "thinking"))
+            self.assertEqual(codex["task_id"], "active")
+            self.assertNotIn(private_marker, repr(codex))
+
+    def test_appended_unchanged_classified_event_counts_as_no_change(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            event = claude_event("user")
+            self._write_line(path, event)
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 10.0)
+            self.assertEqual(service.poll_once(), 1)
+
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event) + "\n")
+
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(service.snapshot()["seq"], 1)
+
+    def test_timestamp_less_private_rewrite_does_not_replay_public_transitions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            working = claude_event("user")
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            working["private"] = "A"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(path, (900, 900))
+            now = [0.0]
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: 1000.0)
+            self.assertEqual(service.poll_once(), 1)
+            baseline = service.snapshot()
+            original_inode = path.stat().st_ino
+
+            working["private"] = "B"
+            path.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(path, (901, 901))
+            self.assertEqual(path.stat().st_ino, original_inode)
+
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(service.snapshot(), baseline)
+
+    def test_small_first_seen_history_flushes_final_once_then_append_is_live(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            working = claude_event("user")
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(path, (999, 999))
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 0.0,
+                _wall_time=lambda: 1000.0)
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], 1)
+            self.assertEqual(top_job(snapshot, "claude")["state"], "done")
+
+            live = claude_event("assistant", stop_reason="end_turn")
+            live["uuid"] = "event-live"
+            del live["timestamp"]
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(live) + "\n")
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], 2)
+            self.assertEqual(top_job(snapshot, "claude")["state"],
+                             "waiting")
+
+    def test_small_same_path_replacement_backfills_without_public_replay(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            working = claude_event("user")
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(path, (998, 998))
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 0.0,
+                _wall_time=lambda: 1000.0)
+            self.assertEqual(service.poll_once(), 1)
+            baseline = service.snapshot()
+            original_inode = path.stat().st_ino
+
+            replacement = root / "replacement.tmp"
+            working["private"] = "replacement-only-private-change"
+            replacement.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(replacement, (999, 999))
+            os.replace(replacement, path)
+            self.assertNotEqual(path.stat().st_ino, original_inode)
+
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(service.snapshot(), baseline)
+
+    def test_large_rewrite_backfill_never_publishes_intermediate_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            working = claude_event("user")
+            working["private"] = "synthetic-backfill-private-prompt"
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            padding_size = (2 * JsonlTailer._READ_BYTES_PER_POLL +
+                            200_000)
+            data = (
+                json.dumps(working).encode() + b"\n" +
+                b'{"private":"' + b"A" * padding_size + b'"}\n' +
+                json.dumps(completed).encode() + b"\n"
+            )
+            path.parent.mkdir(parents=True)
+            path.write_bytes(data)
+            os.utime(path, (900, 900))
+            now = [0.0]
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: 1000.0)
+            for _ in range(8):
+                changed = service.poll_once()
+                if service._tailer._files[path]["offset"] == len(data):
+                    self.assertEqual(changed, 1)
+                    break
+                self.assertEqual(changed, 0)
+                self.assertEqual(service.snapshot()["seq"], 0)
+            baseline = service.snapshot()
+            self.assertEqual(baseline["seq"], 1)
+            self.assertEqual(top_job(baseline, "claude")["state"], "done")
+
+            replacement = bytearray(data)
+            replacement[JsonlTailer._READ_BYTES_PER_POLL + 100_000] = ord("B")
+            path.write_bytes(replacement)
+            os.utime(path, (901, 901))
+
+            for _ in range(8):
+                self.assertEqual(service.poll_once(), 0)
+                self.assertEqual(service.snapshot(), baseline)
+                self.assertNotIn(
+                    "synthetic-backfill-private-prompt",
+                    repr(service._backfills))
+
+            live = claude_event("assistant", stop_reason="end_turn")
+            live["uuid"] = "event-live"
+            del live["timestamp"]
+            with path.open("ab") as stream:
+                stream.write(json.dumps(live).encode() + b"\n")
+            os.utime(path, (902, 902))
+            now[0] += 0.5
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], baseline["seq"] + 1)
+            self.assertEqual(top_job(snapshot, "claude")["state"],
+                             "waiting")
+
+    def test_cold_eviction_replays_only_genuinely_appended_final_event(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "claude" / "target.jsonl"
+            working = claude_event("user")
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            for record in (working, completed):
+                del record["timestamp"]
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                json.dumps(working) + "\n" + json.dumps(completed) + "\n",
+                encoding="utf-8")
+            os.utime(target, (1, 1))
+            now = [0.0]
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: 1000.0)
+            self.assertEqual(service.poll_once(), 1)
+            baseline_seq = service.snapshot()["seq"]
+            target_stat = target.stat()
+            target_identity = (target_stat.st_dev, target_stat.st_ino)
+
+            fillers = []
+            for index in range(12):
+                filler = root / "claude" / f"filler-{index:02d}.jsonl"
+                self._write_line(filler, {"ignored": index})
+                os.utime(filler, (10 + index, 10 + index))
+                fillers.append(filler)
+            now[0] = service._DISCOVERY_INTERVAL_S
+            self.assertEqual(service.poll_once(), 0)
+
+            for wave in range(4):
+                for index, filler in enumerate(fillers):
+                    replacement = root / f"replacement-{wave}-{index}.tmp"
+                    replacement.write_text(
+                        json.dumps({"ignored": [wave, index]}) + "\n",
+                        encoding="utf-8")
+                    os.replace(replacement, filler)
+                    os.utime(filler, (10 + index, 10 + index))
+                now[0] += 0.1
+                self.assertEqual(service.poll_once(), 0)
+            self.assertNotIn(target_identity, service._tailer._identities)
+
+            live = claude_event("user")
+            live["uuid"] = "event-live"
+            del live["timestamp"]
+            with target.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(live) + "\n")
+            os.utime(target, (999, 999))
+            now[0] = 2 * service._DISCOVERY_INTERVAL_S
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], baseline_seq + 1)
+            self.assertEqual(top_job(snapshot, "claude")["state"],
+                             "working")
+            self.assertEqual(top_job(snapshot, "claude")["task_id"],
+                             claude_task_id("session-1"))
+
+    def test_fast_active_poll_does_not_repeat_recursive_discovery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            first = claude_event("user")
+            self._write_line(path, first)
+            now = [0.0]
+            wall_time = AgentStatusService._event_wall_time(first)
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: now[0],
+                _wall_time=lambda: wall_time)
+            original_discover = service._discover_paths
+            discovery_calls = []
+
+            def counted_discovery(discovery_root, pattern):
+                discovery_calls.append((discovery_root, pattern))
+                return original_discover(discovery_root, pattern)
+
+            service._discover_paths = counted_discovery
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(len(discovery_calls), 2)
+
+            second = claude_event("assistant", stop_reason="end_turn")
+            second["uuid"] = "event-2"
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(second) + "\n")
+            now[0] = 0.5
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(len(discovery_calls), 2)
+
+            now[0] = service._DISCOVERY_INTERVAL_S
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(len(discovery_calls), 4)
+
+    def test_newest_file_rotation_starts_new_file_without_replaying_old(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_path = root / "claude" / "old.jsonl"
+            started = claude_event("user")
+            self._write_line(old_path, started)
+            os.utime(old_path, (1, 1))
+            now = [10.0]
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: now[0])
+            self.assertEqual(service.poll_once(), 1)
+
+            new_path = root / "claude" / "new.jsonl"
+            completed = claude_event("result")
+            completed["uuid"] = "event-2"
+            completed["subtype"] = "success"
+            self._write_line(new_path, completed)
+            os.utime(new_path, (2, 2))
+            now[0] += service._DISCOVERY_INTERVAL_S
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(top_job(snapshot, "claude")["state"], "done")
+            self.assertEqual(top_job(snapshot, "claude")["task_id"],
+                             claude_task_id("session-1"))
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(service.snapshot()["seq"], 2)
+
+    def test_renamed_active_file_transfers_offset_without_replaying_history(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_path = root / "claude" / "old.jsonl"
+            first = claude_event("user")
+            second = claude_event(
+                "assistant", tool_name="Bash",
+                tool_input={"command": "git status --short"})
+            second["uuid"] = "event-2"
+            old_path.parent.mkdir(parents=True)
+            old_path.write_text(
+                json.dumps(first) + "\n" + json.dumps(second) + "\n",
+                encoding="utf-8",
+            )
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 10.0)
+            self.assertEqual(service.poll_once(), 1)
+
+            new_path = old_path.with_name("renamed.jsonl")
+            old_path.rename(new_path)
+            completed = claude_event("result")
+            completed["uuid"] = "event-3"
+            completed["subtype"] = "success"
+            with new_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(completed) + "\n")
+
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(service.snapshot()["seq"], 2)
+            self.assertEqual(
+                top_job(service.snapshot(), "claude")["state"], "done")
+            self.assertNotIn(old_path, service._tailer._files)
+            self.assertIn(new_path, service._tailer._files)
+            self.assertEqual(service.poll_once(), 0)
+
+    def test_missing_roots_and_start_stop_are_idempotent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            service = AgentStatusService(root / "missing-claude",
+                                         root / "missing-codex")
+            self.assertEqual(service.poll_once(), 0)
+
+            service.start()
+            thread = service._thread
+            service.start()
+            self.assertIs(service._thread, thread)
+            self.assertTrue(thread.daemon)
+            service.stop()
+            service.stop()
+
+            self.assertFalse(thread.is_alive())
+
+    def test_stop_signal_cannot_be_cleared_by_concurrent_start(self):
+        class PausingClearEvent(threading.Event):
+            def __init__(self):
+                super().__init__()
+                self.clear_entered = threading.Event()
+                self.allow_clear = threading.Event()
+                self.set_entered = threading.Event()
+                self._pause_once = True
+
+            def clear(self):
+                if self._pause_once:
+                    self._pause_once = False
+                    self.clear_entered.set()
+                    if not self.allow_clear.wait(timeout=2):
+                        raise RuntimeError("test did not release clear")
+                super().clear()
+
+            def set(self):
+                super().set()
+                self.set_entered.set()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            service = AgentStatusService(root / "claude", root / "codex")
+            coordinated_stop = PausingClearEvent()
+            service._stop = coordinated_stop
+            start_thread = threading.Thread(target=service.start)
+            start_thread.start()
+            self.assertTrue(coordinated_stop.clear_entered.wait(timeout=1))
+
+            stop_invoked = threading.Event()
+
+            def stop_service():
+                stop_invoked.set()
+                service.stop()
+
+            stop_thread = threading.Thread(target=stop_service)
+            stop_thread.start()
+            self.assertTrue(stop_invoked.wait(timeout=1))
+            coordinated_stop.set_entered.wait(timeout=0.1)
+            coordinated_stop.allow_clear.set()
+            start_thread.join(timeout=3)
+            stop_thread.join(timeout=3)
+
+            self.assertFalse(start_thread.is_alive())
+            self.assertFalse(stop_thread.is_alive())
+            poller = service._thread
+            poller_was_alive = poller is not None and poller.is_alive()
+            service.stop()
+            self.assertFalse(poller_was_alive)
+
+    def test_start_during_stop_join_cannot_launch_replacement_worker(self):
+        class JoinPausingThread:
+            def __init__(self, thread):
+                self.thread = thread
+                self.worker_joined = threading.Event()
+                self.allow_join_return = threading.Event()
+
+            def is_alive(self):
+                return self.thread.is_alive()
+
+            def join(self, timeout=None):
+                self.thread.join(timeout=timeout)
+                if self.thread.is_alive():
+                    return
+                self.worker_joined.set()
+                if not self.allow_join_return.wait(timeout=2):
+                    raise RuntimeError("test did not release join")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            service = AgentStatusService(root / "claude", root / "codex")
+            service.start()
+            original = service._thread
+            pausing_thread = JoinPausingThread(original)
+            with service._thread_lock:
+                service._thread = pausing_thread
+
+            stop_thread = threading.Thread(target=service.stop)
+            stop_thread.start()
+            self.assertTrue(pausing_thread.worker_joined.wait(timeout=2))
+
+            service.start()
+            pausing_thread.allow_join_return.set()
+            stop_thread.join(timeout=2)
+            self.assertFalse(stop_thread.is_alive())
+            survivor = service._thread
+            survivor_was_alive = (survivor is not None and
+                                  survivor is not pausing_thread and
+                                  survivor.is_alive())
+            service.stop()
+
+            self.assertFalse(survivor_was_alive)
+            service.start()
+            restarted = service._thread
+            self.assertTrue(restarted.is_alive())
+            service.stop()
+            self.assertFalse(restarted.is_alive())
+
+    def test_background_thread_survives_transient_poll_failure(self):
+        class FlakyService(AgentStatusService):
+            def __init__(self, root, diagnostics):
+                super().__init__(
+                    root / "claude", root / "codex",
+                    _diagnostic=diagnostics.append)
+                self.poll_count = 0
+                self.recovered = threading.Event()
+
+            def poll_once(self):
+                self.poll_count += 1
+                if self.poll_count == 1:
+                    raise OSError("synthetic transient failure")
+                self.recovered.set()
+                return 0
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            diagnostics = []
+            service = FlakyService(Path(temp_dir), diagnostics)
+            service.start()
+            try:
+                self.assertTrue(service.recovered.wait(timeout=2))
+                self.assertTrue(service._thread.is_alive())
+            finally:
+                service.stop()
+            self.assertEqual(diagnostics,
+                             ["agent-status poll: OSError"])
+
+    def test_record_failures_are_isolated_and_diagnostics_are_sanitized(self):
+        class ApplyFailsOnce:
+            def __init__(self, delegate, fail_event_id):
+                self.delegate = delegate
+                self.fail_event_id = fail_event_id
+
+            def apply(self, provider, event, observed_at=None, order_at=None,
+                      refresh_unchanged=True, event_id_override=None):
+                if event_id_override == self.fail_event_id:
+                    raise LookupError("synthetic-private-apply-prompt")
+                return self.delegate.apply(
+                    provider, event, observed_at, order_at,
+                    refresh_unchanged, event_id_override)
+
+            def snapshot(self):
+                return self.delegate.snapshot()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            seed = claude_event("user")
+            seed["uuid"] = "seed"
+            records = []
+            for source_id in (
+                    "bad-classify-1", "bad-classify-2", "bad-apply",
+                    "valid-final"):
+                record = claude_event("user")
+                record["uuid"] = source_id
+                records.append(record)
+            self._write_line(path, seed)
+            diagnostics = []
+            wall_time = AgentStatusService._event_wall_time(records[0])
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 0.0,
+                _wall_time=lambda: wall_time,
+                _diagnostic=diagnostics.append)
+            failed_event = classify_claude(records[2])
+            service._store = ApplyFailsOnce(
+                service._store, stable_event_id("claude", failed_event))
+            original_classifier = agent_status.classify_claude
+
+            def classify_with_failures(record):
+                if record.get("uuid", "").startswith("bad-classify"):
+                    raise RuntimeError("synthetic-private-classifier-command")
+                return original_classifier(record)
+
+            with mock.patch.object(
+                    agent_status, "classify_claude",
+                    side_effect=classify_with_failures):
+                self.assertEqual(service.poll_once(), 1)
+                with path.open("a", encoding="utf-8") as stream:
+                    stream.write("".join(
+                        json.dumps(record) + "\n" for record in records))
+                self.assertEqual(service.poll_once(), 1)
+
+            snapshot = top_job(service.snapshot(), "claude")
+            self.assertEqual(snapshot["state"], "working")
+            self.assertEqual(snapshot["task_id"],
+                             claude_task_id("session-1"))
+            self.assertEqual(diagnostics, [
+                "agent-status classify: RuntimeError",
+                "agent-status apply: LookupError",
+            ])
+            serialized = " ".join(diagnostics)
+            self.assertNotIn("synthetic-private", serialized)
+            self.assertNotIn(str(path), serialized)
+
+    def test_snapshot_does_not_require_roots_to_exist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            projects = root / "claude"
+            projects.mkdir()
+            service = AgentStatusService(projects, root / "codex")
+            projects.rmdir()
+
+            snapshot = service.snapshot()
+
+            self.assertEqual(snapshot["v"], 2)
+            self.assertEqual(set(snapshot["agents"]), {"claude", "codex"})
+
+    def test_startup_replay_uses_old_claude_and_codex_iso_timestamps(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            claude_path = root / "claude" / "session.jsonl"
+            codex_path = root / "codex" / "rollout-test.jsonl"
+            claude = claude_event("user")
+            claude["timestamp"] = "2000-01-01T00:00:00Z"
+            codex = {
+                "type": "event_msg",
+                "timestamp": "2000-01-01T00:00:00Z",
+                "payload": {"type": "task_started", "turn_id": "turn-old"},
+            }
+            self._write_line(claude_path, claude)
+            self._write_line(codex_path, codex)
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 500.0)
+            service._wall_time = lambda: 2_000_000_000.0
+
+            self.assertEqual(service.poll_once(), 2)
+            snapshot = service.snapshot()
+
+            for provider in ("claude", "codex"):
+                self.assertEqual(snapshot["agents"][provider], {
+                    "active_count": 0,
+                    "jobs": [],
+                })
+
+    def test_old_file_mtime_is_fallback_when_timestamp_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            event = claude_event("user")
+            del event["timestamp"]
+            self._write_line(path, event)
+            wall_time = 2_000_000_000.0
+            os.utime(path, (wall_time - 121.0, wall_time - 121.0))
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 500.0)
+            service._wall_time = lambda: wall_time
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()["agents"]["claude"]
+            self.assertEqual(snapshot, {"active_count": 0, "jobs": []})
+
+    def test_future_timestamp_falls_back_to_old_file_time(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            event = claude_event("user")
+            event["timestamp"] = "2999-01-01T00:00:00Z"
+            self._write_line(path, event)
+            wall_time = 2_000_000_000.0
+            os.utime(path, (wall_time - 121.0, wall_time - 121.0))
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: 500.0,
+                                         _wall_time=lambda: wall_time)
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()["agents"]["claude"]
+            self.assertEqual(snapshot, {"active_count": 0, "jobs": []})
+
+    def test_task_complete_age_uses_completion_before_start_time(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "codex" / "rollout-test.jsonl"
+            completion = "2026-08-06T10:00:00Z"
+            completed_wall_time = AgentStatusService._event_wall_time(
+                {"timestamp": completion})
+            self._write_line(path, {
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "turn_id": "turn-complete",
+                    "started_at": "2000-01-01T00:00:00Z",
+                    "completed_at": completion,
+                },
+            })
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 500.0,
+                _wall_time=lambda: completed_wall_time + 2.0)
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = top_job(service.snapshot(), "codex")
+            self.assertEqual(snapshot["state"], "done")
+            self.assertEqual(snapshot["updated_ms"], 2000)
+
+    def test_permanently_missing_partial_file_is_pruned_after_bounded_polls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            secret = "synthetic-incomplete-private-prompt"
+            path.parent.mkdir(parents=True)
+            path.write_text('{"prompt":"' + secret, encoding="utf-8")
+            service = AgentStatusService(root / "claude", root / "codex")
+            self.assertEqual(service.poll_once(), 0)
+            self.assertIn(secret, repr(service._tailer._files))
+
+            path.unlink()
+            for _ in range(4):
+                self.assertEqual(service.poll_once(), 0)
+
+            self.assertNotIn(secret, repr(service._tailer._files))
+            self.assertNotIn(path, service._tailer._files)
+            self.assertEqual(service._tailer._identities, {})
+
+    def test_one_missing_service_poll_retains_identity_for_short_recovery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "claude" / "session.jsonl"
+            moved = root / "session.moved"
+            event = claude_event("user")
+            self._write_line(path, event)
+            wall_time = AgentStatusService._event_wall_time(event)
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 10.0,
+                _wall_time=lambda: wall_time)
+            self.assertEqual(service.poll_once(), 1)
+            stat = path.stat()
+            identity = (stat.st_dev, stat.st_ino)
+            offset = service._tailer._identities[identity]["offset"]
+
+            path.rename(moved)
+            self.assertEqual(service.poll_once(), 0)
+
+            self.assertIn(identity, service._tailer._identities)
+            self.assertEqual(
+                service._tailer._identities[identity]["offset"], offset)
+            moved.rename(path)
+            self.assertEqual(service.poll_once(), 0)
+
+    def test_existing_file_outside_recent_limit_is_not_pruned_or_replayed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "claude" / "target.jsonl"
+            started = claude_event("user")
+            self._write_line(target, started)
+            os.utime(target, (1, 1))
+            now = [10.0]
+            service = AgentStatusService(root / "claude", root / "codex",
+                                         now=lambda: now[0],
+                                         _wall_time=lambda: 10.0)
+            self.assertEqual(service.poll_once(), 1)
+
+            for index in range(12):
+                path = root / "claude" / f"newer-{index:02d}.jsonl"
+                event = claude_event("user")
+                event["uuid"] = f"crowd-{index:02d}"
+                self._write_line(path, event)
+                os.utime(path, (10 + index, 10 + index))
+            now[0] += service._DISCOVERY_INTERVAL_S
+            self.assertEqual(service.poll_once(), 12)
+            self.assertEqual(service.poll_once(), 0)
+            self.assertEqual(service.poll_once(), 0)
+
+            completed = claude_event("result")
+            completed["uuid"] = "target-complete"
+            completed["subtype"] = "success"
+            with target.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(completed) + "\n")
+            now[0] += service._DISCOVERY_INTERVAL_S
+
+            self.assertEqual(service.poll_once(), 1)
+            self.assertEqual(
+                top_job(service.snapshot(), "claude")["state"], "done")
+
+    def test_older_event_in_newer_mtime_file_cannot_overwrite_newer_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            working_path = root / "claude" / "working.jsonl"
+            touched_old_path = root / "claude" / "touched-old.jsonl"
+            working = claude_event("user")
+            working["timestamp"] = "2026-08-06T12:00:00Z"
+            completed = claude_event("result")
+            completed["uuid"] = "older-complete"
+            completed["subtype"] = "success"
+            completed["timestamp"] = "2026-08-06T11:00:00Z"
+            self._write_line(working_path, working)
+            self._write_line(touched_old_path, completed)
+            os.utime(working_path, (1, 1))
+            os.utime(touched_old_path, (2, 2))
+            wall_time = AgentStatusService._event_wall_time(
+                {"timestamp": "2026-08-06T12:00:30Z"})
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 500.0,
+                _wall_time=lambda: wall_time)
+
+            self.assertEqual(service.poll_once(), 1)
+
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["seq"], 1)
+            self.assertEqual(top_job(snapshot, "claude")["state"],
+                             "working")
+            self.assertEqual(top_job(snapshot, "claude")["updated_ms"],
+                             30000)
+
+
+class HandlerTests(unittest.TestCase):
+    @staticmethod
+    def _request(path, agent_status=None):
+        handler = object.__new__(tokenserver.Handler)
+        handler.path = path
+        handler.agent_status = agent_status
+        sent = []
+        handler._send = lambda code, payload: sent.append((code, payload))
+        handler.do_GET()
+        return sent
+
+    def test_agent_status_endpoint_uses_service_snapshot(self):
+        expected = {
+            "v": 1,
+            "seq": 0,
+            "agents": {"claude": {}, "codex": {}},
+        }
+
+        class SnapshotOnly:
+            def __init__(self):
+                self.calls = 0
+
+            def snapshot(self):
+                self.calls += 1
+                return expected
+
+        service = SnapshotOnly()
+
+        sent = self._request("/api/agent-status", service)
+
+        self.assertEqual(sent, [(200, expected)])
+        self.assertEqual(service.calls, 1)
+
+    def test_root_lists_existing_and_agent_status_endpoints(self):
+        sent = self._request("/")
+
+        self.assertEqual(sent[0][0], 200)
+        payload = sent[0][1]
+        self.assertEqual(payload["endpoint"], "/api/tokens")
+        self.assertIn("/api/tokens", payload["endpoints"])
+        self.assertIn("/api/agent-status", payload["endpoints"])
+
+    def test_real_service_endpoint_is_exact_private_bounded_and_memory_only(self):
+        markers = {
+            "prompt": "synthetic-secret-prompt",
+            "command": "synthetic-secret-command",
+            "message": "synthetic-secret-message",
+            "file": "synthetic-secret-file-content",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            claude_path = root / "claude" / "session.jsonl"
+            codex_path = root / "codex" / "rollout-test.jsonl"
+            claude = claude_event(
+                "assistant", tool_name="Bash", tool_input={
+                    "command": markers["command"],
+                    "prompt": markers["prompt"],
+                    "file_path": markers["file"],
+                    "message": markers["message"],
+                })
+            claude["sessionId"] = "123e4567-e89b-12d3-a456-426614174000"
+            claude["uuid"] = "123e4567-e89b-12d3-a456-426614174001"
+            claude["cwd"] = "/Users/test/" + "å" * 16
+            codex = {
+                "type": "event_msg",
+                "timestamp": claude["timestamp"],
+                "payload": {
+                    "type": "task_started",
+                    "turn_id": "turn-" + "x" * 100,
+                    "prompt": markers["prompt"],
+                    "command": markers["command"],
+                    "message": markers["message"],
+                    "file_content": markers["file"],
+                },
+            }
+            AgentStatusServiceTests._write_line(claude_path, claude)
+            AgentStatusServiceTests._write_line(codex_path, codex)
+            wall_time = AgentStatusService._event_wall_time(claude)
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 10.0,
+                _wall_time=lambda: wall_time)
+            self.assertEqual(service.poll_once(), 2)
+
+            def forbidden_disk_access(*args, **kwargs):
+                raise AssertionError("request thread attempted filesystem I/O")
+
+            service._discover_paths = forbidden_disk_access
+            service._recent_paths = forbidden_disk_access
+            service._tailer.read = forbidden_disk_access
+
+            sent = self._request("/api/agent-status", service)
+            self.assertEqual(sent[0][0], 200)
+            payload = sent[0][1]
+            serialized = json.dumps(payload, ensure_ascii=False)
+
+            self.assertEqual(set(payload), {"v", "seq", "agents"})
+            self.assertEqual(set(payload["agents"]), {"claude", "codex"})
+            allowed_job = {
+                "task_id", "event_id", "state", "project", "activity",
+                "model", "effort", "updated_ms",
+            }
+            for provider in payload["agents"].values():
+                self.assertEqual(set(provider), {"active_count", "jobs"})
+                self.assertLessEqual(len(provider["jobs"]), 4)
+                for job in provider["jobs"]:
+                    self.assertEqual(set(job), allowed_job)
+                    self.assertLessEqual(
+                        len(job["task_id"].encode("utf-8")), 64)
+                    if job["project"] is not None:
+                        self.assertLessEqual(
+                            len(job["project"].encode("utf-8")), 16)
+            for marker in markers.values():
+                self.assertNotIn(marker, serialized)
+
+    def test_70k_codex_record_classifies_without_exposing_irrelevant_secret(self):
+        marker = "synthetic-70k-private-last-agent-message"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "codex" / "rollout-large.jsonl"
+            record = {
+                "type": "event_msg",
+                "timestamp": "2026-08-06T10:00:00Z",
+                "payload": {
+                    "type": "task_complete",
+                    "turn_id": "turn-large-record",
+                    "last_agent_message": marker + "x" * (70 * 1024),
+                },
+            }
+            AgentStatusServiceTests._write_line(path, record)
+            wall_time = AgentStatusService._event_wall_time(record)
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 0.0,
+                _wall_time=lambda: wall_time)
+
+            self.assertEqual(service.poll_once(), 1)
+            snapshot = service.snapshot()
+            self.assertEqual(top_job(snapshot, "codex")["state"], "done")
+            self.assertNotIn(marker, json.dumps(snapshot))
+
+            sent = self._request("/api/agent-status", service)
+            self.assertEqual(sent[0][0], 200)
+            serialized = json.dumps(sent[0][1])
+            self.assertNotIn(marker, serialized)
+            self.assertNotIn(marker, repr(service._backfills))
+
+
+if __name__ == "__main__":
+    unittest.main()

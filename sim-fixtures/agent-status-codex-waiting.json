@@ -1,0 +1,1 @@
+{"v":2,"seq":206,"agents":{"claude":{"active_count":0,"jobs":[]},"codex":{"active_count":1,"jobs":[{"task_id":"codex-task-206","event_id":"codex-waiting-206","state":"waiting","project":"Torget","activity":"waiting_input","updated_ms":0}]}}}
