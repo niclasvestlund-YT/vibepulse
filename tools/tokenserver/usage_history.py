@@ -108,42 +108,52 @@ class UsageHistory:
 
     def record(self, provider: str, window: str, pct: float,
                reset_at: float, at: Optional[float] = None) -> bool:
-        if (provider not in _PROVIDERS or window not in _WINDOWS or
-                not _finite_number(pct) or not 0 <= pct <= 100 or
-                not _finite_number(reset_at)):
-            return False
+        return bool(self.record_many(
+            ((provider, window, pct, reset_at),), at=at))
+
+    def record_many(self, samples, at: Optional[float] = None) -> int:
         timestamp = self._now() if at is None else at
         if not _finite_number(timestamp):
-            return False
+            return 0
         timestamp = int(round(timestamp))
-        cycle = _reset_cycle(reset_at)
-
-        previous = next((record for record in reversed(self._records)
-                         if record["provider"] == provider and
-                         record["window"] == window and
-                         record["reset"] == cycle), None)
-        if (previous is not None and
-                timestamp - previous["at"] < SAMPLE_INTERVAL_S):
-            return False
 
         old_records = self._records
         cutoff = timestamp - RETENTION_S
         self._records = [record for record in self._records
                          if record["at"] >= cutoff]
-        self._records.append({
-            "at": timestamp,
-            "provider": provider,
-            "window": window,
-            "pct": float(pct),
-            "reset": cycle,
-        })
+        added = 0
+        for provider, window, pct, reset_at in samples:
+            if (provider not in _PROVIDERS or window not in _WINDOWS or
+                    not _finite_number(pct) or not 0 <= pct <= 100 or
+                    not _finite_number(reset_at)):
+                continue
+            cycle = _reset_cycle(reset_at)
+            previous = next(
+                (record for record in reversed(self._records)
+                 if record["provider"] == provider and
+                 record["window"] == window and
+                 record["reset"] == cycle), None)
+            if (previous is not None and
+                    timestamp - previous["at"] < SAMPLE_INTERVAL_S):
+                continue
+            self._records.append({
+                "at": timestamp,
+                "provider": provider,
+                "window": window,
+                "pct": float(pct),
+                "reset": cycle,
+            })
+            added += 1
+        if not added:
+            self._records = old_records
+            return 0
         self._records.sort(key=lambda record: record["at"])
         try:
             self._persist()
         except OSError:
             self._records = old_records
-            return False
-        return True
+            return 0
+        return added
 
     def forecast(self, provider: str, window: str, reset_at: float,
                  now: Optional[float] = None) -> Forecast:
@@ -206,3 +216,32 @@ class UsageHistory:
             pace_factor=(None if pace_factor is None
                          else round(pace_factor, 1)),
         )
+
+    def delta_since(self, provider: str, window: str, since: float,
+                    reset_at: float,
+                    now: Optional[float] = None) -> Optional[float]:
+        if (provider not in _PROVIDERS or window not in _WINDOWS or
+                not _finite_number(since) or
+                not _finite_number(reset_at)):
+            return None
+        current_time = self._now() if now is None else now
+        if not _finite_number(current_time):
+            return None
+
+        cycle = _reset_cycle(reset_at)
+        samples = sorted(
+            (record for record in self._records
+             if record["provider"] == provider and
+             record["window"] == window and
+             record["reset"] == cycle and
+             record["at"] <= current_time),
+            key=lambda record: record["at"])
+        if len(samples) < 2:
+            return None
+        earlier = [record for record in samples if record["at"] <= since]
+        baseline = earlier[-1] if earlier else samples[0]
+        latest = samples[-1]
+        if baseline is latest:
+            return None
+        delta = latest["pct"] - baseline["pct"]
+        return None if delta < 0 else round(delta, 1)

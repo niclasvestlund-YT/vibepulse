@@ -42,6 +42,8 @@ skannar eller öppnar aldrig sessionsfiler på begäran.
       "state": "working",
       "project": "Torget",
       "activity": "testing",
+      "model": "FABLE 5",
+      "effort": "XHIGH",
       "updated_ms": 240
     },
     "codex": {
@@ -50,6 +52,8 @@ skannar eller öppnar aldrig sessionsfiler på begäran.
       "state": "done",
       "project": null,
       "activity": null,
+      "model": "GPT-5.6 SOL",
+      "effort": "XHIGH",
       "updated_ms": 1900
     }
   }
@@ -129,9 +133,40 @@ null = ärlig frånvaro, skärmen visar streck):
  "claudeSessionPct": 21.0, "claudeSessionResetMin": 80,
  "claudeWeekPct": 47.0, "claudeWeekResetMin": 850,
  "claudeModelWeekPct": 73.0, "claudeModelWeekResetMin": 850,
+ "claudeModelWeekLabel": "FABLE · VECKA",
+ "claudeWeekTodayDeltaPct": 6.0,
+ "claudeModelWeekTodayDeltaPct": 3.0,
+ "claudeSessionHourDeltaPct": 4.0,
  "codexSessionPct": null, "codexSessionResetMin": null,
- "codexWeekPct": 35.0, "codexWeekResetMin": 2210}
+ "codexWeekPct": 35.0, "codexWeekResetMin": 2210,
+ "codexWeekTodayDeltaPct": 2.0,
+ "claudeForecastState": "at_reset",
+ "claudeForecastPctAtReset": 85,
+ "claudeForecastPaceFactor": 1.4,
+ "claudeForecastAt": null, "claudeForecastOffsetMin": null,
+ "codexForecastState": "collecting",
+ "codexForecastPctAtReset": null,
+ "codexForecastPaceFactor": null,
+ "codexForecastAt": null, "codexForecastOffsetMin": null}
 ```
+
+De nya delta- och prognosfälten är frivilliga för äldre skärmkod och `null`
+när underlaget saknas. Prognosen blir först aktiv efter minst tre punkter,
+90 minuters spann och en procents faktisk rörelse i samma resetcykel.
+
+## Lokal usagehistorik
+
+Tjänsten sparar historiken atomiskt i
+`~/Library/Application Support/VibePulse/usage-history.json`. Högst en punkt
+per leverantör, fönster och 15 minuter behålls, och allt äldre än åtta dagar
+rensas. Varje punkt har exakt fem värden: tid, `claude`/`codex`, quotafönster,
+procent och avrundad resetcykel. Promptar, svar, kommandon, projekt, filnamn,
+modeller och tokeninnehåll kan inte skrivas till filen.
+
+VECKOTAKT räknas med en utjämnad procentslope från högst de senaste 24
+timmarna i den aktuella veckocykeln. Resultatet är antingen `collecting`,
+`unavailable`, beräknad procent vid reset (`at_reset`) eller beräknad tid då
+quotan tar slut (`exhausts`).
 
 Peka skärmen hit i repytrotens `secrets.h`:
 

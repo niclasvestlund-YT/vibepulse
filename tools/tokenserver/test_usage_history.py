@@ -188,5 +188,51 @@ class UsageHistoryForecastTests(unittest.TestCase):
         self.assertEqual(forecast.pct_at_reset, 45)
 
 
+class UsageHistoryDeltaTests(unittest.TestCase):
+    def test_delta_uses_last_sample_before_period_start(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            history = UsageHistory(Path(temp_dir) / "history.json")
+            reset_at = 10 * HOUR
+            history.record("claude", "week", 40,
+                           reset_at=reset_at, at=HOUR)
+            history.record("claude", "week", 43,
+                           reset_at=reset_at, at=2 * HOUR)
+            history.record("claude", "week", 47,
+                           reset_at=reset_at, at=3 * HOUR)
+
+            delta = history.delta_since(
+                "claude", "week", since=HOUR + 30 * 60,
+                reset_at=reset_at, now=3 * HOUR)
+
+            self.assertEqual(delta, 7.0)
+
+    def test_delta_needs_two_samples_in_the_current_reset_cycle(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            history = UsageHistory(Path(temp_dir) / "history.json")
+            history.record("claude", "week", 80,
+                           reset_at=4 * HOUR, at=0)
+            history.record("claude", "week", 10,
+                           reset_at=11 * HOUR, at=2 * HOUR)
+
+            delta = history.delta_since(
+                "claude", "week", since=HOUR,
+                reset_at=11 * HOUR, now=2 * HOUR)
+
+            self.assertIsNone(delta)
+
+    def test_negative_correction_is_not_reported_as_usage_burn(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            history = UsageHistory(Path(temp_dir) / "history.json")
+            reset_at = 10 * HOUR
+            history.record("codex", "week", 30,
+                           reset_at=reset_at, at=HOUR)
+            history.record("codex", "week", 29,
+                           reset_at=reset_at, at=2 * HOUR)
+
+            self.assertIsNone(history.delta_since(
+                "codex", "week", since=HOUR,
+                reset_at=reset_at, now=2 * HOUR))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -101,8 +101,11 @@ och kör dem mot de riktiga fixture-filerna plus fientliga indata.
 ## VibePulse-tjänsten
 
 `tools/tokenserver/` — liten Python-stdlib-tjänst som skannar Claude
-Code-loggarna och serverar `/api/tokens` över LAN. Se README:n där för
-autostart via launchd.
+Code- och Codex-loggarna och serverar `/api/tokens` samt den separata
+agentstatusen över LAN. VibePulse sparar högst en content-fri quotapunkt per
+15 minuter i åtta dagar för `+N% IDAG` och VECKOTAKT. Historiken innehåller
+endast tid, leverantör, fönster, procent och resetcykel. Se README:n där för
+kontrakt, integritetsgräns och autostart via launchd.
 
 ## Hårdvarufällorna
 

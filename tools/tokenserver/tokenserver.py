@@ -45,8 +45,10 @@ from pathlib import Path
 
 if __package__:
     from .agent_status import AgentStatusService
+    from .usage_history import Forecast, UsageHistory
 else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from agent_status import AgentStatusService
+    from usage_history import Forecast, UsageHistory
 
 RECOMPUTE_EVERY_S = 30
 LIMITS_EVERY_S = 120  # rate-limit-proben: snäll mot API:t, färsk nog för hyllan
@@ -57,6 +59,20 @@ _cache_lock = threading.Lock()
 _file_cache = {}   # path -> {"stat": (mtime, size), "records": [...]}
 _last_result = None
 _last_computed = 0.0
+_history_lock = threading.Lock()
+_default_usage_history = None
+
+
+def _get_usage_history(path=None):
+    global _default_usage_history
+    if path is not None:
+        return UsageHistory(Path(path))
+    with _history_lock:
+        if _default_usage_history is None:
+            _default_usage_history = UsageHistory(
+                Path.home() / "Library" / "Application Support" /
+                "VibePulse" / "usage-history.json")
+        return _default_usage_history
 
 
 def _parse_file(path: Path, month_start: datetime):
@@ -413,7 +429,22 @@ def _read_codex_limits():
     return {}
 
 
-def get_snapshot(projects_dir: Path):
+def _reset_at(now_ts, reset_minutes):
+    if (not isinstance(reset_minutes, (int, float)) or
+            isinstance(reset_minutes, bool) or reset_minutes < 0):
+        return None
+    return now_ts + reset_minutes * 60
+
+
+def _add_forecast(result, prefix, forecast):
+    result[f"{prefix}ForecastState"] = forecast.state
+    result[f"{prefix}ForecastPctAtReset"] = forecast.pct_at_reset
+    result[f"{prefix}ForecastPaceFactor"] = forecast.pace_factor
+    result[f"{prefix}ForecastAt"] = forecast.exhausts_at
+    result[f"{prefix}ForecastOffsetMin"] = forecast.offset_minutes
+
+
+def get_snapshot(projects_dir: Path, history=None, now_ts=None):
     global _last_result, _last_computed
     with _cache_lock:
         if _last_result is None or time.monotonic() - _last_computed > RECOMPUTE_EVERY_S:
@@ -425,6 +456,8 @@ def get_snapshot(projects_dir: Path):
     # visar streck, aldrig hittade procent. Samma regel som sharePct.
     claude = get_limits() or {}
     codex = _read_codex_limits()
+    current_ts = time.time() if now_ts is None else now_ts
+    usage_history = _get_usage_history() if history is None else history
     result["claudeSessionPct"] = claude.get("sessionPct")
     result["claudeSessionResetMin"] = claude.get("sessionResetMin")
     result["claudeWeekPct"] = claude.get("weekPct")
@@ -436,6 +469,61 @@ def get_snapshot(projects_dir: Path):
     result["codexSessionResetMin"] = codex.get("codexSessionResetMin")
     result["codexWeekPct"] = codex.get("codexWeekPct")
     result["codexWeekResetMin"] = codex.get("codexWeekResetMin")
+
+    claude_session_reset = _reset_at(
+        current_ts, result["claudeSessionResetMin"])
+    claude_week_reset = _reset_at(
+        current_ts, result["claudeWeekResetMin"])
+    claude_model_reset = _reset_at(
+        current_ts, result["claudeModelWeekResetMin"])
+    codex_week_reset = _reset_at(
+        current_ts, result["codexWeekResetMin"])
+    quota_samples = [
+        (provider, window, pct, reset_at)
+        for provider, window, pct, reset_at in (
+            ("claude", "session", result["claudeSessionPct"],
+             claude_session_reset),
+            ("claude", "week", result["claudeWeekPct"],
+             claude_week_reset),
+            ("claude", "model_week", result["claudeModelWeekPct"],
+             claude_model_reset),
+            ("codex", "week", result["codexWeekPct"],
+             codex_week_reset),
+        )
+        if pct is not None and reset_at is not None
+    ]
+    usage_history.record_many(quota_samples, at=current_ts)
+
+    local_now = datetime.fromtimestamp(current_ts).astimezone()
+    day_start = local_now.replace(
+        hour=0, minute=0, second=0, microsecond=0).timestamp()
+    result["claudeWeekTodayDeltaPct"] = (
+        None if claude_week_reset is None else usage_history.delta_since(
+            "claude", "week", day_start, claude_week_reset,
+            now=current_ts))
+    result["claudeModelWeekTodayDeltaPct"] = (
+        None if claude_model_reset is None else usage_history.delta_since(
+            "claude", "model_week", day_start, claude_model_reset,
+            now=current_ts))
+    result["claudeSessionHourDeltaPct"] = (
+        None if claude_session_reset is None else usage_history.delta_since(
+            "claude", "session", current_ts - 60 * 60,
+            claude_session_reset, now=current_ts))
+    result["codexWeekTodayDeltaPct"] = (
+        None if codex_week_reset is None else usage_history.delta_since(
+            "codex", "week", day_start, codex_week_reset,
+            now=current_ts))
+
+    claude_forecast = (
+        Forecast(state="unavailable") if claude_week_reset is None else
+        usage_history.forecast("claude", "week", claude_week_reset,
+                               now=current_ts))
+    codex_forecast = (
+        Forecast(state="unavailable") if codex_week_reset is None else
+        usage_history.forecast("codex", "week", codex_week_reset,
+                               now=current_ts))
+    _add_forecast(result, "claude", claude_forecast)
+    _add_forecast(result, "codex", codex_forecast)
     result["v"] = 2
     return result
 
