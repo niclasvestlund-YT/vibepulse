@@ -38,7 +38,7 @@ Commands:
 ./test/run.sh
 python3 -m unittest tools.tokenserver.test_agent_status
 cmake -S sim -B sim/build && cmake --build sim/build
-./sim/build/torget_sim
+./sim/build/torget-sim
 ```
 
 Expected: tests pass and the simulator writes its current `/tmp/torget-*.bmp` matrix.
