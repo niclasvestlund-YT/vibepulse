@@ -278,10 +278,9 @@ Commit: `Skapa usage-presenter för VibePulse`
 
 **Files:**
 - Modify: `tools/agent_assets/build-agent-images.py`
-- Create: `components/app_tokens/assets/claude_pet_32.c`
-- Create: `components/app_tokens/assets/codex_pet_32.c`
-- Modify: `components/app_tokens/CMakeLists.txt`
-- Modify: `sim/CMakeLists.txt`
+- Create: `tools/agent_assets/test_build_agent_images.py`
+- Modify: `components/app_tokens/agent_assets.c`
+- Modify: `components/app_tokens/agent_assets.h`
 
 - [ ] Extend the existing generator to emit 32×32 RGB565A8 descriptors from the checked-in source images.
 - [ ] Regenerate assets; do not hand-redraw Claude or Codex.

@@ -16,14 +16,16 @@ OUT_H = ROOT / "components/app_tokens/agent_assets.h"
 CANVAS = 180
 
 
-def fit_canvas(image: Image.Image, crop: tuple[int, int, int, int]) -> Image.Image:
+def fit_canvas(image: Image.Image, crop: tuple[int, int, int, int],
+               canvas_size: int) -> Image.Image:
     cropped = image.crop(crop)
-    scale = min(CANVAS / cropped.width, CANVAS / cropped.height)
+    scale = min(canvas_size / cropped.width, canvas_size / cropped.height)
     size = (max(1, round(cropped.width * scale)),
             max(1, round(cropped.height * scale)))
     resized = cropped.resize(size, Image.Resampling.NEAREST)
-    canvas = Image.new(image.mode, (CANVAS, CANVAS), 0)
-    canvas.paste(resized, ((CANVAS - size[0]) // 2, (CANVAS - size[1]) // 2))
+    canvas = Image.new(image.mode, (canvas_size, canvas_size), 0)
+    canvas.paste(resized, ((canvas_size - size[0]) // 2,
+                           (canvas_size - size[1]) // 2))
     return canvas
 
 
@@ -49,16 +51,16 @@ def components(mask: Image.Image, bounds: tuple[int, int, int, int]):
     return found
 
 
-def build_claude() -> bytes:
+def build_claude(canvas_size: int = CANVAS) -> bytes:
     source = Image.open(SOURCE / "claude-pet-white.png").convert("RGBA")
     alpha = source.getchannel("A")
     crop = alpha.getbbox()
     if crop is None:
         raise ValueError("Claude source has no visible pixels")
-    return bytes(fit_canvas(alpha, crop).getdata())
+    return bytes(fit_canvas(alpha, crop, canvas_size).getdata())
 
 
-def build_codex() -> tuple[bytes, bytes, bytes]:
+def build_codex(canvas_size: int = CANVAS) -> tuple[bytes, bytes, bytes]:
     source = Image.open(SOURCE / "codex-icon.png").convert("RGBA")
     src = source.load()
     colored = Image.new("L", source.size, 0)
@@ -103,7 +105,7 @@ def build_codex() -> tuple[bytes, bytes, bytes]:
         mask_px = mask.load()
         for x, y in part:
             mask_px[x, y] = src[x, y][3]
-        glyph_masks.append(fit_canvas(mask, crop))
+        glyph_masks.append(fit_canvas(mask, crop, canvas_size))
 
     # Reconstruct the cloud underneath the terminal marks from each row's
     # real cloud color. Hiding a glyph later therefore reveals cloud, not a
@@ -124,7 +126,7 @@ def build_codex() -> tuple[bytes, bytes, bytes]:
             elif (x, y) in glyph_points:
                 cloud_px[x, y] = (*row_color[y], 255)
 
-    fitted = fit_canvas(cloud, crop)
+    fitted = fit_canvas(cloud, crop, canvas_size)
     visible = [(r, g, b) for r, g, b, a in fitted.getdata() if a]
     strip = Image.new("RGB", (len(visible), 1))
     strip.putdata(visible)
@@ -163,14 +165,14 @@ def c_array(name: str, data: bytes) -> str:
 
 
 def descriptor(name: str, data_name: str, color_format: str, stride: int,
-               size: int) -> str:
+               size: int, canvas: int = CANVAS) -> str:
     return f"""const lv_image_dsc_t {name} = {{
   .header = {{
     .magic = LV_IMAGE_HEADER_MAGIC,
     .cf = {color_format},
     .flags = 0,
-    .w = {CANVAS},
-    .h = {CANVAS},
+    .w = {canvas},
+    .h = {canvas},
     .stride = {stride},
   }},
   .data_size = {size},
@@ -182,6 +184,8 @@ def descriptor(name: str, data_name: str, color_format: str, stride: int,
 def main() -> None:
     claude = build_claude()
     codex, chevron, underscore = build_codex()
+    claude_32 = build_claude(32)
+    codex_32, chevron_32, underscore_32 = build_codex(32)
     OUT_H.write_text("""#ifndef AGENT_ASSETS_H
 #define AGENT_ASSETS_H
 
@@ -191,6 +195,10 @@ extern const lv_image_dsc_t tk_img_claude;
 extern const lv_image_dsc_t tk_img_codex_cloud;
 extern const lv_image_dsc_t tk_img_codex_chevron;
 extern const lv_image_dsc_t tk_img_codex_underscore;
+extern const lv_image_dsc_t tk_img_claude_32;
+extern const lv_image_dsc_t tk_img_codex_cloud_32;
+extern const lv_image_dsc_t tk_img_codex_chevron_32;
+extern const lv_image_dsc_t tk_img_codex_underscore_32;
 
 #endif
 """, encoding="utf-8")
@@ -199,6 +207,10 @@ extern const lv_image_dsc_t tk_img_codex_underscore;
     source += c_array("tk_img_codex_cloud_data", codex)
     source += c_array("tk_img_codex_chevron_data", chevron)
     source += c_array("tk_img_codex_underscore_data", underscore)
+    source += c_array("tk_img_claude_32_data", claude_32)
+    source += c_array("tk_img_codex_cloud_32_data", codex_32)
+    source += c_array("tk_img_codex_chevron_32_data", chevron_32)
+    source += c_array("tk_img_codex_underscore_32_data", underscore_32)
     source += "\n"
     source += descriptor("tk_img_claude", "tk_img_claude_data",
                          "LV_COLOR_FORMAT_A8", CANVAS, len(claude))
@@ -208,6 +220,16 @@ extern const lv_image_dsc_t tk_img_codex_underscore;
                          "LV_COLOR_FORMAT_A8", CANVAS, len(chevron))
     source += descriptor("tk_img_codex_underscore", "tk_img_codex_underscore_data",
                          "LV_COLOR_FORMAT_A8", CANVAS, len(underscore))
+    source += descriptor("tk_img_claude_32", "tk_img_claude_32_data",
+                         "LV_COLOR_FORMAT_A8", 32, len(claude_32), 32)
+    source += descriptor("tk_img_codex_cloud_32", "tk_img_codex_cloud_32_data",
+                         "LV_COLOR_FORMAT_I4", 16, len(codex_32), 32)
+    source += descriptor("tk_img_codex_chevron_32",
+                         "tk_img_codex_chevron_32_data",
+                         "LV_COLOR_FORMAT_A8", 32, len(chevron_32), 32)
+    source += descriptor("tk_img_codex_underscore_32",
+                         "tk_img_codex_underscore_32_data",
+                         "LV_COLOR_FORMAT_A8", 32, len(underscore_32), 32)
     OUT_C.write_text(source, encoding="utf-8")
 
 
