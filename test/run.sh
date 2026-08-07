@@ -55,6 +55,12 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-agent-monitor-policy-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_completion_policy.c \
+  test_agent_completion_policy.c \
+  -o /tmp/torget-agent-completion-policy-test
+/tmp/torget-agent-completion-policy-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/agent_net_policy.c \
   test_agent_net_policy.c \
   -o /tmp/torget-agent-net-policy-test

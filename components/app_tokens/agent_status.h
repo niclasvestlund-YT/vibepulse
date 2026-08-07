@@ -67,7 +67,29 @@ typedef struct {
 
 static inline const tk_agent_status *tk_agent_provider_primary(
     const tk_agent_provider_status *provider) {
-  return provider && provider->job_count ? &provider->jobs[0] : NULL;
+  if (!provider || !provider->job_count) return NULL;
+  const tk_agent_status *primary = &provider->jobs[0];
+  for (uint8_t i = 1; i < provider->job_count; i++) {
+    const tk_agent_status *candidate = &provider->jobs[i];
+    int primary_priority =
+        primary->state == TK_AGENT_WAITING ? 5 :
+        primary->state == TK_AGENT_ERROR ? 4 :
+        primary->state == TK_AGENT_WORKING ? 3 :
+        primary->state == TK_AGENT_DONE ? 2 :
+        primary->state == TK_AGENT_IDLE ? 1 : 0;
+    int candidate_priority =
+        candidate->state == TK_AGENT_WAITING ? 5 :
+        candidate->state == TK_AGENT_ERROR ? 4 :
+        candidate->state == TK_AGENT_WORKING ? 3 :
+        candidate->state == TK_AGENT_DONE ? 2 :
+        candidate->state == TK_AGENT_IDLE ? 1 : 0;
+    if (candidate_priority > primary_priority ||
+        (candidate_priority == primary_priority &&
+         candidate->updated_ms < primary->updated_ms)) {
+      primary = candidate;
+    }
+  }
+  return primary;
 }
 
 #endif
