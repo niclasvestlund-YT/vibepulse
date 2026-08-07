@@ -35,6 +35,41 @@ static esp_err_t status_http_event(esp_http_client_event_t *event) {
   return ESP_OK;
 }
 
+static int status_http_open(void *context) {
+  return (int)esp_http_client_open((esp_http_client_handle_t)context, 0);
+}
+
+static int64_t status_http_fetch_headers(void *context) {
+  return esp_http_client_fetch_headers((esp_http_client_handle_t)context);
+}
+
+static int status_http_status(void *context) {
+  return esp_http_client_get_status_code((esp_http_client_handle_t)context);
+}
+
+static int status_http_read(void *context, char *buffer, int capacity) {
+  return esp_http_client_read((esp_http_client_handle_t)context, buffer,
+                              capacity);
+}
+
+static bool status_http_complete(void *context) {
+  return esp_http_client_is_complete_data_received(
+      (esp_http_client_handle_t)context);
+}
+
+static void status_http_close(void *context) {
+  (void)esp_http_client_close((esp_http_client_handle_t)context);
+}
+
+static const tk_agent_http_io status_http_io = {
+  .open = status_http_open,
+  .fetch_headers = status_http_fetch_headers,
+  .get_status = status_http_status,
+  .read = status_http_read,
+  .is_complete = status_http_complete,
+  .close = status_http_close,
+};
+
 static void log_rejection(esp_err_t err, bool parsed) {
   static bool has_logged;
   static TickType_t last_log_tick;
@@ -83,9 +118,9 @@ static void agent_net_task(void *arg) {
 
   ESP_LOGI(TAG, "agentstatuspollning startad");
   for (;;) {
-    tk_agent_http_response_reset(&response);
-    esp_err_t err = esp_http_client_perform(client);
-    response.status = esp_http_client_get_status_code(client);
+    tk_agent_http_fetch_result fetch =
+        tk_agent_http_fetch_bounded(client, &response, &status_http_io);
+    esp_err_t err = fetch == TK_AGENT_HTTP_FETCH_OK ? ESP_OK : ESP_FAIL;
 
     tk_agent_snapshot snapshot;
     bool transport_ok = err == ESP_OK;

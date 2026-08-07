@@ -127,6 +127,29 @@ int main(void) {
   check("terminal status håller inte skärmen vaken",
         !tk_agent_monitor_should_keep_awake(&done, "", 0));
 
+  tk_agent_status mixed[2] = {
+      agent(TK_AGENT_WAITING, 0, "waiting-selected"),
+      agent(TK_AGENT_WORKING, 0, "working-unselected"),
+  };
+  char dismissed_ids[2][TK_AGENT_ID_CAP] = {{0}};
+  uint8_t rendered_mask =
+      tk_agent_monitor_presence_mask(mixed, dismissed_ids, 0);
+  uint8_t stale_mask =
+      tk_agent_monitor_presence_mask(mixed, dismissed_ids, 120001);
+  check("vald terminal och ovald working syns först",
+        rendered_mask == 0x03);
+  check("ovald working försvinner när paketleasen går ut",
+        stale_mask == 0x01);
+  check("presenceändring hos ovald provider triggar UI-render",
+        tk_agent_monitor_tick_should_render(true, 0, rendered_mask,
+                                            stale_mask));
+  check("vald terminalstatus bevaras efter ovald stale working",
+        tk_agent_monitor_effective_state(&mixed[0], 120001) ==
+            TK_AGENT_WAITING);
+  check("oförändrad presence triggar ingen extra UI-render",
+        !tk_agent_monitor_tick_should_render(true, 0, stale_mask,
+                                             stale_mask));
+
   if (failures == 0) {
     printf("OK: alla agentmonitor-policytester gröna\n");
     return 0;

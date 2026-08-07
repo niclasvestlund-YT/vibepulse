@@ -23,6 +23,13 @@ bool tk_agent_monitor_status_present(const tk_agent_status *status,
 bool tk_agent_monitor_should_keep_awake(const tk_agent_status *status,
                                         const char *dismissed_event_id,
                                         uint64_t packet_age_ms);
+uint8_t tk_agent_monitor_presence_mask(
+    const tk_agent_status agents[2],
+    const char dismissed_event_ids[2][TK_AGENT_ID_CAP],
+    uint64_t packet_age_ms);
+bool tk_agent_monitor_tick_should_render(bool has_snapshot, int selected,
+                                         uint8_t rendered_presence_mask,
+                                         uint8_t current_presence_mask);
 
 void tk_agent_monitor_manual_choice_set(tk_agent_manual_choice *choice,
                                         int provider,

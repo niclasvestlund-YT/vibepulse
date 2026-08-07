@@ -44,6 +44,7 @@ typedef struct {
   char dismissed_event_id[2][TK_AGENT_ID_CAP];
   int selected;
   int64_t applied_at_us;
+  uint8_t rendered_presence_mask;
   bool has_snapshot;
   bool long_pressed;
   tk_agent_manual_choice manual_choice;
@@ -79,6 +80,11 @@ static bool is_present(int provider, int64_t now_us) {
   return tk_agent_monitor_status_present(
       &mon.agents[provider], mon.dismissed_event_id[provider],
       packet_age_ms(now_us));
+}
+
+static uint8_t current_presence_mask(int64_t now_us) {
+  return tk_agent_monitor_presence_mask(
+      mon.agents, mon.dismissed_event_id, packet_age_ms(now_us));
 }
 
 static lv_color_t provider_color(int provider) {
@@ -230,7 +236,9 @@ static void render_provider(int provider, int64_t now_us) {
 }
 
 static void render_best(int64_t now_us) {
-  bool present[2] = {is_present(0, now_us), is_present(1, now_us)};
+  uint8_t mask = current_presence_mask(now_us);
+  bool present[2] = {(mask & 0x01U) != 0, (mask & 0x02U) != 0};
+  mon.rendered_presence_mask = mask;
   int provider = tk_agent_monitor_resolve_provider(
       mon.agents, present, &mon.manual_choice);
   if (mon.manual_choice.active &&
@@ -414,8 +422,12 @@ void tk_agent_monitor_apply(const tk_agent_snapshot *snapshot,
 }
 
 void tk_agent_monitor_tick(int64_t now_us) {
-  if (!mon.has_snapshot || mon.selected < 0) return;
-  if (!is_present(mon.selected, now_us)) render_best(now_us);
+  uint8_t presence = current_presence_mask(now_us);
+  if (tk_agent_monitor_tick_should_render(
+          mon.has_snapshot, mon.selected, mon.rendered_presence_mask,
+          presence)) {
+    render_best(now_us);
+  }
 }
 
 void tk_agent_monitor_set_usage(bool claude, tk_agent_usage usage) {

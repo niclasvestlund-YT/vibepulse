@@ -33,6 +33,29 @@ bool tk_agent_monitor_should_keep_awake(const tk_agent_status *status,
                                          packet_age_ms);
 }
 
+uint8_t tk_agent_monitor_presence_mask(
+    const tk_agent_status agents[2],
+    const char dismissed_event_ids[2][TK_AGENT_ID_CAP],
+    uint64_t packet_age_ms) {
+  if (!agents || !dismissed_event_ids) return 0;
+  uint8_t mask = 0;
+  for (int provider = 0; provider < 2; provider++) {
+    if (tk_agent_monitor_status_present(&agents[provider],
+                                        dismissed_event_ids[provider],
+                                        packet_age_ms)) {
+      mask |= (uint8_t)(1U << provider);
+    }
+  }
+  return mask;
+}
+
+bool tk_agent_monitor_tick_should_render(bool has_snapshot, int selected,
+                                         uint8_t rendered_presence_mask,
+                                         uint8_t current_presence_mask) {
+  return has_snapshot && selected >= 0 &&
+         rendered_presence_mask != current_presence_mask;
+}
+
 static int state_priority(tk_agent_state state) {
   switch (state) {
     case TK_AGENT_WAITING: return 5;

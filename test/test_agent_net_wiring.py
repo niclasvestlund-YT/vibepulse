@@ -49,6 +49,16 @@ for line in required_config:
 assert source.count("esp_http_client_init(") == 1, (
     "agent polling must create exactly one HTTP client"
 )
+assert "esp_http_client_perform(" not in source, (
+    "bounded polling must not rely on the unabortable perform callback path"
+)
+for operation in (
+    "esp_http_client_open(",
+    "esp_http_client_fetch_headers(",
+    "esp_http_client_read(",
+    "esp_http_client_close(",
+):
+    assert operation in source, f"bounded adapter must use {operation}"
 assert "esp_http_client_cleanup(" not in source, (
     "the long-lived polling task must not destroy its client per poll"
 )
