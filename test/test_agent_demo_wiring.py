@@ -24,3 +24,17 @@ assert guarded_secrets_include.start() < demo_guard, (
 )
 
 print("OK: agentdemons targetkonfiguration är inkopplad")
+
+monitor_source = (
+    Path(__file__).parent / "../components/app_tokens/agent_monitor.c"
+).resolve().read_text(encoding="utf-8")
+usage_source = (
+    Path(__file__).parent / "../components/app_tokens/usage_screen.c"
+).resolve().read_text(encoding="utf-8")
+
+assert "LV_EVENT_CLICKED" in monitor_source
+assert "tk_completion_queue_dismiss" in monitor_source
+assert "LV_EVENT_LONG_PRESSED" in monitor_source
+assert "torget_launcher_open" in monitor_source
+assert usage_source.count("tk_agent_monitor_create(root)") == 1
+assert "tk_agent_monitor_create_footer" not in usage_source

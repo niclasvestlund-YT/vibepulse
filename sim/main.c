@@ -20,6 +20,7 @@
 
 #include "app_solelkollen.h"
 #include "app_tokens.h"
+#include "agent_monitor.h"
 #include "agent_status_parse.h"
 #include "glance_parse.h"
 #include "tokens_parse.h"
@@ -219,10 +220,7 @@ static void feed_forecast_outcomes(void) {
   tokens_apply(&tokens);
 }
 
-static void apply_agent_fixture(int idx) {
-  int count = (int)(sizeof AGENT_FIXTURES / sizeof AGENT_FIXTURES[0]);
-  agent_fixture_idx = (idx % count + count) % count;
-  const char *file = AGENT_FIXTURES[agent_fixture_idx];
+static void apply_agent_file(const char *file) {
   size_t len = 0;
   char *json = read_fixture(file, &len);
   tk_agent_snapshot snapshot;
@@ -233,6 +231,12 @@ static void apply_agent_fixture(int idx) {
     printf("agentstatus: %s avvisad\n", file);
   }
   free(json);
+}
+
+static void apply_agent_fixture(int idx) {
+  int count = (int)(sizeof AGENT_FIXTURES / sizeof AGENT_FIXTURES[0]);
+  agent_fixture_idx = (idx % count + count) % count;
+  apply_agent_file(AGENT_FIXTURES[agent_fixture_idx]);
 }
 
 static void next_fixture(lv_timer_t *t) {
@@ -333,6 +337,26 @@ static void run_vibepulse_static_qa(void) {
   dump_frame("vibepulse-claude-restored");
 }
 
+static void run_vibepulse_completion_qa(void) {
+  torget_app_show(1);
+  tokens_show_view(0);
+  apply_agent_file("agent-status-idle.json");
+
+  apply_agent_file("agent-status-multi-working.json");
+  dump_frame("vibepulse-multi-working");
+
+  apply_agent_file("agent-status-claude-done.json");
+  dump_frame("vibepulse-claude-done-static");
+  tk_agent_monitor_dismiss_current();
+
+  apply_agent_file("agent-status-codex-done.json");
+  dump_frame("vibepulse-codex-done-static");
+  tk_agent_monitor_dismiss_current();
+
+  apply_agent_file("agent-status-multi-done.json");
+  dump_frame("vibepulse-two-done-queued");
+}
+
 int main(int argc, char **argv) {
   /* Radbuffrat även vid pipe: fixtureloggen ska överleva en kill. */
   setvbuf(stdout, NULL, _IOLBF, 0);
@@ -364,6 +388,10 @@ int main(int argc, char **argv) {
 
   if (argc == 2 && strcmp(argv[1], "--vibepulse-static-qa") == 0) {
     run_vibepulse_static_qa();
+    return 0;
+  }
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-completion-qa") == 0) {
+    run_vibepulse_completion_qa();
     return 0;
   }
 

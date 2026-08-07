@@ -26,8 +26,8 @@ extern const lv_font_t plex_ui_12;
 #define COL_MUTED       lv_color_hex(0x858C97)
 #define COL_RESET       lv_color_hex(0xD4D8DF)
 #define COL_WHITE       lv_color_hex(0xFFFFFF)
-#define COL_CLAUDE      lv_color_hex(0xFF7C61)
-#define COL_CLAUDE_OLD  lv_color_hex(0x70463E)
+#define COL_CLAUDE      lv_color_hex(0xD97757)
+#define COL_CLAUDE_OLD  lv_color_hex(0x6B3C32)
 #define COL_CODEX       lv_color_hex(0x6F78FF)
 #define COL_CODEX_OLD   lv_color_hex(0x3E436F)
 #define COL_APP_PLATE   lv_color_hex(0x181636)
@@ -405,23 +405,16 @@ void usage_screen_create(lv_obj_t *root) {
   create_card(ui.claude.tile, &ui.claude.cards[0], CARD_1_Y, CARD_H, false);
   create_card(ui.claude.tile, &ui.claude.cards[1], CARD_2_Y, CARD_H, false);
   create_pager(ui.claude.tile, 0);
-  lv_obj_t *claude_footer = bare(ui.claude.tile);
-  lv_obj_set_pos(claude_footer, CONTENT_X, FOOTER_Y);
-  lv_obj_set_size(claude_footer, CONTENT_W, FOOTER_H);
-  tk_agent_monitor_create_footer(claude_footer, true);
 
   ui.codex.provider_index = 1;
   ui.codex.tile = new_tile(1);
   create_header(ui.codex.tile, &ui.codex, "CODEX");
   create_card(ui.codex.tile, &ui.codex.cards[0], 90, 230, true);
   create_pager(ui.codex.tile, 1);
-  lv_obj_t *codex_footer = bare(ui.codex.tile);
-  lv_obj_set_pos(codex_footer, CONTENT_X, FOOTER_Y);
-  lv_obj_set_size(codex_footer, CONTENT_W, FOOTER_H);
-  tk_agent_monitor_create_footer(codex_footer, false);
 
   create_forecast_page();
   create_volume_page();
+  tk_agent_monitor_create(root);
 }
 
 void usage_screen_apply_tokens(const tk_tokens *tokens) {

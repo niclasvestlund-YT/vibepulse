@@ -4,7 +4,8 @@
 idf_component_register(
   SRCS "app.c" "tokens_parse.c" "usage_presenter.c" "usage_screen.c"
        "agent_status_parse.c" "agent_usage.c"
-       "agent_monitor_policy.c" "agent_monitor.c" "agent_assets.c"
+       "agent_monitor_policy.c" "agent_completion_policy.c"
+       "agent_monitor.c" "agent_assets.c"
        "agent_net_policy.c" "net.c" "agent_net.c"
   INCLUDE_DIRS "."
   REQUIRES torget_app torget_fmt torget_ticker cjson
