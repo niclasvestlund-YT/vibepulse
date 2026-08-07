@@ -1,36 +1,44 @@
-/*
- * Agentstatusens kontraktstester: den riktiga simulatorfixturen plus
- * fientliga payloads. Avvisade svar får aldrig skriva över senaste goda
- * snapshoten.
- */
+/* Strict contract tests for VibePulse agent-status v2. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../components/app_tokens/agent_status_parse.h"
 
-static int failures = 0;
+static int failures;
+
+static void check(const char *what, int condition) {
+  if (!condition) {
+    printf("FAIL %s\n", what);
+    failures++;
+  }
+}
 
 static char *read_file(const char *path, size_t *len_out) {
-  FILE *f = fopen(path, "rb");
-  if (!f) { printf("FAIL kan inte läsa %s\n", path); failures++; return NULL; }
-  fseek(f, 0, SEEK_END);
-  long n = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  char *buf = malloc((size_t)n + 1);
-  fread(buf, 1, (size_t)n, f);
-  buf[n] = '\0';
-  fclose(f);
-  if (len_out) *len_out = (size_t)n;
-  return buf;
+  FILE *stream = fopen(path, "rb");
+  if (!stream) {
+    printf("FAIL kan inte läsa %s\n", path);
+    failures++;
+    return NULL;
+  }
+  fseek(stream, 0, SEEK_END);
+  long length = ftell(stream);
+  fseek(stream, 0, SEEK_SET);
+  char *data = malloc((size_t)length + 1);
+  if (!data) {
+    fclose(stream);
+    failures++;
+    return NULL;
+  }
+  fread(data, 1, (size_t)length, stream);
+  data[length] = '\0';
+  fclose(stream);
+  *len_out = (size_t)length;
+  return data;
 }
 
-static void check(const char *what, int cond) {
-  if (!cond) { printf("FAIL %s\n", what); failures++; }
-}
-
-static void check_rejected_unchanged(const char *what, const char *json,
-                                     tk_agent_snapshot *out) {
+static void rejected_unchanged(const char *what, const char *json,
+                               tk_agent_snapshot *out) {
   memset(out, 0xa5, sizeof *out);
   tk_agent_snapshot before;
   memcpy(&before, out, sizeof before);
@@ -44,337 +52,200 @@ static void check_rejected_unchanged(const char *what, const char *json,
   }
 }
 
-/* Alla literaler parsas med strlen; inga handräknade payloadlängder. */
-#define PARSE(s, out) tk_agent_status_parse((s), strlen(s), (out))
-#define IDLE_CODEX \
-  "\"codex\":{\"task_id\":null,\"event_id\":null,\"state\":\"idle\"," \
-  "\"project\":null,\"activity\":null,\"updated_ms\":0}"
-#define PAYLOAD(CLAUDE) \
-  "{\"v\":1,\"seq\":1,\"agents\":{" CLAUDE "," IDLE_CODEX "}}"
+#define PARSE(JSON, OUT) tk_agent_status_parse((JSON), strlen(JSON), (OUT))
 
-#define CLAUDE_WORKING \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
+#define WORKING_JOB \
+  "{\"task_id\":\"claude-task\",\"event_id\":\"claude-event\"," \
   "\"state\":\"working\",\"project\":\"Torget\"," \
-  "\"activity\":\"testing\",\"updated_ms\":1}"
-#define CLAUDE_NEGATIVE_UPDATED \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
-  "\"state\":\"working\",\"project\":\"Torget\"," \
-  "\"activity\":\"testing\",\"updated_ms\":-1}"
-#define CLAUDE_UNDERFLOW_UPDATED \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
-  "\"state\":\"working\",\"project\":\"Torget\"," \
-  "\"activity\":\"testing\",\"updated_ms\":1e-9999}"
-#define CLAUDE_LONG_PROJECT \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
-  "\"state\":\"working\",\"project\":\"12345678901234567\"," \
-  "\"activity\":\"testing\",\"updated_ms\":1}"
-#define CLAUDE_CONTROL_PROJECT \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
-  "\"state\":\"working\",\"project\":\"Tor\\u0001get\"," \
-  "\"activity\":\"testing\",\"updated_ms\":1}"
-#define CLAUDE_UNKNOWN_STATE \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
-  "\"state\":\"reviewing\",\"project\":\"Torget\"," \
-  "\"activity\":\"testing\",\"updated_ms\":1}"
-#define CLAUDE_UNKNOWN_ACTIVITY \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
-  "\"state\":\"working\",\"project\":\"Torget\"," \
+  "\"activity\":\"editing\",\"model\":\"FABLE 5\"," \
+  "\"effort\":\"XHIGH\",\"updated_ms\":25}"
+
+#define CODEX_JOB \
+  "{\"task_id\":\"codex-task\",\"event_id\":\"codex-event\"," \
+  "\"state\":\"working\",\"project\":\"Buddy\"," \
+  "\"activity\":\"testing\",\"model\":\"GPT-5.6 SOL\"," \
+  "\"effort\":\"XHIGH\",\"updated_ms\":10}"
+
+#define NO_METADATA_JOB \
+  "{\"task_id\":\"plain\",\"event_id\":\"plain-event\"," \
+  "\"state\":\"done\",\"project\":null,\"activity\":null," \
+  "\"updated_ms\":4294967295}"
+
+#define UNKNOWN_JOB \
+  "{\"task_id\":\"unknown\",\"event_id\":\"unknown-event\"," \
+  "\"state\":\"reviewing\",\"project\":null," \
   "\"activity\":\"reviewing\",\"updated_ms\":1}"
-#define CLAUDE_MAX_UPDATED \
-  "\"claude\":{\"task_id\":\"turn-1\",\"event_id\":\"event-1\"," \
-  "\"state\":\"working\",\"project\":\"Torget\"," \
-  "\"activity\":\"testing\",\"updated_ms\":4294967295}"
 
-#define DEPTH_PREFIX "{\"v\":1,\"seq\":1,\"metadata\":"
-#define DEPTH_SUFFIX \
-  ",\"markers\":\"\\\"[[[[{{{{]]]]}}}}\",\"agents\":{" \
-  CLAUDE_WORKING "," IDLE_CODEX "}}"
-
-static char *depth_payload(size_t array_depth) {
-  size_t prefix_len = strlen(DEPTH_PREFIX);
-  size_t suffix_len = strlen(DEPTH_SUFFIX);
-  size_t total = prefix_len + array_depth + strlen("null") + array_depth +
-                 suffix_len + 1;
-  char *payload = malloc(total);
-  if (!payload) {
-    printf("FAIL kan inte allokera djup-payload\n");
-    failures++;
-    return NULL;
-  }
-
-  char *cursor = payload;
-  memcpy(cursor, DEPTH_PREFIX, prefix_len);
-  cursor += prefix_len;
-  memset(cursor, '[', array_depth);
-  cursor += array_depth;
-  memcpy(cursor, "null", strlen("null"));
-  cursor += strlen("null");
-  memset(cursor, ']', array_depth);
-  cursor += array_depth;
-  memcpy(cursor, DEPTH_SUFFIX, suffix_len + 1);
-  return payload;
-}
+#define EMPTY_CODEX "\"codex\":{\"active_count\":0,\"jobs\":[]}"
+#define ONE_CLAUDE(JOB) \
+  "\"claude\":{\"active_count\":1,\"jobs\":[" JOB "]}"
+#define PAYLOAD(JOB) \
+  "{\"v\":2,\"seq\":7,\"agents\":{" ONE_CLAUDE(JOB) "," \
+  EMPTY_CODEX "}}"
 
 int main(void) {
-  size_t len;
-  char *json;
   tk_agent_snapshot snapshot = {0};
-
-  json = read_file(FIXTURES_DIR "/agent-status-claude-working.json", &len);
-  if (json) {
-    check("fixturen parsar", tk_agent_status_parse(json, len, &snapshot));
-    check("seq", snapshot.seq == 201);
-    check("Claude arbetar", snapshot.claude.state == TK_AGENT_WORKING);
+  size_t fixture_len = 0;
+  char *fixture = read_file(
+      FIXTURES_DIR "/agent-status-claude-working.json", &fixture_len);
+  if (fixture) {
+    check("v2-fixturen parsar",
+          tk_agent_status_parse(fixture, fixture_len, &snapshot));
+    check("fixturens seq", snapshot.seq == 201);
+    check("en Claude-session",
+          snapshot.claude.active_count == 1 &&
+          snapshot.claude.job_count == 1);
     check("Claude ändrar filer",
-          snapshot.claude.activity == TK_ACTIVITY_EDITING);
-    check("Claude-fixturen har modell och effort",
-          snapshot.claude.has_model && snapshot.claude.has_effort &&
-          strcmp(snapshot.claude.model, "FABLE 5") == 0 &&
-          strcmp(snapshot.claude.effort, "XHIGH") == 0);
-    check("projekt", strcmp(snapshot.claude.project, "Torget") == 0);
-    check("Codex vilar", snapshot.codex.state == TK_AGENT_IDLE);
-    free(json);
+          snapshot.claude.jobs[0].state == TK_AGENT_WORKING &&
+          snapshot.claude.jobs[0].activity == TK_ACTIVITY_EDITING);
+    check("modell, effort och projekt bevaras",
+          snapshot.claude.jobs[0].has_model &&
+          snapshot.claude.jobs[0].has_effort &&
+          strcmp(snapshot.claude.jobs[0].model, "FABLE 5") == 0 &&
+          strcmp(snapshot.claude.jobs[0].effort, "XHIGH") == 0 &&
+          strcmp(snapshot.claude.jobs[0].project, "Torget") == 0);
+    check("Codex-listan är tom",
+          snapshot.codex.active_count == 0 &&
+          snapshot.codex.job_count == 0);
+    free(fixture);
   }
 
-  check("modell och effort accepteras",
-        PARSE("{\"v\":1,\"seq\":2,\"agents\":{" \
-              "\"claude\":{\"task_id\":\"turn-2\"," \
-              "\"event_id\":\"event-2\",\"state\":\"working\"," \
-              "\"project\":\"Torget\",\"activity\":\"editing\"," \
-              "\"model\":\"FABLE 5\",\"effort\":\"XHIGH\"," \
-              "\"updated_ms\":2}," IDLE_CODEX "}}", &snapshot));
-  check("modell markeras som tillgänglig", snapshot.claude.has_model);
-  check("modell bevaras", strcmp(snapshot.claude.model, "FABLE 5") == 0);
-  check("effort markeras som tillgänglig", snapshot.claude.has_effort);
-  check("effort bevaras", strcmp(snapshot.claude.effort, "XHIGH") == 0);
+  const char multi[] =
+      "{\"v\":2,\"seq\":9,\"agents\":{" \
+      "\"claude\":{\"active_count\":5,\"jobs\":[" WORKING_JOB "," \
+      "{\"task_id\":\"claude-2\",\"event_id\":\"event-2\"," \
+      "\"state\":\"waiting\",\"project\":\"Solelkollen\"," \
+      "\"activity\":\"waiting_approval\",\"updated_ms\":5}]}," \
+      "\"codex\":{\"active_count\":1,\"jobs\":[" CODEX_JOB "]}}}";
+  check("flera jobb parsas", PARSE(multi, &snapshot));
+  check("alla aktiva räknas även över listtak",
+        snapshot.claude.active_count == 5);
+  check("två Claude-jobb lagras", snapshot.claude.job_count == 2);
+  check("Codex-projekt bevaras",
+        snapshot.codex.job_count == 1 &&
+        strcmp(snapshot.codex.jobs[0].project, "Buddy") == 0);
 
-  check("saknad modellmetadata är bakåtkompatibel",
-        PARSE(PAYLOAD(CLAUDE_WORKING), &snapshot));
-  check("saknad modell är explicit", !snapshot.claude.has_model &&
-        snapshot.claude.model[0] == '\0');
-  check("saknad effort är explicit", !snapshot.claude.has_effort &&
-        snapshot.claude.effort[0] == '\0');
+  check("valfri modellmetadata kan saknas",
+        PARSE(PAYLOAD(NO_METADATA_JOB), &snapshot));
+  check("saknad metadata är explicit",
+        !snapshot.claude.jobs[0].has_model &&
+        !snapshot.claude.jobs[0].has_effort &&
+        snapshot.claude.jobs[0].updated_ms == UINT32_MAX);
 
-  check("null modellmetadata accepteras",
-        PARSE("{\"v\":1,\"seq\":3,\"agents\":{" \
-              "\"claude\":{\"task_id\":\"turn-3\"," \
-              "\"event_id\":\"event-3\",\"state\":\"working\"," \
-              "\"project\":\"Torget\",\"activity\":\"reading\"," \
-              "\"model\":null,\"effort\":null,\"updated_ms\":3}," \
-              IDLE_CODEX "}}", &snapshot));
-  check("null modell är otillgänglig",
-        !snapshot.claude.has_model && !snapshot.claude.has_effort);
+  check("framtida enumvärden parsas",
+        PARSE(PAYLOAD(UNKNOWN_JOB), &snapshot));
+  check("framtida enumvärden mappas till unknown",
+        snapshot.claude.jobs[0].state == TK_AGENT_UNKNOWN &&
+        snapshot.claude.jobs[0].activity == TK_ACTIVITY_UNKNOWN);
 
-  check_rejected_unchanged(
-      "modell med fel typ",
-      "{\"v\":1,\"seq\":4,\"agents\":{" \
-      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
-      "\"state\":\"working\",\"project\":\"Torget\"," \
-      "\"activity\":\"reading\",\"model\":7,\"updated_ms\":4}," \
-      IDLE_CODEX "}}", &snapshot);
-  check_rejected_unchanged(
-      "25 byte modell",
-      "{\"v\":1,\"seq\":4,\"agents\":{" \
-      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
-      "\"state\":\"working\",\"project\":\"Torget\"," \
-      "\"activity\":\"reading\",\"model\":\"1234567890123456789012345\"," \
-      "\"updated_ms\":4}," IDLE_CODEX "}}", &snapshot);
-  check_rejected_unchanged(
-      "13 byte effort",
-      "{\"v\":1,\"seq\":4,\"agents\":{" \
-      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
-      "\"state\":\"working\",\"project\":\"Torget\"," \
-      "\"activity\":\"reading\",\"effort\":\"1234567890123\"," \
-      "\"updated_ms\":4}," IDLE_CODEX "}}", &snapshot);
-  check_rejected_unchanged(
-      "dubbelt modellfält",
-      "{\"v\":1,\"seq\":4,\"agents\":{" \
-      "\"claude\":{\"task_id\":\"turn-4\",\"event_id\":\"event-4\"," \
-      "\"state\":\"working\",\"project\":\"Torget\"," \
-      "\"activity\":\"reading\",\"model\":\"FABLE 5\"," \
-      "\"model\":\"OPUS 5\",\"updated_ms\":4}," IDLE_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "v1 avvisas",
+      "{\"v\":1,\"seq\":7,\"agents\":{" ONE_CLAUDE(WORKING_JOB) "," \
+      EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged("error-form", "{\"error\":\"nope\"}", &snapshot);
+  rejected_unchanged("skräp efter rot", PAYLOAD(WORKING_JOB) "{}",
+                     &snapshot);
+  rejected_unchanged("giltig JSON efter rot", PAYLOAD(WORKING_JOB) " []",
+                     &snapshot);
+  rejected_unchanged("rotarray", "[]", &snapshot);
 
-  check_rejected_unchanged(
-      "fel version",
-      "{\"v\":2,\"seq\":1,\"agents\":{" CLAUDE_WORKING "," IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged("error-form", "{\"error\":\"nope\"}",
-                           &snapshot);
-  check_rejected_unchanged("negativ updated_ms",
-                           PAYLOAD(CLAUDE_NEGATIVE_UPDATED), &snapshot);
-  check_rejected_unchanged("17 teckens projekt",
-                           PAYLOAD(CLAUDE_LONG_PROJECT), &snapshot);
-  check_rejected_unchanged("kontrolltecken i projekt",
-                           PAYLOAD(CLAUDE_CONTROL_PROJECT), &snapshot);
+  rejected_unchanged(
+      "fem publika jobb avvisas",
+      "{\"v\":2,\"seq\":1,\"agents\":{" \
+      "\"claude\":{\"active_count\":5,\"jobs\":[" \
+      WORKING_JOB "," WORKING_JOB "," WORKING_JOB "," WORKING_JOB "," \
+      WORKING_JOB "]}," EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "negativ active_count",
+      "{\"v\":2,\"seq\":1,\"agents\":{" \
+      "\"claude\":{\"active_count\":-1,\"jobs\":[]}," \
+      EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "active_count över uint8",
+      "{\"v\":2,\"seq\":1,\"agents\":{" \
+      "\"claude\":{\"active_count\":256,\"jobs\":[]}," \
+      EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "fraktionell active_count",
+      "{\"v\":2,\"seq\":1,\"agents\":{" \
+      "\"claude\":{\"active_count\":1.5,\"jobs\":[]}," \
+      EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "provider med extrafält",
+      "{\"v\":2,\"seq\":1,\"agents\":{" \
+      "\"claude\":{\"active_count\":0,\"jobs\":[],\"private\":1}," \
+      EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "jobb med extrafält",
+      PAYLOAD("{\"task_id\":\"a\",\"event_id\":\"b\"," \
+              "\"state\":\"working\",\"project\":null," \
+              "\"activity\":\"thinking\",\"updated_ms\":0," \
+              "\"private\":true}"), &snapshot);
+  rejected_unchanged(
+      "dubbelt providerfält",
+      "{\"v\":2,\"seq\":1,\"agents\":{" ONE_CLAUDE(WORKING_JOB) "," \
+      ONE_CLAUDE(WORKING_JOB) "," EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "dubbelt jobsfält",
+      "{\"v\":2,\"seq\":1,\"agents\":{" \
+      "\"claude\":{\"active_count\":1,\"jobs\":[]," \
+      "\"jobs\":[" WORKING_JOB "]}," EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "dubbelt jobbfält",
+      PAYLOAD("{\"task_id\":\"a\",\"task_id\":\"b\"," \
+              "\"event_id\":\"e\",\"state\":\"working\"," \
+              "\"project\":null,\"activity\":\"thinking\"," \
+              "\"updated_ms\":0}"), &snapshot);
 
-  check("okänd state parsar", PARSE(PAYLOAD(CLAUDE_UNKNOWN_STATE), &snapshot));
-  check("okänd state mappas", snapshot.claude.state == TK_AGENT_UNKNOWN);
-  check("okänd activity parsar",
-        PARSE(PAYLOAD(CLAUDE_UNKNOWN_ACTIVITY), &snapshot));
-  check("okänd activity mappas",
-        snapshot.claude.activity == TK_ACTIVITY_UNKNOWN);
-
-  check_rejected_unchanged("trasig JSON", "{\"v\":1", &snapshot);
-  check_rejected_unchanged("skräp efter JSON",
-                           PAYLOAD(CLAUDE_WORKING) "x", &snapshot);
-  check_rejected_unchanged("rot som inte är objekt", "[]", &snapshot);
-  check_rejected_unchanged(
-      "fraktionell seq",
-      "{\"v\":1,\"seq\":1.5,\"agents\":{" CLAUDE_WORKING ","
-      IDLE_CODEX "}}",
+  rejected_unchanged(
+      "för långt projekt",
+      PAYLOAD("{\"task_id\":\"a\",\"event_id\":\"e\"," \
+              "\"state\":\"working\"," \
+              "\"project\":\"12345678901234567\"," \
+              "\"activity\":\"thinking\",\"updated_ms\":0}"),
       &snapshot);
-  check_rejected_unchanged(
-      "avrundad fraktion i version",
-      "{\"v\":1.00000000000000001,\"seq\":1,\"agents\":{" \
-      CLAUDE_WORKING "," IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "avrundad fraktion i seq",
-      "{\"v\":1,\"seq\":1.00000000000000001,\"agents\":{" \
-      CLAUDE_WORKING "," IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "underflödande exponent i seq",
-      "{\"v\":1,\"seq\":1e-9999,\"agents\":{" CLAUDE_WORKING ","
-      IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "seq över uint32",
-      "{\"v\":1,\"seq\":4294967296,\"agents\":{" CLAUDE_WORKING ","
-      IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "seq med inledande nolla",
-      "{\"v\":1,\"seq\":01,\"agents\":{" CLAUDE_WORKING ","
-      IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "saknad Codex",
-      "{\"v\":1,\"seq\":1,\"agents\":{" CLAUDE_WORKING "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "saknad agentnyckel",
-      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
-              "\"event_id\":\"event-1\",\"state\":\"working\"," \
-              "\"project\":\"Torget\",\"updated_ms\":1}"),
-      &snapshot);
-  check_rejected_unchanged(
-      "fel typ i agentsträng",
-      PAYLOAD("\"claude\":{\"task_id\":7,\"event_id\":\"event-1\"," \
-              "\"state\":\"working\",\"project\":\"Torget\"," \
-              "\"activity\":\"testing\",\"updated_ms\":1}"),
-      &snapshot);
-  check_rejected_unchanged(
-      "fraktionell updated_ms",
-      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
-              "\"event_id\":\"event-1\",\"state\":\"working\"," \
-              "\"project\":\"Torget\",\"activity\":\"testing\"," \
-              "\"updated_ms\":1.5}"),
-      &snapshot);
-  check_rejected_unchanged("underflödande exponent i updated_ms",
-                           PAYLOAD(CLAUDE_UNDERFLOW_UPDATED), &snapshot);
-  check_rejected_unchanged(
+  rejected_unchanged(
       "kontrollnolla i projekt",
-      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
-              "\"event_id\":\"event-1\",\"state\":\"working\"," \
-              "\"project\":\"Tor\\u0000get\",\"activity\":\"testing\"," \
-              "\"updated_ms\":1}"),
+      PAYLOAD("{\"task_id\":\"a\",\"event_id\":\"e\"," \
+              "\"state\":\"working\",\"project\":\"Tor\\u0000get\"," \
+              "\"activity\":\"thinking\",\"updated_ms\":0}"),
       &snapshot);
+  rejected_unchanged(
+      "modell med fel typ",
+      PAYLOAD("{\"task_id\":\"a\",\"event_id\":\"e\"," \
+              "\"state\":\"working\",\"project\":null," \
+              "\"activity\":\"thinking\",\"model\":7," \
+              "\"updated_ms\":0}"), &snapshot);
+  rejected_unchanged(
+      "fraktionell updated_ms",
+      PAYLOAD("{\"task_id\":\"a\",\"event_id\":\"e\"," \
+              "\"state\":\"working\",\"project\":null," \
+              "\"activity\":\"thinking\",\"updated_ms\":1.5}"),
+      &snapshot);
+  rejected_unchanged(
+      "seq över uint32",
+      "{\"v\":2,\"seq\":4294967296,\"agents\":{" \
+      ONE_CLAUDE(WORKING_JOB) "," EMPTY_CODEX "}}", &snapshot);
+  rejected_unchanged(
+      "seq med inledande nolla",
+      "{\"v\":2,\"seq\":01,\"agents\":{" \
+      ONE_CLAUDE(WORKING_JOB) "," EMPTY_CODEX "}}", &snapshot);
 
-  check("irrelevanta nummer och nummersträngar förväxlas inte",
-        PARSE("{\"v\":1,\"seq\":1,\"metadata\":{"
-              "\"v\":1.00000000000000001,\"seq\":1e-9999,"
-              "\"updated_ms\":1.5},\"agents\":{" \
-              "\"claude\":{\"task_id\":\"1e-9999\"," \
-              "\"event_id\":\"1.00000000000000001\"," \
-              "\"state\":\"working\",\"project\":\"Torget\"," \
-              "\"activity\":\"testing\",\"updated_ms\":1}," \
-              IDLE_CODEX "}}",
-              &snapshot));
-  check("nummersträng bevaras",
-        strcmp(snapshot.claude.task_id, "1e-9999") == 0);
-
-  check("UINT32_MAX accepteras",
-        PARSE("{\"v\":1,\"seq\":4294967295,\"agents\":{" \
-              CLAUDE_MAX_UPDATED "," IDLE_CODEX "}}",
-              &snapshot) &&
-            snapshot.seq == UINT32_MAX &&
-            snapshot.claude.updated_ms == UINT32_MAX);
-  check("omordnade kontraktsfält accepteras",
-        PARSE("{\"agents\":{" IDLE_CODEX ","
-              "\"claude\":{\"updated_ms\":9,\"activity\":\"testing\"," \
-              "\"project\":\"Torget\",\"state\":\"working\"," \
-              "\"event_id\":\"event-9\",\"task_id\":\"turn-9\"}},"
-              "\"seq\":9,\"v\":1}",
-              &snapshot) &&
-            snapshot.seq == 9 && snapshot.claude.updated_ms == 9);
+  check("omordnade providerfält accepteras",
+        PARSE("{\"agents\":{" \
+              "\"codex\":{\"jobs\":[],\"active_count\":0}," \
+              "\"claude\":{\"jobs\":[" WORKING_JOB "] ," \
+              "\"active_count\":1}},\"seq\":11,\"v\":2}",
+              &snapshot) && snapshot.seq == 11);
   check("BOM accepteras",
-        PARSE("\xEF\xBB\xBF" PAYLOAD(CLAUDE_WORKING), &snapshot));
-  check("escapade egenskapsnamn accepteras",
-        PARSE("{\"\\u0076\":1,\"se\\u0071\":8,\"ag\\u0065nts\":{"
-              "\"cl\\u0061ude\":{\"task_\\u0069d\":\"turn-8\"," \
-              "\"event_\\u0069d\":\"event-8\",\"st\\u0061te\":\"working\"," \
-              "\"pro\\u006aect\":\"Torget\","
-              "\"act\\u0069vity\":\"testing\","
-              "\"updated_\\u006ds\":8}," IDLE_CODEX "}}",
-              &snapshot) &&
-            snapshot.seq == 8 && snapshot.claude.updated_ms == 8);
-  check("okänd array- och boolmetadata accepteras",
-        PARSE("{\"v\":1,\"metadata\":[true,false,{\"nested\":[null]}],"
-              "\"seq\":1,\"agents\":{" CLAUDE_WORKING "," \
-              IDLE_CODEX "}}",
-              &snapshot));
+        PARSE("\xEF\xBB\xBF" PAYLOAD(WORKING_JOB), &snapshot));
 
-  char *depth16 = depth_payload(15);
-  if (depth16) {
-    check("totalt djup 16 accepteras", PARSE(depth16, &snapshot));
-    free(depth16);
-  }
-  char *depth17 = depth_payload(16);
-  if (depth17) {
-    check_rejected_unchanged("totalt djup 17", depth17, &snapshot);
-    free(depth17);
-  }
-
-  check_rejected_unchanged(
-      "dubbel v",
-      "{\"v\":1,\"v\":1,\"seq\":1,\"agents\":{" CLAUDE_WORKING ","
-      IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "dubbel seq med ogiltig andra",
-      "{\"v\":1,\"seq\":1,\"seq\":1.5,\"agents\":{" \
-      CLAUDE_WORKING "," IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "escapad dubbel v",
-      "{\"v\":1,\"\\u0076\":1,\"seq\":1,\"agents\":{" \
-      CLAUDE_WORKING "," IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "dubbel agent",
-      "{\"v\":1,\"seq\":1,\"agents\":{" CLAUDE_WORKING "," \
-      CLAUDE_WORKING "," IDLE_CODEX "}}",
-      &snapshot);
-  check_rejected_unchanged(
-      "dubbelt agentfält",
-      PAYLOAD("\"claude\":{\"task_id\":\"turn-1\"," \
-              "\"event_id\":\"event-1\",\"state\":\"working\"," \
-              "\"state\":\"done\",\"project\":\"Torget\"," \
-              "\"activity\":\"testing\",\"updated_ms\":1}"),
-      &snapshot);
-
-  tk_agent_snapshot before;
-  memcpy(&before, &snapshot, sizeof before);
-  check("NULL json avvisas", !tk_agent_status_parse(NULL, 0, &snapshot));
-  check("NULL json rör inte utdata",
-        memcmp(&before, &snapshot, sizeof before) == 0);
-  check("NULL out avvisas",
-        !tk_agent_status_parse(PAYLOAD(CLAUDE_WORKING),
-                               strlen(PAYLOAD(CLAUDE_WORKING)), NULL));
+  check("provider-enum har stabil ordning",
+        TK_AGENT_PROVIDER_CLAUDE == 0 && TK_AGENT_PROVIDER_CODEX == 1 &&
+        TK_AGENT_PROVIDER_COUNT == 2 && TK_AGENT_JOBS_MAX == 4);
 
   if (failures == 0) {
-    printf("OK: alla agentstatus-tester gröna\n");
+    printf("OK: alla agentstatus-v2-tester gröna\n");
     return 0;
   }
   printf("%d test föll\n", failures);

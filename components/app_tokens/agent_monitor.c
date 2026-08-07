@@ -194,8 +194,13 @@ void tk_agent_monitor_create_footer(lv_obj_t *parent, bool claude) {
 void tk_agent_monitor_apply(const tk_agent_snapshot *snapshot,
                             int64_t now_us) {
   if (!snapshot) return;
-  mon.agents[0] = snapshot->claude;
-  mon.agents[1] = snapshot->codex;
+  const tk_agent_status *claude =
+      tk_agent_provider_primary(&snapshot->claude);
+  const tk_agent_status *codex =
+      tk_agent_provider_primary(&snapshot->codex);
+  memset(mon.agents, 0, sizeof mon.agents);
+  if (claude) mon.agents[0] = *claude;
+  if (codex) mon.agents[1] = *codex;
   mon.applied_at_us = now_us;
   mon.has_snapshot = true;
   for (int provider = 0; provider < 2; provider++) {

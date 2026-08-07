@@ -163,7 +163,9 @@ int main(void) {
 
   fake_http bounded = {0};
   check("overflow-fixturen förbereds",
-        fake_prepare_response(&bounded, NULL, 2000, false, 200, 0));
+        fake_prepare_response(&bounded, NULL,
+                              TK_AGENT_HTTP_BODY_CAP + 500,
+                              false, 200, 0));
   tk_agent_http_fetch_result fetch =
       tk_agent_http_fetch_bounded(&bounded, &response, &fake_io);
   check("multi-chunk overflow avvisas av adaptern",

@@ -5,7 +5,7 @@
 
 #include "../../third_party/cjson/cJSON.h"
 
-/* V1-kontraktet behöver bara djup 3. Extra metadata får gott om marginal,
+/* V2-kontraktet behöver bara djup 5. Extra metadata får gott om marginal,
  * men rekursionen i både cJSON och råtoken-vandringen hålls ESP-säker. */
 #define TK_AGENT_JSON_MAX_DEPTH 16U
 
@@ -48,9 +48,18 @@ static const char *const agents_required_keys[] = {
     "claude", "codex", NULL,
 };
 
-static const char *const agent_required_keys[] = {
+static const char *const provider_required_keys[] = {
+    "active_count", "jobs", NULL,
+};
+
+static const char *const job_required_keys[] = {
     "task_id", "event_id", "state", "project", "activity", "updated_ms",
     NULL,
+};
+
+static const char *const job_allowed_keys[] = {
+    "task_id", "event_id", "state", "project", "activity", "updated_ms",
+    "model", "effort", NULL,
 };
 
 static bool json_whitespace(unsigned char byte) {
@@ -340,6 +349,29 @@ static bool required_keys_once(const cJSON *object,
   return true;
 }
 
+static bool allowed_keys_once(const cJSON *object,
+                              const char *const *allowed_keys) {
+  if (!cJSON_IsObject(object)) return false;
+  for (const cJSON *child = object->child; child; child = child->next) {
+    if (!child->string) return false;
+    bool allowed = false;
+    for (size_t i = 0; allowed_keys[i]; i++) {
+      if (strcmp(child->string, allowed_keys[i]) == 0) {
+        allowed = true;
+        break;
+      }
+    }
+    if (!allowed) return false;
+    for (const cJSON *earlier = object->child;
+         earlier && earlier != child; earlier = earlier->next) {
+      if (earlier->string && strcmp(earlier->string, child->string) == 0) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static bool nullable_string_member(const cJSON *object, const char *key,
                                    char *destination, size_t capacity) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
@@ -426,28 +458,57 @@ static bool activity_member(const cJSON *object, tk_agent_activity *out) {
   return true;
 }
 
-static bool agent_member(const char *json, size_t len, const cJSON *root,
-                         const cJSON *agents, const char *key,
-                         tk_agent_status *out) {
-  const cJSON *agent = cJSON_GetObjectItemCaseSensitive(agents, key);
-  if (!required_keys_once(agent, agent_required_keys)) return false;
+static bool job_member(const char *json, size_t len, const cJSON *root,
+                       const cJSON *job, tk_agent_status *out) {
+  if (!required_keys_once(job, job_required_keys) ||
+      !allowed_keys_once(job, job_allowed_keys)) {
+    return false;
+  }
 
-  return nullable_string_member(agent, "task_id", out->task_id,
+  return nullable_string_member(job, "task_id", out->task_id,
                                 sizeof out->task_id) &&
-         nullable_string_member(agent, "event_id", out->event_id,
+         nullable_string_member(job, "event_id", out->event_id,
                                 sizeof out->event_id) &&
-         state_member(agent, &out->state) &&
-         nullable_string_member(agent, "project", out->project,
+         state_member(job, &out->state) &&
+         nullable_string_member(job, "project", out->project,
                                 sizeof out->project) &&
-         activity_member(agent, &out->activity) &&
-         optional_nullable_string_member(agent, "model", out->model,
+         activity_member(job, &out->activity) &&
+         optional_nullable_string_member(job, "model", out->model,
                                          sizeof out->model,
                                          &out->has_model) &&
-         optional_nullable_string_member(agent, "effort", out->effort,
+         optional_nullable_string_member(job, "effort", out->effort,
                                          sizeof out->effort,
                                          &out->has_effort) &&
-         uint32_member(json, len, root, agent, "updated_ms",
+         uint32_member(json, len, root, job, "updated_ms",
                        &out->updated_ms);
+}
+
+static bool provider_member(const char *json, size_t len, const cJSON *root,
+                            const cJSON *agents, const char *key,
+                            tk_agent_provider_status *out) {
+  const cJSON *provider = cJSON_GetObjectItemCaseSensitive(agents, key);
+  if (!required_keys_once(provider, provider_required_keys) ||
+      !allowed_keys_once(provider, provider_required_keys)) {
+    return false;
+  }
+
+  uint32_t active_count = 0;
+  if (!uint32_member(json, len, root, provider, "active_count",
+                     &active_count) || active_count > UINT8_MAX) {
+    return false;
+  }
+  const cJSON *jobs = cJSON_GetObjectItemCaseSensitive(provider, "jobs");
+  if (!cJSON_IsArray(jobs)) return false;
+  int count = cJSON_GetArraySize(jobs);
+  if (count < 0 || count > TK_AGENT_JOBS_MAX) return false;
+
+  out->active_count = (uint8_t)active_count;
+  out->job_count = (uint8_t)count;
+  for (int i = 0; i < count; i++) {
+    const cJSON *job = cJSON_GetArrayItem(jobs, i);
+    if (!job_member(json, len, root, job, &out->jobs[i])) return false;
+  }
+  return true;
 }
 
 bool tk_agent_status_parse(const char *json, size_t len,
@@ -466,17 +527,20 @@ bool tk_agent_status_parse(const char *json, size_t len,
   if (!cJSON_IsObject(root)) goto done;
   if (cJSON_GetObjectItemCaseSensitive(root, "error")) goto done;
   if (!required_keys_once(root, root_required_keys)) goto done;
-  if (!uint32_member(json, len, root, root, "v", &version) || version != 1) {
+  if (!uint32_member(json, len, root, root, "v", &version) || version != 2) {
     goto done;
   }
   if (!uint32_member(json, len, root, root, "seq", &next.seq)) goto done;
 
   const cJSON *agents = cJSON_GetObjectItemCaseSensitive(root, "agents");
-  if (!required_keys_once(agents, agents_required_keys)) goto done;
-  if (!agent_member(json, len, root, agents, "claude", &next.claude)) {
+  if (!required_keys_once(agents, agents_required_keys) ||
+      !allowed_keys_once(agents, agents_required_keys)) goto done;
+  if (!provider_member(json, len, root, agents, "claude", &next.claude)) {
     goto done;
   }
-  if (!agent_member(json, len, root, agents, "codex", &next.codex)) goto done;
+  if (!provider_member(json, len, root, agents, "codex", &next.codex)) {
+    goto done;
+  }
 
   *out = next;
   ok = true;

@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define TK_AGENT_HTTP_BODY_CAP 1536
+#define TK_AGENT_HTTP_BODY_CAP 4096
 
 typedef struct {
   char body[TK_AGENT_HTTP_BODY_CAP];

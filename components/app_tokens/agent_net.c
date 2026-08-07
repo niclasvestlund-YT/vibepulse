@@ -78,7 +78,8 @@ static void log_rejection(esp_err_t err, bool parsed) {
   last_log_tick = now;
 
   if (response.overflow) {
-    ESP_LOGW(TAG, "agentstatus avvisad: svar större än 1535 byte");
+    ESP_LOGW(TAG, "agentstatus avvisad: svar större än %u byte",
+             (unsigned)(TK_AGENT_HTTP_BODY_CAP - 1));
   } else if (err != ESP_OK) {
     ESP_LOGW(TAG, "agentstatus avvisad: transportfel %s",
              esp_err_to_name(err));

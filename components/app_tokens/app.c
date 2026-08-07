@@ -70,20 +70,22 @@ static void tick_cb(lv_timer_t *timer) {
   if (next_stage != demo_stage) {
     demo_stage = next_stage;
     tk_agent_snapshot snapshot = {0};
-    snprintf(snapshot.claude.task_id, sizeof snapshot.claude.task_id,
+    snapshot.claude.active_count = demo_stage == 2 ? 0 : 1;
+    snapshot.claude.job_count = 1;
+    tk_agent_status *claude = &snapshot.claude.jobs[0];
+    snprintf(claude->task_id, sizeof claude->task_id,
              "demo-task");
-    snprintf(snapshot.claude.event_id, sizeof snapshot.claude.event_id,
+    snprintf(claude->event_id, sizeof claude->event_id,
              "demo-%lld-%d", (long long)(now_us / 20000000LL), demo_stage);
-    snprintf(snapshot.claude.project, sizeof snapshot.claude.project,
+    snprintf(claude->project, sizeof claude->project,
              "Torget");
-    snapshot.claude.state = (tk_agent_state[]){TK_AGENT_WORKING,
-                                               TK_AGENT_WAITING,
-                                               TK_AGENT_DONE,
-                                               TK_AGENT_ERROR}[demo_stage];
-    snapshot.claude.activity = demo_stage == 0 ? TK_ACTIVITY_TESTING :
-                               demo_stage == 1 ? TK_ACTIVITY_WAITING_APPROVAL :
-                                                 TK_ACTIVITY_NONE;
-    snapshot.codex.state = TK_AGENT_IDLE;
+    claude->state = (tk_agent_state[]){TK_AGENT_WORKING,
+                                       TK_AGENT_WAITING,
+                                       TK_AGENT_DONE,
+                                       TK_AGENT_ERROR}[demo_stage];
+    claude->activity = demo_stage == 0 ? TK_ACTIVITY_TESTING :
+                        demo_stage == 1 ? TK_ACTIVITY_WAITING_APPROVAL :
+                                          TK_ACTIVITY_NONE;
     tokens_apply_agent_status(&snapshot);
   }
 #endif

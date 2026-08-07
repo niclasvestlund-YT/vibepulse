@@ -2,12 +2,20 @@
 #define AGENT_STATUS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define TK_AGENT_ID_CAP 65
 #define TK_AGENT_PROJECT_CAP 17
 #define TK_AGENT_MODEL_CAP 25
 #define TK_AGENT_EFFORT_CAP 13
+#define TK_AGENT_PROVIDER_COUNT 2
+#define TK_AGENT_JOBS_MAX 4
+
+typedef enum {
+  TK_AGENT_PROVIDER_CLAUDE = 0,
+  TK_AGENT_PROVIDER_CODEX = 1,
+} tk_agent_provider;
 
 typedef enum {
   TK_AGENT_IDLE,
@@ -46,9 +54,20 @@ typedef struct {
 } tk_agent_status;
 
 typedef struct {
+  uint8_t active_count;
+  uint8_t job_count;
+  tk_agent_status jobs[TK_AGENT_JOBS_MAX];
+} tk_agent_provider_status;
+
+typedef struct {
   uint32_t seq;
-  tk_agent_status claude;
-  tk_agent_status codex;
+  tk_agent_provider_status claude;
+  tk_agent_provider_status codex;
 } tk_agent_snapshot;
+
+static inline const tk_agent_status *tk_agent_provider_primary(
+    const tk_agent_provider_status *provider) {
+  return provider && provider->job_count ? &provider->jobs[0] : NULL;
+}
 
 #endif
