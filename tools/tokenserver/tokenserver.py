@@ -206,6 +206,48 @@ def _parse_reset_minutes(value: str, now_ts: float):
         return None
 
 
+def _parse_limit_headers(headers, now_ts):
+    """Map Claude's named limit windows without guessing model identity."""
+    found = {}
+    model_labels = {
+        "fable": "FABLE · VECKA",
+        "opus": "OPUS · VECKA",
+        "sonnet": "SONNET · VECKA",
+    }
+    for name, value in headers.items():
+        match = re.match(
+            r"(?i)anthropic-ratelimit-unified-(.+?)[-_]"
+            r"(utilization|reset|resets[-_]at)$", name)
+        if not match:
+            continue
+        raw = match.group(1).lower()
+        named_model = next(
+            (model for model in model_labels if model in raw), None)
+        if "5h" in raw:
+            window = "session"
+        elif named_model is not None or "model" in raw:
+            window = "model"
+            if named_model is not None:
+                found["modelLabel"] = model_labels[named_model]
+        elif "7d" in raw or "week" in raw:
+            window = "week"
+        else:
+            continue
+        kind = match.group(2).lower()
+        if kind == "utilization":
+            try:
+                pct = float(value)
+                found[f"{window}Pct"] = round(
+                    pct * 100 if pct <= 1.0 else pct, 1)
+            except (TypeError, ValueError):
+                pass
+        else:
+            mins = _parse_reset_minutes(str(value), now_ts)
+            if mins is not None:
+                found[f"{window}ResetMin"] = mins
+    return found
+
+
 def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
@@ -268,33 +310,7 @@ def _probe_limits():
     # (alla modeller) och veckan för tyngsta modellen (Fable/Opus). Fönster-
     # namnet i headern varierar ("5h", "7d", "7d_opus", ...) — mappa på
     # innehåll, inte exakt namn.
-    found = {}
-    for name, value in headers.items():
-        m = re.match(
-            r"(?i)anthropic-ratelimit-unified-(.+?)[-_]"
-            r"(utilization|reset|resets[-_]at)$", name)
-        if not m:
-            continue
-        raw = m.group(1).lower()
-        if "5h" in raw:
-            window = "session"
-        elif any(x in raw for x in ("opus", "fable", "sonnet", "model")):
-            window = "model"
-        elif "7d" in raw or "week" in raw:
-            window = "week"
-        else:
-            continue
-        kind = m.group(2).lower()
-        if kind == "utilization":
-            try:
-                pct = float(value)
-                found[f"{window}Pct"] = round(pct * 100 if pct <= 1.0 else pct, 1)
-            except ValueError:
-                pass
-        else:
-            mins = _parse_reset_minutes(value, now_ts)
-            if mins is not None:
-                found[f"{window}ResetMin"] = mins
+    found = _parse_limit_headers(headers, now_ts)
 
     _probe_headers = sorted(
         f"{n}: {v}" for n, v in headers.items() if "ratelimit" in n.lower())
@@ -415,6 +431,7 @@ def get_snapshot(projects_dir: Path):
     result["claudeWeekResetMin"] = claude.get("weekResetMin")
     result["claudeModelWeekPct"] = claude.get("modelPct")
     result["claudeModelWeekResetMin"] = claude.get("modelResetMin")
+    result["claudeModelWeekLabel"] = claude.get("modelLabel")
     result["codexSessionPct"] = codex.get("codexSessionPct")
     result["codexSessionResetMin"] = codex.get("codexSessionResetMin")
     result["codexWeekPct"] = codex.get("codexWeekPct")
