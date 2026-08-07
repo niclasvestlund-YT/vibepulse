@@ -24,14 +24,10 @@ static const char *TAG = "agent-net";
 static tk_agent_http_response response;
 
 static esp_err_t status_http_event(esp_http_client_event_t *event) {
-  if (event->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
-  tk_agent_http_response *current = event->user_data;
-  if (!current || event->data_len < 0 ||
-      !tk_agent_http_response_append(current, event->data,
-                                     (size_t)event->data_len)) {
-    if (current) current->overflow = true;
-    return ESP_FAIL;
-  }
+  /* ESP-IDF ignorerar callbackens returvärde för ON_DATA. Den bounded
+   * read-loopen äger därför all kopiering och kan stänga socketen säkert. */
+  if (!event || (event->event_id == HTTP_EVENT_ON_DATA &&
+                 !event->user_data)) return ESP_FAIL;
   return ESP_OK;
 }
 

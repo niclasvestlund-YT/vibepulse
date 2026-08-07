@@ -14,8 +14,8 @@ static void check(const char *what, int condition) {
 }
 
 typedef struct {
-  tk_agent_http_response *response;
   size_t remaining;
+  size_t bytes_read;
   int open_calls;
   int fetch_calls;
   int read_calls;
@@ -45,8 +45,8 @@ static int fake_read(void *context, char *scratch, int capacity) {
   size_t amount = fake->remaining;
   if (amount > (size_t)capacity) amount = (size_t)capacity;
   memset(scratch, 'x', amount);
-  (void)tk_agent_http_response_append(fake->response, scratch, amount);
   fake->remaining -= amount;
+  fake->bytes_read += amount;
   return (int)amount;
 }
 
@@ -118,7 +118,6 @@ int main(void) {
         !tk_agent_http_response_can_apply(&response, true, true));
 
   fake_http bounded = {
-    .response = &response,
     .remaining = 2000,
   };
   tk_agent_http_fetch_result fetch =
@@ -127,11 +126,11 @@ int main(void) {
         fetch == TK_AGENT_HTTP_FETCH_OVERFLOW && response.overflow);
   check("overflow stänger socketen men inte klienthandtaget",
         bounded.close_calls == 1 && bounded.open_calls == 1);
-  check("overflow avbryter innan resten av kroppen läses",
-        bounded.remaining > 0 && bounded.read_calls == 3);
+  check("overflow läser högst cap bytes och lämnar resten oläst",
+        bounded.remaining > 0 &&
+            bounded.bytes_read == TK_AGENT_HTTP_BODY_CAP);
 
   fake_http valid = {
-    .response = &response,
     .remaining = 1000,
   };
   fetch = tk_agent_http_fetch_bounded(&valid, &response, &fake_io);

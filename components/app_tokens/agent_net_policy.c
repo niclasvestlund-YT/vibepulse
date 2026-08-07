@@ -69,14 +69,17 @@ tk_agent_http_fetch_result tk_agent_http_fetch_bounded(
                        ? (int)remaining + 1
                        : (int)sizeof scratch;
     int read_len = io->read(context, scratch, capacity);
-    if (response->overflow) {
-      io->close(context);
-      return TK_AGENT_HTTP_FETCH_OVERFLOW;
-    }
     if (read_len < 0 ||
         (read_len == 0 && !io->is_complete(context))) {
       io->close(context);
       return TK_AGENT_HTTP_FETCH_IO_ERROR;
+    }
+    if (read_len > capacity ||
+        !tk_agent_http_response_append(response, scratch,
+                                       (size_t)read_len)) {
+      response->overflow = true;
+      io->close(context);
+      return TK_AGENT_HTTP_FETCH_OVERFLOW;
     }
   }
   io->close(context);
