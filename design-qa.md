@@ -1,26 +1,37 @@
-# VibePulse static overlay — design QA
+# VibePulse design QA
 
-Reference: approved Claude `JOBBAR` direction in
-`outputs/agentmonitor-review/01-jobbar.png`.
+**Resultat:** PASS i simulatorn. Fysisk AMOLED-grind återstår.
 
-Implementation capture: real LVGL simulator output at 480 × 480,
-`outputs/vibepulse-preview/claude-jobbar.png`.
+## Jämförelse
 
-## Visual comparison
+- Referens: den godkända 480 × 480-mockupen `Usage-vyn med verklig rörelse`.
+- Implementation: faktisk 480 × 480-XRGB8888-framebuffer från LVGL-simulatorn.
+- Reproducerbar körning: `./sim/build/torget-sim --vibepulse-static-qa`.
+- Lokal sida-vid-sida-bild: `work/design-qa/comparison-claude.png`.
+- Kontrollerade tillstånd: Claude arbetar, Claude lång väntetext, Codex
+  arbetar, VECKOTAKT-skal, volym, saknad Claude-quota och återställd quota.
 
-- True-black AMOLED background and 24 px safe edge are intact.
-- The supplied pixel pet remains the dominant visual asset and is not
-  recreated with UI shapes.
-- Provider/project, pet, large state word, working marker, controlled
-  activity and usage bar preserve the reference hierarchy.
-- `73,0 % FABLE` is substantially more legible than the early reference and
-  follows the approved Fable selector contract.
-- No clipping, unintended wrapping, missing glyphs or broken asset edges were
-  found in Claude/Codex working, waiting and done simulator captures.
-- Launcher V, violet plate/dot and `VIBEPULSE` label render cleanly in the
-  existing launcher system.
+## Synlig granskning
 
-Remaining P3: judge apparent pet/status size and brightness on the physical
-AMOLED at 1, 2 and 3 metres before animation work begins.
+- P0: inga blockerande visuella fel.
+- P1: ingen klippning, överlappning eller felaktig hierarki vid 480 × 480.
+- P2: procenten är avsiktligt större än i webbmockupen för fysisk
+  avståndsläsning. Fyra prickar visar appens fyra globala sidor. Den blå
+  markeringsramen från brainstorm-mockupen används inte eftersom den låsta
+  specifikationen kräver neutrala kort.
+- `V.`-identiteten, provider, modell/effort, båda Claude-korten och den
+  centrerade aktivitetsgruppen ligger kvar i samma koordinater när status
+  ändras; ingen helskärms-overlay finns längre.
+- Långtexten `BEHÖVER GODKÄNNAN` ryms utan att flytta korten.
+- Codex visar ett enda större veckokort och en tydlig blå provideraccent.
+- Saknad quota visar `–` och den uttryckliga texten `QUOTA SAKNAS`.
+- En utgången tvåminuterslease tömmer både aktivitet och projektnamn; gammal
+  agentstatus får inte se aktuell ut i en dämpad färg.
+- QA-läget tvingar layout och redraw före varje snapshot. Tre separata
+  körningar gav byte-identiska SHA-256-hashar för hela bildmatrisen.
 
-final result: passed
+## Öppen hårdvarugrind
+
+Typstorlek, svartnivå, fysisk ljusstyrka, bezelbalans och läsbarhet på
+avstånd måste fortfarande bedömas på den riktiga AMOLED-panelen. Ingen
+kortrotation, pet-rörelse eller pulsanimering får aktiveras före den grinden.

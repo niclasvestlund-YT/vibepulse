@@ -130,3 +130,26 @@ int tk_agent_monitor_resolve_provider(const tk_agent_status agents[2],
    * får bryta användarens uttryckliga provider-val. */
   return generation_changed(choice, best, agents) ? best : selected;
 }
+
+const char *tk_agent_monitor_activity_text(const tk_agent_status *status) {
+  if (!status) return "";
+  if (status->state == TK_AGENT_IDLE || status->state == TK_AGENT_UNKNOWN)
+    return "";
+  if (status->state == TK_AGENT_DONE) return "VÄNTAR PÅ DIG";
+  if (status->state == TK_AGENT_ERROR) return "FEL";
+  switch (status->activity) {
+    case TK_ACTIVITY_THINKING: return "TÄNKER";
+    case TK_ACTIVITY_READING: return "LÄSER KOD";
+    case TK_ACTIVITY_EDITING: return "ÄNDRAR FILER";
+    case TK_ACTIVITY_SEARCHING: return "SÖKER I PROJEKTET";
+    case TK_ACTIVITY_RUNNING: return "KÖR KOMMANDO";
+    case TK_ACTIVITY_TESTING: return "KÖR TESTER";
+    case TK_ACTIVITY_BUILDING: return "BYGGER PROJEKTET";
+    case TK_ACTIVITY_WAITING_INPUT: return "BEHÖVER ETT SVAR";
+    case TK_ACTIVITY_WAITING_APPROVAL: return "BEHÖVER GODKÄNNAN";
+    case TK_ACTIVITY_NONE:
+    case TK_ACTIVITY_UNKNOWN:
+      return status->state == TK_AGENT_WORKING ? "JOBBAR" : "";
+  }
+  return "";
+}

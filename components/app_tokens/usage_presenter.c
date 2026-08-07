@@ -5,11 +5,29 @@
 
 static void format_reset(const tk_limit *limit, char *out, size_t capacity) {
   if (!limit->has_reset) return;
-  if (limit->reset_min >= 60) {
+  if (limit->reset_min >= 24 * 60) {
+    snprintf(out, capacity, "NOLLAS OM %d D %d H",
+             limit->reset_min / (24 * 60),
+             (limit->reset_min / 60) % 24);
+  } else if (limit->reset_min >= 60) {
     snprintf(out, capacity, "NOLLAS OM %d H %02d",
              limit->reset_min / 60, limit->reset_min % 60);
   } else {
     snprintf(out, capacity, "NOLLAS OM %d MIN", limit->reset_min);
+  }
+}
+
+static void format_reset_short(const tk_limit *limit, char *out,
+                               size_t capacity) {
+  if (!limit->has_reset) return;
+  if (limit->reset_min >= 24 * 60) {
+    snprintf(out, capacity, "%d D %d H KVAR", limit->reset_min / (24 * 60),
+             (limit->reset_min / 60) % 24);
+  } else if (limit->reset_min >= 60) {
+    snprintf(out, capacity, "%d H %02d MIN KVAR", limit->reset_min / 60,
+             limit->reset_min % 60);
+  } else {
+    snprintf(out, capacity, "%d MIN KVAR", limit->reset_min);
   }
 }
 
@@ -24,6 +42,7 @@ static void build_card(usage_card_view *out, usage_card_kind kind,
     snprintf(out->pct_text, sizeof out->pct_text, "%.0f%%", limit->pct);
   } else {
     snprintf(out->pct_text, sizeof out->pct_text, "–");
+    snprintf(out->reset_text, sizeof out->reset_text, "QUOTA SAKNAS");
   }
   if (limit->has_delta && limit->has_pct) {
     out->has_delta = 1;
@@ -33,7 +52,10 @@ static void build_card(usage_card_view *out, usage_card_kind kind,
                                              "+%.0f%% IDAG",
              limit->delta_pct);
   }
-  format_reset(limit, out->reset_text, sizeof out->reset_text);
+  if (limit->has_pct)
+    format_reset(limit, out->reset_text, sizeof out->reset_text);
+  format_reset_short(limit, out->reset_short_text,
+                     sizeof out->reset_short_text);
 }
 
 static void build_claude(const tk_tokens *tokens, uint32_t elapsed_ms,

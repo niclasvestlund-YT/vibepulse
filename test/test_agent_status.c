@@ -125,7 +125,12 @@ int main(void) {
     check("fixturen parsar", tk_agent_status_parse(json, len, &snapshot));
     check("seq", snapshot.seq == 201);
     check("Claude arbetar", snapshot.claude.state == TK_AGENT_WORKING);
-    check("Claude testar", snapshot.claude.activity == TK_ACTIVITY_TESTING);
+    check("Claude ändrar filer",
+          snapshot.claude.activity == TK_ACTIVITY_EDITING);
+    check("Claude-fixturen har modell och effort",
+          snapshot.claude.has_model && snapshot.claude.has_effort &&
+          strcmp(snapshot.claude.model, "FABLE 5") == 0 &&
+          strcmp(snapshot.claude.effort, "XHIGH") == 0);
     check("projekt", strcmp(snapshot.claude.project, "Torget") == 0);
     check("Codex vilar", snapshot.codex.state == TK_AGENT_IDLE);
     free(json);

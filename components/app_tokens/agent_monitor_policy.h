@@ -40,4 +40,8 @@ int tk_agent_monitor_resolve_provider(const tk_agent_status agents[2],
                                       const bool present[2],
                                       const tk_agent_manual_choice *choice);
 
+/* Säker, begränsad aktivitetstext för den inbäddade nederkanten. Inga
+ * promptar, kommandon eller filnamn passerar denna mapping. */
+const char *tk_agent_monitor_activity_text(const tk_agent_status *status);
+
 #endif

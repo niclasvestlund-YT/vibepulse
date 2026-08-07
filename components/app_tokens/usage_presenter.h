@@ -9,6 +9,7 @@
 #define USAGE_CARD_PCT_CAP 16
 #define USAGE_CARD_DELTA_CAP 24
 #define USAGE_CARD_RESET_CAP 32
+#define USAGE_CARD_SHORT_CAP 24
 
 typedef enum {
   USAGE_PROVIDER_CLAUDE,
@@ -27,6 +28,7 @@ typedef struct {
   char pct_text[USAGE_CARD_PCT_CAP];
   char delta_text[USAGE_CARD_DELTA_CAP];
   char reset_text[USAGE_CARD_RESET_CAP];
+  char reset_short_text[USAGE_CARD_SHORT_CAP];
   double pct;
   double delta_pct;
   int has_pct;

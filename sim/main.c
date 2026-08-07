@@ -68,6 +68,10 @@ int64_t torget_now_us(void) { return (int64_t)lv_tick_get() * 1000; }
  * vilket är exakt BMP:s radformat, så raderna kopieras rått. Negativ höjd =
  * uppifrån och ner. */
 static void dump_frame(const char *tag) {
+  /* QA-dumpar får inte bero på var SDL:s nästa refresh råkar ligga. Tvinga
+   * layout + redraw före snapshot så ett helt tillstånd fångas atomiskt. */
+  lv_obj_update_layout(lv_screen_active());
+  lv_refr_now(NULL);
   lv_draw_buf_t *buf = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_XRGB8888);
   if (!buf) { printf("snapshot: misslyckades (%s)\n", tag); return; }
 
@@ -163,19 +167,11 @@ static void apply_fixture(int idx) {
   lv_timer_set_repeat_count(seq, 8);
 }
 
-static void feed_tokens(void) {
+static void feed_tokens_file(const char *file) {
   size_t len = 0;
-  char *json = read_fixture("tokens.json", &len);
+  char *json = read_fixture(file, &len);
   tk_tokens t;
   if (json && tk_tokens_parse(json, len, &t)) {
-    /* Bildfacit för agentoverlayn: Claude jämför alla tre fönster och
-     * Fable ligger närmast taket. Den ordinarie vyn behåller samma rad. */
-    t.claude_session.has_pct = 1;
-    t.claude_session.pct = 21.0;
-    t.claude_week.has_pct = 1;
-    t.claude_week.pct = 49.0;
-    t.claude_model_week.has_pct = 1;
-    t.claude_model_week.pct = 73.0;
     tokens_apply(&t);
     printf("tokens: %.2f Mtok idag, %d sessioner, takt %.2f Mtok/h\n",
            t.day_tokens / 1e6, t.day_sessions, t.day_tokens_per_hour / 1e6);
@@ -183,6 +179,10 @@ static void feed_tokens(void) {
     printf("tokens: fixtur saknas/avvisad, vyn visar streck\n");
   }
   free(json);
+}
+
+static void feed_tokens(void) {
+  feed_tokens_file("tokens.json");
 }
 
 static void apply_agent_fixture(int idx) {
@@ -206,34 +206,33 @@ static void next_fixture(lv_timer_t *t) {
   apply_fixture(fixture_idx + 1);
 }
 
-/* Plattformsrundan efter fixturdumparna: launcher → VibePulse-agentlägen →
- * ordinarie VibePulse-vyer → hem. */
+/* Plattformsrundan efter fixturdumparna: deterministiska statiska
+ * VibePulse-vyer för bildgranskningen före AMOLED-grinden. */
 static void platform_tour_cb(lv_timer_t *t) {
   static int stage;
   (void)t;
   switch (stage++) {
     case 0: torget_launcher_open(); break;
     case 1: dump_frame("launcher"); break;
-    case 2: torget_app_show(1); break;
+    case 2: torget_app_show(1); tokens_show_view(0); break;
     case 3: apply_agent_fixture(1); break;
-    case 4: dump_frame("agent-claude-working"); break;
+    case 4: dump_frame("vibepulse-claude-static"); break;
     case 5: apply_agent_fixture(2); break;
-    case 6: dump_frame("agent-claude-waiting"); break;
-    case 7: apply_agent_fixture(3); break;
-    case 8: dump_frame("agent-claude-done"); break;
-    case 9: apply_agent_fixture(5); break;
-    case 10: dump_frame("agent-codex-working"); break;
-    case 11: apply_agent_fixture(6); break;
-    case 12: dump_frame("agent-codex-waiting"); break;
-    case 13: apply_agent_fixture(7); break;
-    case 14: dump_frame("agent-codex-done"); break;
-    case 15: apply_agent_fixture(0); break;
-    case 16: dump_frame("tokens-claude"); break;
-    case 17: tokens_show_view(1); break;
-    case 18: dump_frame("tokens-codex"); break;
-    case 19: tokens_show_view(2); break;
-    case 20: dump_frame("tokens-volym"); break;
-    case 21: tokens_show_view(0); break;
+    case 6: dump_frame("vibepulse-claude-long-copy"); break;
+    case 7: tokens_show_view(1); apply_agent_fixture(5); break;
+    case 8: dump_frame("vibepulse-codex-static"); break;
+    case 9: tokens_show_view(2); break;
+    case 10: dump_frame("vibepulse-forecast-shell"); break;
+    case 11: tokens_show_view(3); break;
+    case 12: dump_frame("vibepulse-volume"); break;
+    case 13:
+      tokens_show_view(0);
+      apply_agent_fixture(0);
+      feed_tokens_file("tokens-missing.json");
+      break;
+    case 14: dump_frame("vibepulse-claude-missing"); break;
+    case 15: feed_tokens(); break;
+    case 16: dump_frame("vibepulse-claude-restored"); break;
     default: torget_app_show(0); break;
   }
   lv_timer_set_period(t, 500);
@@ -269,7 +268,33 @@ static void poll_keys(lv_timer_t *t) {
   }
 }
 
-int main(void) {
+static void run_vibepulse_static_qa(void) {
+  torget_app_show(1);
+
+  tokens_show_view(0);
+  apply_agent_fixture(1);
+  dump_frame("vibepulse-claude-static");
+  apply_agent_fixture(2);
+  dump_frame("vibepulse-claude-long-copy");
+
+  tokens_show_view(1);
+  apply_agent_fixture(5);
+  dump_frame("vibepulse-codex-static");
+
+  tokens_show_view(2);
+  dump_frame("vibepulse-forecast-shell");
+  tokens_show_view(3);
+  dump_frame("vibepulse-volume");
+
+  tokens_show_view(0);
+  apply_agent_fixture(0);
+  feed_tokens_file("tokens-missing.json");
+  dump_frame("vibepulse-claude-missing");
+  feed_tokens();
+  dump_frame("vibepulse-claude-restored");
+}
+
+int main(int argc, char **argv) {
   /* Radbuffrat även vid pipe: fixtureloggen ska överleva en kill. */
   setvbuf(stdout, NULL, _IOLBF, 0);
   lv_init();
@@ -297,6 +322,11 @@ int main(void) {
   /* VibePulse får sin fixtur direkt: launchern ska visa en levande app,
    * inte ett streck, när man tittar in (tangent T matar om). */
   feed_tokens();
+
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-static-qa") == 0) {
+    run_vibepulse_static_qa();
+    return 0;
+  }
 
   cycle_timer = lv_timer_create(next_fixture, 20000, NULL);
   apply_fixture(0);

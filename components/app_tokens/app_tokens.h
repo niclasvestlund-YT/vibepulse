@@ -26,7 +26,7 @@ void tokens_apply_agent_status(const tk_agent_snapshot *snapshot);
  * och ingen task eller HTTP-klient skapas. */
 void tokens_agent_net_start(void);
 
-/* Hoppa till vy 0-2 utan animation — bänkens och BMP-dumparnas ratt. */
+/* Hoppa till vy 0-3 utan animation — bänkens och BMP-dumparnas ratt. */
 void tokens_show_view(int idx);
 
 #endif

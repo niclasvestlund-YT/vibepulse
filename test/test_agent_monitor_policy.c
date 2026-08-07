@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../components/app_tokens/agent_monitor_policy.h"
 
@@ -149,6 +150,29 @@ int main(void) {
   check("oförändrad presence triggar ingen extra UI-render",
         !tk_agent_monitor_tick_should_render(true, 0, stale_mask,
                                              stale_mask));
+
+  tk_agent_status copy = agent(TK_AGENT_WORKING, 0, "copy");
+  copy.activity = TK_ACTIVITY_EDITING;
+  check("editing får den säkra svenska aktivitetskategorin",
+        strcmp(tk_agent_monitor_activity_text(&copy), "ÄNDRAR FILER") == 0);
+  copy.activity = TK_ACTIVITY_WAITING_APPROVAL;
+  check("approval använder den korta godkända texten",
+        strcmp(tk_agent_monitor_activity_text(&copy),
+               "BEHÖVER GODKÄNNAN") == 0);
+  copy.state = TK_AGENT_DONE;
+  check("done väntar på användaren",
+        strcmp(tk_agent_monitor_activity_text(&copy), "VÄNTAR PÅ DIG") == 0);
+  copy.state = TK_AGENT_ERROR;
+  check("error blir FEL utan rå feltext",
+        strcmp(tk_agent_monitor_activity_text(&copy), "FEL") == 0);
+  copy.state = TK_AGENT_IDLE;
+  copy.activity = TK_ACTIVITY_NONE;
+  check("idle ger ingen onödig placeholder",
+        strcmp(tk_agent_monitor_activity_text(&copy), "") == 0);
+  copy.state = TK_AGENT_UNKNOWN;
+  copy.activity = TK_ACTIVITY_EDITING;
+  check("utgången lease får aldrig behålla gammal aktivitet",
+        strcmp(tk_agent_monitor_activity_text(&copy), "") == 0);
 
   if (failures == 0) {
     printf("OK: alla agentmonitor-policytester gröna\n");

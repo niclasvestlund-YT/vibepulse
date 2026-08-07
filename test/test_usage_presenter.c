@@ -25,7 +25,7 @@ static tk_limit limit(double pct, int reset_min, double delta) {
 
 int main(void) {
   tk_tokens tokens = {0};
-  tokens.claude_model_week = limit(73, 850, 3);
+  tokens.claude_model_week = limit(73, 3120, 3);
   tokens.claude_week = limit(47, 300, 7);
   tokens.claude_session = limit(21, 80, 11);
   tokens.has_claude_model_week_label = 1;
@@ -46,6 +46,10 @@ int main(void) {
         strcmp(view.cards[0].delta_text, "+3% IDAG") == 0);
   check("reset har kompakt copy",
         strcmp(view.cards[1].reset_text, "NOLLAS OM 5 H 00") == 0);
+  check("reset har separat liten kvar-rad",
+        strcmp(view.cards[0].reset_short_text, "2 D 4 H KVAR") == 0);
+  check("långa resetfönster använder dygn även på nedersta raden",
+        strcmp(view.cards[0].reset_text, "NOLLAS OM 2 D 4 H") == 0);
 
   usage_presenter_build_provider(&tokens, USAGE_PROVIDER_CLAUDE, 6999, &view);
   check("allveckan ligger kvar före sju sekunder",
@@ -86,8 +90,8 @@ int main(void) {
   usage_presenter_build_provider(
       &missing, USAGE_PROVIDER_CODEX, 0, &view);
   check("saknad quota är streck", strcmp(view.cards[0].pct_text, "–") == 0);
-  check("saknad reset flyttar inte in hittepåtext",
-        view.cards[0].reset_text[0] == '\0');
+  check("saknad quota förklaras utan hittepåvärde",
+        strcmp(view.cards[0].reset_text, "QUOTA SAKNAS") == 0);
   check("saknat delta är tomt", view.cards[0].delta_text[0] == '\0');
 
   if (failures == 0) {
