@@ -8,6 +8,9 @@
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
 # third_party/ innehåller vendrade komponenter (cjson) som apparna delar.
-set(EXTRA_COMPONENT_DIRS third_party)
+# Vibbe (app_buddy) bor i sitt eget repo (~/Buddy) och delas in härifrån —
+# EN källa, ingen kopiedrift (inflyttsbeslutet 2026-08-07: "alla tre ska bo
+# där"). Kravet är att ~/Buddy är utcheckat bredvid ~/Torget.
+set(EXTRA_COMPONENT_DIRS third_party $ENV{HOME}/Buddy/components)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(torget)

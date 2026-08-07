@@ -38,3 +38,11 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 # en blockerad TLS-handskakning ska inte svälta LVGL-tasken.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 CONFIG_LV_MEM_SIZE_KILOBYTES=96
+
+# --- Vibbe (app_buddy) --- USB-ljudkortsläget. Parametrarna bor i Kconfig,
+# inte i uac_device_config_t (bänkläxa 2026-08-07: default är 48 kHz medan
+# hela ljudnavet antar 16 kHz, och utan macOS-flaggan blir feedback-formatet
+# fel med hackigt ljud som symptom).
+CONFIG_UAC_SAMPLE_RATE=16000
+CONFIG_UAC_SUPPORT_MACOS=y
+CONFIG_UAC_TUSB_PRODUCT="Vibbe"

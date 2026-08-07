@@ -35,6 +35,12 @@ add_executable(torget-sim
   ../components/torget_fmt/fmt_sv.c
   ../components/torget_ticker/ticker.c
   ../third_party/cjson/cJSON.c
+  # Vibbe delas in fran ~/Buddy (inflytten 2026-08-07) - sjal, ansikte och
+  # latenas rena karna; ljudnav/wake ar target-only och kompileras inte har.
+  $ENV{HOME}/Buddy/components/app_buddy/app.c
+  $ENV{HOME}/Buddy/components/app_buddy/buddy_soul.c
+  $ENV{HOME}/Buddy/components/app_buddy/buddy_face.c
+  $ENV{HOME}/Buddy/components/app_buddy/vibbe_sounds.c
   ${FONTS})
 
 # Simulatorn läser de riktiga fixture-filerna genom de delade parsrarna.
@@ -47,5 +53,6 @@ target_include_directories(torget-sim PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../components/app_solelkollen"
   "${CMAKE_CURRENT_SOURCE_DIR}/../components/app_tokens"
   "${CMAKE_CURRENT_SOURCE_DIR}/../components/torget_fmt"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../components/torget_ticker")
+  "${CMAKE_CURRENT_SOURCE_DIR}/../components/torget_ticker"
+  "$ENV{HOME}/Buddy/components/app_buddy")
 target_link_libraries(torget-sim PRIVATE lvgl SDL2::SDL2)

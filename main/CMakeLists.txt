@@ -12,6 +12,7 @@ idf_component_register(
   REQUIRES torget_app
            app_solelkollen
            app_tokens
+           app_buddy
            nvs_flash
            esp_wifi
            esp_netif

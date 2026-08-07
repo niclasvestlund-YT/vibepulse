@@ -1,5 +1,6 @@
 #include "torget_app.h"
 
+#include "app_buddy.h"
 #include "app_solelkollen.h"
 #include "app_tokens.h"
 
@@ -17,6 +18,7 @@
 const torget_app_t *const torget_apps[] = {
   &solelkollen_app,
   &tokens_app,
+  &vibbe_app,
 };
 
 const int torget_app_count =
