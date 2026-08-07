@@ -240,6 +240,70 @@ class ClassificationTests(unittest.TestCase):
 
         self.assertEqual(event.state, "error")
 
+    def test_codex_reasoning_refreshes_live_work_between_lifecycle_events(self):
+        event = classify_codex({
+            "type": "response_item",
+            "payload": {
+                "type": "reasoning",
+                "id": "reasoning-7",
+                "internal_chat_message_metadata_passthrough": {
+                    "turn_id": "turn-7",
+                },
+                "encrypted_content": "synthetic-private-reasoning",
+            },
+        })
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="thinking",
+            task_id="turn-7",
+            source_id="reasoning-7",
+            project=None,
+        ))
+        self.assertNotIn("synthetic-private-reasoning", repr(event))
+
+    def test_codex_tool_calls_refresh_live_work_without_retaining_arguments(self):
+        event = classify_codex({
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call",
+                "id": "tool-7",
+                "call_id": "call-7",
+                "name": "exec",
+                "input": "synthetic-private-command",
+            },
+        })
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="running",
+            task_id="tool-7",
+            source_id="tool-7",
+            project=None,
+        ))
+        self.assertNotIn("synthetic-private-command", repr(event))
+
+    def test_codex_tool_output_returns_to_thinking(self):
+        event = classify_codex({
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call_output",
+                "id": "output-7",
+                "call_id": "call-7",
+                "output": "synthetic-private-output",
+            },
+        })
+
+        self.assertEqual((event.state, event.activity, event.task_id),
+                         ("working", "thinking", "output-7"))
+        self.assertNotIn("synthetic-private-output", repr(event))
+
+    def test_codex_response_item_without_stable_identity_is_ignored(self):
+        self.assertIsNone(classify_codex({
+            "type": "response_item",
+            "payload": {"type": "reasoning"},
+        }))
+
     def test_malformed_and_unrelated_events_are_ignored(self):
         malformed_content = claude_event("assistant")
         malformed_content["message"]["content"] = [{"unexpected": True}]
@@ -810,6 +874,54 @@ class AgentStatusServiceTests(unittest.TestCase):
             self.assertEqual(snapshot["agents"]["codex"]["state"],
                              "working")
             self.assertEqual(service.poll_once(), 0)
+
+    def test_live_codex_activity_recovers_after_a_newer_task_completed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            active_path = root / "codex" / "rollout-active.jsonl"
+            completed_path = root / "codex" / "rollout-completed.jsonl"
+            self._write_line(active_path, {
+                "type": "event_msg",
+                "timestamp": "2026-08-06T12:00:00Z",
+                "payload": {"type": "task_started", "turn_id": "active"},
+            })
+            self._write_line(completed_path, {
+                "type": "event_msg",
+                "timestamp": "2026-08-06T12:01:00Z",
+                "payload": {"type": "task_complete", "turn_id": "other"},
+            })
+            wall_time = AgentStatusService._event_wall_time({
+                "timestamp": "2026-08-06T12:02:01Z",
+            })
+            service = AgentStatusService(
+                root / "claude", root / "codex", now=lambda: 500.0,
+                _wall_time=lambda: wall_time)
+
+            service.poll_once()
+            self.assertEqual(
+                service.snapshot()["agents"]["codex"]["state"], "done")
+
+            private_marker = "synthetic-private-live-reasoning"
+            with active_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({
+                    "type": "response_item",
+                    "timestamp": "2026-08-06T12:02:00Z",
+                    "payload": {
+                        "type": "reasoning",
+                        "id": "reasoning-active",
+                        "internal_chat_message_metadata_passthrough": {
+                            "turn_id": "active",
+                        },
+                        "encrypted_content": private_marker,
+                    },
+                }) + "\n")
+
+            self.assertEqual(service.poll_once(), 1)
+            codex = service.snapshot()["agents"]["codex"]
+            self.assertEqual((codex["state"], codex["activity"]),
+                             ("working", "thinking"))
+            self.assertEqual(codex["task_id"], "active")
+            self.assertNotIn(private_marker, repr(codex))
 
     def test_appended_unchanged_classified_event_counts_as_no_change(self):
         with tempfile.TemporaryDirectory() as temp_dir:

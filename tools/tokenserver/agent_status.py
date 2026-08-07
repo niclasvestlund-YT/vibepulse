@@ -217,12 +217,48 @@ def classify_claude(event: Any) -> Optional[Event]:
     return None
 
 
+def _codex_response_activity(payload: Dict[str, Any]) -> Optional[str]:
+    kind = payload.get("type")
+    if kind in {"reasoning", "function_call_output",
+                "custom_tool_call_output"}:
+        return "thinking"
+    if kind not in {"function_call", "custom_tool_call"}:
+        return None
+    name = payload.get("name")
+    if not isinstance(name, str) or not name:
+        return "running"
+    normalized = name.lower()
+    if normalized in {"apply_patch", "edit", "write"}:
+        return "editing"
+    if normalized in {"read", "view_image"}:
+        return "reading"
+    if ("search" in normalized or normalized in
+            {"web", "web__run", "find"}):
+        return "searching"
+    return "running"
+
+
 def classify_codex(event: Any) -> Optional[Event]:
-    """Classify stable Codex task lifecycle events conservatively."""
-    if not isinstance(event, dict) or event.get("type") != "event_msg":
+    """Classify Codex lifecycle and privacy-safe live activity events."""
+    if not isinstance(event, dict):
         return None
     payload = event.get("payload")
     if not isinstance(payload, dict):
+        return None
+    if event.get("type") == "response_item":
+        source_id = payload.get("id")
+        if not isinstance(source_id, str) or not source_id:
+            return None
+        activity = _codex_response_activity(payload)
+        if activity is None:
+            return None
+        metadata = payload.get("internal_chat_message_metadata_passthrough")
+        turn_id = metadata.get("turn_id") if isinstance(metadata, dict) else None
+        if not isinstance(turn_id, str) or not turn_id:
+            turn_id = source_id
+        return Event("working", activity, _bounded_task_id(turn_id),
+                     source_id, None)
+    if event.get("type") != "event_msg":
         return None
     kind = payload.get("type")
     turn_id = payload.get("turn_id")
