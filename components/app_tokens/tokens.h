@@ -1,6 +1,10 @@
 #ifndef TOKENS_H
 #define TOKENS_H
 
+#include <stdint.h>
+
+#define TK_QUOTA_LABEL_CAP 17
+
 /*
  * Speglar Mac-tjänstens /api/tokens (kontrakt v2) minus transportfälten —
  * VibePulse-datats kontrakt enligt glance-mönstret: platt JSON, tal inte
@@ -20,9 +24,29 @@
 
 typedef struct {
   double pct;    /* utnyttjande, 0-100 */
+  double delta_pct; /* förändring i samma resetcykel */
   int reset_min; /* minuter till fönstret nollas */
-  int has_pct, has_reset;
+  int has_pct, has_reset, has_delta;
 } tk_limit;
+
+typedef enum {
+  TK_FORECAST_UNAVAILABLE,
+  TK_FORECAST_COLLECTING,
+  TK_FORECAST_AT_RESET,
+  TK_FORECAST_EXHAUSTS,
+} tk_forecast_state;
+
+typedef struct {
+  tk_forecast_state state;
+  int pct_at_reset;
+  double pace_factor;
+  int64_t at_epoch;
+  int offset_min;
+  int has_pct_at_reset;
+  int has_pace_factor;
+  int has_at_epoch;
+  int has_offset_min;
+} tk_forecast;
 
 typedef struct {
   /* volymen (alltid närvarande) */
@@ -35,6 +59,9 @@ typedef struct {
    * modellen (Fable/Opus) — tredje raden i Claudes egen usage-panel. */
   tk_limit claude_session, claude_week, claude_model_week;
   tk_limit codex_session, codex_week;
+  char claude_model_week_label[TK_QUOTA_LABEL_CAP];
+  int has_claude_model_week_label;
+  tk_forecast claude_forecast, codex_forecast;
 } tk_tokens;
 
 #endif

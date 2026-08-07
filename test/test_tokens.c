@@ -41,6 +41,23 @@ static void check(const char *what, int cond) {
   "\"codexSessionPct\":null,\"codexSessionResetMin\":null," \
   "\"codexWeekPct\":null,\"codexWeekResetMin\":null"
 
+#define OPTIONAL_USAGE \
+  ",\"claudeModelWeekLabel\":\"FABLE · VECKA\"," \
+  "\"claudeModelWeekTodayDeltaPct\":3," \
+  "\"claudeWeekTodayDeltaPct\":7," \
+  "\"claudeSessionHourDeltaPct\":11," \
+  "\"codexWeekTodayDeltaPct\":5," \
+  "\"claudeForecastState\":\"at_reset\"," \
+  "\"claudeForecastPctAtReset\":85," \
+  "\"claudeForecastPaceFactor\":1.4," \
+  "\"claudeForecastAt\":null," \
+  "\"claudeForecastOffsetMin\":null," \
+  "\"codexForecastState\":\"exhausts\"," \
+  "\"codexForecastPctAtReset\":null," \
+  "\"codexForecastPaceFactor\":null," \
+  "\"codexForecastAt\":1800007200," \
+  "\"codexForecastOffsetMin\":-540"
+
 int main(void) {
   size_t len;
   char *json;
@@ -74,6 +91,65 @@ int main(void) {
         PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
               "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS "}", &t)
         && t.day_tokens == 0 && !t.claude_session.has_pct);
+
+  check("valfria usagefält parsar",
+        PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+              "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS
+              OPTIONAL_USAGE "}", &t));
+  check("modellquotans etikett",
+        t.has_claude_model_week_label &&
+        strcmp(t.claude_model_week_label, "FABLE · VECKA") == 0);
+  check("modellveckans dagsdelta",
+        t.claude_model_week.has_delta &&
+        t.claude_model_week.delta_pct == 3.0);
+  check("allveckans dagsdelta",
+        t.claude_week.has_delta && t.claude_week.delta_pct == 7.0);
+  check("femtimmars timdelta",
+        t.claude_session.has_delta &&
+        t.claude_session.delta_pct == 11.0);
+  check("Codex dagsdelta",
+        t.codex_week.has_delta && t.codex_week.delta_pct == 5.0);
+  check("Claude prognos vid reset",
+        t.claude_forecast.state == TK_FORECAST_AT_RESET &&
+        t.claude_forecast.has_pct_at_reset &&
+        t.claude_forecast.pct_at_reset == 85 &&
+        t.claude_forecast.has_pace_factor &&
+        t.claude_forecast.pace_factor == 1.4);
+  check("Codex prognos tar slut",
+        t.codex_forecast.state == TK_FORECAST_EXHAUSTS &&
+        t.codex_forecast.has_at_epoch &&
+        t.codex_forecast.at_epoch == 1800007200LL &&
+        t.codex_forecast.has_offset_min &&
+        t.codex_forecast.offset_min == -540);
+
+  check("null valfria fält accepteras",
+        PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+              "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS ","
+              "\"claudeModelWeekLabel\":null,"
+              "\"claudeWeekTodayDeltaPct\":null,"
+              "\"claudeForecastState\":null}", &t) &&
+              !t.has_claude_model_week_label &&
+              !t.claude_week.has_delta &&
+              t.claude_forecast.state == TK_FORECAST_UNAVAILABLE);
+
+  check("trasigt valfritt delta underkänner inte usage",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeWeekTodayDeltaPct\":\"fel\"}", &t) &&
+              t.day_tokens == 1 && !t.claude_week.has_delta);
+  check("för lång valfri etikett ignoreras",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeModelWeekLabel\":"
+              "\"12345678901234567\"}", &t) &&
+              !t.has_claude_model_week_label);
+  check("okänd prognos underkänner inte usage",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeForecastState\":\"mystery\","
+              "\"claudeForecastPctAtReset\":85}", &t) &&
+              t.claude_forecast.state == TK_FORECAST_UNAVAILABLE &&
+              !t.claude_forecast.has_pct_at_reset);
 
   /* Fientliga indata: allt som inte är hela kontraktet avvisas utan att
    * röra utdata. */

@@ -236,14 +236,14 @@ Commit: `Utöka tokenservern med delta och veckotakt`
 **Files:**
 - Modify: `components/app_tokens/tokens.h`
 - Modify: `components/app_tokens/tokens_parse.c`
-- Modify: `test/test_tokens_parse.c`
+- Modify: `test/test_tokens.c`
 - Create: `components/app_tokens/usage_presenter.h`
 - Create: `components/app_tokens/usage_presenter.c`
 - Create: `test/test_usage_presenter.c`
 - Modify: `test/run.sh`
 - Modify: `sim/CMakeLists.txt`
 
-- [ ] Add parser tests for all optional fields, absent fields, null fields, bounds, and invalid types.
+- [ ] Add parser tests for all optional fields, absent fields, null fields, bounds, and invalid types. Malformed optional presentation fields become unavailable and must not reject otherwise valid usage.
 - [ ] Add `has_delta` and `delta_pct` to quota windows.
 - [ ] Add a bounded quota-label field and a forecast enum/structure.
 - [ ] Add presenter tests for Claude upper/lower cards, Codex single-card layout, unavailable values, and exact copy.
