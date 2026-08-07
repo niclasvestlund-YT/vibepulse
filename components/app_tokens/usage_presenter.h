@@ -37,10 +37,24 @@ typedef struct {
 
 typedef struct {
   usage_provider provider;
-  int card_count;
-  usage_card_view cards[2];
-  tk_forecast forecast;
-} usage_provider_view;
+  char provider_label[12];
+  usage_card_view quota;
+} usage_hero_view;
+
+typedef struct {
+  int row_count;
+  usage_card_view rows[2];
+} usage_detail_page_view;
+
+typedef struct {
+  usage_provider provider;
+  usage_card_view quota;
+} usage_overview_row_view;
+
+typedef struct {
+  int row_count;
+  usage_overview_row_view rows[2];
+} usage_overview_page_view;
 
 #define USAGE_FORECAST_HEADLINE_CAP 48
 #define USAGE_FORECAST_DETAIL_CAP 40
@@ -60,10 +74,13 @@ typedef struct {
   usage_forecast_row_view rows[2];
 } usage_forecast_page_view;
 
-void usage_presenter_build_provider(const tk_tokens *tokens,
-                                    usage_provider provider,
-                                    uint32_t elapsed_ms,
-                                    usage_provider_view *out);
+void usage_presenter_build_hero(const tk_tokens *tokens,
+                                usage_provider provider,
+                                usage_hero_view *out);
+void usage_presenter_build_claude_details(
+    const tk_tokens *tokens, usage_detail_page_view *out);
+void usage_presenter_build_overview(
+    const tk_tokens *tokens, usage_overview_page_view *out);
 void usage_presenter_build_forecasts(const tk_tokens *tokens,
                                      usage_forecast_page_view *out);
 
