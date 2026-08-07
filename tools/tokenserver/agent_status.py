@@ -40,6 +40,43 @@ ACTIVITIES = {
     "waiting_approval",
 }
 
+MODEL_LABELS = {
+    "claude-fable-5": "FABLE 5",
+    "claude-opus-5": "OPUS 5",
+    "claude-sonnet-5": "SONNET 5",
+    "gpt-5.6-sol": "GPT-5.6 SOL",
+}
+
+
+def _bounded_display(value: Any, max_bytes: int) -> Optional[str]:
+    if not isinstance(value, str) or not value:
+        return None
+    clean = "".join(
+        char for char in value
+        if not unicodedata.category(char).startswith("C")
+    ).strip()
+    prefix = []
+    encoded_bytes = 0
+    for char in clean:
+        char_bytes = len(char.encode("utf-8"))
+        if encoded_bytes + char_bytes > max_bytes:
+            break
+        prefix.append(char)
+        encoded_bytes += char_bytes
+    return "".join(prefix) or None
+
+
+def normalize_model(value: Any) -> Optional[str]:
+    bounded = _bounded_display(value, 24)
+    if bounded is None:
+        return None
+    return MODEL_LABELS.get(bounded.lower(), bounded)
+
+
+def normalize_effort(value: Any) -> Optional[str]:
+    bounded = _bounded_display(value, 12)
+    return None if bounded is None else bounded.upper()
+
 
 @dataclass(frozen=True)
 class Event:
@@ -48,6 +85,8 @@ class Event:
     task_id: str
     source_id: str
     project: str | None
+    model: str | None = None
+    effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,7 +155,14 @@ def _claude_event(event: Dict[str, Any], state: str,
     if identity is None:
         return None
     task_id, source_id, project = identity
-    return Event(state, activity, task_id, source_id, project)
+    message = event.get("message")
+    if isinstance(message, dict):
+        model = normalize_model(message.get("model"))
+        effort = normalize_effort(message.get("effort"))
+    else:
+        model = None
+        effort = None
+    return Event(state, activity, task_id, source_id, project, model, effort)
 
 
 def _has_explicit_error(event: Dict[str, Any]) -> bool:
@@ -245,6 +291,15 @@ def classify_codex(event: Any) -> Optional[Event]:
     payload = event.get("payload")
     if not isinstance(payload, dict):
         return None
+    if event.get("type") == "turn_context":
+        turn_id = payload.get("turn_id")
+        if not isinstance(turn_id, str) or not turn_id:
+            return None
+        return Event(
+            "working", "thinking", _bounded_task_id(turn_id), turn_id,
+            sanitize_project(payload.get("cwd")),
+            normalize_model(payload.get("model")),
+            normalize_effort(payload.get("effort")))
     if event.get("type") == "response_item":
         source_id = payload.get("id")
         if not isinstance(source_id, str) or not source_id:
@@ -288,6 +343,8 @@ class AgentStatusStore:
                 "state": "idle",
                 "project": None,
                 "activity": None,
+                "model": None,
+                "effort": None,
                 "observed_at": observed_at,
                 "order_at": None,
             }
@@ -319,15 +376,24 @@ class AgentStatusStore:
             "state": event.state,
             "project": sanitize_project(event.project),
             "activity": event.activity,
+            "model": normalize_model(event.model),
+            "effort": normalize_effort(event.effort),
             "observed_at": seen_at,
             "order_at": ordered_at,
         }
-        public_fields = ("task_id", "event_id", "state", "project", "activity")
+        public_fields = (
+            "task_id", "event_id", "state", "project", "activity",
+            "model", "effort")
         with self._lock:
             current = self._agents[provider]
             if (current["order_at"] is not None and
                     ordered_at < current["order_at"]):
                 return False
+            if current["task_id"] == replacement["task_id"]:
+                if replacement["model"] is None:
+                    replacement["model"] = current["model"]
+                if replacement["effort"] is None:
+                    replacement["effort"] = current["effort"]
             changed = any(current[key] != replacement[key]
                           for key in public_fields)
             if changed:
@@ -356,6 +422,8 @@ class AgentStatusStore:
                     "state": state,
                     "project": stored["project"],
                     "activity": activity,
+                    "model": stored["model"],
+                    "effort": stored["effort"],
                     "updated_ms": updated_ms,
                 }
             seq = self._seq
@@ -935,7 +1003,8 @@ class AgentStatusService:
         self._observation_sequence += 1
         compact_event = Event(
             event.state, event.activity, _bounded_task_id(event.task_id), "",
-            sanitize_project(event.project))
+            sanitize_project(event.project), normalize_model(event.model),
+            normalize_effort(event.effort))
         return _Observation(
             compact_event, stable_event_id(provider, event), observed_at,
             order_at, self._observation_sequence)

@@ -42,6 +42,29 @@ def claude_task_id(session_id, source_id):
 
 
 class ClassificationTests(unittest.TestCase):
+    def test_claude_reads_model_and_effort_only_from_top_level_message(self):
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "model": "claude-opus-5"})
+        entry["message"]["model"] = "claude-fable-5"
+        entry["message"]["effort"] = "xhigh"
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.model, "FABLE 5")
+        self.assertEqual(event.effort, "XHIGH")
+        self.assertNotIn("OPUS", repr(event))
+
+    def test_claude_does_not_take_model_from_nested_tool_input(self):
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "model": "claude-opus-5"})
+
+        event = classify_claude(entry)
+
+        self.assertIsNone(event.model)
+        self.assertIsNone(event.effort)
+
     def test_claude_user_starts_work(self):
         event = classify_claude(claude_event("user"))
 
@@ -199,6 +222,41 @@ class ClassificationTests(unittest.TestCase):
             source_id="turn-7",
             project=None,
         ))
+
+    def test_codex_turn_context_reads_top_level_model_effort_and_project(self):
+        event = classify_codex({
+            "type": "turn_context",
+            "payload": {
+                "turn_id": "turn-7",
+                "cwd": "/Users/test/Torget",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "settings": {"model": "nested-private-model"},
+            },
+        })
+
+        self.assertEqual(event, Event(
+            state="working",
+            activity="thinking",
+            task_id="turn-7",
+            source_id="turn-7",
+            project="Torget",
+            model="GPT-5.6 SOL",
+            effort="XHIGH",
+        ))
+        self.assertNotIn("nested-private-model", repr(event))
+
+    def test_metadata_is_control_free_and_bounded_by_utf8_bytes(self):
+        entry = claude_event("assistant", tool_name="Read")
+        entry["message"]["model"] = "ok\x00" + "😀" * 20
+        entry["message"]["effort"] = "max\n" + "å" * 20
+
+        event = classify_claude(entry)
+
+        self.assertLessEqual(len(event.model.encode("utf-8")), 24)
+        self.assertLessEqual(len(event.effort.encode("utf-8")), 12)
+        self.assertNotIn("\x00", event.model)
+        self.assertNotIn("\n", event.effort)
 
     def test_codex_overlong_turn_identity_is_hashed_without_collision_truncation(self):
         first_id = "å" * 40
@@ -368,7 +426,7 @@ class StoreTests(unittest.TestCase):
         for agent in snapshot["agents"].values():
             self.assertEqual(set(agent), {
                 "task_id", "event_id", "state", "project", "activity",
-                "updated_ms",
+                "model", "effort", "updated_ms",
             })
             self.assertEqual(agent["state"], "idle")
 
@@ -401,6 +459,25 @@ class StoreTests(unittest.TestCase):
             self.assertTrue(store.apply("claude", event))
 
         self.assertEqual(store.snapshot()["seq"], len(events))
+
+    def test_metadata_carries_forward_only_for_the_same_task(self):
+        store = AgentStatusStore(now=lambda: 0.0)
+        store.apply("codex", Event(
+            "working", "thinking", "turn-7", "context-7", "Torget",
+            model="GPT-5.6 SOL", effort="XHIGH"))
+
+        store.apply("codex", Event(
+            "working", "editing", "turn-7", "tool-7", None))
+        same_task = store.snapshot()["agents"]["codex"]
+
+        store.apply("codex", Event(
+            "working", "thinking", "turn-8", "context-8", None))
+        other_task = store.snapshot()["agents"]["codex"]
+
+        self.assertEqual(same_task["model"], "GPT-5.6 SOL")
+        self.assertEqual(same_task["effort"], "XHIGH")
+        self.assertIsNone(other_task["model"])
+        self.assertIsNone(other_task["effort"])
 
     def test_invalid_provider_state_and_activity_are_rejected(self):
         store = AgentStatusStore()
@@ -463,7 +540,7 @@ class StoreTests(unittest.TestCase):
         self.assertNotIn("source_id", repr(snapshot))
         self.assertEqual(set(snapshot["agents"]["claude"]), {
             "task_id", "event_id", "state", "project", "activity",
-            "updated_ms",
+            "model", "effort", "updated_ms",
         })
 
     def test_store_hashes_any_overlong_task_id_before_output(self):
@@ -1783,7 +1860,7 @@ class HandlerTests(unittest.TestCase):
             self.assertEqual(set(payload["agents"]), {"claude", "codex"})
             allowed = {
                 "task_id", "event_id", "state", "project", "activity",
-                "updated_ms",
+                "model", "effort", "updated_ms",
             }
             for agent in payload["agents"].values():
                 self.assertEqual(set(agent), allowed)
