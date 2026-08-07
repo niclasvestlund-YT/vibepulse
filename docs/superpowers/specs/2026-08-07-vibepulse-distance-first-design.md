@@ -43,9 +43,13 @@ Alla progressbarer och huvudprocent räknar upp från noll och betyder
 **förbrukad quota**.
 
 - Claude-värden visas som rapporterad förbrukning.
-- Codex rapporterar återstående andel. VibePulse beräknar
-  `used = clamp(100 - remaining, 0, 100)` innan presentation. Exempel:
-  `43% kvar` blir `57% USED`.
+- Codex egen UI visar återstående andel, men rollout-kontraktet som
+  tokenservern läser innehåller redan `used_percent`. `codexWeekPct` betyder
+  därför alltid förbrukad andel på tråden och visas utan en andra omräkning.
+  Som semantisk kontroll motsvarar `43% kvar` fortfarande `57% USED`.
+- Om en framtida adapter endast kan läsa återstående andel gör adaptern
+  `used = clamp(100 - remaining, 0, 100)` på Macen innan `/api/tokens`; ESP32
+  ska inte behöva gissa vilken riktning ett procentfält har.
 - Progressbarens färgade del blir längre när mer quota har förbrukats.
 - `USED` står i quotaetiketten eller bredvid huvudprocenten men dupliceras
   aldrig i flera rader.
@@ -245,9 +249,9 @@ Claude+Codex-översikt, därefter befintliga prognos-/volymvyer.
 ## Datakontrakt och fel
 
 ESP32 fortsätter presentera ett bakåtkompatibelt `/api/tokens`-kontrakt.
-Omräkningen för Codex sker i presentatör/policy, inte genom att skriva över
-källvärdet. Tester ska därför kunna verifiera både `remaining=43` och
-`used=57`.
+`codexWeekPct` är uttryckligen förbrukad andel från Codex `used_percent`.
+Eventuell konvertering från en annan källas återstående andel sker i den
+hostadapter som äger den källan, innan värdet serialiseras.
 
 Varje quotaobjekt behöver procent, reset och en betrodd etikett. Historikfält
 är valfria. Ett fel i historik, modell, effort eller agentstatus får aldrig
@@ -275,8 +279,9 @@ eller börja blinka.
 
 ## Verifiering
 
-- Presentatörstest: Codex `43% remaining` ger `57% USED`, med clamp för
-  gränsvärden och saknade data.
+- Kontraktstest: Codex `used_percent=57` ger `codexWeekPct=57` och `57% USED`
+  utan dubbel invertering. En separat adaptertest ska bevisa `43% remaining`
+  till `57% used` om en sådan remaining-adapter införs senare.
 - Labeltest: verklig Claude-modellgräns bevaras; Fable fabriceras aldrig.
 - Layouttest: inga kritiska 12/14 px-labels, inga card-bakgrunder och 16–18 px
   progressbarer på de fyra prioriterade sidorna.
