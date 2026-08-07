@@ -33,6 +33,10 @@ CONFIG_LV_DEF_REFR_PERIOD=15
 # överlever certrotation (beslutsloggen i README).
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+# Vibbes USB/audio-tasker behöver internminnet och mbedTLS behöver ungefär
+# 42 kB per HTTPS-anslutning. Lägg därför TLS-allokeringarna i kortets 8 MB
+# PSRAM; annars saknar Solelkollen ett sammanhängande block efter Vibbe-init.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # Nätverkstacken får jobba på: en hämtning var 30:e sekund är ingen last, men
 # en blockerad TLS-handskakning ska inte svälta LVGL-tasken.
