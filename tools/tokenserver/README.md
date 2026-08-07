@@ -145,7 +145,7 @@ null = ärlig frånvaro, skärmen visar streck):
  "claudeSessionPct": 21.0, "claudeSessionResetMin": 80,
  "claudeWeekPct": 47.0, "claudeWeekResetMin": 850,
  "claudeModelWeekPct": 73.0, "claudeModelWeekResetMin": 850,
- "claudeModelWeekLabel": "FABLE · VECKA",
+ "claudeModelWeekLabel": "FABLE · WEEK",
  "claudeWeekTodayDeltaPct": 6.0,
  "claudeModelWeekTodayDeltaPct": 3.0,
  "claudeSessionHourDeltaPct": 4.0,

@@ -319,9 +319,9 @@ def _parse_limit_headers(headers, now_ts):
     """Map Claude's named limit windows without guessing model identity."""
     found = {}
     model_labels = {
-        "fable": "FABLE · VECKA",
-        "opus": "OPUS · VECKA",
-        "sonnet": "SONNET · VECKA",
+        "fable": "FABLE · WEEK",
+        "opus": "OPUS · WEEK",
+        "sonnet": "SONNET · WEEK",
     }
     for name, value in headers.items():
         match = re.match(

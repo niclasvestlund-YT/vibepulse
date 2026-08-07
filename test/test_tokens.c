@@ -42,7 +42,7 @@ static void check(const char *what, int cond) {
   "\"codexWeekPct\":null,\"codexWeekResetMin\":null"
 
 #define OPTIONAL_USAGE \
-  ",\"claudeModelWeekLabel\":\"FABLE · VECKA\"," \
+  ",\"claudeModelWeekLabel\":\"FABLE · WEEK\"," \
   "\"claudeModelWeekTodayDeltaPct\":3," \
   "\"claudeWeekTodayDeltaPct\":7," \
   "\"claudeSessionHourDeltaPct\":11," \
@@ -100,7 +100,7 @@ int main(void) {
               OPTIONAL_USAGE "}", &t));
   check("modellquotans etikett",
         t.has_claude_model_week_label &&
-        strcmp(t.claude_model_week_label, "FABLE · VECKA") == 0);
+        strcmp(t.claude_model_week_label, "FABLE · WEEK") == 0);
   check("modellveckans dagsdelta",
         t.claude_model_week.has_delta &&
         t.claude_model_week.delta_pct == 3.0);

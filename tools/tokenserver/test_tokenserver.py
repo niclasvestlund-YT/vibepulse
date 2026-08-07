@@ -124,11 +124,11 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             f"anthropic-ratelimit-unified-{model_bucket}-reset": "10800",
         }
 
-    def test_named_model_week_buckets_keep_their_real_label(self):
+    def test_named_model_week_buckets_keep_their_real_english_label(self):
         cases = {
-            "7d_fable": "FABLE · VECKA",
-            "7d_opus": "OPUS · VECKA",
-            "7d_sonnet": "SONNET · VECKA",
+            "7d_fable": "FABLE · WEEK",
+            "7d_opus": "OPUS · WEEK",
+            "7d_sonnet": "SONNET · WEEK",
         }
 
         for bucket, expected in cases.items():
@@ -248,6 +248,18 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
 
 
 class CodexLimitLogTests(unittest.TestCase):
+    def test_codex_window_value_preserves_used_percent(self):
+        window = {
+            "used_percent": 57.0,
+            "window_minutes": 10080,
+            "resets_at": 1_900_000_000,
+        }
+        pct, reset_min, window_min = tokenserver._codex_window(
+            window, now_ts=1_899_996_400)
+        self.assertEqual(pct, 57.0)
+        self.assertEqual(reset_min, 60)
+        self.assertEqual(window_min, 10080)
+
     def test_latest_rate_limit_is_read_from_tail_without_read_text(self):
         rate_limits = {
             "primary": {
@@ -497,7 +509,7 @@ class UsageSnapshotTests(unittest.TestCase):
                     "weekResetMin": 300,
                     "modelPct": 73.0,
                     "modelResetMin": 300,
-                    "modelLabel": "FABLE · VECKA",
+                    "modelLabel": "FABLE · WEEK",
                 },
                 codex={
                     "codexWeekPct": 35.0,
