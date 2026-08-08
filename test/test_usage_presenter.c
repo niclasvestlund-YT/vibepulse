@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "../components/app_tokens/usage_presenter.h"
 
@@ -82,12 +83,61 @@ int main(void) {
   forecasts.claude_forecast.pace_factor = 1.4;
   usage_forecast_page_view forecast_page = {0};
   usage_presenter_build_forecasts(&forecasts, &forecast_page);
-  check("forecasts use stable English copy",
-        forecast_page.row_count == 2 &&
-        strcmp(forecast_page.rows[0].label, "CLAUDE · WEEKLY") == 0 &&
-        strcmp(forecast_page.rows[0].headline, "85% AT RESET") == 0 &&
-        strcmp(forecast_page.rows[0].detail, "INCREASE 1.4x TO MAX OUT") == 0 &&
-        strcmp(forecast_page.rows[1].headline, "FORECAST UNAVAILABLE") == 0);
+  check("forecasts contain both providers", forecast_page.row_count == 2);
+  check("forecast label is stable English copy",
+        strcmp(forecast_page.rows[0].label, "CLAUDE · WEEKLY") == 0);
+  check("at-reset forecast keeps the weekly percentage",
+        strcmp(forecast_page.rows[0].pct_text, "47%") == 0);
+  check("at-reset forecast has an English headline",
+        strcmp(forecast_page.rows[0].headline, "85% AT RESET") == 0);
+  check("at-reset forecast has an English pace detail",
+        strcmp(forecast_page.rows[0].detail,
+               "INCREASE 1.4x TO MAX OUT") == 0);
+
+  tk_tokens exhausts = {0};
+  exhausts.codex_week = limit(35, 2210, 5);
+  exhausts.codex_forecast.state = TK_FORECAST_EXHAUSTS;
+  exhausts.codex_forecast.has_at_epoch = 1;
+  struct tm saturday = {0};
+  saturday.tm_year = 126;
+  saturday.tm_mon = 7;
+  saturday.tm_mday = 8;
+  saturday.tm_hour = 5;
+  saturday.tm_isdst = -1;
+  exhausts.codex_forecast.at_epoch = (int64_t)mktime(&saturday);
+  exhausts.codex_forecast.has_offset_min = 1;
+  exhausts.codex_forecast.offset_min = -540;
+  usage_presenter_build_forecasts(&exhausts, &forecast_page);
+  check("exhaustion forecast keeps the weekly percentage",
+        strcmp(forecast_page.rows[1].pct_text, "35%") == 0);
+  check("exhaustion forecast has local weekday and time",
+        strcmp(forecast_page.rows[1].headline,
+               "QUOTA RUNS OUT SAT 05:00") == 0);
+  check("exhaustion forecast formats negative offset separately",
+        strcmp(forecast_page.rows[1].detail, "9H EARLY") == 0);
+
+  tk_tokens collecting = {0};
+  collecting.claude_week = limit(5, 9841, 1);
+  collecting.claude_forecast.state = TK_FORECAST_COLLECTING;
+  usage_presenter_build_forecasts(&collecting, &forecast_page);
+  check("collecting forecast keeps the weekly percentage",
+        strcmp(forecast_page.rows[0].pct_text, "5%") == 0);
+  check("collecting forecast has an English headline",
+        strcmp(forecast_page.rows[0].headline, "COLLECTING PACE") == 0);
+  check("collecting forecast has no detail",
+        forecast_page.rows[0].detail[0] == '\0');
+
+  tk_tokens unavailable = {0};
+  unavailable.codex_week = limit(35, 2210, 5);
+  unavailable.codex_forecast.state = TK_FORECAST_UNAVAILABLE;
+  usage_presenter_build_forecasts(&unavailable, &forecast_page);
+  check("unavailable forecast keeps the weekly percentage",
+        strcmp(forecast_page.rows[1].pct_text, "35%") == 0);
+  check("unavailable forecast has an English headline",
+        strcmp(forecast_page.rows[1].headline,
+               "FORECAST UNAVAILABLE") == 0);
+  check("unavailable forecast has no detail",
+        forecast_page.rows[1].detail[0] == '\0');
 
   if (failures == 0) {
     printf("OK: all usage presenter tests pass\n");
