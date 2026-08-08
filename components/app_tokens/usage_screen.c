@@ -54,10 +54,12 @@ extern const lv_font_t plex_ui_12;
 #define SUMMARY_ROW_1_Y 78
 #define SUMMARY_ROW_2_Y 274
 #define SUMMARY_TRACK_Y 136
-#define SUMMARY_RESET_Y 160
+#define SUMMARY_RESET_Y 157
+#define SUMMARY_HAIRLINE_Y 267
 #define SUMMARY_PCT_X 150
 #define SUMMARY_PCT_W (CONTENT_W - SUMMARY_PCT_X)
 #define SUMMARY_LABEL_SCALE_Y 384 /* 14 px glyph set rendered at 21 px. */
+#define SUMMARY_LABEL_W 190
 
 #define LEGACY_CONTENT_X 18
 #define LEGACY_CONTENT_W 444
@@ -146,6 +148,18 @@ static lv_obj_t *text(lv_obj_t *parent, const lv_font_t *font,
   lv_obj_set_style_text_font(object, font, 0);
   lv_obj_set_style_text_color(object, color, 0);
   lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
+  return object;
+}
+
+static lv_obj_t *create_ui21_label(lv_obj_t *parent, lv_color_t color,
+                                   int width) {
+  lv_obj_t *object = text(parent, &plex_ui_14, color);
+  lv_obj_set_size(object, width, 18);
+  lv_obj_set_style_transform_scale_x(object, 256, 0);
+  lv_obj_set_style_transform_scale_y(object, SUMMARY_LABEL_SCALE_Y, 0);
+  lv_obj_set_style_transform_pivot_x(object, 0, 0);
+  lv_obj_set_style_transform_pivot_y(object, 0, 0);
+  lv_label_set_long_mode(object, LV_LABEL_LONG_CLIP);
   return object;
 }
 
@@ -453,9 +467,8 @@ static void create_hero_page(lv_obj_t *tile, hero_widgets *hero,
   lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(line, COL_HAIRLINE, 0);
 
-  hero->quota = text(hero->content, &plex_text_21, COL_LABEL);
+  hero->quota = create_ui21_label(hero->content, COL_LABEL, CONTENT_W);
   lv_obj_set_pos(hero->quota, 0, HERO_LABEL_Y);
-  lv_obj_set_size(hero->quota, CONTENT_W, 28);
   lv_obj_set_style_text_letter_space(hero->quota, 2, 0);
   lv_label_set_text(hero->quota, "");
 
@@ -477,9 +490,8 @@ static void create_hero_page(lv_obj_t *tile, hero_widgets *hero,
   lv_obj_set_size(hero->fill, 0, HERO_BAR_H);
   lv_obj_set_style_bg_opa(hero->fill, LV_OPA_COVER, 0);
 
-  hero->reset = text(hero->content, &plex_text_21, COL_RESET);
+  hero->reset = create_ui21_label(hero->content, COL_RESET, CONTENT_W);
   lv_obj_set_pos(hero->reset, 0, HERO_RESET_Y);
-  lv_obj_set_size(hero->reset, CONTENT_W, 28);
   lv_obj_set_style_text_letter_space(hero->reset, 1, 0);
   lv_label_set_text(hero->reset, "");
 }
@@ -521,14 +533,9 @@ static void create_summary_row(lv_obj_t *content, summary_row_widgets *row,
   lv_label_set_text(row->provider,
                     provider == USAGE_PROVIDER_CLAUDE ? "CLAUDE" : "CODEX");
 
-  row->label = text(content, &plex_ui_14, COL_LABEL);
+  row->label = create_ui21_label(content, COL_LABEL, SUMMARY_LABEL_W);
   lv_obj_set_pos(row->label, 0, y + 43);
-  lv_obj_set_size(row->label, SUMMARY_PCT_X, 18);
   lv_obj_set_style_text_letter_space(row->label, 1, 0);
-  lv_obj_set_style_transform_scale_x(row->label, 256, 0);
-  lv_obj_set_style_transform_scale_y(row->label, SUMMARY_LABEL_SCALE_Y, 0);
-  lv_obj_set_style_transform_pivot_x(row->label, 0, 0);
-  lv_obj_set_style_transform_pivot_y(row->label, 0, 0);
   lv_label_set_long_mode(row->label, LV_LABEL_LONG_CLIP);
   lv_label_set_text(row->label, "");
 
@@ -540,10 +547,11 @@ static void create_summary_row(lv_obj_t *content, summary_row_widgets *row,
   lv_label_set_long_mode(row->pct, LV_LABEL_LONG_CLIP);
   lv_label_set_text(row->pct, "–");
 
-  row->used = text(content, &plex_ui_14,
-                   provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX);
+  row->used = create_ui21_label(content,
+                                 provider == USAGE_PROVIDER_CLAUDE
+                                     ? COL_CLAUDE : COL_CODEX,
+                                 SUMMARY_LABEL_W - 12);
   lv_obj_set_pos(row->used, 0, y + 84);
-  lv_obj_set_width(row->used, SUMMARY_PCT_X);
   lv_obj_set_style_text_letter_space(row->used, 1, 0);
   lv_label_set_text(row->used, "");
 
@@ -560,14 +568,13 @@ static void create_summary_row(lv_obj_t *content, summary_row_widgets *row,
   lv_obj_set_size(row->fill, 0, 16);
   lv_obj_set_style_bg_opa(row->fill, LV_OPA_COVER, 0);
 
-  row->reset = text(content, &plex_text_17, COL_RESET);
+  row->reset = create_ui21_label(content, COL_RESET, CONTENT_W);
   lv_obj_set_pos(row->reset, 0, y + SUMMARY_RESET_Y);
-  lv_obj_set_width(row->reset, CONTENT_W);
   lv_obj_set_style_text_letter_space(row->reset, 1, 0);
   lv_label_set_text(row->reset, "");
 
   row->status_dot = bare(content);
-  lv_obj_set_pos(row->status_dot, 140, y + 88);
+  lv_obj_set_pos(row->status_dot, SUMMARY_LABEL_W - 8, y + 90);
   lv_obj_set_size(row->status_dot, 8, 8);
   lv_obj_set_style_radius(row->status_dot, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_opa(row->status_dot, LV_OPA_COVER, 0);
@@ -576,7 +583,7 @@ static void create_summary_row(lv_obj_t *content, summary_row_widgets *row,
 
 static void create_summary_hairline(summary_page *page) {
   lv_obj_t *line = bare(page->content);
-  lv_obj_set_pos(line, 0, 258);
+  lv_obj_set_pos(line, 0, SUMMARY_HAIRLINE_Y);
   lv_obj_set_size(line, CONTENT_W, 1);
   lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(line, COL_HAIRLINE, 0);

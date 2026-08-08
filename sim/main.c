@@ -391,14 +391,15 @@ int main(int argc, char **argv) {
     free(json);
   }
 
-  /* VibePulse får sin fixtur direkt: launchern ska visa en levande app,
-   * inte ett streck, när man tittar in (tangent T matar om). */
-  feed_tokens();
-
   if (argc == 2 && strcmp(argv[1], "--vibepulse-static-qa") == 0) {
     run_vibepulse_static_qa();
     return 0;
   }
+
+  /* VibePulse får sin fixtur direkt: launchern ska visa en levande app,
+   * inte ett streck, när man tittar in (tangent T matar om). */
+  feed_tokens();
+
   if (argc == 2 && strcmp(argv[1], "--vibepulse-completion-qa") == 0) {
     run_vibepulse_completion_qa();
     return 0;
