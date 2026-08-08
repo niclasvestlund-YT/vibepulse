@@ -2,7 +2,8 @@
  * Torgets värdlager på Macen: hela plattformen + båda apparna i ett
  * SDL-fönster, månader/timmar före hårdvaran. Läser de RIKTIGA fixture-
  * filerna genom samma parsrar som ESP-targetet — en payload som renderar
- * här kan inte felparsa på hyllan.
+ * här kan inte felparsa på hyllan. [ och ] byter VibePulse-vy, medan N
+ * fortsätter motsvara KEY3:s appbyte.
  *
  * Autocykeln demonstrerar tickande, midnatt och en äkta stale-övergång:
  * felfixturen håller 140 s så apparnas 120 s-tröskel faktiskt slår till,
@@ -25,6 +26,7 @@
 #include "glance_parse.h"
 #include "tokens_parse.h"
 #include "torget.h"
+#include "usage_screen.h"
 
 typedef struct { const char *file; const char *name; uint32_t hold_ms; } fixture_t;
 
@@ -252,19 +254,19 @@ static void platform_tour_cb(lv_timer_t *t) {
   switch (stage++) {
     case 0: torget_launcher_open(); break;
     case 1: dump_frame("launcher"); break;
-    case 2: torget_app_show(1); tokens_show_view(0); break;
+    case 2: torget_app_show(1); tokens_show_view(VIEW_CLAUDE_HERO); break;
     case 3: apply_agent_fixture(1); break;
     case 4: dump_frame("vibepulse-claude-static"); break;
     case 5: apply_agent_fixture(2); break;
     case 6: dump_frame("vibepulse-claude-long-copy"); break;
-    case 7: tokens_show_view(1); apply_agent_fixture(5); break;
+    case 7: tokens_show_view(VIEW_CODEX_HERO); apply_agent_fixture(5); break;
     case 8: dump_frame("vibepulse-codex-static"); break;
-    case 9: tokens_show_view(2); break;
+    case 9: tokens_show_view(VIEW_FORECAST); break;
     case 10: dump_frame("vibepulse-forecast-collecting"); break;
-    case 11: tokens_show_view(3); break;
+    case 11: tokens_show_view(VIEW_VOLUME); break;
     case 12: dump_frame("vibepulse-volume"); break;
     case 13:
-      tokens_show_view(0);
+      tokens_show_view(VIEW_CLAUDE_HERO);
       apply_agent_fixture(0);
       feed_tokens_file("tokens-missing.json");
       break;
@@ -277,20 +279,21 @@ static void platform_tour_cb(lv_timer_t *t) {
 }
 
 /* Tangent 1-4: Solelkollen-fixtur. T: mata VibePulse. S: nästa agentläge.
- * L: launchern.
- * N: nästa app (KEY3-knappens bänkmotsvarighet). LVGL:s SDL-drivrutin
+ * L: launchern. [ och ] bläddrar VibePulse-sidor; N byter app (KEY3).
+ * LVGL:s SDL-drivrutin
  * pumpar eventen, så ren tangentbordspollning räcker — ingen indev-
  * rördragning för ett bänkverktyg. */
 static void poll_keys(lv_timer_t *t) {
   (void)t;
-  static bool held[8];
+  static bool held[10];
   const Uint8 *ks = SDL_GetKeyboardState(NULL);
-  const SDL_Scancode keys[8] = { SDL_SCANCODE_1, SDL_SCANCODE_2,
-                                 SDL_SCANCODE_3, SDL_SCANCODE_4,
-                                 SDL_SCANCODE_T, SDL_SCANCODE_S,
-                                 SDL_SCANCODE_L,
-                                 SDL_SCANCODE_N };
-  for (int i = 0; i < 8; i++) {
+  const SDL_Scancode keys[10] = { SDL_SCANCODE_1, SDL_SCANCODE_2,
+                                  SDL_SCANCODE_3, SDL_SCANCODE_4,
+                                  SDL_SCANCODE_T, SDL_SCANCODE_S,
+                                  SDL_SCANCODE_L, SDL_SCANCODE_N,
+                                  SDL_SCANCODE_LEFTBRACKET,
+                                  SDL_SCANCODE_RIGHTBRACKET };
+  for (int i = 0; i < 10; i++) {
     bool down = ks[keys[i]];
     if (down && !held[i]) {
       if (i < 4) apply_fixture(i);
@@ -300,7 +303,14 @@ static void poll_keys(lv_timer_t *t) {
         apply_agent_fixture(agent_fixture_idx + 1);
       }
       else if (i == 6) torget_launcher_open();
-      else torget_app_next();
+      else if (i == 7) torget_app_next();
+      else {
+        torget_app_show(1);
+        int view = usage_screen_current_view() + (i == 8 ? -1 : 1);
+        if (view < 0) view = TK_USAGE_SCREEN_VIEWS - 1;
+        if (view >= TK_USAGE_SCREEN_VIEWS) view = 0;
+        tokens_show_view(view);
+      }
     }
     held[i] = down;
   }
@@ -309,37 +319,36 @@ static void poll_keys(lv_timer_t *t) {
 static void run_vibepulse_static_qa(void) {
   torget_app_show(1);
 
-  tokens_show_view(0);
-  apply_agent_fixture(1);
-  dump_frame("vibepulse-claude-static");
-  apply_agent_fixture(2);
-  dump_frame("vibepulse-claude-long-copy");
-
-  tokens_show_view(1);
-  apply_agent_fixture(5);
-  dump_frame("vibepulse-codex-static");
-
-  tokens_show_view(2);
-  dump_frame("vibepulse-forecast-collecting");
-  feed_forecast_outcomes();
-  dump_frame("vibepulse-forecast-outcomes");
-  feed_tokens_file("tokens-missing.json");
-  dump_frame("vibepulse-forecast-unavailable");
   feed_tokens();
-  tokens_show_view(3);
-  dump_frame("vibepulse-volume");
+  tokens_show_view(VIEW_CLAUDE_HERO);
+  dump_frame("vibepulse-claude-hero");
+  tokens_show_view(VIEW_CODEX_HERO);
+  dump_frame("vibepulse-codex-hero");
+  tokens_show_view(VIEW_CLAUDE_DETAILS);
+  dump_frame("vibepulse-claude-details");
+  tokens_show_view(VIEW_OVERVIEW);
+  dump_frame("vibepulse-overview");
 
-  tokens_show_view(0);
-  apply_agent_fixture(0);
+  tokens_show_view(VIEW_CLAUDE_HERO);
+  usage_screen_set_stale(true);
+  dump_frame("vibepulse-claude-hero-stale");
+  usage_screen_set_stale(false);
+
+  tokens_show_view(VIEW_CODEX_HERO);
+  usage_screen_set_stale(true);
+  dump_frame("vibepulse-codex-hero-stale");
+  usage_screen_set_stale(false);
+
+  tokens_show_view(VIEW_CLAUDE_HERO);
   feed_tokens_file("tokens-missing.json");
-  dump_frame("vibepulse-claude-missing");
-  feed_tokens();
-  dump_frame("vibepulse-claude-restored");
+  dump_frame("vibepulse-claude-hero-missing");
+  tokens_show_view(VIEW_CODEX_HERO);
+  dump_frame("vibepulse-codex-hero-missing");
 }
 
 static void run_vibepulse_completion_qa(void) {
   torget_app_show(1);
-  tokens_show_view(0);
+  tokens_show_view(VIEW_CLAUDE_HERO);
   apply_agent_file("agent-status-idle.json");
 
   apply_agent_file("agent-status-multi-working.json");
@@ -362,7 +371,7 @@ int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IOLBF, 0);
   lv_init();
   lv_display_t *disp = lv_sdl_window_create(480, 480);
-  lv_sdl_window_set_title(disp, "Torget 480x480 — S agentstatus, T VibePulse, L launcher");
+  lv_sdl_window_set_title(disp, "Torget 480x480 — S agentstatus, T VibePulse, [ och ] VibePulse-vy, N nästa app, L launcher");
   lv_sdl_mouse_create();
 
   torget_ui_create(); /* bygger apparna via registret, går in i app 0 */

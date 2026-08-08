@@ -15,6 +15,15 @@
 
 extern const torget_app_t tokens_app;
 
+enum {
+  VIEW_CLAUDE_HERO = 0,
+  VIEW_CODEX_HERO = 1,
+  VIEW_CLAUDE_DETAILS = 2,
+  VIEW_OVERVIEW = 3,
+  VIEW_FORECAST = 4,
+  VIEW_VOLUME = 5,
+};
+
 /* Ett lyckat /api/tokens-svar. Snappar tickern, stämplar färskhet och
  * håller skärmen vaken när tokens brinner. Kallas under torget_ui_lock(). */
 void tokens_apply(const tk_tokens *t);
@@ -26,7 +35,8 @@ void tokens_apply_agent_status(const tk_agent_snapshot *snapshot);
  * och ingen task eller HTTP-klient skapas. */
 void tokens_agent_net_start(void);
 
-/* Hoppa till vy 0-3 utan animation — bänkens och BMP-dumparnas ratt. */
+/* Hoppa till en VibePulse-vy utan animation — bänkens och BMP-dumparnas
+ * ratt. */
 void tokens_show_view(int idx);
 
 #endif
