@@ -69,3 +69,4 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 python3 test_agent_demo_wiring.py
 python3 test_agent_net_wiring.py
 python3 test_target_tls_memory.py
+python3 test_vibepulse_layout_wiring.py

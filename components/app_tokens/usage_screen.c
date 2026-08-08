@@ -8,6 +8,7 @@
 #include "usage_presenter.h"
 #include "torget.h"
 
+extern const lv_font_t plex_num_146;
 extern const lv_font_t plex_num_118;
 extern const lv_font_t plex_num_50;
 extern const lv_font_t plex_text_21;
@@ -27,9 +28,7 @@ extern const lv_font_t plex_ui_12;
 #define COL_RESET       lv_color_hex(0xD4D8DF)
 #define COL_WHITE       lv_color_hex(0xFFFFFF)
 #define COL_CLAUDE      lv_color_hex(0xD97757)
-#define COL_CLAUDE_OLD  lv_color_hex(0x6B3C32)
 #define COL_CODEX       lv_color_hex(0x6F78FF)
-#define COL_CODEX_OLD   lv_color_hex(0x3E436F)
 #define COL_APP_PLATE   lv_color_hex(0x181636)
 #define COL_APP_DOT     lv_color_hex(0x7770FF)
 #define COL_DOT         lv_color_hex(0x41444A)
@@ -37,10 +36,23 @@ extern const lv_font_t plex_ui_12;
 #define COL_STALE       lv_color_hex(0x5C687B)
 
 #define SCREEN_W 480
-#define CONTENT_X 18
-#define CONTENT_W 444
-#define HEADER_Y 15
-#define HEADER_H 52
+#define SAFE_X 22
+#define CONTENT_W 436
+#define HEADER_Y 16
+#define HEADER_H 48
+#define HERO_LABEL_Y 86
+#define HERO_PCT_Y 118
+#define HERO_PCT_H 132
+#define HERO_BAR_Y 276
+#define HERO_BAR_H 18
+#define HERO_RESET_Y 312
+#define HERO_STATUS_Y 388
+#define HERO_STATUS_H 66
+
+#define LEGACY_CONTENT_X 18
+#define LEGACY_CONTENT_W 444
+#define LEGACY_HEADER_Y 15
+#define LEGACY_HEADER_H 52
 #define CARD_H 131
 #define CARD_1_Y 76
 #define CARD_2_Y 216
@@ -62,11 +74,19 @@ typedef struct {
 
 typedef struct {
   lv_obj_t *tile;
+  lv_obj_t *content;
   lv_obj_t *provider;
   lv_obj_t *model;
-  lv_obj_t *effort;
-  usage_card_widgets cards[2];
-  int provider_index;
+  lv_obj_t *quota;
+  lv_obj_t *pct;
+  lv_obj_t *track;
+  lv_obj_t *fill;
+  lv_obj_t *reset;
+} hero_widgets;
+
+typedef struct {
+  lv_obj_t *tile;
+  hero_widgets hero;
 } provider_page;
 
 static struct {
@@ -104,9 +124,9 @@ static void open_launcher(lv_event_t *event) {
   torget_launcher_open();
 }
 
-static void create_app_icon(lv_obj_t *parent) {
+static void create_app_icon(lv_obj_t *parent, int x, int y) {
   lv_obj_t *plate = bare(parent);
-  lv_obj_set_pos(plate, CONTENT_X, HEADER_Y + 9);
+  lv_obj_set_pos(plate, x, y);
   lv_obj_set_size(plate, 34, 34);
   lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(plate, COL_APP_PLATE, 0);
@@ -127,32 +147,17 @@ static void create_app_icon(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(dot, COL_APP_DOT, 0);
 }
 
-static void create_header(lv_obj_t *tile, provider_page *page,
-                          const char *provider) {
-  create_app_icon(tile);
-  page->provider = text(tile, &plex_text_21, COL_WHITE);
-  lv_obj_set_pos(page->provider, 63, HEADER_Y + 15);
-  lv_obj_set_width(page->provider, 190);
-  lv_obj_set_style_text_letter_space(page->provider, 2, 0);
-  lv_label_set_text(page->provider, provider);
-
-  page->model = text(tile, &plex_ui_14, lv_color_hex(0xE9EBEF));
-  lv_obj_set_pos(page->model, 270, HEADER_Y + 7);
-  lv_obj_set_size(page->model, 192, 22);
-  lv_obj_set_style_text_align(page->model, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_style_text_letter_space(page->model, 1, 0);
-  lv_label_set_text(page->model, "");
-
-  page->effort = text(tile, &plex_ui_12, COL_MUTED);
-  lv_obj_set_pos(page->effort, 270, HEADER_Y + 30);
-  lv_obj_set_size(page->effort, 192, 18);
-  lv_obj_set_style_text_align(page->effort, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_style_text_letter_space(page->effort, 2, 0);
-  lv_label_set_text(page->effort, "");
+static void create_header(lv_obj_t *tile, const char *provider) {
+  create_app_icon(tile, LEGACY_CONTENT_X, LEGACY_HEADER_Y + 9);
+  lv_obj_t *label = text(tile, &plex_text_21, COL_WHITE);
+  lv_obj_set_pos(label, 63, LEGACY_HEADER_Y + 15);
+  lv_obj_set_width(label, 190);
+  lv_obj_set_style_text_letter_space(label, 2, 0);
+  lv_label_set_text(label, provider);
 
   lv_obj_t *line = bare(tile);
-  lv_obj_set_pos(line, CONTENT_X, HEADER_Y + HEADER_H - 1);
-  lv_obj_set_size(line, CONTENT_W, 1);
+  lv_obj_set_pos(line, LEGACY_CONTENT_X, LEGACY_HEADER_Y + LEGACY_HEADER_H - 1);
+  lv_obj_set_size(line, LEGACY_CONTENT_W, 1);
   lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(line, COL_HAIRLINE, 0);
 }
@@ -160,8 +165,8 @@ static void create_header(lv_obj_t *tile, provider_page *page,
 static void create_card(lv_obj_t *tile, usage_card_widgets *card, int y,
                         int height, bool large) {
   card->root = bare(tile);
-  lv_obj_set_pos(card->root, CONTENT_X, y);
-  lv_obj_set_size(card->root, CONTENT_W, height);
+  lv_obj_set_pos(card->root, LEGACY_CONTENT_X, y);
+  lv_obj_set_size(card->root, LEGACY_CONTENT_W, height);
   lv_obj_set_style_bg_opa(card->root, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(card->root, COL_CARD, 0);
   lv_obj_set_style_border_width(card->root, 1, 0);
@@ -207,7 +212,7 @@ static void create_card(lv_obj_t *tile, usage_card_widgets *card, int y,
   lv_obj_set_size(card->reset_short, 195, 20);
   lv_label_set_text(card->reset_short, "");
 
-  card->track_w = CONTENT_W - 28;
+  card->track_w = LEGACY_CONTENT_W - 28;
   lv_obj_t *track = bare(card->root);
   lv_obj_set_pos(track, 14, large ? 166 : 91);
   lv_obj_set_size(track, card->track_w, 9);
@@ -265,55 +270,30 @@ static lv_obj_t *new_tile(int index) {
   return tile;
 }
 
-static void apply_card(usage_card_widgets *widgets,
-                       const usage_card_view *card,
-                       lv_color_t old_color, lv_color_t today_color) {
-  lv_label_set_text(widgets->label, card->label);
-  lv_label_set_text(widgets->delta, card->delta_text);
-  lv_label_set_text(widgets->reset_short, card->reset_short_text);
-  lv_label_set_text(widgets->reset, card->reset_text);
+static void apply_hero(hero_widgets *widgets, const usage_hero_view *view,
+                       lv_color_t provider_color) {
+  const usage_card_view *quota = &view->quota;
+  lv_label_set_text(widgets->provider, view->provider_label);
+  lv_label_set_text(widgets->quota, quota->label);
+  lv_label_set_text(widgets->pct, quota->has_pct ? quota->pct_text : "–");
+  lv_label_set_text(widgets->reset, quota->reset_text);
 
-  if (card->has_pct) {
-    lv_label_set_text(widgets->pct, card->pct_text);
-  } else {
-    lv_label_set_text(widgets->pct, "–");
-  }
-
-  double pct = card->has_pct ? card->pct : 0.0;
-  double delta = card->has_delta ? card->delta_pct : 0.0;
-  if (pct < 0) pct = 0;
-  if (pct > 100) pct = 100;
-  if (delta < 0) delta = 0;
-  if (delta > pct) delta = pct;
-  int before = (int)llround((pct - delta) * widgets->track_w / 100.0);
-  int today = (int)llround(delta * widgets->track_w / 100.0);
-  lv_obj_set_width(widgets->before_fill, before);
-  lv_obj_set_width(widgets->today_fill, today);
-  lv_obj_set_x(widgets->today_fill, before);
-  lv_obj_set_style_bg_color(widgets->before_fill, old_color, 0);
-  lv_obj_set_style_bg_color(widgets->today_fill, today_color, 0);
-  lv_obj_set_style_text_color(widgets->delta, today_color, 0);
+  double pct = quota->has_pct ? quota->pct : 0.0;
+  if (pct < 0.0) pct = 0.0;
+  if (pct > 100.0) pct = 100.0;
+  int fill_w = (int)llround(pct * CONTENT_W / 100.0);
+  if (fill_w < 0) fill_w = 0;
+  if (fill_w > CONTENT_W) fill_w = CONTENT_W;
+  lv_obj_set_width(widgets->fill, fill_w);
+  lv_obj_set_style_bg_color(widgets->fill, provider_color, 0);
 }
 
 static void apply_provider(provider_page *page, const tk_tokens *tokens,
                            usage_provider provider) {
-  usage_provider_view view;
-  /* Den statiska AMOLED-grinden visar alltid det första läget. Rotation
-   * kopplas på först efter fysisk läsbarhetskontroll. */
-  usage_presenter_build_provider(tokens, provider, 0, &view);
-  lv_color_t old_color = provider == USAGE_PROVIDER_CLAUDE
-                             ? COL_CLAUDE_OLD : COL_CODEX_OLD;
-  lv_color_t today_color = provider == USAGE_PROVIDER_CLAUDE
-                               ? COL_CLAUDE : COL_CODEX;
-  for (int i = 0; i < 2; i++) {
-    if (!page->cards[i].root) continue;
-    if (i < view.card_count) {
-      lv_obj_remove_flag(page->cards[i].root, LV_OBJ_FLAG_HIDDEN);
-      apply_card(&page->cards[i], &view.cards[i], old_color, today_color);
-    } else {
-      lv_obj_add_flag(page->cards[i].root, LV_OBJ_FLAG_HIDDEN);
-    }
-  }
+  usage_hero_view view = {0};
+  usage_presenter_build_hero(tokens, provider, &view);
+  apply_hero(&page->hero, &view,
+             provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX);
 }
 
 static void apply_forecast_row(usage_card_widgets *widgets,
@@ -346,16 +326,71 @@ static void apply_forecasts(const tk_tokens *tokens) {
 
 static void apply_metadata(provider_page *page,
                            const tk_agent_status *agent) {
-  lv_label_set_text(page->model,
+  lv_label_set_text(page->hero.model,
                     agent && agent->has_model ? agent->model : "");
-  lv_label_set_text(page->effort,
-                    agent && agent->has_effort ? agent->effort : "");
+}
+
+static void create_hero_page(lv_obj_t *tile, hero_widgets *hero,
+                             const char *provider) {
+  hero->tile = tile;
+  hero->content = bare(tile);
+  lv_obj_set_pos(hero->content, SAFE_X, 0);
+  lv_obj_set_size(hero->content, CONTENT_W, SCREEN_W);
+
+  create_app_icon(hero->content, 0, HEADER_Y + 7);
+  hero->provider = text(hero->content, &plex_text_21, COL_WHITE);
+  lv_obj_set_pos(hero->provider, 41, HEADER_Y + 15);
+  lv_obj_set_width(hero->provider, 180);
+  lv_obj_set_style_text_letter_space(hero->provider, 2, 0);
+  lv_label_set_text(hero->provider, provider);
+
+  hero->model = text(hero->content, &plex_ui_14, lv_color_hex(0xE9EBEF));
+  lv_obj_set_pos(hero->model, 210, HEADER_Y + 15);
+  lv_obj_set_size(hero->model, CONTENT_W - 210, 22);
+  lv_obj_set_style_text_align(hero->model, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_style_text_letter_space(hero->model, 1, 0);
+  lv_label_set_text(hero->model, "");
+
+  lv_obj_t *line = bare(hero->content);
+  lv_obj_set_pos(line, 0, HEADER_Y + HEADER_H - 1);
+  lv_obj_set_size(line, CONTENT_W, 1);
+  lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(line, COL_HAIRLINE, 0);
+
+  hero->quota = text(hero->content, &plex_text_21, COL_LABEL);
+  lv_obj_set_pos(hero->quota, 0, HERO_LABEL_Y);
+  lv_obj_set_size(hero->quota, CONTENT_W, 28);
+  lv_obj_set_style_text_letter_space(hero->quota, 2, 0);
+  lv_label_set_text(hero->quota, "");
+
+  hero->pct = text(hero->content, &plex_num_146, COL_WHITE);
+  lv_obj_set_pos(hero->pct, 0, HERO_PCT_Y);
+  lv_obj_set_size(hero->pct, CONTENT_W, HERO_PCT_H);
+  lv_label_set_long_mode(hero->pct, LV_LABEL_LONG_CLIP);
+  lv_label_set_text(hero->pct, "–");
+
+  hero->track = bare(hero->content);
+  lv_obj_set_pos(hero->track, 0, HERO_BAR_Y);
+  lv_obj_set_size(hero->track, CONTENT_W, HERO_BAR_H);
+  lv_obj_set_style_bg_opa(hero->track, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(hero->track, COL_TRACK, 0);
+  lv_obj_set_style_clip_corner(hero->track, true, 0);
+
+  hero->fill = bare(hero->track);
+  lv_obj_set_pos(hero->fill, 0, 0);
+  lv_obj_set_size(hero->fill, 0, HERO_BAR_H);
+  lv_obj_set_style_bg_opa(hero->fill, LV_OPA_COVER, 0);
+
+  hero->reset = text(hero->content, &plex_text_21, COL_RESET);
+  lv_obj_set_pos(hero->reset, 0, HERO_RESET_Y);
+  lv_obj_set_size(hero->reset, CONTENT_W, 28);
+  lv_obj_set_style_text_letter_space(hero->reset, 1, 0);
+  lv_label_set_text(hero->reset, "");
 }
 
 static void create_forecast_page(void) {
   lv_obj_t *tile = new_tile(2);
-  provider_page page = {0};
-  create_header(tile, &page, "VECKOTAKT");
+  create_header(tile, "VECKOTAKT");
   create_card(tile, &ui.forecast_cards[0], CARD_1_Y, CARD_H, false);
   create_card(tile, &ui.forecast_cards[1], CARD_2_Y, CARD_H, false);
   create_pager(tile, 2);
@@ -363,11 +398,10 @@ static void create_forecast_page(void) {
 
 static void create_volume_page(void) {
   lv_obj_t *tile = new_tile(3);
-  provider_page page = {0};
-  create_header(tile, &page, "VOLYM");
+  create_header(tile, "VOLYM");
   lv_obj_t *card = bare(tile);
-  lv_obj_set_pos(card, CONTENT_X, 88);
-  lv_obj_set_size(card, CONTENT_W, 245);
+  lv_obj_set_pos(card, LEGACY_CONTENT_X, 88);
+  lv_obj_set_size(card, LEGACY_CONTENT_W, 245);
   lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(card, COL_CARD, 0);
   lv_obj_set_style_border_width(card, 1, 0);
@@ -399,17 +433,12 @@ void usage_screen_create(lv_obj_t *root) {
   lv_obj_set_style_bg_opa(ui.tileview, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(ui.tileview, COL_BLACK, 0);
 
-  ui.claude.provider_index = 0;
   ui.claude.tile = new_tile(0);
-  create_header(ui.claude.tile, &ui.claude, "CLAUDE");
-  create_card(ui.claude.tile, &ui.claude.cards[0], CARD_1_Y, CARD_H, false);
-  create_card(ui.claude.tile, &ui.claude.cards[1], CARD_2_Y, CARD_H, false);
+  create_hero_page(ui.claude.tile, &ui.claude.hero, "CLAUDE");
   create_pager(ui.claude.tile, 0);
 
-  ui.codex.provider_index = 1;
   ui.codex.tile = new_tile(1);
-  create_header(ui.codex.tile, &ui.codex, "CODEX");
-  create_card(ui.codex.tile, &ui.codex.cards[0], 90, 230, true);
+  create_hero_page(ui.codex.tile, &ui.codex.hero, "CODEX");
   create_pager(ui.codex.tile, 1);
 
   create_forecast_page();
@@ -451,9 +480,11 @@ void usage_screen_set_volume(double day_mtok, int sessions,
 
 void usage_screen_set_stale(bool stale) {
   ui.stale = stale;
+  /* A stale transport state only changes the header treatment. The rendered
+   * quota is the last accepted presenter value until fresh tokens arrive. */
   lv_color_t color = stale ? COL_STALE : COL_WHITE;
-  lv_obj_set_style_text_color(ui.claude.provider, color, 0);
-  lv_obj_set_style_text_color(ui.codex.provider, color, 0);
+  lv_obj_set_style_text_color(ui.claude.hero.provider, color, 0);
+  lv_obj_set_style_text_color(ui.codex.hero.provider, color, 0);
 }
 
 void usage_screen_show_view(int index) {
