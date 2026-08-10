@@ -98,6 +98,15 @@ En obevakad körning BMP-dumpar alla vyer + launchern + VibePulse till
 Kompilerar kärnorna + båda parsrarna med clang under -Wall -Wextra -Werror
 och kör dem mot de riktiga fixture-filerna plus fientliga indata.
 
+## Hardware knowledge
+
+Install development tools with `python3 -m pip install -r requirements-dev.txt`.
+Both Codex and Claude Code read the validated registries under `spec/` before
+hardware-dependent work. Run `python3 tools/hardware_registry.py spec` for a
+focused check or `./test/run.sh` for the full host gate. Update the registry
+when the board, BSP, ESP-IDF, partition table, enclosure, or physical evidence
+changes; never store secrets in it.
+
 ## VibePulse-tjänsten
 
 `tools/tokenserver/` — liten Python-stdlib-tjänst som skannar Claude

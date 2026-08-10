@@ -5,6 +5,15 @@ Viktigast: gamla wikin (www.waveshare.com/wiki/...) är en tom platshållare —
 den riktiga dokumentationen är **docs.waveshare.com**, och demokoden ligger på
 GitHub, inte i en zip. Varje sektion är märkt verifierad eller ej.
 
+## How to read hardware truth
+
+This file explains verified traps and context. Machine-readable state lives in
+`hardware-capabilities.yaml`, source metadata in `hardware-sources.yaml`, and
+per-device physical evidence in `device-units.yaml`. A feature of ESP32-S3 is
+not automatically wired on this board, enabled in Torget, or verified on the
+physical unit. Run `python3 tools/hardware_registry.py spec` after editing any
+registry file.
+
 ## Beslut som reconen låser (verifierat)
 
 | Fråga | Svar |
@@ -17,15 +26,16 @@ GitHub, inte i en zip. Varje sektion är märkt verifierad eller ej.
 
 ## Pinallokering (verifierad mot docs + BSP-header)
 
-**Display, CO5300 över QSPI (SPI2_HOST):** CS=12, PCLK=38, SIO0-3=4/5/6/7,
-RESET=39. Ingen backlight-GPIO (AMOLED: ljus via panelkommando).
+**Display, CO5300 över QSPI (SPI2_HOST; `display.amoled`):** CS=12, PCLK=38,
+SIO0-3=4/5/6/7, RESET=39. Ingen backlight-GPIO (AMOLED: ljus via
+panelkommando).
 
 **Touch CST9217 (I2C):** SCL=14, SDA=15, INT=11, RESET=40.
 
 **Delad I2C-buss (port 1, 400 kHz, SCL=14/SDA=15):** touch CST9217 (0x5A),
-PMU AXP2101 (0x34*), RTC **PCF85063ATL** (0x51*), IMU QMI8658 (0x6A/0x6B*),
-kodek ES8311/ES7210 (0x18/0x40, komponentdefaults).
-*Datablads-standard, ej wikiverifierade.
+PMU AXP2101 (0x34; `power.axp2101`), RTC **PCF85063ATL** (0x51;
+`rtc.pcf85063atl`), IMU QMI8658 (0x6A/0x6B), kodek ES8311/ES7210
+(0x18/0x40, komponentdefaults).
 
 **Övrigt:** BOOT=GPIO0, KEY3=GPIO18 (aktiv låg), RTC_INT=13, IMU_INT=17/21,
 SYS_OUT=16, TF-kort SDMMC 1-bit (CMD=1, CLK=2, D0=3), USB=19/20, UART0=43/44,
@@ -55,10 +65,10 @@ openocd före nästa flashning (samma USB-enhet).
   bootskanning är facit för vilka nät som existerar i dess värld.
 - Frånkopplingsorsak 201 = nätet syns inte (fel namn eller fel band),
   15/204 = fel lösenord. Orsaken loggas av vår event-handler.
-- Hemmeshen sänder "Solgarden WiFi" på kanal 13, WPA2 (auth 3) — kanal 13
-  fungerar (EU-regdomän), både skanning och anslutning verifierad.
+- En 2,4 GHz-hemmesh på kanal 13 med WPA2 (auth 3) både skannades och
+  anslöts 2026-08-06; kanal 13 fungerar i EU-regdomänen.
 
-## CO5300-gotchas (verifierade i BSP-källkoden)
+## CO5300-gotchas (verifierade i BSP-källkoden; `display.amoled`)
 
 - **AXP2101 behöver INTE konfigureras** för att panelen ska lysa — BSP:n rör
   aldrig PMU:n. Default-rails räcker.
@@ -98,6 +108,8 @@ CPU 240 MHz, `LV_DEF_REFR_PERIOD=15`, 2 SW-draw-units, partition 8M app + 7M SPI
 
 ## Kvarvarande luckor (ej verifierat)
 
-- Vilken AXP2101-rail som matar AMOLED:en (står i schemat, oöppnat; irrelevant
-  så länge BSP:n fungerar utan PMU-init).
-- Om 40 MHz är panelens tak eller bara komponentdefault.
+Reconen 2026-07-17 lämnade två frågor öppna; aktuellt verifieringsläge och
+källor finns i registret:
+
+- Vilken AXP2101-rail som matar AMOLED:en: `power.axp2101`.
+- Om 40 MHz är panelens tak eller bara komponentdefault: `display.amoled`.

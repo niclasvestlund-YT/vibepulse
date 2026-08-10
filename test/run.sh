@@ -70,3 +70,6 @@ python3 test_agent_demo_wiring.py
 python3 test_agent_net_wiring.py
 python3 test_target_tls_memory.py
 python3 test_vibepulse_layout_wiring.py
+
+cd ..
+python3 -m unittest tools.test_hardware_registry -v
