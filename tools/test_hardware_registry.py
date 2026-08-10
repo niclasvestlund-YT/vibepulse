@@ -88,6 +88,29 @@ class RegistryValidationTests(unittest.TestCase):
             })
             return load_registry(root)
 
+    def load_document(self, name, value):
+        documents = {
+            "hardware-sources.yaml": {
+                "schema_version": 1,
+                "sources": [VALID_SOURCE],
+            },
+            "hardware-capabilities.yaml": {
+                "schema_version": 1,
+                "board": "waveshare-esp32-s3-touch-amoled-2.16",
+                "capabilities": [VALID_CAPABILITY],
+            },
+            "device-units.yaml": {
+                "schema_version": 1,
+                "units": [VALID_UNIT],
+            },
+        }
+        documents[name] = value
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for filename, document in documents.items():
+                self.write_yaml(root, filename, document)
+            return load_registry(root)
+
     def test_valid_registry_loads(self):
         registry = self.load()
         self.assertEqual(registry.capabilities["display.amoled"]["confidence"],
@@ -102,6 +125,17 @@ class RegistryValidationTests(unittest.TestCase):
         value = dict(VALID_CAPABILITY)
         value["states"] = dict(VALID_CAPABILITY["states"], board_wired="maybe")
         with self.assertRaisesRegex(RegistryError, "board_wired"):
+            self.load(capability=value)
+
+    def test_nonstring_state_is_rejected_as_a_schema_error(self):
+        value = dict(VALID_CAPABILITY)
+        value["states"] = dict(VALID_CAPABILITY["states"], board_wired=[])
+        with self.assertRaisesRegex(RegistryError, "invalid board_wired"):
+            self.load(capability=value)
+
+    def test_nonstring_confidence_is_rejected_as_a_schema_error(self):
+        value = dict(VALID_CAPABILITY, confidence=[])
+        with self.assertRaisesRegex(RegistryError, "invalid confidence"):
             self.load(capability=value)
 
     def test_measured_claim_requires_unit_and_test(self):
@@ -126,7 +160,114 @@ class RegistryValidationTests(unittest.TestCase):
         self.assertEqual(value, "CST9217")
         self.assertEqual(conflicts, ["vendor"])
 
+    def test_equal_rank_conflict_is_rejected_in_forward_order(self):
+        sources = {
+            "vendor-a": {"rank": 3},
+            "vendor-b": {"rank": 3},
+        }
+        with self.assertRaisesRegex(RegistryError, "ambiguous claim at rank 3"):
+            resolve_claim([
+                {"source": "vendor-a", "value": "CST9220"},
+                {"source": "vendor-b", "value": "CST9217"},
+            ], sources)
+
+    def test_equal_rank_conflict_is_rejected_in_reverse_order(self):
+        sources = {
+            "vendor-a": {"rank": 3},
+            "vendor-b": {"rank": 3},
+        }
+        with self.assertRaisesRegex(RegistryError, "ambiguous claim at rank 3"):
+            resolve_claim([
+                {"source": "vendor-b", "value": "CST9217"},
+                {"source": "vendor-a", "value": "CST9220"},
+            ], sources)
+
+    def test_top_level_collections_are_required(self):
+        documents = {
+            "hardware-sources.yaml": "sources",
+            "hardware-capabilities.yaml": "capabilities",
+            "device-units.yaml": "units",
+        }
+        for filename, collection in documents.items():
+            with self.subTest(collection=collection):
+                with self.assertRaisesRegex(RegistryError,
+                                            f"missing {collection}"):
+                    self.load_document(filename, {"schema_version": 1})
+
+    def test_top_level_collections_must_be_lists(self):
+        documents = {
+            "hardware-sources.yaml": "sources",
+            "hardware-capabilities.yaml": "capabilities",
+            "device-units.yaml": "units",
+        }
+        for filename, collection in documents.items():
+            with self.subTest(collection=collection):
+                with self.assertRaisesRegex(
+                        RegistryError, f"{collection} must be a list"):
+                    self.load_document(filename, {
+                        "schema_version": 1,
+                        collection: {"id": "not-a-list"},
+                    })
+
+    def test_ids_must_be_nonempty_strings(self):
+        for bad_id in (12, "  "):
+            with self.subTest(bad_id=bad_id):
+                source = dict(VALID_SOURCE, id=bad_id)
+                with self.assertRaisesRegex(
+                        RegistryError, "id must be a nonempty string"):
+                    self.load(sources=[source])
+
+    def test_source_rank_must_be_an_integer(self):
+        for bad_rank in ("1", True):
+            with self.subTest(bad_rank=bad_rank):
+                source = dict(VALID_SOURCE, rank=bad_rank)
+                with self.assertRaisesRegex(
+                        RegistryError, "rank must be an integer"):
+                    self.load(sources=[source])
+
+    def test_evidence_entries_must_be_mappings(self):
+        value = dict(VALID_CAPABILITY, evidence=["not-a-mapping"])
+        with self.assertRaisesRegex(RegistryError,
+                                    "evidence entry must be a mapping"):
+            self.load(capability=value)
+
+    def test_evidence_requires_field_value_and_source(self):
+        evidence = [dict(finding) for finding in VALID_CAPABILITY["evidence"]]
+        evidence[0].pop("value")
+        value = dict(VALID_CAPABILITY, evidence=evidence)
+        with self.assertRaisesRegex(RegistryError,
+                                    "evidence missing.*value"):
+            self.load(capability=value)
+
+    def test_evidence_values_must_be_states(self):
+        evidence = [dict(finding) for finding in VALID_CAPABILITY["evidence"]]
+        evidence[0]["value"] = "maybe"
+        value = dict(VALID_CAPABILITY, evidence=evidence)
+        with self.assertRaisesRegex(RegistryError,
+                                    "invalid evidence value maybe"):
+            self.load(capability=value)
+
+    def test_verification_must_be_a_mapping_when_present(self):
+        value = dict(VALID_CAPABILITY, verification="not-a-mapping")
+        with self.assertRaisesRegex(RegistryError,
+                                    "verification must be a mapping"):
+            self.load(capability=value)
+
+    def test_capability_list_fields_must_be_lists(self):
+        for field in ("resources", "constraints", "conflicts",
+                      "opportunities", "sources", "evidence"):
+            with self.subTest(field=field):
+                value = dict(VALID_CAPABILITY, **{field: "not-a-list"})
+                with self.assertRaisesRegex(
+                        RegistryError, f"{field} must be a list"):
+                    self.load(capability=value)
+
     def test_unit_records_cannot_contain_secret_fields(self):
         bad_unit = dict(VALID_UNIT, wifi_password="bad")
+        with self.assertRaisesRegex(RegistryError, "secret field wifi_password"):
+            self.load(unit=bad_unit)
+
+    def test_unit_records_cannot_contain_nested_secret_fields(self):
+        bad_unit = dict(VALID_UNIT, credentials={"wifi_password": "bad"})
         with self.assertRaisesRegex(RegistryError, "secret field wifi_password"):
             self.load(unit=bad_unit)
