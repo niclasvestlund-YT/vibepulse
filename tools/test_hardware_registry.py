@@ -315,6 +315,133 @@ class RegistryValidationTests(unittest.TestCase):
 
 
 class RepositoryRegistryTests(unittest.TestCase):
+    @staticmethod
+    def load_repository_registry():
+        root = Path(__file__).resolve().parents[1] / "spec"
+        return load_registry(root)
+
+    def test_imu_is_not_claimed_as_physically_verified(self):
+        registry = self.load_repository_registry()
+        capability = registry.capabilities["sensors.imu-qmi8658"]
+        self.assertEqual(
+            capability["states"]["unit_verified"],
+            "unknown",
+        )
+        self.assertNotIn("verification", capability)
+        self.assertFalse(any(
+            finding["field"] == "unit_verified"
+            for finding in capability["evidence"]
+        ))
+
+    def test_usb_device_is_not_claimed_as_physically_verified(self):
+        registry = self.load_repository_registry()
+        capability = registry.capabilities["usb.device"]
+        self.assertEqual(
+            capability["states"]["unit_verified"],
+            "unknown",
+        )
+        self.assertNotIn("verification", capability)
+        self.assertFalse(any(
+            finding["field"] == "unit_verified"
+            for finding in capability["evidence"]
+        ))
+
+    def test_only_dated_physical_findings_are_unit_verified(self):
+        registry = self.load_repository_registry()
+        verified_ids = {
+            capability_id
+            for capability_id, capability in registry.capabilities.items()
+            if capability["states"]["unit_verified"] == "yes"
+        }
+        self.assertEqual(
+            verified_ids,
+            {"display.amoled", "radio.wifi-24"},
+        )
+        for capability_id in verified_ids:
+            with self.subTest(capability=capability_id):
+                capability = registry.capabilities[capability_id]
+                self.assertEqual(
+                    capability["verification"]["unit"],
+                    "torget-home-01",
+                )
+                self.assertTrue(capability["verification"]["test"].strip())
+                sources = {
+                    finding["source"] for finding in capability["evidence"]
+                    if finding["field"] == "unit_verified"
+                }
+                self.assertEqual(sources, {"torget-physical-2026-08-06"})
+
+    def test_repository_required_truth_distinctions(self):
+        registry = self.load_repository_registry()
+
+        for capability_id in (
+                "audio.microphones", "audio.speaker-output"):
+            with self.subTest(capability=capability_id):
+                self.assertEqual(
+                    registry.capabilities[capability_id]["states"][
+                        "unit_verified"
+                    ],
+                    "unknown",
+                )
+
+        self.assertEqual(
+            registry.capabilities["radio.bluetooth-le"]["states"],
+            {
+                "soc_capable": "yes",
+                "board_wired": "yes",
+                "bsp_support": "yes",
+                "firmware_enabled": "no",
+                "unit_verified": "unknown",
+            },
+        )
+
+        touch = registry.capabilities["touch.controller"]
+        touch_conflicts = " ".join(touch["conflicts"])
+        self.assertIn("CST9220", touch_conflicts)
+        self.assertIn("CST9217", touch_conflicts)
+        self.assertTrue({
+            "waveshare-board-docs-2026-08-10",
+            "waveshare-cst9217-driver-1.0.0",
+        }.issubset(touch["sources"]))
+
+        usb_host = registry.capabilities["usb.host"]
+        self.assertEqual(usb_host["states"]["soc_capable"], "yes")
+        self.assertEqual(usb_host["states"]["board_wired"], "unknown")
+        usb_host_constraints = " ".join(usb_host["constraints"]).lower()
+        self.assertIn("vbus", usb_host_constraints)
+        self.assertRegex(usb_host_constraints, r"current[- ]limit")
+        self.assertIn("phy", usb_host_constraints)
+        self.assertIn("shared", usb_host_constraints)
+
+        ipex = registry.capabilities["antenna.ipex-mod"]
+        self.assertEqual(ipex["states"]["board_wired"], "no")
+        self.assertEqual(
+            ipex["states"]["firmware_enabled"],
+            "not_applicable",
+        )
+        self.assertTrue(any(
+            "resistor" in constraint.lower()
+            for constraint in ipex["constraints"]
+        ))
+
+        for capability_id in (
+                "security.secure-boot-v2",
+                "security.flash-encryption",
+                "update.ota-ab-rollback"):
+            with self.subTest(capability=capability_id):
+                self.assertEqual(
+                    registry.capabilities[capability_id]["states"][
+                        "firmware_enabled"
+                    ],
+                    "no",
+                )
+
+        die_temperature = registry.capabilities["soc.die-temperature"]
+        self.assertTrue(any(
+            "not room temperature" in constraint.lower()
+            for constraint in die_temperature["constraints"]
+        ))
+
     def test_repository_cli_counts_records(self):
         repo = Path(__file__).resolve().parents[1]
         result = subprocess.run(

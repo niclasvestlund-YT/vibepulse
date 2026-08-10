@@ -279,13 +279,13 @@ capabilities:
       board_wired: "yes"
       bsp_support: "yes"
       firmware_enabled: "yes"
-      unit_verified: "yes"
-    confidence: measured
+      unit_verified: unknown
+    confidence: source_inspected
     resources:
       - "shared I2C port 1 at 400 kHz"
       - "GPIO17 IMU_INT1"
       - "GPIO21 IMU_INT2"
-      - "I2C address 0x6B on torget-home-01"
+      - "QMI8658 address 0x6A or 0x6B"
     constraints:
       - "six physical axes: three-axis accelerometer plus three-axis gyroscope"
       - "no magnetometer is present; nine-axis claims require another sensor or derived fusion"
@@ -293,7 +293,6 @@ capabilities:
     conflicts: ["component headers declare helpers that the locked source does not implement"]
     opportunities: ["auto-rotation", "tap and shake", "lift-to-wake", "orientation-aware animation"]
     sources:
-      - torget-physical-2026-08-06
       - waveshare-schematic-2026-08-10
       - torget-main-1fad449
       - waveshare-board-docs-2026-08-10
@@ -302,11 +301,7 @@ capabilities:
       - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
       - {field: bsp_support, value: "yes", source: torget-main-1fad449}
       - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
-      - {field: unit_verified, value: "yes", source: torget-physical-2026-08-06}
-    last_verified: "2026-08-06"
-    verification:
-      unit: torget-home-01
-      test: qmi8658-four-orientation-rotation-2026-08-06
+    last_verified: "2026-08-10"
 
   - id: sensors.ambient-light
     name: Ambient-light sensor
@@ -455,8 +450,8 @@ capabilities:
       board_wired: "yes"
       bsp_support: "yes"
       firmware_enabled: "yes"
-      unit_verified: "yes"
-    confidence: measured
+      unit_verified: unknown
+    confidence: source_inspected
     resources: ["single internal USB PHY", "GPIO19 D-", "GPIO20 D+", "USB-C connector", "endpoints and internal RAM"]
     constraints:
       - "device classes share endpoint and memory limits"
@@ -464,7 +459,6 @@ capabilities:
     conflicts: ["USB host, USB device, and USB Serial/JTAG contend for the single internal USB PHY"]
     opportunities: ["CDC", "HID", "MIDI", "mass storage", "USB audio", "composite device"]
     sources:
-      - torget-physical-2026-08-06
       - waveshare-schematic-2026-08-10
       - torget-main-1fad449
       - esp32s3-datasheet-2026-08-10
@@ -474,11 +468,7 @@ capabilities:
       - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
       - {field: bsp_support, value: "yes", source: esp-idf-5.5-usb}
       - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
-      - {field: unit_verified, value: "yes", source: torget-physical-2026-08-06}
-    last_verified: "2026-08-06"
-    verification:
-      unit: torget-home-01
-      test: builtin-usb-jtag-gdb-session-2026-08-06
+    last_verified: "2026-08-10"
 
   - id: usb.host
     name: Native USB host/OTG
