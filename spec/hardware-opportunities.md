@@ -5,6 +5,14 @@ hardware registry. Status is descriptive only, not permission. Validate every
 required capability and prerequisite against the canonical hardware files
 before planning work.
 
+## Status legend
+
+- `designed`: a design artifact exists; implementation is not approved.
+- `candidate`: worth evaluating with named evidence gaps.
+- `idea`: an exploratory direction with larger unknowns.
+
+All three statuses remain non-authorizing.
+
 ## Opportunity radar
 
 | ID | Status | Required capabilities | Physical prerequisite |
@@ -19,11 +27,15 @@ before planning work.
 | native-usb-modes | idea | USB device | reconcile Buddy and USB debug ownership |
 | voice-controls | idea | microphones, speaker, network | privacy UI and full-duplex audio test |
 
+Design reference: `local-ota` has a [safe OTA foundation implementation
+plan](../docs/superpowers/plans/2026-08-10-safe-ota-foundation-implementation.md),
+but designed does not mean OTA is enabled or authorized.
+
 ## Decision context
 
 | ID | User value | Relevant conflicts | Privacy implications | Why not authorized |
 | --- | --- | --- | --- | --- |
-| local-ota | Update a deployed screen without routine cabling. | Partition, recovery, and rollout policy must agree. | Network update checks expose device timing and endpoint metadata. | Requires a release, rollback, and bootstrap decision. |
+| local-ota | Update a deployed screen without routine cabling. | Partition/recovery/rollout, authentication and update authorization, token/credential handling, and firmware image integrity/signing must agree. | Network update checks expose timing and endpoint metadata; update tokens/credentials need least-privilege storage and transport. | Needs security review, signing policy, release/rollback approval, and the final bootstrap; designed does not mean enabled or authorized. |
 | completion-audio | Make completed actions noticeable away from the display. | Playback can contend with other audio ownership and quiet-hours behavior. | Audible output may disclose activity to nearby people. | Requires speaker confirmation, volume limits, and product approval. |
 | ble-provisioning | Set up Wi-Fi without rebuilding secrets into firmware. | BLE memory and radio use can compete with Wi-Fi workloads. | Provisioning handles network identity and credentials. | Requires measured coexistence and a credential-handling design. |
 | motion-gestures | Offer hands-free shortcuts and orientation-aware actions. | Movement and auto-rotation can interpret the same sensor events differently. | Motion should remain local unless a separately approved design says otherwise. | Requires physical false-positive evidence and gesture UX approval. |

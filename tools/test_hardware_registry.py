@@ -445,6 +445,7 @@ class RepositoryRegistryTests(unittest.TestCase):
         "spec/hardware-capabilities.yaml",
         "spec/hardware-sources.yaml",
         "spec/hardware-opportunities.md",
+        "spec/device-units.yaml",
     }
 
     @staticmethod
@@ -473,36 +474,66 @@ class RepositoryRegistryTests(unittest.TestCase):
             return rows
         raise AssertionError(f"Markdown table not found: {expected_header}")
 
-    def test_agent_instructions_route_to_hardware_truth(self):
+    @staticmethod
+    def extract_markdown_section(text, heading):
+        lines = text.splitlines()
+        marker = f"## {heading}"
+        try:
+            start = lines.index(marker)
+        except ValueError as error:
+            raise AssertionError(f"Markdown section not found: {marker}") \
+                from error
+        end = next(
+            (index for index in range(start + 1, len(lines))
+             if lines[index].startswith("## ")),
+            len(lines),
+        )
+        return "\n".join(lines[start:end]).strip()
+
+    def load_agent_hardware_sections(self):
         repo = Path(__file__).resolve().parents[1]
-        routed_paths = {}
-        for name in ("AGENTS.md", "CLAUDE.md"):
+        return {
+            name: self.extract_markdown_section(
+                (repo / name).read_text(encoding="utf-8"),
+                "Hardware-aware work",
+            )
+            for name in ("AGENTS.md", "CLAUDE.md")
+        }
+
+    def test_agent_hardware_sections_are_identical(self):
+        sections = self.load_agent_hardware_sections()
+        self.assertEqual(sections["AGENTS.md"], sections["CLAUDE.md"])
+
+    def test_agent_instructions_route_to_hardware_truth(self):
+        sections = self.load_agent_hardware_sections()
+        for name, block in sections.items():
             with self.subTest(agent=name):
-                path = repo / name
-                self.assertTrue(path.exists(), f"{name} is absent")
-                text = path.read_text(encoding="utf-8")
                 for hardware_path in self.CANONICAL_HARDWARE_PATHS:
                     self.assertIn(
-                        hardware_path, text,
+                        hardware_path, block,
                         f"{name} does not route to {hardware_path}",
                     )
                 for layer in (
                         "silicon-capable", "board-wired",
                         "firmware-enabled", "physically verified"):
-                    self.assertIn(layer, text, f"{name} omits {layer}")
-                routed_paths[name] = set(re.findall(
-                    r"spec/hardware(?:-[a-z]+)*\.(?:md|yaml)", text
+                    self.assertIn(layer, block, f"{name} omits {layer}")
+
+                normalized = " ".join(block.split())
+                self.assertIn(
+                    "Mention a relevant unused onboard capability",
+                    normalized,
+                )
+                self.assertIn("Never copy secrets", normalized)
+                self.assertIn(
+                    "turn an opportunity into authorized implementation work",
+                    normalized,
+                )
+                routed_paths = set(re.findall(
+                    r"spec/[a-z0-9./-]+", block
                 ))
                 self.assertEqual(
-                    routed_paths[name], self.CANONICAL_HARDWARE_PATHS
+                    routed_paths, self.CANONICAL_HARDWARE_PATHS
                 )
-        if set(routed_paths) == {"AGENTS.md", "CLAUDE.md"}:
-            self.assertEqual(
-                routed_paths["AGENTS.md"], routed_paths["CLAUDE.md"]
-            )
-            self.assertEqual(
-                routed_paths["AGENTS.md"], self.CANONICAL_HARDWARE_PATHS
-            )
 
     def test_hardware_opportunity_rows_are_complete_and_exact(self):
         repo = Path(__file__).resolve().parents[1]
@@ -573,14 +604,61 @@ class RepositoryRegistryTests(unittest.TestCase):
         for row in rows:
             with self.subTest(opportunity=row[0]):
                 self.assertEqual(len(row), 5)
-                self.assertTrue(all(cell for cell in row[1:]))
-                self.assertIn("requires", row[4].lower())
+                for heading, cell in zip(
+                        ("user value", "conflicts", "privacy",
+                         "no-authorization rationale"), row[1:]):
+                    self.assertGreaterEqual(
+                        len(cell.split()), 4,
+                        f"{row[0]} has no substantive {heading}",
+                    )
 
         self.assertIn("Status is descriptive only, not permission", text)
         for unauthorized_action in (
                 "feature work", "flashing", "fuse changes",
                 "hardware modification"):
             self.assertIn(unauthorized_action, text)
+
+    def test_hardware_opportunity_status_legend_is_non_authorizing(self):
+        repo = Path(__file__).resolve().parents[1]
+        text = (repo / "spec/hardware-opportunities.md").read_text(
+            encoding="utf-8"
+        )
+        legend = self.extract_markdown_section(text, "Status legend")
+        for status in ("designed", "candidate", "idea"):
+            with self.subTest(status=status):
+                self.assertRegex(legend, rf"(?m)^- `{status}`: \S.+$")
+        self.assertIn(
+            "All three statuses remain non-authorizing.", legend
+        )
+
+    def test_local_ota_records_design_and_security_boundaries(self):
+        repo = Path(__file__).resolve().parents[1]
+        text = (repo / "spec/hardware-opportunities.md").read_text(
+            encoding="utf-8"
+        )
+        rows = self.parse_markdown_table(
+            text,
+            ("ID", "User value", "Relevant conflicts",
+             "Privacy implications", "Why not authorized"),
+        )
+        local_ota = next(row for row in rows if row[0] == "local-ota")
+        security_context = " ".join(local_ota[2:]).lower()
+        for security_boundary in (
+                "authentication", "update authorization",
+                "token/credential handling", "firmware image integrity",
+                "signing"):
+            self.assertIn(security_boundary, security_context)
+
+        design_path = (
+            "../docs/superpowers/plans/"
+            "2026-08-10-safe-ota-foundation-implementation.md"
+        )
+        self.assertIn(f"]({design_path})", text)
+        self.assertTrue((repo / "spec" / design_path).resolve().is_file())
+        self.assertIn(
+            "designed does not mean OTA is enabled or authorized",
+            " ".join(text.split()),
+        )
 
     def test_imu_is_not_claimed_as_physically_verified(self):
         registry = self.load_repository_registry()
