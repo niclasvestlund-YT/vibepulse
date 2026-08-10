@@ -2,6 +2,9 @@
 # från Solceller: känsligt committas aldrig, se secrets.h.example).
 secrets.h
 
+# Lokal utvecklingsmiljö.
+.venv/
+
 # Byggträd är regenererbara.
 build/
 sim/build*/

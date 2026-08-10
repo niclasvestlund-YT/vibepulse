@@ -535,6 +535,56 @@ class RepositoryRegistryTests(unittest.TestCase):
                     routed_paths, self.CANONICAL_HARDWARE_PATHS
                 )
 
+    def test_readme_documents_reproducible_python_environment(self):
+        repo = Path(__file__).resolve().parents[1]
+        text = (repo / "README.md").read_text(encoding="utf-8")
+        section = self.extract_markdown_section(text, "Hardware knowledge")
+        for required_text in (
+                "Python 3.11+",
+                "python3.12 -m venv .venv",
+                ". .venv/bin/activate",
+                "python -m pip install -r requirements-dev.txt",
+                "PYTHON_BIN",
+                "./test/run.sh"):
+            with self.subTest(required_text=required_text):
+                self.assertIn(required_text, section)
+
+    def test_repository_ignores_documented_virtual_environment(self):
+        repo = Path(__file__).resolve().parents[1]
+        lines = (repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn(".venv/", lines)
+
+    def test_host_gate_uses_one_preflighted_python_interpreter(self):
+        repo = Path(__file__).resolve().parents[1]
+        script = (repo / "test/run.sh").read_text(encoding="utf-8")
+        self.assertIn("PYTHON_BIN=${PYTHON_BIN:-python3}", script)
+        self.assertIn("sys.version_info >= (3, 11)", script)
+        self.assertRegex(
+            script,
+            r"yaml\.__version__\s*==\s*['\"]6\.0\.3['\"]",
+        )
+        self.assertLess(script.index("sys.version_info"), script.index("\ncc "))
+
+        for arguments in (
+                "test_agent_demo_wiring.py",
+                "test_agent_net_wiring.py",
+                "test_target_tls_memory.py",
+                "test_vibepulse_layout_wiring.py",
+                "-m unittest tools.test_hardware_registry -v"):
+            with self.subTest(arguments=arguments):
+                self.assertIn(f'"$PYTHON_BIN" {arguments}', script)
+        self.assertNotRegex(
+            script,
+            r"(?m)^\s*python3\s+(?:test_.*\.py|-m unittest)",
+        )
+
+        for setup_command in (
+                "python3.12 -m venv .venv",
+                ". .venv/bin/activate",
+                "python -m pip install -r requirements-dev.txt"):
+            with self.subTest(setup_command=setup_command):
+                self.assertIn(setup_command, script)
+
     def test_hardware_opportunity_rows_are_complete_and_exact(self):
         repo = Path(__file__).resolve().parents[1]
         path = repo / "spec/hardware-opportunities.md"

@@ -1,8 +1,23 @@
 #!/bin/sh
-# Hosttesterna för Torgets rena kärnor. Kräver bara clang (Xcode CLT) —
-# samma filer som targetet bygger, bevisade på Macen innan de rör hyllan.
+# Hosttesterna för Torgets rena kärnor. Kräver clang (Xcode CLT) samt
+# Python 3.11+ med PyYAML 6.0.3.
 set -e
 cd "$(dirname "$0")"
+
+PYTHON_BIN=${PYTHON_BIN:-python3}
+if ! "$PYTHON_BIN" -c \
+  'import sys, yaml; raise SystemExit(0 if sys.version_info >= (3, 11) and yaml.__version__ == "6.0.3" else 1)' \
+  2>/dev/null
+then
+  printf '%s\n' \
+    'ERROR: Hosttesterna kräver Python 3.11+ med PyYAML 6.0.3.' \
+    'Kör från Torget-repots rot:' \
+    '  python3.12 -m venv .venv' \
+    '  . .venv/bin/activate' \
+    '  python -m pip install -r requirements-dev.txt' \
+    'Se README.md under "Hardware knowledge".' >&2
+  exit 1
+fi
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_fmt/fmt_sv.c \
@@ -66,10 +81,10 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -o /tmp/torget-agent-net-policy-test
 /tmp/torget-agent-net-policy-test
 
-python3 test_agent_demo_wiring.py
-python3 test_agent_net_wiring.py
-python3 test_target_tls_memory.py
-python3 test_vibepulse_layout_wiring.py
+"$PYTHON_BIN" test_agent_demo_wiring.py
+"$PYTHON_BIN" test_agent_net_wiring.py
+"$PYTHON_BIN" test_target_tls_memory.py
+"$PYTHON_BIN" test_vibepulse_layout_wiring.py
 
 cd ..
-python3 -m unittest tools.test_hardware_registry -v
+"$PYTHON_BIN" -m unittest tools.test_hardware_registry -v
