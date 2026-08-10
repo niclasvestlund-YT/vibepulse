@@ -277,5 +277,61 @@ class RepositoryRegistryTests(unittest.TestCase):
     def test_repository_registry_loads(self):
         root = Path(__file__).resolve().parents[1] / "spec"
         registry = load_registry(root)
-        self.assertIn("waveshare-schematic-2026-08-10", registry.sources)
-        self.assertIn("torget-home-01", registry.units)
+        expected_sources = {
+            "torget-physical-2026-08-06": (
+                "physical-test", 1,
+                "findings-2026-08-06; unit=torget-home-01",
+            ),
+            "waveshare-schematic-2026-08-10": (
+                "schematic", 2, "downloaded-2026-08-10",
+            ),
+            "waveshare-bsp-2.0.1": ("source-code", 3, "2.0.1"),
+            "waveshare-cst9217-driver-1.0.0": (
+                "source-code", 3, "2.0.0",
+            ),
+            "torget-main-1fad449": ("source-code", 3, "1fad449"),
+            "waveshare-board-docs-2026-08-10": (
+                "vendor-doc", 4, "accessed-2026-08-10",
+            ),
+            "esp32s3-datasheet-2026-08-10": (
+                "silicon-doc", 5, "accessed-2026-08-10",
+            ),
+            "esp-idf-5.5-ota": ("framework-doc", 5, "ESP-IDF-v5.5"),
+            "esp-idf-5.5-usb": ("framework-doc", 5, "ESP-IDF-v5.5"),
+        }
+        self.assertEqual(set(expected_sources), set(registry.sources))
+        for source_id, expected in expected_sources.items():
+            with self.subTest(source=source_id):
+                source = registry.sources[source_id]
+                self.assertEqual(
+                    (source["kind"], source["rank"], source["revision"]),
+                    expected,
+                )
+
+        datasheet = registry.sources["esp32s3-datasheet-2026-08-10"]
+        self.assertEqual(
+            datasheet["locator"],
+            "https://documentation.espressif.com/esp32-s3_datasheet_en.pdf",
+        )
+        cst9217 = registry.sources["waveshare-cst9217-driver-1.0.0"]
+        self.assertEqual(cst9217["revision"], "2.0.0")
+        self.assertEqual(
+            cst9217.get("note"),
+            "Legacy stable ID; dependencies.lock pins 2.0.0.",
+        )
+
+        self.assertEqual(registry.units["torget-home-01"], {
+            "id": "torget-home-01",
+            "friendly_name": "Torget hemma",
+            "board": "waveshare-esp32-s3-touch-amoled-2.16",
+            "sku_evidence": "physical-device-and-working-bsp",
+            "board_revision": "unknown",
+            "enclosure": "white-square-enclosure",
+            "speaker": "unknown",
+            "battery": "not_fitted",
+            "microsd": "unknown",
+            "antenna": "onboard",
+            "installed_firmware": "unknown-after-next-flash",
+            "last_physical_verification": "2026-08-06",
+            "secrets": False,
+        })

@@ -38,6 +38,7 @@ sources:
     locator: dependencies.lock#dependencies.waveshare/esp_lcd_touch_cst9217
     revision: 2.0.0
     accessed: "2026-08-10"
+    note: Legacy stable ID; dependencies.lock pins 2.0.0.
 
   - id: torget-main-1fad449
     kind: source-code
@@ -63,7 +64,7 @@ sources:
     rank: 5
     title: ESP32-S3 Series Datasheet
     publisher: Espressif Systems
-    locator: https://www.espressif.com/documentation/esp32-s3_datasheet_en.pdf
+    locator: https://documentation.espressif.com/esp32-s3_datasheet_en.pdf
     revision: accessed-2026-08-10
     accessed: "2026-08-10"
 
