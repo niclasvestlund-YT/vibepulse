@@ -271,3 +271,11 @@ class RegistryValidationTests(unittest.TestCase):
         bad_unit = dict(VALID_UNIT, credentials={"wifi_password": "bad"})
         with self.assertRaisesRegex(RegistryError, "secret field wifi_password"):
             self.load(unit=bad_unit)
+
+
+class RepositoryRegistryTests(unittest.TestCase):
+    def test_repository_registry_loads(self):
+        root = Path(__file__).resolve().parents[1] / "spec"
+        registry = load_registry(root)
+        self.assertIn("waveshare-schematic-2026-08-10", registry.sources)
+        self.assertIn("torget-home-01", registry.units)

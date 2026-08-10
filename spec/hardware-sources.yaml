@@ -1,0 +1,86 @@
+schema_version: 1
+sources:
+  - id: torget-physical-2026-08-06
+    kind: physical-test
+    rank: 1
+    title: Torget physical hardware findings for torget-home-01
+    publisher: Torget
+    locator: spec/hardware.md
+    revision: findings-2026-08-06; unit=torget-home-01
+    accessed: "2026-08-10"
+    board_revision: unknown
+
+  - id: waveshare-schematic-2026-08-10
+    kind: schematic
+    rank: 2
+    title: ESP32-S3-Touch-AMOLED-2.16 Schematic
+    publisher: Waveshare
+    locator: https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-2.16/ESP32-S3-Touch-AMOLED-2.16-Schematic.pdf
+    revision: downloaded-2026-08-10
+    accessed: "2026-08-10"
+    board_revision: unknown
+
+  - id: waveshare-bsp-2.0.1
+    kind: source-code
+    rank: 3
+    title: waveshare/esp32_s3_touch_amoled_2_16
+    publisher: Waveshare
+    locator: https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_2_16
+    revision: 2.0.1
+    accessed: "2026-08-10"
+    board_revision: unknown
+
+  - id: waveshare-cst9217-driver-1.0.0
+    kind: source-code
+    rank: 3
+    title: waveshare/esp_lcd_touch_cst9217
+    publisher: Waveshare
+    locator: dependencies.lock#dependencies.waveshare/esp_lcd_touch_cst9217
+    revision: 2.0.0
+    accessed: "2026-08-10"
+
+  - id: torget-main-1fad449
+    kind: source-code
+    rank: 3
+    title: Torget firmware source
+    publisher: Torget
+    locator: .
+    revision: 1fad449
+    accessed: "2026-08-10"
+
+  - id: waveshare-board-docs-2026-08-10
+    kind: vendor-doc
+    rank: 4
+    title: ESP32-S3-Touch-AMOLED-2.16 Documentation
+    publisher: Waveshare
+    locator: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16
+    revision: accessed-2026-08-10
+    accessed: "2026-08-10"
+    board_revision: unknown
+
+  - id: esp32s3-datasheet-2026-08-10
+    kind: silicon-doc
+    rank: 5
+    title: ESP32-S3 Series Datasheet
+    publisher: Espressif Systems
+    locator: https://www.espressif.com/documentation/esp32-s3_datasheet_en.pdf
+    revision: accessed-2026-08-10
+    accessed: "2026-08-10"
+
+  - id: esp-idf-5.5-ota
+    kind: framework-doc
+    rank: 5
+    title: ESP-IDF Programming Guide - Over The Air Updates (OTA)
+    publisher: Espressif Systems
+    locator: https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/system/ota.html
+    revision: ESP-IDF-v5.5
+    accessed: "2026-08-10"
+
+  - id: esp-idf-5.5-usb
+    kind: framework-doc
+    rank: 5
+    title: ESP-IDF Programming Guide - USB Device Stack
+    publisher: Espressif Systems
+    locator: https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/peripherals/usb_device.html
+    revision: ESP-IDF-v5.5
+    accessed: "2026-08-10"

@@ -1,0 +1,15 @@
+schema_version: 1
+units:
+  - id: torget-home-01
+    friendly_name: Torget hemma
+    board: waveshare-esp32-s3-touch-amoled-2.16
+    sku_evidence: physical-device-and-working-bsp
+    board_revision: unknown
+    enclosure: white-square-enclosure
+    speaker: unknown
+    battery: not_fitted
+    microsd: unknown
+    antenna: onboard
+    installed_firmware: unknown-after-next-flash
+    last_physical_verification: "2026-08-06"
+    secrets: false

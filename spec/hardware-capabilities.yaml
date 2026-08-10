@@ -1,0 +1,3 @@
+schema_version: 1
+board: waveshare-esp32-s3-touch-amoled-2.16
+capabilities: []
