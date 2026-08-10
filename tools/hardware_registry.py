@@ -1,3 +1,5 @@
+import argparse
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -153,6 +155,14 @@ def load_registry(root):
         for key, value in states.items():
             if not isinstance(value, str) or value not in STATE_VALUES:
                 raise RegistryError(f"{capability_id}: invalid {key}={value}")
+        if states["unit_verified"] == "yes" and states["board_wired"] != "yes":
+            raise RegistryError(
+                f"{capability_id}: verified capability must be board_wired",
+            )
+        if states["firmware_enabled"] == "yes" and states["bsp_support"] == "no":
+            raise RegistryError(
+                f"{capability_id}: enabled capability has no software support",
+            )
         confidence = capability.get("confidence")
         if (not isinstance(confidence, str)
                 or confidence not in CONFIDENCE_VALUES):
@@ -208,3 +218,23 @@ def load_registry(root):
                 )
 
     return HardwareRegistry(sources=sources, capabilities=capabilities, units=units)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path")
+    args = parser.parse_args(argv)
+    registry = load_registry(args.path)
+    print(
+        f"OK: {len(registry.capabilities)} capabilities, "
+        f"{len(registry.sources)} sources, {len(registry.units)} units",
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, RegistryError, yaml.YAMLError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)

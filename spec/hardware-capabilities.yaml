@@ -1,3 +1,832 @@
 schema_version: 1
 board: waveshare-esp32-s3-touch-amoled-2.16
-capabilities: []
+capabilities:
+  - id: compute.esp32s3r8
+    name: ESP32-S3R8 compute and flash
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["dual-core Xtensa LX7", "240 MHz CPU", "16 MB QIO NOR flash"]
+    constraints:
+      - "large display, TLS, Wi-Fi, Bluetooth, and audio workloads share finite internal RAM"
+      - "DMA descriptors and some peripheral buffers require internal memory"
+    conflicts:
+      - "flash, PSRAM, and internal-memory pressure must be budgeted together"
+    opportunities: ["on-device applications", "local signal processing"]
+    sources:
+      - esp32s3-datasheet-2026-08-10
+      - waveshare-board-docs-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-board-docs-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: display.amoled
+    name: 2.16-inch CO5300 AMOLED
+    width: 480
+    height: 480
+    color_format: RGB565
+    byte_order: big_endian
+    bus: QSPI
+    bus_mhz: 40
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: "yes"
+    confidence: measured
+    resources:
+      - "SPI2_HOST"
+      - "GPIO12 CS"
+      - "GPIO38 PCLK"
+      - "GPIO4-7 QSPI data"
+      - "GPIO39 reset"
+      - "PSRAM display buffers"
+    constraints:
+      - "40 MHz QSPI is the verified starting point; higher rates are untested"
+      - "RGB565 pixels use big-endian byte order"
+      - "dirty areas require two-pixel alignment on both axes"
+      - "AMOLED lifecycle protection requires black-first UI, dimming, and display-off behavior"
+    conflicts:
+      - "display flushes compete with TLS, audio, and other DMA users for internal memory"
+      - "MADCTL rotation and touch coordinate rotation must change together"
+    opportunities: ["480 x 480 Studio preview", "high-contrast ambient display"]
+    sources:
+      - torget-physical-2026-08-06
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+    evidence:
+      - {field: soc_capable, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+      - {field: unit_verified, value: "yes", source: torget-physical-2026-08-06}
+    last_verified: "2026-08-06"
+    verification:
+      unit: torget-home-01
+      test: display-lock-gdb-and-panel-operation-2026-08-06
+
+  - id: memory.psram
+    name: 8 MB octal PSRAM
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["8 MB octal PSRAM", "80 MHz PSRAM bus", "XIP"]
+    constraints:
+      - "PSRAM is unavailable during some flash operations"
+      - "DMA descriptors and DMA-only buffers cannot be assumed to live in PSRAM"
+      - "large simultaneous display, TLS, Bluetooth, and audio allocations require measured budgets"
+    conflicts: ["internal-memory starvation can occur even when PSRAM remains free"]
+    opportunities: ["large UI assets", "partial double display buffers", "TLS allocation offload"]
+    sources:
+      - esp32s3-datasheet-2026-08-10
+      - waveshare-board-docs-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-board-docs-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: touch.controller
+    name: Capacitive touch controller
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources:
+      - "shared I2C port 1 at 400 kHz"
+      - "GPIO14 SCL"
+      - "GPIO15 SDA"
+      - "GPIO11 interrupt"
+      - "GPIO40 reset"
+    constraints:
+      - "locked driver exposes one touch point; multi-touch is not promised"
+      - "touch coordinate transforms must stay paired with display MADCTL rotation"
+    conflicts:
+      - "Waveshare board documentation identifies CST9220 while locked BSP 2.0.1 instantiates the CST9217 driver 2.0.0; controller silicon has not been physically inspected"
+    opportunities: ["single-finger taps", "single-finger swipes", "touch-to-wake"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - waveshare-cst9217-driver-1.0.0
+      - waveshare-board-docs-2026-08-10
+      - torget-main-1fad449
+    evidence:
+      - {field: soc_capable, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: radio.wifi-24
+    name: 2.4 GHz 802.11 b/g/n Wi-Fi
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: "yes"
+    confidence: measured
+    resources: ["shared 2.4 GHz radio", "onboard antenna", "internal RAM"]
+    constraints:
+      - "2.4 GHz only; 5 GHz networks are not visible"
+      - "high-traffic Wi-Fi competes with BLE for the same radio"
+      - "TLS connections require measured internal-memory headroom"
+    conflicts: ["BLE coexistence changes throughput, power, image size, and memory pressure"]
+    opportunities: ["station mode", "SoftAP maintenance", "Wi-Fi OTA", "local discovery"]
+    sources:
+      - torget-physical-2026-08-06
+      - waveshare-schematic-2026-08-10
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+      - {field: unit_verified, value: "yes", source: torget-physical-2026-08-06}
+    last_verified: "2026-08-06"
+    verification:
+      unit: torget-home-01
+      test: wifi-channel-13-scan-and-connect-2026-08-06
+
+  - id: radio.bluetooth-le
+    name: Bluetooth 5 Low Energy
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["shared 2.4 GHz radio", "onboard antenna", "internal RAM"]
+    constraints:
+      - "Bluetooth Classic is not supported"
+      - "BLE is not the preferred transport for firmware-sized images"
+      - "enabling BLE requires binary-size, memory, power, and coexistence measurements"
+    conflicts: ["Wi-Fi and BLE time-share the same 2.4 GHz radio"]
+    opportunities: ["provisioning", "local discovery", "low-bandwidth control", "proximity experiments"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: audio.microphones
+    name: Dual microphones through ES7210
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources:
+      - "I2S0"
+      - "GPIO42 MCLK"
+      - "GPIO9 BCLK"
+      - "GPIO45 LRCK"
+      - "GPIO10 ASDOUT"
+      - "shared I2C control bus"
+      - "DMA and internal RAM"
+    constraints:
+      - "microphone capture needs an independent physical test before product use"
+      - "the schematic echo-reference path does not provide a complete echo-cancellation algorithm"
+      - "privacy-sensitive recording requires an unmistakable visible state and hardware-accessible stop action"
+    conflicts: ["shares I2S, DMA, CPU, memory, and native USB resources with speaker and USB audio paths"]
+    opportunities: ["voice activity detection", "wake-word experiments", "voice control", "audio diagnostics"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: audio.speaker-output
+    name: ES8311 codec and amplified speaker output
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources:
+      - "I2S0"
+      - "GPIO42 MCLK"
+      - "GPIO9 BCLK"
+      - "GPIO45 LRCK"
+      - "GPIO8 DSDIN"
+      - "GPIO46 amplifier control"
+      - "shared I2C control bus"
+      - "DMA and internal RAM"
+    constraints:
+      - "the physical unit inventory does not establish that a speaker is fitted or attached"
+      - "speaker output needs an independent physical test before completion sounds or alerts are promised"
+      - "no independent buzzer or vibration motor is documented; haptics require external hardware"
+    conflicts: ["shares I2S, DMA, CPU, memory, and native USB resources with microphone and USB audio paths"]
+    opportunities: ["completion sounds", "spoken alerts", "audio playback", "audio diagnostics"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: sensors.imu-qmi8658
+    name: QMI8658 six-axis IMU
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: "yes"
+    confidence: measured
+    resources:
+      - "shared I2C port 1 at 400 kHz"
+      - "GPIO17 IMU_INT1"
+      - "GPIO21 IMU_INT2"
+      - "I2C address 0x6B on torget-home-01"
+    constraints:
+      - "six physical axes: three-axis accelerometer plus three-axis gyroscope"
+      - "no magnetometer is present; nine-axis claims require another sensor or derived fusion"
+      - "new gestures need enclosure-specific false-positive testing"
+    conflicts: ["component headers declare helpers that the locked source does not implement"]
+    opportunities: ["auto-rotation", "tap and shake", "lift-to-wake", "orientation-aware animation"]
+    sources:
+      - torget-physical-2026-08-06
+      - waveshare-schematic-2026-08-10
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+      - {field: unit_verified, value: "yes", source: torget-physical-2026-08-06}
+    last_verified: "2026-08-06"
+    verification:
+      unit: torget-home-01
+      test: qmi8658-four-orientation-rotation-2026-08-06
+
+  - id: sensors.ambient-light
+    name: Ambient-light sensor
+    states:
+      soc_capable: unknown
+      board_wired: "no"
+      bsp_support: "no"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: []
+    constraints:
+      - "no ambient-light sensor is documented on this board"
+      - "true room-light response requires an externally verified sensor"
+      - "automatic brightness currently can use time, touch or activity, agent state, and power state instead"
+    conflicts: []
+    opportunities: ["external I2C or ADC light sensor after resource audit"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+    evidence:
+      - {field: board_wired, value: "no", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "no", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: power.axp2101
+    name: AXP2101 power-management IC
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "no"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["shared I2C port 1", "I2C address 0x34", "power rails"]
+    constraints:
+      - "the locked BSP does not configure the PMU during display startup"
+      - "battery and charging settings require cell, polarity, current, thermal, and enclosure verification"
+      - "vendor example charge-current settings must not be copied to an unknown battery"
+    conflicts: ["power-off and sleep behavior must account for display rails and Wi-Fi reconnect time"]
+    opportunities: ["USB and battery detection", "voltage and percentage reporting", "charging state", "power-key events"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "no", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: power.battery-connector
+    name: 3.7 V lithium-battery connector and charging path
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "no"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: schematic
+    resources: ["two-pin battery connector", "AXP2101 charging path"]
+    constraints:
+      - "torget-home-01 has no fitted battery"
+      - "connector polarity, cell capacity, charge current, thermal design, enclosure, and shutdown behavior are not physically verified"
+      - "board support does not imply that any particular unit contains a battery"
+    conflicts: ["battery operation changes power, thermal, charging, and shutdown safety requirements"]
+    opportunities: ["portable operation", "graceful shutdown", "battery-status UI"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "no", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: rtc.pcf85063atl
+    name: PCF85063ATL real-time clock
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "no"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: schematic
+    resources: ["shared I2C port 1", "I2C address 0x51", "GPIO13 RTC interrupt"]
+    constraints:
+      - "battery backup is not physically verified"
+      - "correct time through complete power loss must not be promised before unit testing"
+      - "sleep and wake behavior must distinguish light sleep, deep sleep, and PMU power-off"
+    conflicts: ["network time and RTC persistence have different failure modes"]
+    opportunities: ["persistent time", "alarms", "scheduled wake", "network-independent reset timing"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "no", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: storage.microsd
+    name: TF/microSD slot
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["SDMMC host", "GPIO1 CMD", "GPIO2 CLK", "GPIO3 D0"]
+    constraints:
+      - "locked BSP mounts the card as one-bit SDMMC"
+      - "no card-detect or write-protect signal is configured by the locked BSP"
+      - "firmware correctness and essential settings must not depend on removable storage"
+    conflicts: ["removal and interrupted writes require defensive handling"]
+    opportunities: ["long-term history", "offline assets", "audio files", "diagnostic bundles", "recovery exports"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: usb.device
+    name: Native USB device and USB Serial/JTAG
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: "yes"
+    confidence: measured
+    resources: ["single internal USB PHY", "GPIO19 D-", "GPIO20 D+", "USB-C connector", "endpoints and internal RAM"]
+    constraints:
+      - "device classes share endpoint and memory limits"
+      - "native USB device use must preserve a reliable debugging and recovery path"
+    conflicts: ["USB host, USB device, and USB Serial/JTAG contend for the single internal USB PHY"]
+    opportunities: ["CDC", "HID", "MIDI", "mass storage", "USB audio", "composite device"]
+    sources:
+      - torget-physical-2026-08-06
+      - waveshare-schematic-2026-08-10
+      - torget-main-1fad449
+      - esp32s3-datasheet-2026-08-10
+      - esp-idf-5.5-usb
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: esp-idf-5.5-usb}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+      - {field: unit_verified, value: "yes", source: torget-physical-2026-08-06}
+    last_verified: "2026-08-06"
+    verification:
+      unit: torget-home-01
+      test: builtin-usb-jtag-gdb-session-2026-08-06
+
+  - id: usb.host
+    name: Native USB host/OTG
+    states:
+      soc_capable: "yes"
+      board_wired: unknown
+      bsp_support: unknown
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: unverified
+    resources: ["single internal USB PHY", "GPIO19 D-", "GPIO20 D+", "USB-C connector"]
+    constraints:
+      - "safe host use requires a verified VBUS sourcing design"
+      - "current limiting and connector role behavior are not established"
+      - "the single internal USB PHY is shared with USB device and USB Serial/JTAG"
+    conflicts: ["host mode may remove the native USB debugging and Buddy device path"]
+    opportunities: ["USB peripherals after electrical and role verification"]
+    sources:
+      - torget-main-1fad449
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: input.key3
+    name: Active-low KEY3 user button
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["GPIO18", "internal pull-up"]
+    constraints: ["active low; a press shorts the input to ground"]
+    conflicts: ["locked BSP advertises no generic button capability; Torget handles GPIO18 directly"]
+    opportunities: ["app switching", "navigation", "dismissal", "maintenance entry"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: input.boot-button
+    name: BOOT and reset control area
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["GPIO0", "CHIP_PU"]
+    constraints:
+      - "GPIO0 is a boot strapping pin and is not a free general-purpose control"
+      - "recovery access must remain available"
+    conflicts: ["ordinary button mappings can interfere with download mode and reset recovery"]
+    opportunities: ["manual USB recovery", "maintenance gesture", "rollback gesture"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: antenna.onboard
+    name: Onboard 2.4 GHz antenna
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: schematic
+    resources: ["shared Wi-Fi/BLE RF path", "onboard PCB antenna"]
+    constraints: ["Wi-Fi and BLE share this RF path and the 2.4 GHz radio"]
+    conflicts: ["the IPEX option is not active without a resistor modification"]
+    opportunities: ["Wi-Fi connectivity", "future BLE features"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: antenna.ipex-mod
+    name: IPEX external-antenna modification
+    states:
+      soc_capable: "yes"
+      board_wired: "no"
+      bsp_support: not_applicable
+      firmware_enabled: not_applicable
+      unit_verified: unknown
+    confidence: schematic
+    resources: ["IPEX connector", "RF selection resistors", "shared 2.4 GHz RF path"]
+    constraints:
+      - "requires physical resistor changes"
+      - "external-antenna selection is not a firmware toggle"
+      - "RF performance and regulatory implications require review after modification"
+    conflicts: ["onboard and IPEX RF paths must not be treated as simultaneously selected"]
+    opportunities: ["external antenna after intentional hardware modification"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "no", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: not_applicable, source: waveshare-schematic-2026-08-10}
+      - {field: firmware_enabled, value: not_applicable, source: waveshare-schematic-2026-08-10}
+    last_verified: "2026-08-10"
+
+  - id: expansion.shared-i2c
+    name: Shared onboard I2C bus and expansion path
+    states:
+      soc_capable: "yes"
+      board_wired: "yes"
+      bsp_support: "yes"
+      firmware_enabled: "yes"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["I2C port 1", "GPIO14 SCL", "GPIO15 SDA", "400 kHz bus"]
+    constraints:
+      - "existing devices include touch, PMU, IMU, RTC, and audio control"
+      - "external devices require address, voltage, bus-speed, locking, and interrupt audits"
+    conflicts: ["address conflicts and unsynchronised access can disrupt all onboard I2C devices"]
+    opportunities: ["external sensors", "diagnostic peripherals"]
+    sources:
+      - waveshare-schematic-2026-08-10
+      - waveshare-bsp-2.0.1
+      - torget-main-1fad449
+      - waveshare-board-docs-2026-08-10
+      - esp32s3-datasheet-2026-08-10
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
+      - {field: bsp_support, value: "yes", source: waveshare-bsp-2.0.1}
+      - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: security.secure-boot-v2
+    name: ESP32-S3 Secure Boot v2
+    states:
+      soc_capable: "yes"
+      board_wired: not_applicable
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["eFuses", "bootloader", "signing keys"]
+    constraints:
+      - "production enablement involves irreversible eFuse decisions"
+      - "presence of a Kconfig option is not an enabled protection"
+    conflicts: ["must preserve a designed recovery and signing-key lifecycle"]
+    opportunities: ["verified boot chain", "signed firmware policy"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: not_applicable, source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: security.flash-encryption
+    name: ESP32-S3 flash encryption
+    states:
+      soc_capable: "yes"
+      board_wired: not_applicable
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["eFuses", "flash-encryption keys", "bootloader"]
+    constraints:
+      - "production enablement involves irreversible eFuse and key-lifecycle decisions"
+      - "presence of a Kconfig option is not an enabled protection"
+    conflicts: ["recovery, reflashing, and release signing must be designed before enablement"]
+    opportunities: ["encrypted firmware and data at rest"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: not_applicable, source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: update.ota-ab-rollback
+    name: A/B OTA with application rollback
+    states:
+      soc_capable: "yes"
+      board_wired: not_applicable
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["otadata", "ota_0", "ota_1", "bootloader rollback state", "Wi-Fi"]
+    constraints:
+      - "current partition table has one factory app and no OTA slots"
+      - "first enablement requires a full USB flash of bootloader, partition table, and application"
+      - "success requires post-reboot identity and health confirmation"
+    conflicts: ["partition-table migration is not a normal application-only OTA operation"]
+    opportunities: ["authenticated wireless development installs", "automatic rollback"]
+    sources: [torget-main-1fad449, esp-idf-5.5-ota, esp32s3-datasheet-2026-08-10]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: not_applicable, source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: esp-idf-5.5-ota}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: soc.ulp
+    name: Ultra-low-power coprocessors
+    states:
+      soc_capable: "yes"
+      board_wired: not_applicable
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["ULP RISC-V", "ULP FSM", "RTC memory", "RTC IO"]
+    constraints: ["wake behavior needs a board power-rail and pin audit"]
+    conflicts: ["display, Wi-Fi, and PMU power states determine achievable system sleep behavior"]
+    opportunities: ["low-power sensing", "scheduled wake", "wake-source handling"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: not_applicable, source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: soc.hardware-crypto-rng
+    name: Hardware cryptography and random-number generation
+    states:
+      soc_capable: "yes"
+      board_wired: not_applicable
+      bsp_support: "yes"
+      firmware_enabled: unknown
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["AES", "SHA", "RSA", "HMAC", "digital signature peripheral", "hardware RNG"]
+    constraints: ["application use and security guarantees require configuration-specific review"]
+    conflicts: ["hardware capability alone does not establish key storage or identity policy"]
+    opportunities: ["TLS acceleration", "hardware-backed identity", "secure random generation"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: not_applicable, source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: soc.adc
+    name: Two 12-bit SAR ADCs
+    states:
+      soc_capable: "yes"
+      board_wired: unknown
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["ADC1", "ADC2", "up to 20 channels"]
+    constraints: ["candidate pins may be occupied, unexposed, or electrically unsuitable"]
+    conflicts: ["any analog input proposal needs a pin, attenuation, calibration, and RF coexistence audit"]
+    opportunities: ["external analog sensors", "diagnostic voltage measurements"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: soc.die-temperature
+    name: On-chip temperature sensor
+    states:
+      soc_capable: "yes"
+      board_wired: not_applicable
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["on-chip temperature sensor"]
+    constraints:
+      - "die temperature is not room temperature"
+      - "readings are affected by chip workload and self-heating"
+    conflicts: ["must not be presented as an ambient-temperature measurement"]
+    opportunities: ["thermal diagnostics", "workload and overheating guardrails"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: board_wired, value: not_applicable, source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: soc.capacitive-touch
+    name: ESP32-S3 capacitive-touch IO
+    states:
+      soc_capable: "yes"
+      board_wired: unknown
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["14 capacitive-touch sensing IOs"]
+    constraints: ["candidate pins may be occupied, unexposed, or electrically unsuitable on this board"]
+    conflicts: ["not the same capability as the board's external CST touch controller"]
+    opportunities: ["additional touch electrodes after schematic and pin audit"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"
+
+  - id: soc.pwm-rmt-twai
+    name: PWM, RMT, and TWAI peripherals
+    states:
+      soc_capable: "yes"
+      board_wired: unknown
+      bsp_support: "yes"
+      firmware_enabled: "no"
+      unit_verified: unknown
+    confidence: source_inspected
+    resources: ["LED PWM", "MCPWM", "RMT TX/RX", "TWAI controller"]
+    constraints: ["each use requires a pin, timing, voltage, and resource-ownership audit"]
+    conflicts: ["candidate GPIOs may already serve display, storage, audio, USB, buttons, or shared buses"]
+    opportunities: ["LED or servo control", "precise pulse protocols", "CAN/TWAI after transceiver audit"]
+    sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]
+    evidence:
+      - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
+      - {field: bsp_support, value: "yes", source: torget-main-1fad449}
+      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
+    last_verified: "2026-08-10"

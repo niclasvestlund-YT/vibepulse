@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,6 +146,33 @@ class RegistryValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "verification"):
             self.load(capability=value)
 
+    def test_verified_capability_must_be_board_wired(self):
+        value = dict(VALID_CAPABILITY)
+        value["states"] = dict(
+            VALID_CAPABILITY["states"], board_wired="unknown",
+        )
+        value["evidence"] = [
+            dict(finding) for finding in VALID_CAPABILITY["evidence"]
+            if finding["field"] != "board_wired"
+        ]
+        with self.assertRaisesRegex(
+                RegistryError, "verified capability must be board_wired"):
+            self.load(capability=value)
+
+    def test_enabled_capability_must_have_software_support(self):
+        value = dict(VALID_CAPABILITY)
+        value["states"] = dict(
+            VALID_CAPABILITY["states"], bsp_support="no",
+        )
+        value["evidence"] = [
+            dict(finding, value="no")
+            if finding["field"] == "bsp_support" else dict(finding)
+            for finding in VALID_CAPABILITY["evidence"]
+        ]
+        with self.assertRaisesRegex(
+                RegistryError, "enabled capability has no software support"):
+            self.load(capability=value)
+
     def test_duplicate_capability_is_rejected(self):
         with self.assertRaisesRegex(RegistryError, "duplicate capability"):
             self.load(capability=[VALID_CAPABILITY, VALID_CAPABILITY])
@@ -272,11 +301,99 @@ class RegistryValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "secret field wifi_password"):
             self.load(unit=bad_unit)
 
+    def test_cli_returns_nonzero_for_invalid_registry_path(self):
+        repo = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, str(repo / "tools/hardware_registry.py"),
+             str(repo / "spec/does-not-exist")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("OK:", result.stdout)
+
 
 class RepositoryRegistryTests(unittest.TestCase):
+    def test_repository_cli_counts_records(self):
+        repo = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, str(repo / "tools/hardware_registry.py"),
+             str(repo / "spec")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "OK: 30 capabilities, 9 sources, 1 units\n",
+        )
+
     def test_repository_registry_loads(self):
         root = Path(__file__).resolve().parents[1] / "spec"
         registry = load_registry(root)
+        expected_capabilities = {
+            "compute.esp32s3r8",
+            "display.amoled",
+            "memory.psram",
+            "touch.controller",
+            "radio.wifi-24",
+            "radio.bluetooth-le",
+            "audio.microphones",
+            "audio.speaker-output",
+            "sensors.imu-qmi8658",
+            "sensors.ambient-light",
+            "power.axp2101",
+            "power.battery-connector",
+            "rtc.pcf85063atl",
+            "storage.microsd",
+            "usb.device",
+            "usb.host",
+            "input.key3",
+            "input.boot-button",
+            "antenna.onboard",
+            "antenna.ipex-mod",
+            "expansion.shared-i2c",
+            "security.secure-boot-v2",
+            "security.flash-encryption",
+            "update.ota-ab-rollback",
+            "soc.ulp",
+            "soc.hardware-crypto-rng",
+            "soc.adc",
+            "soc.die-temperature",
+            "soc.capacitive-touch",
+            "soc.pwm-rmt-twai",
+        }
+        self.assertEqual(set(registry.capabilities), expected_capabilities)
+        self.assertEqual(len(registry.capabilities), 30)
+
+        display = registry.capabilities["display.amoled"]
+        self.assertEqual(
+            {key: display[key] for key in (
+                "width", "height", "color_format", "byte_order", "bus",
+                "bus_mhz",
+            )},
+            {
+                "width": 480,
+                "height": 480,
+                "color_format": "RGB565",
+                "byte_order": "big_endian",
+                "bus": "QSPI",
+                "bus_mhz": 40,
+            },
+        )
+        for capability_id, capability in registry.capabilities.items():
+            evidenced_fields = {
+                finding["field"] for finding in capability["evidence"]
+            }
+            expected_fields = {
+                field for field, value in capability["states"].items()
+                if value != "unknown"
+            }
+            with self.subTest(capability=capability_id):
+                self.assertTrue(expected_fields.issubset(evidenced_fields))
+
         expected_sources = {
             "torget-physical-2026-08-06": (
                 "physical-test", 1,
@@ -318,6 +435,43 @@ class RepositoryRegistryTests(unittest.TestCase):
         self.assertEqual(
             cst9217.get("note"),
             "Legacy stable ID; dependencies.lock pins 2.0.0.",
+        )
+
+        self.assertEqual(
+            registry.capabilities["radio.bluetooth-le"]["states"][
+                "firmware_enabled"
+            ],
+            "no",
+        )
+        self.assertEqual(
+            registry.capabilities["touch.controller"]["states"][
+                "unit_verified"
+            ],
+            "unknown",
+        )
+        self.assertEqual(
+            registry.capabilities["audio.speaker-output"]["states"][
+                "unit_verified"
+            ],
+            "unknown",
+        )
+        self.assertEqual(
+            registry.capabilities["sensors.ambient-light"]["states"][
+                "board_wired"
+            ],
+            "no",
+        )
+        self.assertEqual(
+            registry.capabilities["rtc.pcf85063atl"]["constraints"][0],
+            "battery backup is not physically verified",
+        )
+        self.assertEqual(
+            registry.capabilities["usb.host"]["states"]["soc_capable"],
+            "yes",
+        )
+        self.assertEqual(
+            registry.capabilities["usb.host"]["states"]["board_wired"],
+            "unknown",
         )
 
         self.assertEqual(registry.units["torget-home-01"], {
