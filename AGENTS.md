@@ -69,3 +69,14 @@ targetbygget går igenom. Inte verifierat: flash på glaset.
   (ES7210/ES8311, oanvända). Röst kräver OpenAI Realtime API med egen
   betalning (ChatGPT-prenumeration ger ingen API-åtkomst). Arkitektur:
   kort ↔ websocket ↔ liten server.
+
+## Hardware-aware work
+
+Before proposing external hardware, declaring a device limitation, or designing
+a hardware-dependent feature, read `spec/hardware.md`,
+`spec/hardware-capabilities.yaml`, `spec/hardware-sources.yaml`, and
+`spec/hardware-opportunities.md`. State whether the idea is only
+silicon-capable, board-wired, firmware-enabled, and physically verified on the
+named unit. Mention a relevant unused onboard capability when it materially
+improves the request. Never copy secrets or turn an opportunity into authorized
+implementation work.

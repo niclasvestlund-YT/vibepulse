@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 import tempfile
@@ -439,10 +440,147 @@ class RegistryValidationTests(unittest.TestCase):
 
 
 class RepositoryRegistryTests(unittest.TestCase):
+    CANONICAL_HARDWARE_PATHS = {
+        "spec/hardware.md",
+        "spec/hardware-capabilities.yaml",
+        "spec/hardware-sources.yaml",
+        "spec/hardware-opportunities.md",
+    }
+
     @staticmethod
     def load_repository_registry():
         root = Path(__file__).resolve().parents[1] / "spec"
         return load_registry(root)
+
+    @staticmethod
+    def parse_markdown_table(text, expected_header):
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            cells = tuple(
+                cell.strip() for cell in line.strip().strip("|").split("|")
+            )
+            if cells != expected_header:
+                continue
+            rows = []
+            for row_line in lines[index + 2:]:
+                if not row_line.strip().startswith("|"):
+                    break
+                row = tuple(
+                    cell.strip()
+                    for cell in row_line.strip().strip("|").split("|")
+                )
+                rows.append(row)
+            return rows
+        raise AssertionError(f"Markdown table not found: {expected_header}")
+
+    def test_agent_instructions_route_to_hardware_truth(self):
+        repo = Path(__file__).resolve().parents[1]
+        routed_paths = {}
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            with self.subTest(agent=name):
+                path = repo / name
+                self.assertTrue(path.exists(), f"{name} is absent")
+                text = path.read_text(encoding="utf-8")
+                for hardware_path in self.CANONICAL_HARDWARE_PATHS:
+                    self.assertIn(
+                        hardware_path, text,
+                        f"{name} does not route to {hardware_path}",
+                    )
+                for layer in (
+                        "silicon-capable", "board-wired",
+                        "firmware-enabled", "physically verified"):
+                    self.assertIn(layer, text, f"{name} omits {layer}")
+                routed_paths[name] = set(re.findall(
+                    r"spec/hardware(?:-[a-z]+)*\.(?:md|yaml)", text
+                ))
+                self.assertEqual(
+                    routed_paths[name], self.CANONICAL_HARDWARE_PATHS
+                )
+        if set(routed_paths) == {"AGENTS.md", "CLAUDE.md"}:
+            self.assertEqual(
+                routed_paths["AGENTS.md"], routed_paths["CLAUDE.md"]
+            )
+            self.assertEqual(
+                routed_paths["AGENTS.md"], self.CANONICAL_HARDWARE_PATHS
+            )
+
+    def test_hardware_opportunity_rows_are_complete_and_exact(self):
+        repo = Path(__file__).resolve().parents[1]
+        path = repo / "spec/hardware-opportunities.md"
+        self.assertTrue(path.exists(), "hardware opportunity radar is absent")
+        text = path.read_text(encoding="utf-8")
+        rows = self.parse_markdown_table(
+            text,
+            ("ID", "Status", "Required capabilities",
+             "Physical prerequisite"),
+        )
+        actual = {row[0]: row[1:] for row in rows}
+        self.assertEqual(len(actual), len(rows), "duplicate opportunity ID")
+        self.assertEqual(actual, {
+            "local-ota": (
+                "designed", "Wi-Fi, OTA A/B", "one final USB bootstrap",
+            ),
+            "completion-audio": (
+                "candidate", "ES8311, speaker output",
+                "confirm attached speaker and safe volume",
+            ),
+            "ble-provisioning": (
+                "candidate", "BLE, Wi-Fi", "radio/memory measurement",
+            ),
+            "motion-gestures": (
+                "candidate", "QMI8658",
+                "enclosure false-positive test",
+            ),
+            "battery-mode": (
+                "idea", "AXP2101, battery connector",
+                "cell/polarity/current/thermal verification",
+            ),
+            "rtc-wake": (
+                "idea", "PCF85063ATL, PMU",
+                "verify backup supply and wake path",
+            ),
+            "microsd-history": (
+                "idea", "one-bit SDMMC",
+                "insertion/removal/write-interruption test",
+            ),
+            "native-usb-modes": (
+                "idea", "USB device",
+                "reconcile Buddy and USB debug ownership",
+            ),
+            "voice-controls": (
+                "idea", "microphones, speaker, network",
+                "privacy UI and full-duplex audio test",
+            ),
+        })
+
+    def test_each_hardware_opportunity_records_decision_context(self):
+        repo = Path(__file__).resolve().parents[1]
+        path = repo / "spec/hardware-opportunities.md"
+        self.assertTrue(path.exists(), "hardware opportunity radar is absent")
+        text = path.read_text(encoding="utf-8")
+        rows = self.parse_markdown_table(
+            text,
+            ("ID", "User value", "Relevant conflicts",
+             "Privacy implications", "Why not authorized"),
+        )
+        expected_ids = {
+            "local-ota", "completion-audio", "ble-provisioning",
+            "motion-gestures", "battery-mode", "rtc-wake",
+            "microsd-history", "native-usb-modes", "voice-controls",
+        }
+        self.assertEqual({row[0] for row in rows}, expected_ids)
+        self.assertEqual(len(rows), len(expected_ids), "duplicate detail row")
+        for row in rows:
+            with self.subTest(opportunity=row[0]):
+                self.assertEqual(len(row), 5)
+                self.assertTrue(all(cell for cell in row[1:]))
+                self.assertIn("requires", row[4].lower())
+
+        self.assertIn("Status is descriptive only, not permission", text)
+        for unauthorized_action in (
+                "feature work", "flashing", "fuse changes",
+                "hardware modification"):
+            self.assertIn(unauthorized_action, text)
 
     def test_imu_is_not_claimed_as_physically_verified(self):
         registry = self.load_repository_registry()
