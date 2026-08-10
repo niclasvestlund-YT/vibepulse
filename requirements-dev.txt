@@ -1,0 +1,3 @@
+PyYAML==6.0.3
+Pillow==12.3.0
+zeroconf==0.150.0
