@@ -535,6 +535,104 @@ class RepositoryRegistryTests(unittest.TestCase):
                     routed_paths, self.CANONICAL_HARDWARE_PATHS
                 )
 
+    def test_root_docs_match_registered_app_set(self):
+        repo = Path(__file__).resolve().parents[1]
+        registry_text = (repo / "main/registry.c").read_text(
+            encoding="utf-8"
+        )
+        registry_body = re.search(
+            r"torget_apps\[\]\s*=\s*\{(?P<body>.*?)\};",
+            registry_text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(registry_body)
+        app_pointers = re.findall(
+            r"&([a-z0-9_]+),", registry_body.group("body")
+        )
+        self.assertEqual(len(app_pointers), 3)
+        self.assertEqual(
+            set(app_pointers),
+            {"solelkollen_app", "tokens_app", "vibbe_app"},
+        )
+
+        for name in ("AGENTS.md", "README.md"):
+            with self.subTest(document=name):
+                text = (repo / name).read_text(encoding="utf-8")
+                self.assertRegex(text, r"(?i)\btre (?:registrerade )?appar\b")
+                for app_name in ("Solelkollen", "VibePulse", "Vibbe/Buddy"):
+                    self.assertIn(app_name, text)
+                self.assertIn("~/Buddy/components", text)
+                self.assertIn("spec/hardware-sources.yaml", text)
+
+    def test_root_docs_reject_stale_app_and_imu_claims(self):
+        repo = Path(__file__).resolve().parents[1]
+        for name in ("AGENTS.md", "README.md"):
+            with self.subTest(document=name):
+                text = (repo / name).read_text(encoding="utf-8")
+                self.assertNotRegex(text, r"(?i)\btvå appar\b")
+                self.assertNotRegex(
+                    text, r"(?is)(?:ES7210|ES8311).{0,80}oanvänd"
+                )
+                self.assertNotIn("QMI8658 svarar på **0x6B**", text)
+
+                later = self.extract_markdown_section(
+                    text, "Medvetet SENARE (bygg inte förrän triggern slår)"
+                )
+                self.assertNotRegex(
+                    later, r"(?im)^-\s+\*\*AI-buddyn\*\*|^-\s+AI-buddyn"
+                )
+
+    def test_agents_opening_routes_to_canonical_hardware_section(self):
+        repo = Path(__file__).resolve().parents[1]
+        text = (repo / "AGENTS.md").read_text(encoding="utf-8")
+        opening = text.split("\n## ", 1)[0]
+        self.assertIn("Hardware-aware work", opening)
+        self.assertNotRegex(
+            opening, r"Hårdvarusanningen:\s+\*\*spec/hardware\.md\*\*"
+        )
+
+    def test_root_docs_preserve_imu_api_and_verification_boundaries(self):
+        repo = Path(__file__).resolve().parents[1]
+        for name in ("AGENTS.md", "README.md"):
+            with self.subTest(document=name):
+                text = (repo / name).read_text(encoding="utf-8")
+                normalized = " ".join(text.split())
+                self.assertIn(
+                    "IMU-adress och fysisk verifiering gäller capability "
+                    "`sensors.imu-qmi8658`",
+                    normalized,
+                )
+                self.assertIn("sensors.imu-qmi8658", text)
+                self.assertIn("read_accel_mg", text)
+                self.assertIn("read_accel", text)
+
+    def test_root_docs_keep_existing_buddy_voice_work_non_authorized(self):
+        repo = Path(__file__).resolve().parents[1]
+        for name in ("AGENTS.md", "README.md"):
+            with self.subTest(document=name):
+                text = (repo / name).read_text(encoding="utf-8")
+                normalized = " ".join(text.split())
+                self.assertIn(
+                    "Fysisk mikrofon-/högtalarfunktion är fortfarande "
+                    "overifierad",
+                    normalized,
+                )
+                later = self.extract_markdown_section(
+                    text, "Medvetet SENARE (bygg inte förrän triggern slår)"
+                )
+                self.assertIn("röststyrning", later.lower())
+                self.assertIn("kandidat", later.lower())
+                self.assertIn("inte auktoriserat", later.lower())
+
+        agents_later = self.extract_markdown_section(
+            (repo / "AGENTS.md").read_text(encoding="utf-8"),
+            "Medvetet SENARE (bygg inte förrän triggern slår)",
+        )
+        for capability_id in (
+                "audio.microphones", "audio.speaker-output", "usb.device"):
+            self.assertIn(capability_id, agents_later)
+        self.assertIn("firmware-enabled", agents_later)
+
     def test_readme_documents_reproducible_python_environment(self):
         repo = Path(__file__).resolve().parents[1]
         text = (repo / "README.md").read_text(encoding="utf-8")

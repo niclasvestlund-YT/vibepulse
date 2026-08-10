@@ -6,7 +6,8 @@ firmware-binär som flashas. Appar pluggar in som ESP-IDF-komponenter och kan
 bo i egna repon. En skärm = en binär = ett bygge här. MIT-licens.
 
 Struktur, byggkommandon och hur man skriver en app: **README.md** (läs den
-först). Hårdvarusanningen: **spec/hardware.md**. Designsystemet:
+först). Hårdvarusanningen routas under `Hardware-aware work` nedan; läs den
+kanoniska femfilslistan där före hårdvaruarbete. Designsystemet:
 **spec/ui-spec.md**. Historiken och P-numren: Solceller-repots
 `docs/roadmap-hyllskarmen.md` — P25 + P25-VISION är detta repos
 födelseattest.
@@ -17,14 +18,17 @@ Plattformen kopierades (flyttades inte) från `~/Documents/Solceller/firmware/`
 och stöptes om enligt granskningens tre krav: (1) versionerat appkontrakt
 `torget_app_t` + appregister i main/registry.c som launchern läser;
 (2) nätverk/hämtning bor i varje apps egen komponent (net.c), plattformen
-äger bara WiFi/SNTP/lås/ljus/rotation; (3) MIT-licens. Två appar:
-Solelkollen (datakontraktet mot solelkollen.se oförändrat) och Tokenmätaren
-(Claude Code-användning via tools/tokenserver på Macen, platt JSON över LAN).
+äger bara WiFi/SNTP/lås/ljus/rotation; (3) MIT-licens. Tre appar är
+registrerade: Solelkollen (datakontraktet mot solelkollen.se oförändrat),
+VibePulse (Claude/Codex-användning via tools/tokenserver på Macen, platt JSON
+över LAN) och Vibbe/Buddy från companion-repots build input
+`~/Buddy/components` (exakt källrevision i `spec/hardware-sources.yaml`).
 
 **Solceller-kopian fortsätter driva skärmen tills detta repo bevisat sig med
 en lyckad flash + fysisk verifiering.** Verifierat hittills: hosttesterna
-gröna, simulatorn BMP-dumpar alla vyer + launchern + Tokenmätaren korrekt,
-targetbygget går igenom. Inte verifierat: flash på glaset.
+gröna, simulatorn BMP-dumpar vyer för Solelkollen, VibePulse och Vibbe/Buddy
+samt launchern korrekt, targetbygget går igenom. Inte verifierat: flash på
+glaset.
 
 ## Arbetsregler
 
@@ -36,8 +40,8 @@ targetbygget går igenom. Inte verifierat: flash på glaset.
 - **Kontraktet är heligt.** Bryts torget_app.h eller torget.h bumpas
   TORGET_APP_API_VERSION — launchern hoppar över appar med fel version.
 - **Biblioteksregeln:** skörda vid ANDRA användningen, bygg aldrig i förväg
-  (torget_fmt, torget_ticker, torget_net skördades när Tokenmätaren blev
-  andra användaren — det är mallen).
+  (torget_fmt, torget_ticker, torget_net skördades när VibePulse, då kallad
+  Tokenmätaren, blev andra användaren — det är mallen).
 - **Ärlighetsinvarianten:** aldrig påhittade nollor — utan data visas
   streck; räknare backar aldrig; eSett är AVRÄKNAD el och copyn säger det.
 
@@ -47,8 +51,9 @@ targetbygget går igenom. Inte verifierat: flash på glaset.
   `esp_lv_adapter_lock(-1)` direkt (plattformens torget_ui_lock gör rätt),
   annars heapkorruption och eviga loopar.
 - LVGL 9.5: `lv_span_set_text` ritar INTE om — explicit `lv_spangroup_refresh`.
-- IMU QMI8658 svarar på **0x6B**; komponentens header deklarerar funktioner
-  som inte finns i källan (`read_accel_mg`) — använd `read_accel`.
+- För IMU-adress och fysisk verifiering gäller capability
+  `sensors.imu-qmi8658`; komponentens header deklarerar `read_accel_mg`, som
+  saknas i källan — använd `read_accel`.
 - Rotationskalibrering: SG_QUAD_UP 1, SG_QUAD_DIR -1, trösklar med
   iterationshistorik i rotation.c. Kalibrera fysisk hårdvara med ETT
   strukturerat flerlägestest, aldrig fotoforensik; en konstant per iteration.
@@ -59,16 +64,22 @@ targetbygget går igenom. Inte verifierat: flash på glaset.
 
 ## Medvetet SENARE (bygg inte förrän triggern slår)
 
+Vibbe/Buddy är redan app 3 via companion-inputen `~/Buddy/components`.
+`audio.microphones`, `audio.speaker-output` och `usb.device` är
+firmware-enabled genom det build-inputet; exakt revision och evidens finns i
+`spec/hardware-sources.yaml`. Fysisk mikrofon-/högtalarfunktion är fortfarande
+overifierad.
+
 - WiFi-provisionering + OTA + konfig-UI — trigger: första enheten som lämnar
   huset (kompilerad secrets.h duger inte för sålda enheter; ESP-IDF:s
   wifi_provisioning finns färdig).
 - Responsiv layout för andra Waveshare-storlekar — trigger: andra skärmtypen.
 - Butiks-/paketmaskineri och appar i egna repon via Espressifs registry —
   trigger: bevisad traktion efter open source.
-- **AI-buddyn** (eget repo) — mikrofoner/högtalare finns på kortet
-  (ES7210/ES8311, oanvända). Röst kräver OpenAI Realtime API med egen
-  betalning (ChatGPT-prenumeration ger ingen API-åtkomst). Arkitektur:
-  kort ↔ websocket ↔ liten server.
+- Röststyrning för befintliga Vibbe/Buddy är kandidat/senare tills privacy-UI,
+  fysisk mikrofon-/högtalarverifiering samt full-duplex-, audio- och
+  nätverksvalidering finns. Kandidatstatus är inte auktoriserat arbete;
+  molntjänst och betalningsmodell är separata produktbeslut.
 
 ## Hardware-aware work
 

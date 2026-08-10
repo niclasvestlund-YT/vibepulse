@@ -31,6 +31,8 @@ components/
   torget_ticker/          den lokala tickern, hosttestad
   app_solelkollen/        app 1: fyra vyer, /api/glance + /api/glance-sverige
   app_tokens/             app 2: VibePulse (agentstatus + Claude/Codex-usage)
+~/Buddy/components/
+  app_buddy/              app 3: Vibbe/Buddy, companion build input
 sim/                      SDL-simulatorn: hela plattformen + apparna på Macen
 sim-fixtures/             inspelade API-svar simulatorn och testerna delar
 test/                     hosttester, körs med clang utan ESP-IDF: ./test/run.sh
@@ -38,6 +40,11 @@ tools/tokenserver/        Mac-tjänsten som serverar VibePulse-data över LAN
 spec/                     hardware.md (alla hårdvarufällor) + ui-spec.md (designsystemet)
 third_party/cjson/        vendrad cJSON 1.7.18 — samma parser på Macen som på kortet
 ```
+
+Tre registrerade appar är alltså Solelkollen, VibePulse och Vibbe/Buddy.
+Companion-revisionen och build-relationen för `~/Buddy/components` finns i
+`spec/hardware-sources.yaml`; capability- och enhetsstatus finns i
+`spec/hardware-capabilities.yaml` respektive `spec/device-units.yaml`.
 
 `platform/`, `components/app_*` (utom net.c) och kärnkomponenterna delas
 BYTE-IDENTISKT mellan sim/ och targetet. Det enda som skiljer världarna åt
@@ -86,8 +93,8 @@ Tangent 1-4 väljer Solelkollen-fixtur, T matar om VibePulse-usage, S cyklar
 agentstatus, N växlar app (KEY3-knappens bänkmotsvarighet), L öppnar launchern (långtryck med
 musen fungerar också — det är enhetens gest). På enheten växlar KEY3
 (GPIO18) app med ett tryck.
-En obevakad körning BMP-dumpar alla vyer + launchern + VibePulse till
-/tmp/torget-*.bmp — pixelverifieringens facit.
+En obevakad körning BMP-dumpar vyerna för Solelkollen, VibePulse och
+Vibbe/Buddy samt launchern till /tmp/torget-*.bmp — pixelverifieringens facit.
 
 ## Hosttesterna
 
@@ -127,14 +134,15 @@ kontrakt, integritetsgräns och autostart via launchd.
 
 ## Hårdvarufällorna
 
-Allt som bits står i `spec/hardware.md` och beslutsloggen nedan är ärvd
-därifrån i kortform:
+Översikten finns i `spec/hardware.md`; capability-, source- och unitstatus
+finns i de validerade registren under `spec/`. Fällorna nedan är en kortform:
 
 - `bsp_display_lock()` LJUGER (esp_err_t genom bool, spegelvänt) — tala med
   `esp_lv_adapter_lock(-1)` direkt. Plattformen exponerar `torget_ui_lock()`.
 - LVGL 9.5: `lv_span_set_text` ritar INTE om — `lv_spangroup_refresh` krävs.
-- IMU QMI8658 svarar på **0x6B**; headerns `read_accel_mg` finns inte i
-  källan — använd `read_accel`. Kalibrering: SG_QUAD_UP 1, SG_QUAD_DIR -1.
+- För IMU-adress och fysisk verifiering gäller capability
+  `sensors.imu-qmi8658`; headerns `read_accel_mg` finns inte i källan — använd
+  `read_accel`. Kalibrering: SG_QUAD_UP 1, SG_QUAD_DIR -1.
 - MADCTL och touch roteras ALLTID i samma grepp (rotation.c gör det rätt).
 - S3:an är 2,4 GHz-only; bootskanningen i loggen är facit för vilka nät
   som finns.
@@ -143,8 +151,14 @@ därifrån i kortform:
 
 ## Medvetet SENARE (bygg inte förrän triggern slår)
 
+Vibbe/Buddy är redan app 3 via companion-inputen `~/Buddy/components`.
+`audio.microphones`, `audio.speaker-output` och `usb.device` är
+firmware-enabled i build-inputet. Fysisk mikrofon-/högtalarfunktion är
+fortfarande overifierad.
+
 - WiFi-provisionering + OTA — trigger: första enheten som lämnar huset.
 - Responsiv layout för andra Waveshare-storlekar — trigger: andra skärmtypen.
 - Appbutik/paketmaskineri — trigger: bevisad traktion efter open source.
-- AI-buddyn med röst (kodeken finns på kortet) — eget repo, kort ↔
-  websocket ↔ liten server; Realtime-API med egen betalning.
+- Röststyrning för befintliga Vibbe/Buddy är kandidat/senare i väntan på
+  fysisk mikrofon-/högtalarverifiering, privacy-UI samt full-duplex-, audio-
+  och nätverksvalidering. Kandidatstatus är inte auktoriserat arbete.
