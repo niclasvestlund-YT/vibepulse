@@ -748,7 +748,9 @@ capabilities:
       unit_verified: unknown
     confidence: source_inspected
     resources: ["ADC1", "ADC2", "up to 20 channels"]
-    constraints: ["candidate pins may be occupied, unexposed, or electrically unsuitable"]
+    constraints:
+      - "candidate pins may be occupied, unexposed, or electrically unsuitable"
+      - "ADC2 analog functions cannot be used simultaneously with Wi-Fi"
     conflicts: ["any analog input proposal needs a pin, attenuation, calibration, and RF coexistence audit"]
     opportunities: ["external analog sensors", "diagnostic voltage measurements"]
     sources: [esp32s3-datasheet-2026-08-10, torget-main-1fad449]

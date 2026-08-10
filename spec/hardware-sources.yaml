@@ -9,6 +9,10 @@ sources:
     revision: findings-2026-08-06; unit=torget-home-01
     accessed: "2026-08-10"
     board_revision: unknown
+    unit: torget-home-01
+    tests:
+      - display-lock-gdb-and-panel-operation-2026-08-06
+      - wifi-channel-13-scan-and-connect-2026-08-06
 
   - id: waveshare-schematic-2026-08-10
     kind: schematic
@@ -43,11 +47,16 @@ sources:
   - id: torget-main-1fad449
     kind: source-code
     rank: 3
-    title: Torget firmware source
+    title: Torget firmware build inputs
     publisher: Torget
     locator: .
     revision: 1fad449
     accessed: "2026-08-10"
+    companion_revisions:
+      - repository: Buddy
+        locator: ../Buddy
+        revision: b7002f0101ef220a2b77eb12957e62ce536aa11a
+    note: CMake includes Buddy/components in the Torget firmware build.
 
   - id: waveshare-board-docs-2026-08-10
     kind: vendor-doc

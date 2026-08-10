@@ -16,6 +16,19 @@ VALID_SOURCE = {
     "locator": "test://torget-home-01/display-smoke",
     "revision": "2026-08-06",
     "accessed": "2026-08-10",
+    "unit": "torget-home-01",
+    "tests": ["display-smoke"],
+}
+
+VALID_VENDOR_SOURCE = {
+    "id": "vendor",
+    "kind": "vendor-doc",
+    "rank": 4,
+    "title": "Vendor board documentation",
+    "publisher": "Vendor",
+    "locator": "https://example.test/board",
+    "revision": "2026-08-10",
+    "accessed": "2026-08-10",
 }
 
 VALID_UNIT = {
@@ -145,6 +158,117 @@ class RegistryValidationTests(unittest.TestCase):
         value.pop("verification")
         with self.assertRaisesRegex(RegistryError, "verification"):
             self.load(capability=value)
+
+    def test_evidence_source_must_be_listed_by_capability(self):
+        value = dict(VALID_CAPABILITY)
+        value["evidence"] = [
+            dict(finding, source="vendor")
+            if finding["field"] == "board_wired" else dict(finding)
+            for finding in VALID_CAPABILITY["evidence"]
+        ]
+        with self.assertRaisesRegex(
+                RegistryError, "evidence source vendor not listed in sources"):
+            self.load(
+                capability=value,
+                sources=[VALID_SOURCE, VALID_VENDOR_SOURCE],
+            )
+
+    def conflicting_capability(self, conflicts):
+        value = dict(VALID_CAPABILITY)
+        value["sources"] = ["physical", "vendor"]
+        value["evidence"] = [
+            *[dict(finding) for finding in VALID_CAPABILITY["evidence"]],
+            {
+                "field": "board_wired",
+                "value": "no",
+                "source": "vendor",
+            },
+        ]
+        value["conflicts"] = conflicts
+        return value
+
+    def test_ranked_disagreement_accepts_structured_conflict_metadata(self):
+        value = self.conflicting_capability([{
+            "field": "board_wired",
+            "sources": ["physical", "vendor"],
+        }])
+        registry = self.load(
+            capability=value,
+            sources=[VALID_SOURCE, VALID_VENDOR_SOURCE],
+        )
+        self.assertEqual(
+            registry.capabilities["display.amoled"]["states"]["board_wired"],
+            "yes",
+        )
+
+    def test_ranked_disagreement_requires_structured_conflict_metadata(self):
+        value = self.conflicting_capability([])
+        with self.assertRaisesRegex(
+                RegistryError, "contradictory board_wired evidence"):
+            self.load(
+                capability=value,
+                sources=[VALID_SOURCE, VALID_VENDOR_SOURCE],
+            )
+
+    def test_structured_conflict_metadata_must_match_disagreement(self):
+        bad_conflicts = (
+            {
+                "field": "soc_capable",
+                "sources": ["physical", "vendor"],
+            },
+            {
+                "field": "board_wired",
+                "sources": ["physical"],
+            },
+        )
+        for conflict in bad_conflicts:
+            with self.subTest(conflict=conflict):
+                value = self.conflicting_capability([conflict])
+                with self.assertRaisesRegex(
+                        RegistryError, "structured conflict does not match"):
+                    self.load(
+                        capability=value,
+                        sources=[VALID_SOURCE, VALID_VENDOR_SOURCE],
+                    )
+
+    def test_verification_unit_board_must_match_registry_board(self):
+        unit = dict(VALID_UNIT, board="different-board")
+        with self.assertRaisesRegex(
+                RegistryError, "verification unit board does not match"):
+            self.load(unit=unit)
+
+    def test_unit_verification_requires_matching_physical_test_source(self):
+        evidence = [
+            dict(finding, source="vendor")
+            for finding in VALID_CAPABILITY["evidence"]
+        ]
+        value = dict(
+            VALID_CAPABILITY,
+            sources=["vendor"],
+            evidence=evidence,
+            confidence="vendor_claimed",
+            verification={
+                "unit": "torget-home-01",
+                "test": "arbitrary-label",
+            },
+        )
+        with self.assertRaisesRegex(
+                RegistryError, "matching physical-test source"):
+            self.load(capability=value, sources=[VALID_VENDOR_SOURCE])
+
+    def test_physical_test_source_requires_structured_unit_and_tests(self):
+        invalid_sources = []
+        missing_unit = dict(VALID_SOURCE)
+        missing_unit.pop("unit")
+        invalid_sources.append(missing_unit)
+        invalid_sources.append(dict(VALID_SOURCE, unit="missing-unit"))
+        invalid_sources.append(dict(VALID_SOURCE, tests=[]))
+        invalid_sources.append(dict(VALID_SOURCE, tests=[""]))
+        for source in invalid_sources:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(
+                        RegistryError, "physical-test source"):
+                    self.load(sources=[source])
 
     def test_verified_capability_must_be_board_wired(self):
         value = dict(VALID_CAPABILITY)
@@ -441,6 +565,33 @@ class RepositoryRegistryTests(unittest.TestCase):
             "not room temperature" in constraint.lower()
             for constraint in die_temperature["constraints"]
         ))
+
+    def test_repository_physical_source_has_structured_test_ids(self):
+        registry = self.load_repository_registry()
+        source = registry.sources["torget-physical-2026-08-06"]
+        self.assertEqual(source.get("unit"), "torget-home-01")
+        self.assertEqual(source.get("tests"), [
+            "display-lock-gdb-and-panel-operation-2026-08-06",
+            "wifi-channel-13-scan-and-connect-2026-08-06",
+        ])
+
+    def test_repository_firmware_source_records_buddy_companion(self):
+        registry = self.load_repository_registry()
+        source = registry.sources["torget-main-1fad449"]
+        self.assertEqual(source["revision"], "1fad449")
+        self.assertEqual(source.get("companion_revisions"), [{
+            "repository": "Buddy",
+            "locator": "../Buddy",
+            "revision": "b7002f0101ef220a2b77eb12957e62ce536aa11a",
+        }])
+
+    def test_repository_adc_records_wifi_coexistence_constraint(self):
+        registry = self.load_repository_registry()
+        constraints = " ".join(
+            registry.capabilities["soc.adc"]["constraints"],
+        ).lower()
+        self.assertIn("adc2", constraints)
+        self.assertIn("wi-fi", constraints)
 
     def test_repository_cli_counts_records(self):
         repo = Path(__file__).resolve().parents[1]

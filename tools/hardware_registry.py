@@ -94,6 +94,7 @@ def load_registry(root):
     source_doc = _read(root / "hardware-sources.yaml")
     capability_doc = _read(root / "hardware-capabilities.yaml")
     unit_doc = _read(root / "device-units.yaml")
+    registry_board = capability_doc.get("board")
     sources = _unique(
         _collection(source_doc, "sources", "hardware-sources.yaml"),
         "source",
@@ -117,6 +118,18 @@ def load_registry(root):
         rank = source["rank"]
         if not isinstance(rank, int) or isinstance(rank, bool):
             raise RegistryError(f"source {source_id}: rank must be an integer")
+        if source["kind"] == "physical-test":
+            unit_id = source.get("unit")
+            tests = source.get("tests")
+            if (not isinstance(unit_id, str) or unit_id not in units
+                    or not isinstance(tests, list) or not tests
+                    or any(not isinstance(test, str) or not test.strip()
+                           for test in tests)
+                    or len(set(tests)) != len(tests)):
+                raise RegistryError(
+                    f"physical-test source {source_id}: "
+                    "needs known unit and nonempty unique tests",
+                )
 
     required_unit_keys = {
         "friendly_name", "board", "sku_evidence", "board_revision",
@@ -193,6 +206,62 @@ def load_registry(root):
                 raise RegistryError(
                     f"{capability_id}: invalid evidence source {source_id}",
                 )
+            if source_id not in capability["sources"]:
+                raise RegistryError(
+                    f"{capability_id}: evidence source {source_id} "
+                    "not listed in sources",
+                )
+
+        structured_conflicts = []
+        for conflict in capability["conflicts"]:
+            if isinstance(conflict, str):
+                continue
+            if not isinstance(conflict, dict):
+                raise RegistryError(
+                    f"{capability_id}: conflict must be prose or a mapping",
+                )
+            field = conflict.get("field")
+            conflict_sources = conflict.get("sources")
+            if (not isinstance(field, str) or field not in STATE_KEYS
+                    or not isinstance(conflict_sources, list)
+                    or not conflict_sources
+                    or any(not isinstance(source_id, str)
+                           or source_id not in capability["sources"]
+                           for source_id in conflict_sources)
+                    or len(set(conflict_sources)) != len(conflict_sources)):
+                raise RegistryError(
+                    f"{capability_id}: invalid structured conflict",
+                )
+            structured_conflicts.append(conflict)
+
+        disagreements = {}
+        for field in STATE_KEYS:
+            field_evidence = [
+                finding for finding in capability["evidence"]
+                if finding["field"] == field
+            ]
+            if len({finding["value"] for finding in field_evidence}) > 1:
+                disagreements[field] = {
+                    finding["source"] for finding in field_evidence
+                }
+        for conflict in structured_conflicts:
+            expected_sources = disagreements.get(conflict["field"])
+            if (expected_sources is None
+                    or set(conflict["sources"]) != expected_sources):
+                raise RegistryError(
+                    f"{capability_id}: structured conflict does not match "
+                    "ranked evidence",
+                )
+        for field, evidence_sources in disagreements.items():
+            if not any(
+                    conflict["field"] == field
+                    and set(conflict["sources"]) == evidence_sources
+                    for conflict in structured_conflicts):
+                raise RegistryError(
+                    f"{capability_id}: contradictory {field} evidence "
+                    "needs structured conflict metadata",
+                )
+
         for field in STATE_KEYS:
             evidence = [item for item in capability["evidence"]
                         if item.get("field") == field]
@@ -215,6 +284,24 @@ def load_registry(root):
                     or not isinstance(test, str) or not test.strip()):
                 raise RegistryError(
                     f"{capability_id}: verification needs known unit and test",
+                )
+            if units[unit_id]["board"] != registry_board:
+                raise RegistryError(
+                    f"{capability_id}: verification unit board does not match "
+                    "registry board",
+                )
+            matching_physical_source = any(
+                finding["field"] == "unit_verified"
+                and finding["value"] == "yes"
+                and sources[finding["source"]]["kind"] == "physical-test"
+                and sources[finding["source"]]["unit"] == unit_id
+                and test in sources[finding["source"]]["tests"]
+                for finding in capability["evidence"]
+            )
+            if not matching_physical_source:
+                raise RegistryError(
+                    f"{capability_id}: verification needs matching "
+                    "physical-test source",
                 )
 
     return HardwareRegistry(sources=sources, capabilities=capabilities, units=units)
