@@ -4,6 +4,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const MIN_TEXT_ROW_STEP = 26;
 const MIN_SECTION_GAP = 8;
 const MIN_QUOTA_TO_PERCENT_STEP = 28;
+const PERCENT_FONT_PX = 164;
 const PERCENT_RENDERED_LINE_HEIGHT = 119;
 // Browser SVG and LVGL use different font rasterizers. These measured offsets
 // align visible IBM Plex Sans ink with the LVGL simulator without changing the
@@ -121,6 +122,7 @@ function heroIsServerValid(hero, width, height) {
       || hero.contentWidth !== width - 2 * hero.safeX
       || hero.contentWidth < 1 || hero.contentWidth > width
       || hero.percentFontPx < 1 || hero.percentFontPx > height
+      || hero.percentFontPx !== PERCENT_FONT_PX
       || hero.barHeight < 12 || hero.barHeight > 24
       || hero.statusHeight < 1 || hero.statusHeight > height) {
     return false;

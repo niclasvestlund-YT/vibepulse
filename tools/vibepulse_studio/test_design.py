@@ -107,6 +107,15 @@ class DesignTests(unittest.TestCase):
                 with self.assertRaisesRegex(DesignError, message):
                     validate_design(design, self.display)
 
+    def test_percent_font_is_locked_to_generated_raster(self):
+        for value in (163, 165):
+            with self.subTest(value=value):
+                design = copy.deepcopy(self.design)
+                design["hero"]["percentFontPx"] = value
+                with self.assertRaisesRegex(
+                        DesignError, "percentFontPx.*164"):
+                    validate_design(design, self.display)
+
     def test_geometry_rejects_equal_or_overlapping_sections(self):
         cases = (
             ({"providerY": 86}, "reading order"),

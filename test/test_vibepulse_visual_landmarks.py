@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -13,6 +14,19 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LAYOUT_HEADER = ROOT / "components/app_tokens/vibepulse_layout.generated.h"
+
+
+def layout_token(name):
+    content = LAYOUT_HEADER.read_text(encoding="utf-8")
+    match = re.search(rf"^#define {re.escape(name)} (\d+)$", content, re.MULTILINE)
+    if match is None:
+        raise AssertionError(f"missing generated layout token {name}")
+    return int(match.group(1))
+
+
+BAR_SOLID_CENTER_Y = layout_token("VP_BAR_Y") + layout_token("VP_BAR_H") // 2
+
 EXPECTED = {
     "torget-vibepulse-claude-fable.bmp",
     "torget-vibepulse-claude-all.bmp",
@@ -80,7 +94,10 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         for name, accent in cases:
             with self.subTest(name=name):
                 image = self.image(name)
-                row = [image.getpixel((x, 314)) for x in range(480)]
+                row = [
+                    image.getpixel((x, BAR_SOLID_CENTER_Y))
+                    for x in range(480)
+                ]
                 colored = [x for x, pixel in enumerate(row) if pixel == accent]
                 self.assertTrue(colored)
                 self.assertEqual(colored[0], 22)
@@ -100,7 +117,10 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 image = self.image(name)
-                row = [image.getpixel((x, 314)) for x in range(22, 458)]
+                row = [
+                    image.getpixel((x, BAR_SOLID_CENTER_Y))
+                    for x in range(22, 458)
+                ]
                 self.assertEqual(set(row), {(48, 50, 56)})
 
 

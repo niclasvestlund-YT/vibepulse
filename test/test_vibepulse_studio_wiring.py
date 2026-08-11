@@ -214,6 +214,11 @@ class StudioWiringTests(unittest.TestCase):
         self.assertIn("const MIN_SECTION_GAP = 8", self.js)
         self.assertIn("const MIN_QUOTA_TO_PERCENT_STEP = 28", self.js)
         self.assertIn("const PERCENT_RENDERED_LINE_HEIGHT = 119", self.js)
+        self.assertIn("const PERCENT_FONT_PX = 164", self.js)
+        self.assertIn(
+            "hero.percentFontPx !== PERCENT_FONT_PX",
+            self.js,
+        )
         self.assertRegex(self.js, r"contentWidth\s*=\s*width\s*-\s*2\s*\*")
 
     def test_svg_text_uses_named_lvgl_metric_offsets(self):
@@ -358,6 +363,22 @@ class StudioWiringTests(unittest.TestCase):
         """)
         self.assertFalse(result["renderedOverlap"])
         self.assertFalse(result["quotaOverlap"])
+
+    @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
+    def test_browser_contract_locks_percent_font_to_generated_raster(self):
+        hero = self.design["hero"]
+        result = self.evaluate_javascript(f"""
+          (() => ({{
+            smaller: heroIsServerValid(
+              {{...{json.dumps(hero)}, percentFontPx: 163}}, 480, 480
+            ),
+            larger: heroIsServerValid(
+              {{...{json.dumps(hero)}, percentFontPx: 165}}, 480, 480
+            )
+          }}))()
+        """)
+        self.assertFalse(result["smaller"])
+        self.assertFalse(result["larger"])
 
     @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
     def test_operation_lock_covers_every_mutator_and_snapshots_export_name(self):

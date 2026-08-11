@@ -68,6 +68,7 @@ RGB_COLOR = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 MIN_TEXT_ROW_HEIGHT_PX = 18
 MIN_SECTION_GAP_PX = 8
 MIN_TEXT_ROW_STEP_PX = MIN_TEXT_ROW_HEIGHT_PX + MIN_SECTION_GAP_PX
+PERCENT_FONT_PX = 164
 PERCENT_RENDERED_LINE_HEIGHT_PX = 119
 # The real LVGL raster is authoritative: the 21 px quota row needs enough
 # room for its visible glyphs plus an optical gutter before the 164 px hero.
@@ -145,6 +146,10 @@ def _validate_hero(hero, width, height):
             or hero["barY"] + hero["barHeight"] > height
             or hero["statusY"] + hero["statusHeight"] > height):
         raise DesignError("hero geometry must remain on screen")
+    if hero["percentFontPx"] != PERCENT_FONT_PX:
+        raise DesignError(
+            "percentFontPx must remain 164 for the plex_num_164 raster",
+        )
     if hero["providerY"] + MIN_TEXT_ROW_STEP_PX > hero["quotaY"]:
         raise DesignError(
             "provider row must finish before quota in visual reading order",
