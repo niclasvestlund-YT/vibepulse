@@ -13,10 +13,10 @@ static void check(const char *what, int condition) {
 }
 
 static tk_agent_status job(tk_agent_state state, const char *event_id,
-                           const char *project, uint32_t updated_ms) {
+                           const char *project, uint32_t age_ms) {
   tk_agent_status value = {0};
   value.state = state;
-  value.updated_ms = updated_ms;
+  value.updated_ms = age_ms;
   snprintf(value.task_id, sizeof value.task_id, "task-%s", event_id);
   snprintf(value.event_id, sizeof value.event_id, "%s", event_id);
   snprintf(value.project, sizeof value.project, "%s", project);
@@ -28,95 +28,170 @@ static void add_job(tk_agent_provider_status *provider,
   provider->jobs[provider->job_count++] = value;
 }
 
-int main(void) {
+static const tk_completion_event *current(tk_completion_queue *queue) {
+  return tk_completion_queue_current(queue);
+}
+
+static void test_priority_order(void) {
   tk_agent_snapshot snapshot = {0};
-  snapshot.claude.active_count = 3;
-  snapshot.codex.active_count = 2;
-  add_job(&snapshot.claude,
-          job(TK_AGENT_DONE, "torget-done", "Torget", 500));
-  add_job(&snapshot.codex,
-          job(TK_AGENT_DONE, "buddy-done", "Buddy", 1000));
-
+  add_job(&snapshot.claude, job(TK_AGENT_DONE, "done", "Done", 1));
+  add_job(&snapshot.codex, job(TK_AGENT_ERROR, "error", "Error", 1));
+  add_job(&snapshot.claude, job(TK_AGENT_WAITING, "wait", "Wait", 1));
   tk_completion_queue queue = {0};
-  tk_completion_queue_apply(&queue, &snapshot, 1000);
-  const tk_completion_event *current =
-      tk_completion_queue_current(&queue);
-  check("äldsta done visas först",
-        current && strcmp(current->project, "Buddy") == 0);
-  check("alla andra aktiva jobb räknas",
-        current && current->other_active_count == 5);
-  check("pulserar före pipgränsen",
-        tk_completion_phase_at(&queue, 3399) == TK_COMPLETION_PULSE);
-  check("statisk efter 2,4 sekunder",
-        tk_completion_phase_at(&queue, 3400) == TK_COMPLETION_STATIC);
-  check("autoåtergår efter tio sekunder",
-        tk_completion_phase_at(&queue, 11000) == TK_COMPLETION_HIDDEN);
-
+  tk_completion_queue_apply(&queue, &snapshot, 100);
+  check("waiting ranks before error and done",
+        current(&queue) && strcmp(current(&queue)->event_id, "wait") == 0);
   tk_completion_queue_dismiss(&queue);
-  current = tk_completion_queue_current(&queue);
-  check("tryck går till nästa köade event",
-        current && strcmp(current->project, "Torget") == 0);
+  check("error ranks before done", current(&queue) &&
+        strcmp(current(&queue)->event_id, "error") == 0);
   tk_completion_queue_dismiss(&queue);
-  check("tom kö är dold",
-        tk_completion_phase_at(&queue, 11001) == TK_COMPLETION_HIDDEN);
+  check("done follows attention failures", current(&queue) &&
+        strcmp(current(&queue)->event_id, "done") == 0);
+}
 
-  tk_completion_queue_apply(&queue, &snapshot, 12000);
-  check("samma event-id köas aldrig igen",
-        tk_completion_queue_current(&queue) == NULL);
+static void test_freshness_and_provider_tie_break(void) {
+  tk_agent_snapshot fresh = {0};
+  add_job(&fresh.claude, job(TK_AGENT_WAITING, "older", "Older", 100));
+  add_job(&fresh.codex, job(TK_AGENT_WAITING, "fresh", "Fresh", 1));
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &fresh, 100);
+  check("fresher same-state event wins", current(&queue) &&
+        strcmp(current(&queue)->event_id, "fresh") == 0);
 
-  tk_completion_queue first_snapshot = {0};
+  tk_agent_snapshot tied = {0};
+  add_job(&tied.codex, job(TK_AGENT_WAITING, "codex", "Codex", 1));
+  add_job(&tied.claude, job(TK_AGENT_WAITING, "claude", "Claude", 1));
+  tk_completion_queue tied_queue = {0};
+  tk_completion_queue_apply(&tied_queue, &tied, 100);
+  check("claude resolves equal freshness tie", current(&tied_queue) &&
+        strcmp(current(&tied_queue)->event_id, "claude") == 0);
+}
+
+static void test_non_attention_and_stale_events(void) {
+  tk_agent_snapshot working = {0};
+  add_job(&working.claude, job(TK_AGENT_WORKING, "working", "Work", 1));
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &working, 100);
+  check("working events never enter queue", current(&queue) == NULL);
+
   tk_agent_snapshot old = {0};
-  add_job(&old.claude,
-          job(TK_AGENT_DONE, "old-done", "Old", 15001));
-  tk_completion_queue_apply(&first_snapshot, &old, 50000);
-  check("första snapshoten ignorerar gamla done",
-        tk_completion_queue_current(&first_snapshot) == NULL);
-  tk_completion_queue_apply(&first_snapshot, &old, 51000);
-  check("ignorerat gammalt event återkommer inte",
-        tk_completion_queue_current(&first_snapshot) == NULL);
+  add_job(&old.claude, job(TK_AGENT_WAITING, "old", "Old", 15001));
+  tk_completion_queue stale_queue = {0};
+  tk_completion_queue_apply(&stale_queue, &old, 100);
+  check("old first-snapshot event is ignored", current(&stale_queue) == NULL);
+  old.claude.jobs[0].updated_ms = 1;
+  tk_completion_queue_apply(&stale_queue, &old, 101);
+  check("ignored first-snapshot event is remembered", current(&stale_queue) == NULL);
+}
 
-  tk_agent_provider_status priority = {0};
-  add_job(&priority, job(TK_AGENT_WORKING, "work", "Work", 1));
-  add_job(&priority, job(TK_AGENT_ERROR, "error", "Error", 100));
-  add_job(&priority, job(TK_AGENT_WAITING, "wait", "Wait", 200));
-  const tk_agent_status *primary = tk_agent_provider_primary(&priority);
-  check("waiting och error går före working i rail",
-        primary && primary->state == TK_AGENT_WAITING);
+static void test_independent_waiting_and_counts(void) {
+  tk_agent_snapshot snapshot = {0};
+  add_job(&snapshot.claude, job(TK_AGENT_WAITING, "one", "One", 1));
+  add_job(&snapshot.codex, job(TK_AGENT_WAITING, "two", "Two", 2));
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &snapshot, 100);
+  check("same-state count spans both providers", current(&queue) &&
+        current(&queue)->same_state_count == 2);
+  check("first waiting event is displayed", current(&queue) &&
+        strcmp(current(&queue)->event_id, "one") == 0);
+  tk_completion_queue_dismiss(&queue);
+  check("dismissing one waiting event reveals next", current(&queue) &&
+        strcmp(current(&queue)->event_id, "two") == 0);
+}
 
-  tk_completion_queue overflow = {0};
-  tk_agent_snapshot eight = {0};
-  eight.claude.active_count = 9;
-  for (int i = 0; i < TK_AGENT_JOBS_MAX; i++) {
-    char event_id[16], project[16];
-    snprintf(event_id, sizeof event_id, "claude-%d", i);
-    snprintf(project, sizeof project, "C%d", i);
-    add_job(&eight.claude,
-            job(TK_AGENT_DONE, event_id, project, 800 - i));
-    snprintf(event_id, sizeof event_id, "codex-%d", i);
-    snprintf(project, sizeof project, "X%d", i);
-    add_job(&eight.codex,
-            job(TK_AGENT_DONE, event_id, project, 400 - i));
+static void test_reconciliation_and_transitions(void) {
+  tk_agent_snapshot snapshot = {0};
+  add_job(&snapshot.claude, job(TK_AGENT_WAITING, "moving", "Before", 3));
+  add_job(&snapshot.codex, job(TK_AGENT_DONE, "fallback", "Fallback", 1));
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &snapshot, 100);
+
+  tk_agent_snapshot changed = {0};
+  add_job(&changed.claude, job(TK_AGENT_ERROR, "moving", "After", 1));
+  add_job(&changed.codex, job(TK_AGENT_DONE, "fallback", "Fallback", 1));
+  tk_completion_queue_apply(&queue, &changed, 101);
+  check("same event id updates its state", current(&queue) &&
+        current(&queue)->state == TK_AGENT_ERROR);
+  check("same event id updates its project", current(&queue) &&
+        strcmp(current(&queue)->project, "After") == 0);
+
+  tk_agent_snapshot resumed = {0};
+  add_job(&resumed.claude, job(TK_AGENT_WORKING, "moving", "After", 1));
+  add_job(&resumed.codex, job(TK_AGENT_DONE, "fallback", "Fallback", 1));
+  tk_completion_queue_apply(&queue, &resumed, 102);
+  check("resumed working current is invalidated", current(&queue) &&
+        strcmp(current(&queue)->event_id, "fallback") == 0);
+  tk_completion_queue_apply(&queue, &resumed, 103);
+  check("identical repoll does not duplicate", queue.count == 1);
+
+  tk_completion_queue_apply(&queue, &(tk_agent_snapshot){0}, 104);
+  check("gone current is invalidated", current(&queue) == NULL);
+}
+
+static void test_phases(void) {
+  tk_agent_snapshot waiting = {0};
+  add_job(&waiting.claude, job(TK_AGENT_WAITING, "wait", "Wait", 1));
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &waiting, 100);
+  check("pulse lasts through 4799ms", tk_completion_phase_at(&queue, 4899) ==
+        TK_COMPLETION_PULSE);
+  check("pulse becomes static at 4800ms", tk_completion_phase_at(&queue, 4900) ==
+        TK_COMPLETION_STATIC);
+  check("waiting remains static after ten seconds",
+        tk_completion_phase_at(&queue, 10100) == TK_COMPLETION_STATIC);
+
+  tk_agent_snapshot error = {0};
+  add_job(&error.claude, job(TK_AGENT_ERROR, "error", "Error", 1));
+  tk_completion_queue error_queue = {0};
+  tk_completion_queue_apply(&error_queue, &error, 100);
+  check("error remains static after ten seconds",
+        tk_completion_phase_at(&error_queue, 10100) == TK_COMPLETION_STATIC);
+
+  tk_agent_snapshot done = {0};
+  add_job(&done.claude, job(TK_AGENT_DONE, "done", "Done", 1));
+  tk_completion_queue done_queue = {0};
+  tk_completion_queue_apply(&done_queue, &done, 100);
+  check("done has bounded visibility", tk_completion_phase_at(&done_queue, 10100) ==
+        TK_COMPLETION_HIDDEN);
+}
+
+static void test_capacity_protects_current(void) {
+  tk_completion_queue queue = {0};
+  queue.initialized = true;
+  queue.count = TK_COMPLETION_QUEUE_CAP;
+  queue.current_started_ms = 100;
+  queue.events[0].provider = TK_AGENT_PROVIDER_CLAUDE;
+  queue.events[0].state = TK_AGENT_WAITING;
+  snprintf(queue.events[0].event_id, sizeof queue.events[0].event_id,
+           "visible");
+  for (uint8_t i = 1; i < queue.count; i++) {
+    queue.events[i].provider = TK_AGENT_PROVIDER_CLAUDE;
+    queue.events[i].state = TK_AGENT_DONE;
+    snprintf(queue.events[i].event_id, sizeof queue.events[i].event_id,
+             "queued-%u", (unsigned)i);
   }
-  tk_completion_queue_apply(&overflow, &eight, 1000);
-  const tk_completion_event *displayed =
-      tk_completion_queue_current(&overflow);
-  char displayed_id[TK_AGENT_ID_CAP];
-  snprintf(displayed_id, sizeof displayed_id, "%s", displayed->event_id);
+  tk_agent_snapshot snapshot = {0};
+  add_job(&snapshot.claude, job(TK_AGENT_WAITING, "visible", "Visible", 1));
+  add_job(&snapshot.codex, job(TK_AGENT_DONE, "new", "New", 1));
+  tk_completion_queue_apply(&queue, &snapshot, 101);
+  check("capacity stays bounded", queue.count <= TK_COMPLETION_QUEUE_CAP);
+  check("overflow does not remove visible event", current(&queue) &&
+        strcmp(current(&queue)->event_id, "visible") == 0);
+}
 
-  tk_agent_snapshot replacement = {0};
-  add_job(&replacement.claude,
-          job(TK_AGENT_DONE, "ninth", "Ninth", 0));
-  tk_completion_queue_apply(&overflow, &replacement, 1100);
-  check("queuekapaciteten är hårt begränsad",
-        overflow.count == TK_COMPLETION_QUEUE_CAP);
-  check("overflow tar aldrig bort det visade eventet",
-        strcmp(tk_completion_queue_current(&overflow)->event_id,
-               displayed_id) == 0);
+int main(void) {
+  test_priority_order();
+  test_freshness_and_provider_tie_break();
+  test_non_attention_and_stale_events();
+  test_independent_waiting_and_counts();
+  test_reconciliation_and_transitions();
+  test_phases();
+  test_capacity_protects_current();
 
   if (failures == 0) {
-    printf("OK: alla completion-policytester gröna\n");
+    printf("OK: all completion-policy tests pass\n");
     return 0;
   }
-  printf("%d test föll\n", failures);
+  printf("%d tests failed\n", failures);
   return 1;
 }

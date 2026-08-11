@@ -6,17 +6,38 @@
 typedef struct {
   const tk_agent_status *job;
   int provider;
+  uint8_t job_order;
 } completion_candidate;
 
-static bool seen(const tk_completion_queue *queue, const char *event_id) {
+static bool is_attention_state(tk_agent_state state) {
+  return state == TK_AGENT_WAITING || state == TK_AGENT_ERROR ||
+         state == TK_AGENT_DONE;
+}
+
+static int state_priority(tk_agent_state state) {
+  if (state == TK_AGENT_WAITING) return 3;
+  if (state == TK_AGENT_ERROR) return 2;
+  if (state == TK_AGENT_DONE) return 1;
+  return 0;
+}
+
+static bool same_event(int provider, const char *event_id,
+                       int other_provider, const char *other_event_id) {
+  return provider == other_provider && strcmp(event_id, other_event_id) == 0;
+}
+
+static bool seen(const tk_completion_queue *queue, int provider,
+                 const char *event_id) {
   for (uint8_t i = 0; i < queue->seen_count; i++) {
-    if (strcmp(queue->seen_ids[i], event_id) == 0) return true;
+    if (same_event(provider, event_id, queue->seen_providers[i],
+                   queue->seen_ids[i])) return true;
   }
   return false;
 }
 
-static void remember(tk_completion_queue *queue, const char *event_id) {
-  if (!event_id[0] || seen(queue, event_id)) return;
+static void remember(tk_completion_queue *queue, int provider,
+                     const char *event_id) {
+  if (!event_id[0] || seen(queue, provider, event_id)) return;
   uint8_t slot;
   if (queue->seen_count < TK_COMPLETION_SEEN_CAP) {
     slot = queue->seen_count++;
@@ -25,6 +46,7 @@ static void remember(tk_completion_queue *queue, const char *event_id) {
     queue->seen_next =
         (uint8_t)((queue->seen_next + 1U) % TK_COMPLETION_SEEN_CAP);
   }
+  queue->seen_providers[slot] = provider;
   snprintf(queue->seen_ids[slot], sizeof queue->seen_ids[slot], "%s",
            event_id);
 }
@@ -35,30 +57,67 @@ static uint8_t total_active(const tk_agent_snapshot *snapshot) {
   return total > UINT8_MAX ? UINT8_MAX : (uint8_t)total;
 }
 
-static void drop_oldest_pending(tk_completion_queue *queue) {
-  if (queue->count < 2) return;
-  memmove(&queue->events[1], &queue->events[2],
-          (size_t)(queue->count - 2) * sizeof queue->events[0]);
-  queue->count--;
+static uint8_t same_state_count(const tk_agent_snapshot *snapshot,
+                                tk_agent_state state) {
+  uint16_t count = 0;
+  const tk_agent_provider_status *providers[TK_AGENT_PROVIDER_COUNT] = {
+      &snapshot->claude,
+      &snapshot->codex,
+  };
+  for (int provider = 0; provider < TK_AGENT_PROVIDER_COUNT; provider++) {
+    for (uint8_t i = 0; i < providers[provider]->job_count; i++) {
+      const tk_agent_status *job = &providers[provider]->jobs[i];
+      if (job->event_id[0] && job->state == state) count++;
+    }
+  }
+  return count > UINT8_MAX ? UINT8_MAX : (uint8_t)count;
 }
 
-static void append_candidate(tk_completion_queue *queue,
-                             const completion_candidate *candidate,
-                             uint8_t other_active_count, uint64_t now_ms) {
-  if (queue->count == TK_COMPLETION_QUEUE_CAP) {
-    drop_oldest_pending(queue);
+static bool candidate_precedes(const completion_candidate *left,
+                               const completion_candidate *right) {
+  int left_priority = state_priority(left->job->state);
+  int right_priority = state_priority(right->job->state);
+  if (left_priority != right_priority) return left_priority > right_priority;
+  if (left->job->updated_ms != right->job->updated_ms) {
+    return left->job->updated_ms < right->job->updated_ms;
   }
-  if (queue->count == TK_COMPLETION_QUEUE_CAP) return;
-  bool was_empty = queue->count == 0;
-  tk_completion_event *event = &queue->events[queue->count++];
+  if (left->provider != right->provider) return left->provider < right->provider;
+  if (left->job_order != right->job_order) return left->job_order < right->job_order;
+  return strcmp(left->job->event_id, right->job->event_id) < 0;
+}
+
+static bool queue_contains(const tk_completion_queue *queue, int provider,
+                           const char *event_id) {
+  for (uint8_t i = 0; i < queue->count; i++) {
+    if (same_event(provider, event_id, queue->events[i].provider,
+                   queue->events[i].event_id)) return true;
+  }
+  return false;
+}
+
+static bool candidate_contains(const completion_candidate *candidates,
+                               size_t count, int provider,
+                               const char *event_id) {
+  for (size_t i = 0; i < count; i++) {
+    if (same_event(provider, event_id, candidates[i].provider,
+                   candidates[i].job->event_id)) return true;
+  }
+  return false;
+}
+
+static void copy_event(tk_completion_event *event,
+                       const completion_candidate *candidate,
+                       uint8_t active_count, uint8_t state_count) {
   memset(event, 0, sizeof *event);
   event->provider = candidate->provider;
-  event->other_active_count = other_active_count;
+  event->state = candidate->job->state;
+  event->same_state_count = state_count;
+  event->other_active_count = active_count;
+  event->updated_ms = candidate->job->updated_ms;
   snprintf(event->event_id, sizeof event->event_id, "%s",
            candidate->job->event_id);
   snprintf(event->project, sizeof event->project, "%s",
            candidate->job->project);
-  if (was_empty) queue->current_started_ms = now_ms;
 }
 
 void tk_completion_queue_apply(tk_completion_queue *queue,
@@ -66,8 +125,14 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
                                uint64_t now_ms) {
   if (!queue || !snapshot) return;
   bool first_snapshot = !queue->initialized;
+  char previous_id[TK_AGENT_ID_CAP] = {0};
+  int previous_provider = -1;
+  if (queue->count) {
+    previous_provider = queue->events[0].provider;
+    snprintf(previous_id, sizeof previous_id, "%s", queue->events[0].event_id);
+  }
   queue->initialized = true;
-  queue->last_now_ms = now_ms;
+  if (now_ms >= queue->last_now_ms) queue->last_now_ms = now_ms;
 
   completion_candidate candidates[TK_AGENT_PROVIDER_COUNT *
                                   TK_AGENT_JOBS_MAX];
@@ -79,18 +144,22 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
   for (int provider = 0; provider < TK_AGENT_PROVIDER_COUNT; provider++) {
     for (uint8_t i = 0; i < providers[provider]->job_count; i++) {
       const tk_agent_status *job = &providers[provider]->jobs[i];
-      if (job->state != TK_AGENT_DONE || !job->event_id[0] ||
-          seen(queue, job->event_id)) {
+      if (!job->event_id[0] || !is_attention_state(job->state) ||
+          candidate_contains(candidates, candidate_count, provider,
+                             job->event_id)) {
         continue;
       }
-      remember(queue, job->event_id);
-      if (first_snapshot &&
+      bool already_queued = queue_contains(queue, provider, job->event_id);
+      if (!already_queued && seen(queue, provider, job->event_id)) continue;
+      if (!already_queued) remember(queue, provider, job->event_id);
+      if (!already_queued && first_snapshot &&
           job->updated_ms > TK_COMPLETION_INITIAL_MAX_AGE_MS) {
         continue;
       }
       candidates[candidate_count++] = (completion_candidate){
           .job = job,
           .provider = provider,
+          .job_order = i,
       };
     }
   }
@@ -98,22 +167,33 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
   for (size_t i = 1; i < candidate_count; i++) {
     completion_candidate candidate = candidates[i];
     size_t position = i;
-    while (position > 0) {
-      completion_candidate previous = candidates[position - 1];
-      bool comes_first =
-          candidate.job->updated_ms > previous.job->updated_ms ||
-          (candidate.job->updated_ms == previous.job->updated_ms &&
-           candidate.provider < previous.provider);
-      if (!comes_first) break;
-      candidates[position] = previous;
+    while (position > 0 && candidate_precedes(&candidate,
+                                               &candidates[position - 1])) {
+      candidates[position] = candidates[position - 1];
       position--;
     }
     candidates[position] = candidate;
   }
 
+  /* Each fresh snapshot is the source of truth.  Sorting the reconciled list
+   * intentionally lets a newly arrived WAITING or ERROR event supersede a
+   * visible DONE event; the displaced event remains queued when still present.
+   */
+  tk_completion_event reconciled[TK_COMPLETION_QUEUE_CAP] = {0};
   uint8_t active_count = total_active(snapshot);
-  for (size_t i = 0; i < candidate_count; i++) {
-    append_candidate(queue, &candidates[i], active_count, now_ms);
+  size_t kept = candidate_count < TK_COMPLETION_QUEUE_CAP
+                    ? candidate_count : TK_COMPLETION_QUEUE_CAP;
+  for (size_t i = 0; i < kept; i++) {
+    copy_event(&reconciled[i], &candidates[i], active_count,
+               same_state_count(snapshot, candidates[i].job->state));
+  }
+  memcpy(queue->events, reconciled, sizeof reconciled);
+  queue->count = (uint8_t)kept;
+
+  if (queue->count &&
+      !same_event(previous_provider, previous_id, queue->events[0].provider,
+                  queue->events[0].event_id)) {
+    queue->current_started_ms = queue->last_now_ms;
   }
 }
 
@@ -125,11 +205,14 @@ const tk_completion_event *tk_completion_queue_current(
 tk_completion_phase tk_completion_phase_at(tk_completion_queue *queue,
                                             uint64_t now_ms) {
   if (!queue || !queue->count) return TK_COMPLETION_HIDDEN;
-  queue->last_now_ms = now_ms;
+  if (now_ms >= queue->last_now_ms) queue->last_now_ms = now_ms;
   uint64_t elapsed = now_ms >= queue->current_started_ms
                          ? now_ms - queue->current_started_ms : 0;
   if (elapsed < TK_COMPLETION_PULSE_MS) return TK_COMPLETION_PULSE;
-  if (elapsed < TK_COMPLETION_VISIBLE_MS) return TK_COMPLETION_STATIC;
+  if (queue->events[0].state != TK_AGENT_DONE ||
+      elapsed < TK_COMPLETION_VISIBLE_MS) {
+    return TK_COMPLETION_STATIC;
+  }
   return TK_COMPLETION_HIDDEN;
 }
 

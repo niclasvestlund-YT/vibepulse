@@ -8,7 +8,7 @@
 
 #define TK_COMPLETION_QUEUE_CAP 8
 #define TK_COMPLETION_SEEN_CAP 16
-#define TK_COMPLETION_PULSE_MS 2400ULL
+#define TK_COMPLETION_PULSE_MS 4800ULL
 #define TK_COMPLETION_VISIBLE_MS 10000ULL
 #define TK_COMPLETION_INITIAL_MAX_AGE_MS 15000U
 
@@ -22,12 +22,16 @@ typedef struct {
   int provider;
   char event_id[TK_AGENT_ID_CAP];
   char project[TK_AGENT_PROJECT_CAP];
+  tk_agent_state state;
+  uint8_t same_state_count;
   uint8_t other_active_count;
+  uint32_t updated_ms;
 } tk_completion_event;
 
 typedef struct {
   tk_completion_event events[TK_COMPLETION_QUEUE_CAP];
   char seen_ids[TK_COMPLETION_SEEN_CAP][TK_AGENT_ID_CAP];
+  int seen_providers[TK_COMPLETION_SEEN_CAP];
   uint8_t count;
   uint8_t seen_count;
   uint8_t seen_next;
