@@ -94,4 +94,5 @@ cd ..
 "$PYTHON_BIN" tools/vibepulse_studio/design.py --check
 "$PYTHON_BIN" test/test_vibepulse_studio_wiring.py
 "$PYTHON_BIN" test/test_vibepulse_visual_landmarks.py
+"$PYTHON_BIN" test/test_shared_amoled_skill.py
 "$PYTHON_BIN" -m unittest tools.test_hardware_registry -v

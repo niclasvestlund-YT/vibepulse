@@ -45,6 +45,13 @@ glaset.
 - **Ärlighetsinvarianten:** aldrig påhittade nollor — utan data visas
   streck; räknare backar aldrig; eSett är AVRÄKNAD el och copyn säger det.
 
+## AMOLED visual work
+
+Use `.claude/skills/iterating-esp32-amoled-ui/SKILL.md` for AMOLED work. Show
+exact 480 x 480 output at meaningful stages. Review the static physical AMOLED
+before motion. Studio approval never authorizes a flash; obtain explicit user
+authorization for the physical install.
+
 ## Hårdvarufällorna i kortform (detaljer i spec/hardware.md)
 
 - `bsp_display_lock()` LJUGER (esp_err_t genom bool, spegelvänt) — använd

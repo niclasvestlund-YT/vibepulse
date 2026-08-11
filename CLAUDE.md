@@ -1,5 +1,12 @@
 Read `README.md` for the repository structure and build workflow.
 
+## AMOLED visual work
+
+Use `.claude/skills/iterating-esp32-amoled-ui/SKILL.md` for AMOLED work. Show
+exact 480 x 480 output at meaningful stages. Review the static physical AMOLED
+before motion. Studio approval never authorizes a flash; obtain explicit user
+authorization for the physical install.
+
 ## Hardware-aware work
 
 Before proposing external hardware, declaring a device limitation, or designing

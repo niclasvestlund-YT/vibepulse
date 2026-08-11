@@ -1,0 +1,4 @@
+interface:
+  display_name: "ESP32 AMOLED UI"
+  short_description: "Exact-size VibePulse AMOLED iteration"
+  default_prompt: "Use $iterating-esp32-amoled-ui to make and verify this Torget AMOLED visual change."
