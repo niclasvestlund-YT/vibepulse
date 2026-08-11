@@ -3,11 +3,13 @@
 
 import argparse
 import base64
+import fcntl
 import hashlib
 import hmac
 import io
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -18,6 +20,7 @@ import threading
 import uuid
 import weakref
 import webbrowser
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -89,6 +92,9 @@ JOURNAL_RELATIVE = (
     "design", "vibepulse", ".studio-transaction.json",
 )
 EXPORT_DIRECTORY = ("design", "vibepulse", "exports")
+LOCK_DIRECTORY = ("design", "vibepulse")
+_COORDINATORS_GUARD = threading.Lock()
+_COORDINATORS = {}
 
 
 class UnsafeRepositoryPath(OSError):
@@ -205,6 +211,8 @@ class RepositoryStore:
         if not stat.S_ISDIR(os.fstat(self.root_fd).st_mode):
             os.close(self.root_fd)
             raise UnsafeRepositoryPath("repository root is not a directory")
+        metadata = os.fstat(self.root_fd)
+        self.identity = (metadata.st_dev, metadata.st_ino)
         self._finalizer = weakref.finalize(self, os.close, self.root_fd)
 
     def relative_from_supplied(self, path):
@@ -234,7 +242,10 @@ class RepositoryStore:
                 except FileNotFoundError:
                     if not create:
                         raise
-                    os.mkdir(part, mode, dir_fd=current)
+                    try:
+                        os.mkdir(part, mode, dir_fd=current)
+                    except FileExistsError:
+                        pass
                     following = os.open(part, flags, dir_fd=current)
                 except OSError as error:
                     raise UnsafeRepositoryPath(
@@ -351,6 +362,52 @@ class RepositoryStore:
             os.fsync(parent)
         finally:
             os.close(parent)
+
+    def lock_directory_fd(self):
+        """Open the canonical in-repository advisory-lock vnode safely."""
+        return self._directory_fd(LOCK_DIRECTORY, create=True)
+
+
+class RepositoryCoordinator:
+    """One reentrant process lock plus one cross-process flock per repo."""
+
+    def __init__(self):
+        self.process_lock = threading.RLock()
+        self.local = threading.local()
+
+    @contextmanager
+    def guard(self, store):
+        with self.process_lock:
+            depth = getattr(self.local, "depth", 0)
+            if depth == 0:
+                descriptor = store.lock_directory_fd()
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX)
+                except BaseException:
+                    os.close(descriptor)
+                    raise
+                self.local.descriptor = descriptor
+            self.local.depth = depth + 1
+            try:
+                yield
+            finally:
+                self.local.depth -= 1
+                if self.local.depth == 0:
+                    descriptor = self.local.descriptor
+                    try:
+                        fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    finally:
+                        os.close(descriptor)
+                        del self.local.descriptor
+
+
+def _repository_coordinator(identity):
+    with _COORDINATORS_GUARD:
+        coordinator = _COORDINATORS.get(identity)
+        if coordinator is None:
+            coordinator = RepositoryCoordinator()
+            _COORDINATORS[identity] = coordinator
+        return coordinator
 
 
 def _decode_design(content, display):
@@ -469,8 +526,8 @@ class StudioApplication:
         self.hardware = _safe_hardware(registry)
         display = self.hardware["display"]
         self.display = {"width": display["width"], "height": display["height"]}
-        self._mutation_lock = threading.RLock()
-        with self._mutation_lock:
+        self._coordinator = _repository_coordinator(self.store.identity)
+        with self._repository_guard():
             self._recover_transaction_locked()
             design_content = self.store.read(self.design_relative)
             design = _decode_design(design_content, self.display)
@@ -482,6 +539,9 @@ class StudioApplication:
                     (design_content, expected_header),
                 )
             self._verified_pair_locked()
+
+    def _repository_guard(self):
+        return self._coordinator.guard(self.store)
 
     def _route(self, method, path):
         if path == "/api/design":
@@ -622,7 +682,7 @@ class StudioApplication:
 
     def _get_design(self):
         try:
-            with self._mutation_lock:
+            with self._repository_guard():
                 self._recover_transaction_locked()
                 design, _, header = self._verified_pair_locked()
             return _json_response(200, design, {
@@ -645,7 +705,7 @@ class StudioApplication:
         except DesignError as error:
             return _error(422, str(error))
         try:
-            with self._mutation_lock:
+            with self._repository_guard():
                 self._recover_transaction_locked()
                 _, old_design, old_header = self._verified_pair_locked()
                 self._transaction_locked(
@@ -679,7 +739,7 @@ class StudioApplication:
             return _error(422, "export must be a valid exact-size PNG")
         relative = EXPORT_DIRECTORY + (f"{state_name}.png",)
         try:
-            with self._mutation_lock:
+            with self._repository_guard():
                 self._recover_transaction_locked()
                 self._verified_pair_locked()
                 self.store.atomic_write(relative, body)
@@ -744,8 +804,10 @@ def _parse_authority(value):
         return None
     if (parsed.username is not None or parsed.password is not None
             or not parsed.hostname or parsed.path
-            or parsed.query or parsed.fragment or port is None):
+            or parsed.query or parsed.fragment):
         return None
+    if port is None:
+        port = 80
     return parsed.hostname.rstrip(".").lower(), port
 
 
@@ -755,6 +817,8 @@ def _origin_matches(value, authority):
         port = parsed.port
     except ValueError:
         return False
+    if parsed.scheme == "http" and port is None:
+        port = 80
     return (
         parsed.scheme == "http"
         and parsed.username is None
@@ -798,9 +862,20 @@ class StudioRequestHandler(BaseHTTPRequestHandler):
         if len(hosts) != 1:
             return None, _error(421, "Host does not match Studio")
         authority = _parse_authority(hosts[0])
+        host_allowed = authority is not None and (
+            authority[0] in self.server.allowed_hosts
+        )
+        if (authority is not None and not host_allowed
+                and self.server.accept_ip_literal_hosts):
+            try:
+                ipaddress.ip_address(authority[0].split("%", 1)[0])
+            except ValueError:
+                pass
+            else:
+                host_allowed = True
         if (authority is None
                 or authority[1] != self.server.server_address[1]
-                or authority[0] not in self.server.allowed_hosts):
+                or not host_allowed):
             return None, _error(421, "Host does not match Studio")
         if self.command in ("PUT", "POST"):
             origins = self.headers.get_all("Origin") or []
@@ -931,11 +1006,52 @@ def _server_class(address):
     return BoundedThreadingHTTPServer
 
 
+def _validated_server_options(port, allow_lan, mutation_token,
+                              request_timeout, max_workers,
+                              worker_acquire_timeout):
+    if (not _is_integer(port) or not 0 <= port <= 65535):
+        raise ValueError("port must be an integer from 0 to 65535")
+    if (not isinstance(request_timeout, (int, float))
+            or isinstance(request_timeout, bool)
+            or not math.isfinite(request_timeout)
+            or not 0 < request_timeout <= 300):
+        raise ValueError("request_timeout must be within (0, 300]")
+    if not _is_integer(max_workers) or not 1 <= max_workers <= 128:
+        raise ValueError("max_workers must be an integer from 1 to 128")
+    if (not isinstance(worker_acquire_timeout, (int, float))
+            or isinstance(worker_acquire_timeout, bool)
+            or not math.isfinite(worker_acquire_timeout)
+            or not 0 <= worker_acquire_timeout <= 30):
+        raise ValueError(
+            "worker_acquire_timeout must be within [0, 30]"
+        )
+    if allow_lan:
+        if mutation_token is not None and (
+                not isinstance(mutation_token, str)
+                or not mutation_token
+                or len(mutation_token) > 256
+                or any(not 33 <= ord(character) <= 126
+                       for character in mutation_token)):
+            raise ValueError(
+                "mutation_token must be nonempty visible ASCII"
+            )
+    elif mutation_token is not None:
+        raise ValueError("mutation_token requires allow_lan")
+
+
 def create_server(application, host, port, *, allow_lan=False,
                   mutation_token=None,
                   request_timeout=REQUEST_TIMEOUT_SECONDS,
                   max_workers=MAX_WORKERS,
                   worker_acquire_timeout=WORKER_ACQUIRE_TIMEOUT_SECONDS):
+    _validated_server_options(
+        port,
+        allow_lan,
+        mutation_token,
+        request_timeout,
+        max_workers,
+        worker_acquire_timeout,
+    )
     if not isinstance(host, str) or not host.strip():
         raise ValueError("host must be nonempty")
     host = host.strip()
@@ -959,6 +1075,9 @@ def create_server(application, host, port, *, allow_lan=False,
     server.application = application
     server.allowed_hosts = frozenset(allowed_hosts)
     server.allow_lan = bool(allow_lan)
+    server.accept_ip_literal_hosts = bool(
+        allow_lan and bind_address.is_unspecified
+    )
     server.mutation_token = (
         mutation_token or secrets.token_urlsafe(32) if allow_lan else None
     )

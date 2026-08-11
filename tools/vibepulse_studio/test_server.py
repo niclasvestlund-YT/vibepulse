@@ -3,6 +3,7 @@ import copy
 import hashlib
 import io
 import json
+import multiprocessing
 import os
 import socket
 import stat
@@ -27,6 +28,7 @@ from tools.vibepulse_studio.server import (
     MUTATION_TOKEN_HEADER,
     DesignPairError,
     StudioApplication,
+    _parse_authority,
     create_server,
     safe_server_url,
     validate_bind,
@@ -53,6 +55,35 @@ def png_bytes(size=(480, 480), color="black"):
     payload = io.BytesIO()
     Image.new("RGB", size, color).save(payload, "PNG")
     return payload.getvalue()
+
+
+def process_save_design(repo, design_path, spec, value, pause, initialized,
+                        start, journal_ready, release, results):
+    app = StudioApplication(repo, design_path, spec)
+    if pause:
+        original_write = app.store.atomic_write
+
+        def paused_write(parts, content, mode=0o644):
+            original_write(parts, content, mode)
+            if tuple(parts) == (
+                "design", "vibepulse", ".studio-transaction.json"
+            ):
+                journal_ready.set()
+                if not release.wait(5):
+                    raise TimeoutError("process race release timed out")
+
+        app.store.atomic_write = paused_write
+    initialized.set()
+    if not start.wait(5):
+        raise TimeoutError("process race start timed out")
+    payload = json.dumps(value).encode("utf-8")
+    status, _, body = app.handle(
+        "PUT",
+        "/api/design",
+        payload,
+        {"content-type": "application/json"},
+    )
+    results.put((status, json.loads(body)))
 
 
 class StudioApplicationTests(unittest.TestCase):
@@ -357,6 +388,121 @@ class StudioApplicationTests(unittest.TestCase):
             generate_header(saved, self.display),
         )
 
+    def test_separate_instances_share_one_repository_transaction_lock(self):
+        first_app = self.app
+        second_app = StudioApplication(self.repo, self.design_path, self.spec)
+        first = json.loads(self.design_path.read_text(encoding="utf-8"))
+        second = copy.deepcopy(first)
+        first["hero"]["providerY"] = 24
+        second["hero"]["providerY"] = 25
+        journal_ready = threading.Event()
+        release = threading.Event()
+        second_finished = threading.Event()
+        outcomes = []
+        original_write = first_app.store.atomic_write
+
+        def paused_write(parts, content, mode=0o644):
+            original_write(parts, content, mode)
+            if tuple(parts) == (
+                "design", "vibepulse", ".studio-transaction.json"
+            ):
+                journal_ready.set()
+                if not release.wait(5):
+                    raise TimeoutError("thread race release timed out")
+
+        first_app.store.atomic_write = paused_write
+
+        def save(app, value, finished=None):
+            result = self.json_request_for(app, value)
+            outcomes.append(result)
+            if finished is not None:
+                finished.set()
+
+        first_thread = threading.Thread(target=save, args=(first_app, first))
+        second_thread = threading.Thread(
+            target=save, args=(second_app, second, second_finished)
+        )
+        first_thread.start()
+        self.assertTrue(journal_ready.wait(2))
+        second_thread.start()
+        try:
+            self.assertFalse(second_finished.wait(0.15))
+        finally:
+            release.set()
+            first_thread.join(timeout=5)
+            second_thread.join(timeout=5)
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertEqual(sorted(result[0] for result in outcomes), [200, 200])
+        saved = load_design(self.design_path, self.display)
+        self.assertIn(saved, (first, second))
+        self.assertEqual(
+            self.header_path.read_text(encoding="utf-8"),
+            generate_header(saved, self.display),
+        )
+
+    def json_request_for(self, app, value):
+        return app.handle(
+            "PUT",
+            "/api/design",
+            json.dumps(value).encode("utf-8"),
+            {"content-type": "application/json"},
+        )
+
+    def test_processes_serialize_the_complete_repository_transaction(self):
+        context = multiprocessing.get_context("spawn")
+        first = json.loads(self.design_path.read_text(encoding="utf-8"))
+        second = copy.deepcopy(first)
+        first["hero"]["providerY"] = 24
+        second["hero"]["providerY"] = 25
+        first_initialized = context.Event()
+        second_initialized = context.Event()
+        first_start = context.Event()
+        second_start = context.Event()
+        journal_ready = context.Event()
+        release = context.Event()
+        results = context.Queue()
+        first_process = context.Process(
+            target=process_save_design,
+            args=(self.repo, self.design_path, self.spec, first, True,
+                  first_initialized, first_start, journal_ready, release,
+                  results),
+        )
+        second_process = context.Process(
+            target=process_save_design,
+            args=(self.repo, self.design_path, self.spec, second, False,
+                  second_initialized, second_start, journal_ready, release,
+                  results),
+        )
+        first_process.start()
+        second_process.start()
+        self.assertTrue(first_initialized.wait(5))
+        self.assertTrue(second_initialized.wait(5))
+        first_start.set()
+        self.assertTrue(journal_ready.wait(5))
+        second_start.set()
+        time.sleep(0.2)
+        release.set()
+        first_process.join(timeout=10)
+        second_process.join(timeout=10)
+        if first_process.is_alive():
+            first_process.terminate()
+        if second_process.is_alive():
+            second_process.terminate()
+        self.assertEqual(first_process.exitcode, 0)
+        self.assertEqual(second_process.exitcode, 0)
+        outcomes = [results.get(timeout=2), results.get(timeout=2)]
+        self.assertEqual(sorted(result[0] for result in outcomes), [200, 200])
+        saved = load_design(self.design_path, self.display)
+        successful_designs = [
+            result[1]["design"] for result in outcomes if result[0] == 200
+        ]
+        self.assertIn(saved, successful_designs)
+        self.assertEqual(
+            self.header_path.read_text(encoding="utf-8"),
+            generate_header(saved, self.display),
+        )
+
     def test_each_approved_export_is_an_exact_atomic_png(self):
         payload = png_bytes()
         for state_name in APPROVED_STATES:
@@ -635,6 +781,33 @@ class BindValidationTests(unittest.TestCase):
         finally:
             server.server_close()
 
+    def test_absent_host_port_normalizes_only_to_http_port_80(self):
+        self.assertEqual(
+            _parse_authority("127.0.0.1"), ("127.0.0.1", 80)
+        )
+        self.assertEqual(
+            _parse_authority("example.test:64942"),
+            ("example.test", 64942),
+        )
+
+    def test_server_configuration_rejects_invalid_security_ranges(self):
+        cases = (
+            ({"allow_lan": True, "mutation_token": ""}, "mutation_token"),
+            ({"allow_lan": True, "mutation_token": 7}, "mutation_token"),
+            ({"request_timeout": 0}, "request_timeout"),
+            ({"request_timeout": True}, "request_timeout"),
+            ({"request_timeout": 301}, "request_timeout"),
+            ({"max_workers": 0}, "max_workers"),
+            ({"max_workers": True}, "max_workers"),
+            ({"worker_acquire_timeout": -1}, "worker_acquire_timeout"),
+            ({"worker_acquire_timeout": True}, "worker_acquire_timeout"),
+            ({"worker_acquire_timeout": 31}, "worker_acquire_timeout"),
+        )
+        for options, message in cases:
+            with self.subTest(options=options):
+                with self.assertRaisesRegex(ValueError, message):
+                    create_server(mock.Mock(), "127.0.0.1", 0, **options)
+
 
 class LiveHTTPTests(unittest.TestCase):
     def setUp(self):
@@ -659,9 +832,10 @@ class LiveHTTPTests(unittest.TestCase):
         self.temp.cleanup()
 
     def start_server(self, **kwargs):
+        host = kwargs.pop("host", "127.0.0.1")
         server = create_server(
             self.app,
-            "127.0.0.1",
+            host,
             0,
             request_timeout=kwargs.pop("request_timeout", 0.2),
             worker_acquire_timeout=kwargs.pop("worker_acquire_timeout", 0.05),
@@ -673,7 +847,12 @@ class LiveHTTPTests(unittest.TestCase):
         return server
 
     def exchange(self, server, request, timeout=2):
-        client = socket.create_connection(server.server_address, timeout=timeout)
+        address = server.server_address
+        if address[0] == "0.0.0.0":
+            address = ("127.0.0.1", address[1])
+        elif address[0] == "::":
+            address = ("::1", address[1])
+        client = socket.create_connection(address, timeout=timeout)
         client.settimeout(timeout)
         try:
             client.sendall(request)
@@ -756,6 +935,52 @@ class LiveHTTPTests(unittest.TestCase):
         url = safe_server_url(server, "127.0.0.1", token)
         self.assertIn("#mutation-token=", url)
         self.assertNotIn("?mutation-token=", url)
+
+    def test_wildcard_lan_accepts_ip_literal_host_but_not_dns_hostname(self):
+        token = "wildcard-test-token"
+        server = self.start_server(
+            host="0.0.0.0", allow_lan=True, mutation_token=token
+        )
+        port = server.server_address[1]
+        lan_authority = f"192.168.50.23:{port}"
+        accepted = self.exchange(
+            server,
+            (
+                "GET /api/hardware HTTP/1.1\r\n"
+                f"Host: {lan_authority}\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii"),
+        )
+        self.assertIn(b" 200 ", accepted.split(b"\r\n", 1)[0])
+        rejected = self.exchange(
+            server,
+            (
+                "GET /api/hardware HTTP/1.1\r\n"
+                f"Host: attacker.example:{port}\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii"),
+        )
+        self.assertIn(b" 421 ", rejected.split(b"\r\n", 1)[0])
+
+        design = self.design_path.read_bytes()
+        mutation = self.exchange(
+            server,
+            (
+                "PUT /api/design HTTP/1.1\r\n"
+                f"Host: {lan_authority}\r\n"
+                f"Origin: http://{lan_authority}\r\n"
+                f"{MUTATION_TOKEN_HEADER}: {token}\r\n"
+                "Content-Type: application/json\r\n"
+                f"Content-Length: {len(design)}\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii") + design,
+        )
+        self.assertIn(b" 200 ", mutation.split(b"\r\n", 1)[0])
+        self.assertTrue(
+            safe_server_url(server, "0.0.0.0", token).startswith(
+                f"http://127.0.0.1:{port}/#mutation-token="
+            )
+        )
 
     def test_strict_framing_rejects_transfer_duplicate_and_bad_lengths(self):
         server = self.start_server()
