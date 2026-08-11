@@ -1,0 +1,1 @@
+"""VibePulse Studio support package."""

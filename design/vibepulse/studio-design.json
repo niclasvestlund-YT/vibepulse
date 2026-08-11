@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "deviceCapability": "display.amoled",
+  "palette": {
+    "background": "#000000",
+    "text": "#FFFFFF",
+    "muted": "#858C97",
+    "track": "#303238",
+    "hairline": "#202328",
+    "claude": "#D97757",
+    "codex": "#6F78FF"
+  },
+  "hero": {
+    "safeX": 22,
+    "contentWidth": 436,
+    "providerY": 23,
+    "quotaY": 86,
+    "percentY": 112,
+    "percentFontPx": 146,
+    "barY": 276,
+    "barHeight": 18,
+    "resetY": 312,
+    "statusY": 388,
+    "statusHeight": 66
+  },
+  "fixtures": {
+    "claude": {
+      "provider": "CLAUDE",
+      "model": "OPUS 5",
+      "effort": "ULTRA",
+      "quota": "FABLE · WEEK",
+      "percent": 73,
+      "today": 12,
+      "reset": "RESET IN 2D 4H"
+    },
+    "codex": {
+      "provider": "CODEX",
+      "model": "GPT-5.6 SOL",
+      "effort": "XHIGH",
+      "quota": "WEEKLY",
+      "percent": 43,
+      "today": 8,
+      "reset": "RESET FRI 10:29"
+    }
+  }
+}
