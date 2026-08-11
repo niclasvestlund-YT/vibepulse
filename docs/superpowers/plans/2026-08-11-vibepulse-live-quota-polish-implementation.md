@@ -459,10 +459,6 @@ Expected: the full host suite passes.
 - Modify: `components/app_tokens/agent_monitor.c`
 - Modify: `sim/main.c`
 - Modify: `test/test_vibepulse_layout_wiring.py`
-
-**Prerequisite:** the static Claude/Codex quota pages and attention states have
-passed an authorized install and physical AMOLED review. If that evidence is
-not recorded, stop here rather than enabling any motion.
 - Modify: `test/test_vibepulse_visual_landmarks.py`
 - Modify: `test/test_preview_ui.py`
 
@@ -569,6 +565,10 @@ git commit -m "Add VibePulse needs-you attention states"
 - Modify: `test/test_usage_live_policy.c`
 - Modify: `sim/main.c`
 - Modify: `test/test_vibepulse_layout_wiring.py`
+
+**Prerequisite:** the static Claude/Codex quota pages and attention states have
+passed an authorized install and physical AMOLED review. If that evidence is
+not recorded, stop here rather than enabling any motion.
 
 - [ ] **Step 1: Add failing motion-policy and source tests**
 
