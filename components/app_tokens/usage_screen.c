@@ -17,6 +17,7 @@ extern const lv_font_t plex_text_21;
 extern const lv_font_t plex_text_32;
 extern const lv_font_t plex_text_17;
 extern const lv_font_t plex_text_16;
+extern const lv_font_t plex_ui_21;
 extern const lv_font_t plex_ui_14;
 extern const lv_font_t plex_ui_12;
 
@@ -58,7 +59,6 @@ extern const lv_font_t plex_ui_12;
 #define SUMMARY_HAIRLINE_Y 267
 #define SUMMARY_PCT_X 150
 #define SUMMARY_PCT_W (CONTENT_W - SUMMARY_PCT_X)
-#define SUMMARY_LABEL_SCALE_Y 384 /* 14 px glyph set rendered at 21 px. */
 #define SUMMARY_LABEL_W 190
 
 #define LEGACY_CONTENT_X 18
@@ -153,12 +153,8 @@ static lv_obj_t *text(lv_obj_t *parent, const lv_font_t *font,
 
 static lv_obj_t *create_ui21_label(lv_obj_t *parent, lv_color_t color,
                                    int width) {
-  lv_obj_t *object = text(parent, &plex_ui_14, color);
-  lv_obj_set_size(object, width, 18);
-  lv_obj_set_style_transform_scale_x(object, 256, 0);
-  lv_obj_set_style_transform_scale_y(object, SUMMARY_LABEL_SCALE_Y, 0);
-  lv_obj_set_style_transform_pivot_x(object, 0, 0);
-  lv_obj_set_style_transform_pivot_y(object, 0, 0);
+  lv_obj_t *object = text(parent, &plex_ui_21, color);
+  lv_obj_set_size(object, width, 27);
   lv_label_set_long_mode(object, LV_LABEL_LONG_CLIP);
   return object;
 }

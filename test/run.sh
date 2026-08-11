@@ -84,6 +84,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_agent_demo_wiring.py
 "$PYTHON_BIN" test_agent_net_wiring.py
 "$PYTHON_BIN" test_target_tls_memory.py
+"$PYTHON_BIN" test_lvgl_layer_safety.py
 "$PYTHON_BIN" test_vibepulse_layout_wiring.py
 
 cd ..

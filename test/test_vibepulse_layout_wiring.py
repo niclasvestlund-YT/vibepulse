@@ -10,7 +10,8 @@ assert "create_claude_details_page" in source
 assert "create_overview_page" in source
 assert "set_summary_label" in source
 assert "lv_label_set_long_mode(row->label, LV_LABEL_LONG_CLIP)" in source
-assert "#define SUMMARY_LABEL_SCALE_Y 384" in source
+assert "extern const lv_font_t plex_ui_21" in source
+assert "text(parent, &plex_ui_21, color)" in source
 assert "#define SUMMARY_LABEL_W 190" in source
 assert "create_ui21_label" in source
 assert "hero->quota = create_ui21_label" in source
