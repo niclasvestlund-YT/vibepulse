@@ -3,6 +3,8 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MIN_TEXT_ROW_STEP = 26;
 const MIN_SECTION_GAP = 8;
+const MIN_QUOTA_TO_PERCENT_STEP = 28;
+const PERCENT_RENDERED_LINE_HEIGHT = 119;
 // Browser SVG and LVGL use different font rasterizers. These measured offsets
 // align visible IBM Plex Sans ink with the LVGL simulator without changing the
 // firmware layout tokens that remain the geometry authority.
@@ -131,8 +133,9 @@ function heroIsServerValid(hero, width, height) {
     return false;
   }
   return hero.providerY + MIN_TEXT_ROW_STEP <= hero.quotaY
-    && hero.quotaY + MIN_TEXT_ROW_STEP <= hero.percentY
-    && hero.percentY + hero.percentFontPx + MIN_SECTION_GAP <= hero.barY
+    && hero.quotaY + MIN_QUOTA_TO_PERCENT_STEP <= hero.percentY
+    && hero.percentY + PERCENT_RENDERED_LINE_HEIGHT
+      + MIN_SECTION_GAP <= hero.barY
     && hero.barY + hero.barHeight <= height
     && hero.barY + hero.barHeight + MIN_SECTION_GAP <= hero.resetY
     && hero.resetY + MIN_TEXT_ROW_STEP <= hero.statusY
@@ -148,16 +151,16 @@ function heroBounds(hero, name, width, height) {
     case "quotaY":
       return {
         min: hero.providerY + MIN_TEXT_ROW_STEP,
-        max: hero.percentY - MIN_TEXT_ROW_STEP,
+        max: hero.percentY - MIN_QUOTA_TO_PERCENT_STEP,
       };
     case "percentY":
       return {
-        min: hero.quotaY + MIN_TEXT_ROW_STEP,
-        max: hero.barY - hero.percentFontPx - MIN_SECTION_GAP,
+        min: hero.quotaY + MIN_QUOTA_TO_PERCENT_STEP,
+        max: hero.barY - PERCENT_RENDERED_LINE_HEIGHT - MIN_SECTION_GAP,
       };
     case "barY":
       return {
-        min: hero.percentY + hero.percentFontPx + MIN_SECTION_GAP,
+        min: hero.percentY + PERCENT_RENDERED_LINE_HEIGHT + MIN_SECTION_GAP,
         max: hero.resetY - hero.barHeight - MIN_SECTION_GAP,
       };
     case "barHeight":

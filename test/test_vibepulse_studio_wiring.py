@@ -16,6 +16,7 @@ WEB = ROOT / "tools/vibepulse_studio/web"
 HTML_PATH = WEB / "index.html"
 CSS_PATH = WEB / "studio.css"
 JS_PATH = WEB / "studio.js"
+DESIGN_PATH = ROOT / "design/vibepulse/studio-design.json"
 
 FONT_DIGESTS = {
     "IBMPlexSans-Bold.woff2": (
@@ -56,6 +57,7 @@ class StudioWiringTests(unittest.TestCase):
         cls.html = HTML_PATH.read_text(encoding="utf-8")
         cls.css = CSS_PATH.read_text(encoding="utf-8")
         cls.js = JS_PATH.read_text(encoding="utf-8")
+        cls.design = json.loads(DESIGN_PATH.read_text(encoding="utf-8"))
         cls.inventory = MarkupInventory()
         cls.inventory.feed(cls.html)
 
@@ -210,6 +212,8 @@ class StudioWiringTests(unittest.TestCase):
         self.assertIn("heroIsServerValid(", self.js)
         self.assertIn("const MIN_TEXT_ROW_STEP = 26", self.js)
         self.assertIn("const MIN_SECTION_GAP = 8", self.js)
+        self.assertIn("const MIN_QUOTA_TO_PERCENT_STEP = 28", self.js)
+        self.assertIn("const PERCENT_RENDERED_LINE_HEIGHT = 119", self.js)
         self.assertRegex(self.js, r"contentWidth\s*=\s*width\s*-\s*2\s*\*")
 
     def test_svg_text_uses_named_lvgl_metric_offsets(self):
@@ -247,27 +251,18 @@ class StudioWiringTests(unittest.TestCase):
         })
 
     @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
-    def test_geometry_changes_match_the_server_relational_contract(self):
-        hero = {
-            "safeX": 22,
-            "contentWidth": 436,
-            "providerY": 23,
-            "quotaY": 86,
-            "percentY": 112,
-            "percentFontPx": 146,
-            "barY": 276,
-            "barHeight": 18,
-            "resetY": 312,
-            "statusY": 388,
-            "statusHeight": 66,
-        }
+    def test_repository_geometry_matches_browser_contract_and_stays_editable(self):
+        hero = self.design["hero"]
+        self.assertEqual(hero["percentY"], 150)
+        self.assertEqual(hero["barY"], 304)
+        self.assertEqual(hero["barHeight"], 24)
         expression = f"""
           (() => {{
             const hero = {json.dumps(hero)};
             const requested = {{
-              providerY: 999, quotaY: -999, percentY: 999,
-              barY: -999, barHeight: 999, resetY: -999,
-              statusY: 999, statusHeight: 999
+              safeX: 23, providerY: 23, quotaY: 73, percentY: 151,
+              barY: 305, barHeight: 23, resetY: 353,
+              statusY: 391, statusHeight: 65
             }};
             const changes = {{}};
             for (const [name, value] of Object.entries(requested)) {{
@@ -283,37 +278,86 @@ class StudioWiringTests(unittest.TestCase):
               bounds[name] = heroBounds(hero, name, 480, 480);
             }}
             const badType = applyHeroChange(hero, "statusY", true, 480, 480);
-            return {{changes, bounds, badType}};
+            return {{
+              valid: heroIsServerValid(hero, 480, 480),
+              changes, bounds, badType
+            }};
           }})()
         """
         result = self.evaluate_javascript(expression)
+        self.assertTrue(result["valid"])
         self.assertEqual(
             {name: item["value"] for name, item in result["changes"].items()},
             {
-                "providerY": 60,
-                "quotaY": 49,
-                "percentY": 122,
-                "barY": 266,
-                "barHeight": 24,
-                "resetY": 302,
-                "statusY": 414,
-                "statusHeight": 92,
+                "safeX": 23,
+                "providerY": 23,
+                "quotaY": 73,
+                "percentY": 151,
+                "barY": 305,
+                "barHeight": 23,
+                "resetY": 353,
+                "statusY": 391,
+                "statusHeight": 65,
             },
         )
         self.assertTrue(all(
             item["valid"] and item["accepted"]
             for item in result["changes"].values()
         ))
-        self.assertEqual(result["bounds"]["providerY"], {"min": 0, "max": 60})
-        self.assertEqual(result["bounds"]["quotaY"], {"min": 49, "max": 86})
-        self.assertEqual(result["bounds"]["percentY"], {"min": 112, "max": 122})
-        self.assertEqual(result["bounds"]["barY"], {"min": 266, "max": 286})
+        self.assertTrue(all(
+            bounds["min"] <= bounds["max"]
+            for bounds in result["bounds"].values()
+        ))
+        self.assertEqual(result["bounds"]["safeX"], {"min": 16, "max": 40})
+        self.assertEqual(result["bounds"]["providerY"], {"min": 0, "max": 46})
+        self.assertEqual(result["bounds"]["quotaY"], {"min": 48, "max": 122})
+        self.assertEqual(result["bounds"]["percentY"], {"min": 100, "max": 177})
+        self.assertEqual(result["bounds"]["barY"], {"min": 277, "max": 320})
         self.assertEqual(result["bounds"]["barHeight"], {"min": 12, "max": 24})
-        self.assertEqual(result["bounds"]["resetY"], {"min": 302, "max": 362})
-        self.assertEqual(result["bounds"]["statusY"], {"min": 338, "max": 414})
-        self.assertEqual(result["bounds"]["statusHeight"], {"min": 1, "max": 92})
+        self.assertEqual(result["bounds"]["resetY"], {"min": 336, "max": 364})
+        self.assertEqual(result["bounds"]["statusY"], {"min": 378, "max": 414})
+        self.assertEqual(result["bounds"]["statusHeight"], {"min": 1, "max": 90})
         self.assertFalse(result["badType"]["accepted"])
         self.assertEqual(result["badType"]["hero"], hero)
+
+        save = self.js[self.js.index("async function saveDesign"):
+                       self.js.index("async function exportPng")]
+        self.assertIn(
+            "if (!heroIsServerValid(state.design.hero, width, height))",
+            save,
+        )
+
+    @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
+    def test_browser_contract_rejects_rendered_and_quota_overlap(self):
+        rendered_overlap = {
+            **self.design["hero"],
+            "barY": 276,
+        }
+        quota_overlap = {
+            "safeX": 22,
+            "contentWidth": 436,
+            "providerY": 22,
+            "quotaY": 77,
+            "percentY": 104,
+            "percentFontPx": 164,
+            "barY": 276,
+            "barHeight": 20,
+            "resetY": 352,
+            "statusY": 390,
+            "statusHeight": 66,
+        }
+        result = self.evaluate_javascript(f"""
+          (() => ({{
+            renderedOverlap: heroIsServerValid(
+              {json.dumps(rendered_overlap)}, 480, 480
+            ),
+            quotaOverlap: heroIsServerValid(
+              {json.dumps(quota_overlap)}, 480, 480
+            )
+          }}))()
+        """)
+        self.assertFalse(result["renderedOverlap"])
+        self.assertFalse(result["quotaOverlap"])
 
     @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
     def test_operation_lock_covers_every_mutator_and_snapshots_export_name(self):
