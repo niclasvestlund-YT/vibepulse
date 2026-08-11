@@ -70,6 +70,14 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-agent-monitor-policy-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/agent_monitor_policy.c \
+  ../components/app_tokens/usage_live_policy.c \
+  test_usage_live_policy.c \
+  -lm \
+  -o /tmp/torget-usage-live-policy-test
+/tmp/torget-usage-live-policy-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/agent_completion_policy.c \
   test_agent_completion_policy.c \
   -o /tmp/torget-agent-completion-policy-test
