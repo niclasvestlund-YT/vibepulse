@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AMOLED Usage Studio</title>
+  <link rel="stylesheet" href="/studio.css">
+  <script type="module" src="/studio.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#device-preview">Skip to preview</a>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">Exact-size interface workshop</p>
+      <h1>AMOLED Usage Studio</h1>
+    </div>
+    <p class="app-note">Edit a small reviewed token set. Device facts stay locked.</p>
+  </header>
+
+  <main class="studio-shell">
+    <aside class="control-panel" aria-label="Preview controls">
+      <section class="control-section" aria-labelledby="state-title">
+        <div class="section-heading">
+          <h2 id="state-title">Preview state</h2>
+          <span id="state-summary">Loading</span>
+        </div>
+        <fieldset>
+          <legend>Provider</legend>
+          <div class="button-row" role="group" aria-label="Provider">
+            <button type="button" data-state="claude" aria-pressed="true">Claude</button>
+            <button type="button" data-state="codex" aria-pressed="false">Codex</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Data condition</legend>
+          <div class="button-row" role="group" aria-label="Data condition">
+            <button type="button" data-state="missing" aria-pressed="false">Missing</button>
+            <button type="button" data-state="stale" aria-pressed="false">Stale</button>
+          </div>
+          <p class="field-help">Choose the provider again to return to live data.</p>
+        </fieldset>
+      </section>
+
+      <section class="control-section" aria-labelledby="geometry-title">
+        <div class="section-heading">
+          <h2 id="geometry-title">Geometry</h2>
+          <span>Panel pixels</span>
+        </div>
+        <div id="geometry-controls" class="geometry-grid"></div>
+      </section>
+
+      <section class="control-section action-section" aria-labelledby="actions-title">
+        <h2 id="actions-title">Reviewed output</h2>
+        <div class="action-row">
+          <button id="save-design" type="button" class="primary-action">Save tokens</button>
+          <button id="export-png" type="button">Export current PNG</button>
+        </div>
+        <p id="operation-status" class="operation-status" role="status" aria-live="polite">
+          Loading design…
+        </p>
+      </section>
+    </aside>
+
+    <section class="preview-panel" aria-labelledby="preview-title">
+      <header class="preview-header">
+        <div>
+          <p class="eyebrow">Pixel authority</p>
+          <h2 id="preview-title">Preview loading…</h2>
+        </div>
+        <div class="button-row zoom-controls" role="group" aria-label="Preview scale">
+          <button type="button" data-scale="1" aria-pressed="true">1:1 physical pixels</button>
+          <button type="button" data-scale="2" aria-pressed="false">2:1 inspect</button>
+        </div>
+      </header>
+      <p id="zoom-warning" class="zoom-warning" hidden>
+        INSPECTION ZOOM — NOT PHYSICAL SIZE
+      </p>
+      <div id="preview-viewport" class="preview-viewport" tabindex="0"
+           aria-label="Scrollable exact-size preview area">
+        <div id="preview-space">
+          <div id="preview-frame" class="scale-1">
+            <svg id="device-preview" role="img"
+                 aria-label="AMOLED usage preview">
+              <rect id="screen-background" fill="var(--background)"></rect>
+              <g id="hero-content"></g>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <p class="preview-footnote">
+        One browser pixel maps to one panel pixel at 1:1. The preview never fits itself to the window.
+      </p>
+    </section>
+  </main>
+</body>
+</html>
