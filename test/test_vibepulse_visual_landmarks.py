@@ -41,6 +41,7 @@ EXPECTED = {
     "torget-vibepulse-claude-missing.bmp",
     "torget-vibepulse-codex-missing.bmp",
     "torget-vibepulse-claude-single-working.bmp",
+    "torget-vibepulse-claude-lease-expired.bmp",
     "torget-vibepulse-claude-multi-chat.bmp",
     "torget-vibepulse-claude-idle.bmp",
     "torget-vibepulse-codex-single-working.bmp",
@@ -143,6 +144,7 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
 
         inactive = (
             "torget-vibepulse-claude-idle.bmp",
+            "torget-vibepulse-claude-lease-expired.bmp",
             "torget-vibepulse-claude-stale.bmp",
             "torget-vibepulse-claude-missing.bmp",
             "torget-vibepulse-codex-idle.bmp",
@@ -156,22 +158,38 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                     (0, 0, 0),
                 )
 
-    def test_missing_and_stale_headers_have_empty_context_region(self):
-        names = (
-            "torget-vibepulse-claude-stale.bmp",
-            "torget-vibepulse-claude-missing.bmp",
-            "torget-vibepulse-codex-stale.bmp",
-            "torget-vibepulse-codex-missing.bmp",
+    def test_missing_and_stale_headers_show_only_quota_truth_status(self):
+        cases = (
+            ("torget-vibepulse-claude-stale.bmp", 414),
+            ("torget-vibepulse-claude-missing.bmp", 395),
+            ("torget-vibepulse-codex-stale.bmp", 414),
+            ("torget-vibepulse-codex-missing.bmp", 395),
         )
-        for name in names:
+        for name, expected_left in cases:
             with self.subTest(name=name):
                 image = self.image(name)
-                context_region = {
-                    image.getpixel((x, y))
+                status_pixels = [
+                    (x, y)
                     for y in range(18, 56)
                     for x in range(200, 458)
-                }
-                self.assertEqual(context_region, {(0, 0, 0)})
+                    if image.getpixel((x, y)) != (0, 0, 0)
+                ]
+                self.assertTrue(status_pixels)
+                self.assertEqual(min(x for x, _ in status_pixels),
+                                 expected_left)
+                self.assertEqual(max(x for x, _ in status_pixels), 457)
+                self.assertEqual(
+                    (min(y for _, y in status_pixels),
+                     max(y for _, y in status_pixels)),
+                    (32, 41),
+                )
+
+    def test_working_lease_expiry_matches_idle_header_and_halo(self):
+        expired = self.image("torget-vibepulse-claude-lease-expired.bmp")
+        idle = self.image("torget-vibepulse-claude-idle.bmp")
+        header = (18, 14, 458, 56)
+        self.assertEqual(expired.crop(header).tobytes(),
+                         idle.crop(header).tobytes())
 
     def test_burn_rate_is_unboxed_with_one_shared_separator(self):
         image = self.image("torget-vibepulse-burn-speed-up.bmp")
@@ -207,6 +225,21 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             for x in range(22, 458)
         ]
         self.assertEqual(set(row), {(48, 50, 56)})
+        accent = (217, 119, 87)
+        daily_pixels = [
+            (x, y)
+            for y in range(345, 390)
+            for x in range(22, 220)
+            if image.getpixel((x, y)) == accent
+        ]
+        self.assertEqual(
+            (min(x for x, _ in daily_pixels),
+             max(x for x, _ in daily_pixels),
+             min(y for _, y in daily_pixels),
+             max(y for _, y in daily_pixels),
+             len(daily_pixels)),
+            (24, 40, 364, 367, 68),
+        )
 
     def test_endpoint_markers_are_clamped_inside_track(self):
         zero = self.image("torget-vibepulse-claude-zero-total.bmp")

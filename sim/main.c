@@ -26,6 +26,7 @@
 #include "app_solelkollen.h"
 #include "app_tokens.h"
 #include "agent_monitor.h"
+#include "agent_monitor_policy.h"
 #include "agent_status_parse.h"
 #include "glance_parse.h"
 #include "tokens_parse.h"
@@ -392,6 +393,10 @@ static int run_vibepulse_static_qa(void) {
   tokens_apply_agent_status(&single);
   tokens_show_view(VIEW_CLAUDE_FABLE);
   dump_frame("vibepulse-claude-single-working");
+  usage_screen_tick(
+      torget_now_us() +
+      (int64_t)(TK_AGENT_WORKING_LEASE_MS + 1ULL) * 1000LL);
+  dump_frame("vibepulse-claude-lease-expired");
 
   apply_agent_file("agent-status-multi-working.json");
   dump_frame("vibepulse-claude-multi-chat");

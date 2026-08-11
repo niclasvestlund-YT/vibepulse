@@ -74,9 +74,16 @@ assert "status" not in quota
 
 quota_page = source[source.index("typedef struct {"):]
 quota_page = quota_page[:quota_page.index("} quota_page;")]
-for member in ("context", "track", "baseline_fill", "today_fill", "marker", "halo"):
+for member in (
+    "context", "track", "baseline_fill", "today_fill", "marker", "halo",
+):
     assert f"*{member};" in quota_page, f"quota_page must own {member}"
 assert "*effort;" not in quota_page, "quota header must use one context label"
+for member in (
+    "rendered_context[64]", "context_initialized", "halo_visible",
+    "halo_initialized",
+):
+    assert member in quota_page, f"quota_page must cache {member}"
 
 assert "#define COL_CLAUDE_MUTED lv_color_hex(0x8A4F42)" in source
 assert "COL_CODEX_MUTED" in source and "lv_color_hex(0x454B8A)" in source
@@ -91,14 +98,26 @@ assert "lv_obj_set_size(page->marker, 3, VP_BAR_H + 8);" in quota
 
 refresh_header = source[source.index("static void refresh_header"):]
 refresh_header = refresh_header[
-    :refresh_header.index("static void apply_today_bar")
+    :refresh_header.index("static bool apply_today_bar")
 ]
 assert "ui.has_agent_snapshot && page->has_data" in refresh_header
-assert "lv_label_set_text(page->context, view.context);" in refresh_header
-assert 'lv_label_set_text(page->context, "NO DATA")' not in refresh_header
-assert 'lv_label_set_text(page->context, "STALE")' not in refresh_header
-assert "if (view.halo_active)" in refresh_header
+assert 'context = "NO DATA"' in refresh_header
+assert 'context = "STALE"' in refresh_header
+assert "context = view.context" in refresh_header
+assert "strcmp(page->rendered_context, context) != 0" in refresh_header
+assert "lv_label_set_text(page->context, context);" in refresh_header
+assert "page->halo_visible != view.halo_active" in refresh_header
 assert "page->has_data && !ui.stale && view.halo_active" not in refresh_header
+assert refresh_header.count("lv_label_set_text") == 1
+assert "usage_live_build_header" in refresh_header
+
+apply_today = source[source.index("static bool apply_today_bar"):]
+apply_today = apply_today[:apply_today.index("static void apply_quota")]
+assert "return available;" in apply_today
+apply_quota = source[source.index("static void apply_quota"):]
+apply_quota = apply_quota[:apply_quota.index("static void apply_forecast_row")]
+assert "bool bar_available = apply_today_bar(page, quota);" in apply_quota
+assert "quota->has_delta && bar_available" in apply_quota
 
 burn = source[source.index("static void create_burn_rate_page"):]
 burn = burn[:burn.index("static void create_volume_page")]

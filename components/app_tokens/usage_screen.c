@@ -59,6 +59,10 @@ typedef struct {
   lv_obj_t *reset;
   usage_quota_scope scope;
   usage_provider provider;
+  char rendered_context[64];
+  bool context_initialized;
+  bool halo_visible;
+  bool halo_initialized;
   bool has_data;
 } quota_page;
 
@@ -175,6 +179,7 @@ static void create_quota_header(quota_page *page) {
       page->halo,
       page->provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX, 0);
   lv_obj_add_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
+  page->halo_initialized = true;
 
   create_provider_identity(page->tile, page->provider);
   page->context = label(page->tile, &plex_ui_14, COL_META,
@@ -395,16 +400,33 @@ static void refresh_header(quota_page *page, int64_t now_us) {
   usage_live_build_header(agent_provider_for(page->provider),
                           agent_packet_age_ms(now_us), ui.stale,
                           ui.has_agent_snapshot && page->has_data, &view);
-  lv_label_set_text(page->context, view.context);
+  const char *context;
+  if (!page->has_data)
+    context = "NO DATA";
+  else if (ui.stale)
+    context = "STALE";
+  else
+    context = view.context;
 
-  if (view.halo_active) {
-    lv_obj_remove_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_add_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
+  if (!page->context_initialized ||
+      strcmp(page->rendered_context, context) != 0) {
+    lv_label_set_text(page->context, context);
+    snprintf(page->rendered_context, sizeof page->rendered_context, "%s",
+             context);
+    page->context_initialized = true;
+  }
+
+  if (!page->halo_initialized || page->halo_visible != view.halo_active) {
+    if (view.halo_active)
+      lv_obj_remove_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
+    page->halo_visible = view.halo_active;
+    page->halo_initialized = true;
   }
 }
 
-static void apply_today_bar(quota_page *page,
+static bool apply_today_bar(quota_page *page,
                             const usage_card_view *quota) {
   usage_today_bar_view bar = {0};
   bool available = usage_live_build_today_bar(
@@ -422,7 +444,7 @@ static void apply_today_bar(quota_page *page,
 
   if (!available || !bar.has_today) {
     lv_obj_add_flag(page->marker, LV_OBJ_FLAG_HIDDEN);
-    return;
+    return available;
   }
 
   int marker_x = VP_SAFE_X + bar.marker_x - 1;
@@ -431,6 +453,7 @@ static void apply_today_bar(quota_page *page,
     marker_x = VP_SAFE_X + VP_CONTENT_W - 3;
   lv_obj_set_x(page->marker, marker_x);
   lv_obj_remove_flag(page->marker, LV_OBJ_FLAG_HIDDEN);
+  return available;
 }
 
 static void apply_quota(quota_page *page, const tk_tokens *tokens) {
@@ -441,10 +464,11 @@ static void apply_quota(quota_page *page, const tk_tokens *tokens) {
   lv_label_set_text(page->quota, quota->label);
   lv_label_set_text(page->percent,
                     quota->has_pct ? quota->pct_text : "");
+  bool bar_available = apply_today_bar(page, quota);
   lv_label_set_text(page->today,
-                    quota->has_delta ? quota->delta_text : "–");
+                    quota->has_delta && bar_available
+                        ? quota->delta_text : "–");
   lv_label_set_text(page->reset, quota->reset_short_text);
-  apply_today_bar(page, quota);
   refresh_header(page, ui.last_now_us);
 }
 
