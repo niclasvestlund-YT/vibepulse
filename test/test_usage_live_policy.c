@@ -101,6 +101,13 @@ int main(void) {
   add_job(&four_jobs, job(TK_AGENT_DONE, 0, NULL, NULL));
   check_header("four shaped jobs count only effective active jobs", &four_jobs,
                0, false, true, "3 CHATS ACTIVE", true);
+  tk_agent_provider_status four_active_jobs = {0};
+  add_job(&four_active_jobs, job(TK_AGENT_WORKING, 0, NULL, NULL));
+  add_job(&four_active_jobs, job(TK_AGENT_WAITING, 0, NULL, NULL));
+  add_job(&four_active_jobs, job(TK_AGENT_ERROR, 0, NULL, NULL));
+  add_job(&four_active_jobs, job(TK_AGENT_WORKING, 0, NULL, NULL));
+  check_header("four effective jobs report the exact active count",
+               &four_active_jobs, 0, false, true, "4 CHATS ACTIVE", true);
 
   tk_agent_provider_status nonworking = {0};
   add_job(&nonworking, job(TK_AGENT_WAITING, 0, NULL, NULL));
