@@ -60,8 +60,8 @@ class SharedAmoledSkillTests(unittest.TestCase):
         self.assertEqual(metadata["name"], "iterating-esp32-amoled-ui")
         self.assertEqual(
             metadata["description"],
-            "Use when making Torget or VibePulse visual changes, exact-size "
-            "mockups, simulator captures, or AMOLED review.",
+            "Use when making any Torget AMOLED app visual change, exact-size "
+            "mockup, simulator capture, or physical review.",
         )
 
         required_workflow = (
@@ -90,6 +90,20 @@ class SharedAmoledSkillTests(unittest.TestCase):
             "concurrent Claude/Codex edits",
             "scope and diff",
             "memory budget",
+            "interaction performance",
+            "shared display pipeline",
+            "flush count",
+            "largest internal block",
+            "network/TLS stress",
+            "one variable at a time",
+            "never increase display-buffer height",
+            "Static approval does not imply motion approval",
+            "shared LVGL raster is the visual authority",
+            "widest realistic copy",
+            "missing-data state",
+            "one dominant metric",
+            "round secondary values",
+            "encode discovered spacing as validator tests",
         )
         for phrase in required_workflow:
             with self.subTest(phrase=phrase):

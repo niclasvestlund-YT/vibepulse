@@ -4,7 +4,7 @@
   "palette": {
     "background": "#000000",
     "text": "#FFFFFF",
-    "muted": "#858C97",
+    "muted": "#9298A2",
     "track": "#303238",
     "hairline": "#202328",
     "claude": "#D97757",
@@ -13,14 +13,14 @@
   "hero": {
     "safeX": 22,
     "contentWidth": 436,
-    "providerY": 23,
-    "quotaY": 86,
-    "percentY": 112,
-    "percentFontPx": 146,
-    "barY": 276,
-    "barHeight": 18,
-    "resetY": 312,
-    "statusY": 388,
+    "providerY": 22,
+    "quotaY": 72,
+    "percentY": 104,
+    "percentFontPx": 164,
+    "barY": 304,
+    "barHeight": 20,
+    "resetY": 352,
+    "statusY": 390,
     "statusHeight": 66
   },
   "fixtures": {

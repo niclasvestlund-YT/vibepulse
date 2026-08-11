@@ -1,63 +1,107 @@
 #!/usr/bin/env python3
-"""Raster landmark checks calibrated from the LVGL simulator authority."""
+"""Exact-size raster checks against the shared LVGL simulator renderer."""
 
-import unittest
+from __future__ import annotations
+
+import os
 from pathlib import Path
+import subprocess
+import tempfile
+import unittest
 
 from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPORTS = ROOT / "design/vibepulse/exports"
-
-# Visible-ink row starts measured from the 480x480 LVGL hero captures. We lock
-# only structural landmarks; browser and LVGL antialiasing are intentionally
-# allowed to differ.
-LVGL_LANDMARK_TOPS = (30, 93, 113, 276, 319, 415)
-
-
-def nonblack_row_runs(path):
-    image = Image.open(path).convert("RGB")
-    occupied = []
-    for y in range(image.height):
-        occupied.append(any(image.getpixel((x, y)) != (0, 0, 0)
-                            for x in range(image.width)))
-
-    runs = []
-    start = None
-    for y, present in enumerate(occupied + [False]):
-        if present and start is None:
-            start = y
-        elif not present and start is not None:
-            runs.append((start, y - 1))
-            start = None
-    return image.size, runs
+EXPECTED = {
+    "torget-vibepulse-claude-fable.bmp",
+    "torget-vibepulse-claude-all.bmp",
+    "torget-vibepulse-codex-weekly.bmp",
+    "torget-vibepulse-burn-speed-up.bmp",
+    "torget-vibepulse-burn-on-pace.bmp",
+    "torget-vibepulse-burn-early.bmp",
+    "torget-vibepulse-burn-learning.bmp",
+    "torget-vibepulse-burn-unavailable.bmp",
+    "torget-vibepulse-volume.bmp",
+    "torget-vibepulse-claude-stale.bmp",
+    "torget-vibepulse-claude-missing.bmp",
+    "torget-vibepulse-codex-missing.bmp",
+}
 
 
 class VibePulseVisualLandmarkTests(unittest.TestCase):
-    def test_browser_exports_follow_lvgl_vertical_landmarks(self):
-        for name in ("claude-hero.png", "codex-hero.png"):
-            with self.subTest(name=name):
-                size, runs = nonblack_row_runs(EXPORTS / name)
-                self.assertEqual(size, (480, 480))
-                self.assertEqual(len(runs), len(LVGL_LANDMARK_TOPS))
-                self.assertEqual(tuple(run[0] for run in runs),
-                                 LVGL_LANDMARK_TOPS)
-                self.assertEqual(runs[3], (276, 293))
-
-    def test_provider_color_and_horizontal_bar_geometry_are_exact(self):
-        cases = (
-            ("claude-hero.png", (217, 119, 87), 339),
-            ("codex-hero.png", (111, 120, 255), 208),
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix="vibepulse-raster-")
+        cls.capture_dir = Path(cls.temp.name)
+        subprocess.run(
+            ["cmake", "-S", "sim", "-B", "sim/build", "-G", "Ninja"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
         )
-        for name, provider_color, fill_right in cases:
+        subprocess.run(
+            ["cmake", "--build", "sim/build"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [str(ROOT / "sim/build/torget-sim"), "--vibepulse-static-qa"],
+            cwd=ROOT,
+            env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir)},
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp.cleanup()
+
+    def image(self, name):
+        return Image.open(self.capture_dir / name).convert("RGB")
+
+    def test_capture_matrix_is_complete_and_true_size(self):
+        actual = {path.name for path in self.capture_dir.iterdir()}
+        self.assertEqual(actual, EXPECTED)
+        for name in sorted(EXPECTED):
             with self.subTest(name=name):
-                image = Image.open(EXPORTS / name).convert("RGB")
-                y = 284
-                colored = [x for x in range(image.width)
-                           if image.getpixel((x, y)) == provider_color]
-                self.assertEqual((colored[0], colored[-1]), (22, fill_right))
-                self.assertEqual(image.getpixel((457, y)), (48, 50, 56))
+                self.assertEqual(self.image(name).size, (480, 480))
+
+    def test_provider_bars_use_locked_colors_and_full_track(self):
+        cases = (
+            ("torget-vibepulse-claude-fable.bmp", (217, 119, 87)),
+            ("torget-vibepulse-claude-all.bmp", (217, 119, 87)),
+            ("torget-vibepulse-codex-weekly.bmp", (111, 120, 255)),
+        )
+        for name, accent in cases:
+            with self.subTest(name=name):
+                image = self.image(name)
+                row = [image.getpixel((x, 314)) for x in range(480)]
+                colored = [x for x, pixel in enumerate(row) if pixel == accent]
+                self.assertTrue(colored)
+                self.assertEqual(colored[0], 22)
+                self.assertEqual(row[457], (48, 50, 56))
+
+    def test_burn_rate_is_unboxed_with_one_shared_separator(self):
+        image = self.image("torget-vibepulse-burn-speed-up.bmp")
+        hairline = (32, 35, 40)
+        separator = [x for x in range(480)
+                     if image.getpixel((x, 251)) == hairline]
+        self.assertEqual((separator[0], separator[-1]), (22, 457))
+
+    def test_missing_pages_keep_identity_and_empty_progress(self):
+        for name in (
+            "torget-vibepulse-claude-missing.bmp",
+            "torget-vibepulse-codex-missing.bmp",
+        ):
+            with self.subTest(name=name):
+                image = self.image(name)
+                row = [image.getpixel((x, 314)) for x in range(22, 458)]
+                self.assertEqual(set(row), {(48, 50, 56)})
 
 
 if __name__ == "__main__":

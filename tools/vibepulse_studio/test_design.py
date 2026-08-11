@@ -34,6 +34,13 @@ class DesignTests(unittest.TestCase):
         self.assertEqual(design["palette"]["codex"], "#6F78FF")
         self.assertEqual(design["palette"]["background"], "#000000")
         self.assertNotIn("5-hour", json.dumps(design))
+        self.assertEqual(design["hero"]["providerY"], 22)
+        self.assertEqual(design["hero"]["quotaY"], 72)
+        self.assertEqual(design["hero"]["percentY"], 104)
+        self.assertEqual(design["hero"]["percentFontPx"], 164)
+        self.assertEqual(design["hero"]["barY"], 304)
+        self.assertEqual(design["hero"]["barHeight"], 20)
+        self.assertEqual(design["hero"]["resetY"], 352)
 
     def test_device_facts_cannot_be_changed(self):
         design = copy.deepcopy(self.design)
@@ -104,8 +111,7 @@ class DesignTests(unittest.TestCase):
         cases = (
             ({"providerY": 86}, "reading order"),
             ({"quotaY": 112}, "reading order"),
-            ({"percentFontPx": 164}, "percentage"),
-            ({"percentFontPx": 170}, "percentage"),
+            ({"percentFontPx": 193}, "percentage"),
             ({"resetY": 294}, "progress bar"),
             ({"statusY": 312}, "reset row"),
             ({"statusY": 420, "statusHeight": 66}, "screen"),
@@ -120,6 +126,7 @@ class DesignTests(unittest.TestCase):
     def test_geometry_accounts_for_text_row_extents(self):
         cases = (
             ({"providerY": 78}, "provider row"),
+            ({"quotaY": 77}, "quota row"),
             ({"quotaY": 104}, "quota row"),
             ({"resetY": 380}, "reset row"),
         )

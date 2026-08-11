@@ -67,6 +67,9 @@ RGB_COLOR = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 MIN_TEXT_ROW_HEIGHT_PX = 18
 MIN_SECTION_GAP_PX = 8
 MIN_TEXT_ROW_STEP_PX = MIN_TEXT_ROW_HEIGHT_PX + MIN_SECTION_GAP_PX
+# The real LVGL raster is authoritative: the 21 px quota row needs enough
+# room for its visible glyphs plus an optical gutter before the 164 px hero.
+MIN_QUOTA_TO_PERCENT_STEP_PX = 28
 
 
 def _pixel_integer(value):
@@ -144,7 +147,8 @@ def _validate_hero(hero, width, height):
         raise DesignError(
             "provider row must finish before quota in visual reading order",
         )
-    if hero["quotaY"] + MIN_TEXT_ROW_STEP_PX > hero["percentY"]:
+    if (hero["quotaY"] + MIN_QUOTA_TO_PERCENT_STEP_PX
+            > hero["percentY"]):
         raise DesignError(
             "quota row must finish before percentage in visual reading order",
         )

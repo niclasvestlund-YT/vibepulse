@@ -18,6 +18,9 @@ assert "lv_obj_set_style_transform_scale_" not in usage_screen, (
 )
 assert "SUMMARY_LABEL_SCALE_Y" not in usage_screen
 assert "extern const lv_font_t plex_ui_21;" in usage_screen
-assert "text(parent, &plex_ui_21, color)" in usage_screen
+assert "extern const lv_font_t plex_num_164;" in usage_screen
+assert "lv_obj_set_style_transform" not in usage_screen
+assert "lv_obj_set_style_opa" not in usage_screen
+assert "lv_canvas" not in usage_screen
 
 print("OK: VibePulse dynamic labels do not allocate transform layers")

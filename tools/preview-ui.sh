@@ -85,14 +85,18 @@ registry = load_registry(repo / "spec")
 display = registry.capabilities["display.amoled"]
 expected = (display["width"], display["height"])
 expected_names = {
-    "torget-vibepulse-claude-hero.bmp",
-    "torget-vibepulse-codex-hero.bmp",
-    "torget-vibepulse-claude-details.bmp",
-    "torget-vibepulse-overview.bmp",
-    "torget-vibepulse-claude-hero-stale.bmp",
-    "torget-vibepulse-codex-hero-stale.bmp",
-    "torget-vibepulse-claude-hero-missing.bmp",
-    "torget-vibepulse-codex-hero-missing.bmp",
+    "torget-vibepulse-claude-fable.bmp",
+    "torget-vibepulse-claude-all.bmp",
+    "torget-vibepulse-codex-weekly.bmp",
+    "torget-vibepulse-burn-speed-up.bmp",
+    "torget-vibepulse-burn-on-pace.bmp",
+    "torget-vibepulse-burn-early.bmp",
+    "torget-vibepulse-burn-learning.bmp",
+    "torget-vibepulse-burn-unavailable.bmp",
+    "torget-vibepulse-volume.bmp",
+    "torget-vibepulse-claude-stale.bmp",
+    "torget-vibepulse-claude-missing.bmp",
+    "torget-vibepulse-codex-missing.bmp",
 }
 actual_names = {path.name for path in capture_dir.iterdir()}
 missing = sorted(expected_names - actual_names)

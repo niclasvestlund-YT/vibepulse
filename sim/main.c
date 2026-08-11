@@ -296,19 +296,19 @@ static void platform_tour_cb(lv_timer_t *t) {
   switch (stage++) {
     case 0: torget_launcher_open(); break;
     case 1: dump_frame("launcher"); break;
-    case 2: torget_app_show(1); tokens_show_view(VIEW_CLAUDE_HERO); break;
+    case 2: torget_app_show(1); tokens_show_view(VIEW_CLAUDE_FABLE); break;
     case 3: apply_agent_fixture(1); break;
     case 4: dump_frame("vibepulse-claude-static"); break;
     case 5: apply_agent_fixture(2); break;
     case 6: dump_frame("vibepulse-claude-long-copy"); break;
-    case 7: tokens_show_view(VIEW_CODEX_HERO); apply_agent_fixture(5); break;
+    case 7: tokens_show_view(VIEW_CODEX_WEEKLY); apply_agent_fixture(5); break;
     case 8: dump_frame("vibepulse-codex-static"); break;
-    case 9: tokens_show_view(VIEW_FORECAST); break;
+    case 9: tokens_show_view(VIEW_BURN_RATE); break;
     case 10: dump_frame("vibepulse-forecast-collecting"); break;
     case 11: tokens_show_view(VIEW_VOLUME); break;
     case 12: dump_frame("vibepulse-volume"); break;
     case 13:
-      tokens_show_view(VIEW_CLAUDE_HERO);
+      tokens_show_view(VIEW_CLAUDE_FABLE);
       apply_agent_fixture(0);
       feed_tokens_file("tokens-missing.json");
       break;
@@ -364,36 +364,68 @@ static int run_vibepulse_static_qa(void) {
 
   feed_tokens();
   apply_agent_file("agent-status-multi-working.json");
-  tokens_show_view(VIEW_CLAUDE_HERO);
-  dump_frame("vibepulse-claude-hero");
-  tokens_show_view(VIEW_CODEX_HERO);
-  dump_frame("vibepulse-codex-hero");
-  tokens_show_view(VIEW_CLAUDE_DETAILS);
-  dump_frame("vibepulse-claude-details");
-  tokens_show_view(VIEW_OVERVIEW);
-  dump_frame("vibepulse-overview");
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("vibepulse-claude-fable");
+  tokens_show_view(VIEW_CLAUDE_ALL);
+  dump_frame("vibepulse-claude-all");
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("vibepulse-codex-weekly");
 
-  tokens_show_view(VIEW_CLAUDE_HERO);
+  feed_forecast_outcomes();
+  tokens_show_view(VIEW_BURN_RATE);
+  dump_frame("vibepulse-burn-speed-up");
+
+  tk_tokens forecast = {0};
+  forecast.claude_week = forecast_limit(47, 300);
+  forecast.codex_week = forecast_limit(35, 2210);
+  forecast.claude_forecast.state = TK_FORECAST_AT_RESET;
+  forecast.claude_forecast.pace_factor = 1.0;
+  forecast.claude_forecast.pct_at_reset = 100;
+  forecast.claude_forecast.has_pace_factor = 1;
+  forecast.claude_forecast.has_pct_at_reset = 1;
+  forecast.codex_forecast = forecast.claude_forecast;
+  tokens_apply(&forecast);
+  dump_frame("vibepulse-burn-on-pace");
+
+  forecast.claude_forecast.state = TK_FORECAST_EXHAUSTS;
+  forecast.claude_forecast.offset_min = -540;
+  forecast.claude_forecast.at_epoch = 1786158000;
+  forecast.claude_forecast.has_offset_min = 1;
+  forecast.claude_forecast.has_at_epoch = 1;
+  forecast.codex_forecast = forecast.claude_forecast;
+  tokens_apply(&forecast);
+  dump_frame("vibepulse-burn-early");
+
+  forecast.claude_forecast.state = TK_FORECAST_COLLECTING;
+  forecast.codex_forecast.state = TK_FORECAST_COLLECTING;
+  tokens_apply(&forecast);
+  dump_frame("vibepulse-burn-learning");
+
+  forecast.claude_forecast.state = TK_FORECAST_UNAVAILABLE;
+  forecast.codex_forecast.state = TK_FORECAST_UNAVAILABLE;
+  tokens_apply(&forecast);
+  dump_frame("vibepulse-burn-unavailable");
+
+  feed_tokens();
+  tokens_show_view(VIEW_VOLUME);
+  dump_frame("vibepulse-volume");
+
+  tokens_show_view(VIEW_CLAUDE_ALL);
   usage_screen_set_stale(true);
-  dump_frame("vibepulse-claude-hero-stale");
+  dump_frame("vibepulse-claude-stale");
   usage_screen_set_stale(false);
 
-  tokens_show_view(VIEW_CODEX_HERO);
-  usage_screen_set_stale(true);
-  dump_frame("vibepulse-codex-hero-stale");
-  usage_screen_set_stale(false);
-
-  tokens_show_view(VIEW_CLAUDE_HERO);
   feed_tokens_file("tokens-missing.json");
-  dump_frame("vibepulse-claude-hero-missing");
-  tokens_show_view(VIEW_CODEX_HERO);
-  dump_frame("vibepulse-codex-hero-missing");
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("vibepulse-claude-missing");
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("vibepulse-codex-missing");
   return capture_failures == 0 ? 0 : 1;
 }
 
 static void run_vibepulse_completion_qa(void) {
   torget_app_show(1);
-  tokens_show_view(VIEW_CLAUDE_HERO);
+  tokens_show_view(VIEW_CLAUDE_FABLE);
   apply_agent_file("agent-status-idle.json");
 
   apply_agent_file("agent-status-multi-working.json");

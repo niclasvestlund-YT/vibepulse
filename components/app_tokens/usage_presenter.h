@@ -43,6 +43,17 @@ typedef struct {
   usage_card_view quota;
 } usage_hero_view;
 
+typedef enum {
+  USAGE_QUOTA_CLAUDE_MODEL,
+  USAGE_QUOTA_CLAUDE_ALL,
+  USAGE_QUOTA_CODEX_WEEK,
+} usage_quota_scope;
+
+typedef struct {
+  usage_provider provider;
+  usage_card_view quota;
+} usage_quota_page_view;
+
 typedef struct {
   int row_count;
   usage_card_view rows[2];
@@ -69,6 +80,7 @@ typedef struct {
   char detail[USAGE_FORECAST_DETAIL_CAP];
   double pct;
   int has_pct;
+  int visible;
 } usage_forecast_row_view;
 
 typedef struct {
@@ -79,6 +91,9 @@ typedef struct {
 void usage_presenter_build_hero(const tk_tokens *tokens,
                                 usage_provider provider,
                                 usage_hero_view *out);
+void usage_presenter_build_quota_page(const tk_tokens *tokens,
+                                      usage_quota_scope scope,
+                                      usage_quota_page_view *out);
 void usage_presenter_build_claude_details(
     const tk_tokens *tokens, usage_detail_page_view *out);
 void usage_presenter_build_overview(

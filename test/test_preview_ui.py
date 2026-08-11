@@ -18,14 +18,18 @@ SIM_PATH = ROOT / "sim/main.c"
 RUNNER_PATH = ROOT / "test/run.sh"
 
 EXPECTED_BMPS = {
-    "torget-vibepulse-claude-hero.bmp",
-    "torget-vibepulse-codex-hero.bmp",
-    "torget-vibepulse-claude-details.bmp",
-    "torget-vibepulse-overview.bmp",
-    "torget-vibepulse-claude-hero-stale.bmp",
-    "torget-vibepulse-codex-hero-stale.bmp",
-    "torget-vibepulse-claude-hero-missing.bmp",
-    "torget-vibepulse-codex-hero-missing.bmp",
+    "torget-vibepulse-claude-fable.bmp",
+    "torget-vibepulse-claude-all.bmp",
+    "torget-vibepulse-codex-weekly.bmp",
+    "torget-vibepulse-burn-speed-up.bmp",
+    "torget-vibepulse-burn-on-pace.bmp",
+    "torget-vibepulse-burn-early.bmp",
+    "torget-vibepulse-burn-learning.bmp",
+    "torget-vibepulse-burn-unavailable.bmp",
+    "torget-vibepulse-volume.bmp",
+    "torget-vibepulse-claude-stale.bmp",
+    "torget-vibepulse-claude-missing.bmp",
+    "torget-vibepulse-codex-missing.bmp",
 }
 EXPECTED_PNGS = {
     f"{Path(name).stem.removeprefix('torget-')}.png"
@@ -159,7 +163,7 @@ class ConverterBehaviorTests(unittest.TestCase):
             check=False,
         )
 
-    def test_exact_eight_valid_captures_export_eight_pngs(self):
+    def test_exact_capture_matrix_exports_matching_pngs(self):
         with tempfile.TemporaryDirectory() as tmp:
             capture_dir, output_dir = self.create_case(Path(tmp))
             result = self.run_converter(capture_dir, output_dir)
@@ -168,7 +172,9 @@ class ConverterBehaviorTests(unittest.TestCase):
                 {path.name for path in output_dir.glob("*.png")},
                 EXPECTED_PNGS,
             )
-            self.assertEqual(len(result.stdout.splitlines()), 9)
+            self.assertEqual(
+                len(result.stdout.splitlines()), len(EXPECTED_BMPS) + 1
+            )
             for output in output_dir.glob("*.png"):
                 with Image.open(output) as image:
                     self.assertEqual(image.size, (480, 480))
@@ -179,7 +185,7 @@ class ConverterBehaviorTests(unittest.TestCase):
             )
 
     def test_missing_expected_capture_is_rejected_with_exact_set_error(self):
-        missing = "torget-vibepulse-overview.bmp"
+        missing = "torget-vibepulse-burn-on-pace.bmp"
         with tempfile.TemporaryDirectory() as tmp:
             capture_dir, output_dir = self.create_case(Path(tmp), missing)
             result = self.run_converter(capture_dir, output_dir)
@@ -203,7 +209,7 @@ class ConverterBehaviorTests(unittest.TestCase):
             self.assertTrue((capture_dir / unexpected).is_file())
 
     def test_symlink_capture_is_rejected_without_touching_victim(self):
-        linked_name = "torget-vibepulse-claude-hero.bmp"
+        linked_name = "torget-vibepulse-claude-fable.bmp"
         with tempfile.TemporaryDirectory() as tmp:
             case_root = Path(tmp)
             capture_dir, output_dir = self.create_case(case_root, linked_name)
@@ -219,7 +225,7 @@ class ConverterBehaviorTests(unittest.TestCase):
             self.assertTrue(linked_capture.is_symlink())
 
     def test_corrupt_expected_capture_is_rejected(self):
-        corrupt_name = "torget-vibepulse-codex-hero.bmp"
+        corrupt_name = "torget-vibepulse-codex-weekly.bmp"
         with tempfile.TemporaryDirectory() as tmp:
             capture_dir, output_dir = self.create_case(Path(tmp))
             corrupt = capture_dir / corrupt_name
@@ -230,7 +236,7 @@ class ConverterBehaviorTests(unittest.TestCase):
             self.assertEqual(corrupt.read_bytes(), b"not a BMP")
 
     def test_wrong_size_expected_capture_is_rejected(self):
-        wrong_name = "torget-vibepulse-codex-hero-stale.bmp"
+        wrong_name = "torget-vibepulse-burn-learning.bmp"
         with tempfile.TemporaryDirectory() as tmp:
             capture_dir, output_dir = self.create_case(Path(tmp))
             wrong = capture_dir / wrong_name
