@@ -75,7 +75,9 @@ static void build_hero_quota(const tk_tokens *tokens, usage_provider provider,
                &tokens->claude_model_week);
     return;
   }
-  build_card(out, USAGE_CARD_ALL_WEEK, "WEEKLY · ALL MODELS",
+  build_card(out, USAGE_CARD_ALL_WEEK,
+             tokens->claude_week.has_pct ? "WEEKLY · ALL MODELS"
+                                         : "WEEKLY",
              &tokens->claude_week);
 }
 
@@ -98,10 +100,14 @@ void usage_presenter_build_claude_details(
   if (!out) return;
   if (!tokens) tokens = &empty;
   memset(out, 0, sizeof *out);
-  build_card(&out->rows[0], USAGE_CARD_ALL_WEEK, "WEEKLY · ALL MODELS",
+  build_card(&out->rows[0], USAGE_CARD_MODEL_WEEK,
+             tokens->has_claude_model_week_label &&
+                     tokens->claude_model_week_label[0]
+                 ? tokens->claude_model_week_label
+                 : "MODEL · WEEK",
+             &tokens->claude_model_week);
+  build_card(&out->rows[1], USAGE_CARD_ALL_WEEK, "ALL MODELS",
              &tokens->claude_week);
-  build_card(&out->rows[1], USAGE_CARD_FIVE_HOURS, "5-HOUR LIMIT",
-             &tokens->claude_session);
   out->row_count = 2;
 }
 

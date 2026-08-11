@@ -45,6 +45,20 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                                  LVGL_LANDMARK_TOPS)
                 self.assertEqual(runs[3], (276, 293))
 
+    def test_provider_color_and_horizontal_bar_geometry_are_exact(self):
+        cases = (
+            ("claude-hero.png", (217, 119, 87), 339),
+            ("codex-hero.png", (111, 120, 255), 208),
+        )
+        for name, provider_color, fill_right in cases:
+            with self.subTest(name=name):
+                image = Image.open(EXPORTS / name).convert("RGB")
+                y = 284
+                colored = [x for x in range(image.width)
+                           if image.getpixel((x, y)) == provider_color]
+                self.assertEqual((colored[0], colored[-1]), (22, fill_right))
+                self.assertEqual(image.getpixel((457, y)), (48, 50, 56))
+
 
 if __name__ == "__main__":
     unittest.main()

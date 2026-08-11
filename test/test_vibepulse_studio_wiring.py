@@ -152,6 +152,49 @@ class StudioWiringTests(unittest.TestCase):
         ):
             self.assertIn(f"hero.{hero_name}", self.js)
 
+    @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
+    def test_semantic_copy_matches_firmware_for_every_data_condition(self):
+        fixture = {
+            "provider": "CLAUDE",
+            "quota": "FABLE · WEEK",
+            "percent": 73,
+            "today": 12,
+            "reset": "RESET IN 2D 4H",
+        }
+        result = self.evaluate_javascript(f"""
+          (() => {{
+            const fixture = {json.dumps(fixture)};
+            return {{
+              live: heroCopy(fixture, "live"),
+              stale: heroCopy(fixture, "stale"),
+              missing: heroCopy(fixture, "missing")
+            }};
+          }})()
+        """)
+        self.assertEqual(result["live"], {
+            "quotaText": "FABLE · WEEK",
+            "percentageText": "73%",
+            "todayText": "+12% TODAY",
+            "resetText": "RESET IN 2D 4H",
+            "statusText": "LIVE",
+        })
+        self.assertEqual(result["stale"], {
+            "quotaText": "FABLE · WEEK",
+            "percentageText": "73%",
+            "todayText": "+12% TODAY",
+            "resetText": "RESET IN 2D 4H",
+            "statusText": "STALE",
+        })
+        self.assertEqual(result["missing"], {
+            "quotaText": "WEEKLY",
+            "percentageText": "–",
+            "todayText": "– TODAY",
+            "resetText": "USAGE UNAVAILABLE",
+            "statusText": "NO DATA",
+        })
+        self.assertIn("const percentSize = isMissing ? labelSize : hero.percentFontPx", self.js)
+        self.assertIn("textStyle(percentSize", self.js)
+
     def test_only_reviewed_numeric_tokens_are_editable_and_bounded(self):
         expected = {
             "safeX", "providerY", "quotaY", "percentY", "barY",

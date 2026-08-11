@@ -71,12 +71,13 @@ int main(void) {
 
   usage_detail_page_view details = {0};
   usage_presenter_build_claude_details(&tokens, &details);
-  check("details are stable and ordered",
+  check("details keep both useful weekly Claude quotas",
         details.row_count == 2 &&
-        strcmp(details.rows[0].label, "WEEKLY · ALL MODELS") == 0 &&
-        strcmp(details.rows[1].label, "5-HOUR LIMIT") == 0);
-  check("hour delta is English",
-        strcmp(details.rows[1].delta_text, "+11 LAST HOUR") == 0);
+        strcmp(details.rows[0].label, "FABLE · WEEK") == 0 &&
+        strcmp(details.rows[1].label, "ALL MODELS") == 0);
+  check("details never expose the five-hour quota",
+        details.rows[0].kind != USAGE_CARD_FIVE_HOURS &&
+        details.rows[1].kind != USAGE_CARD_FIVE_HOURS);
 
   usage_overview_page_view overview = {0};
   usage_presenter_build_overview(&tokens, &overview);
@@ -100,6 +101,14 @@ int main(void) {
         strcmp(hero.quota.pct_text, "–") == 0 &&
         strcmp(hero.quota.reset_text, "USAGE UNAVAILABLE") == 0 &&
         hero.quota.delta_text[0] == '\0');
+  usage_presenter_build_hero(&missing, USAGE_PROVIDER_CLAUDE, &hero);
+  check("missing Claude quota stays generic and truthful",
+        strcmp(hero.quota.label, "WEEKLY") == 0 &&
+        strcmp(hero.quota.pct_text, "–") == 0);
+  usage_presenter_build_claude_details(&missing, &details);
+  check("missing Claude details never invent a model",
+        strcmp(details.rows[0].label, "MODEL · WEEK") == 0 &&
+        strcmp(details.rows[1].label, "ALL MODELS") == 0);
 
   tk_tokens forecasts = {0};
   forecasts.claude_week = limit(47, 300, 7);

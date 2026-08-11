@@ -105,7 +105,7 @@ static void render_completion(uint64_t now_ms) {
   int provider = event->provider;
   lv_obj_remove_flag(mon.completion.root, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(mon.completion.root);
-  lv_label_set_text(mon.completion.done, "KLAR");
+  lv_label_set_text(mon.completion.done, "DONE");
   lv_obj_invalidate(mon.completion.done);
   lv_label_set_text(mon.completion.provider,
                     provider == TK_AGENT_PROVIDER_CLAUDE
@@ -130,7 +130,7 @@ static void render_completion(uint64_t now_ms) {
 
   char jobs[24];
   if (event->other_active_count > 0) {
-    snprintf(jobs, sizeof jobs, "%u JOBBAR",
+    snprintf(jobs, sizeof jobs, "%u WORKING",
              (unsigned)event->other_active_count);
     lv_label_set_text(mon.completion.other_jobs, jobs);
     lv_obj_remove_flag(mon.completion.other_jobs, LV_OBJ_FLAG_HIDDEN);
@@ -187,7 +187,7 @@ static void create_completion(lv_obj_t *app_root) {
   lv_obj_set_pos(view->done, 0, 252);
   lv_obj_set_size(view->done, VP_SCREEN_W, 76);
   lv_obj_set_style_text_align(view->done, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_text(view->done, "KLAR");
+  lv_label_set_text(view->done, "DONE");
 
   view->project = label(view->root, &plex_text_21, COL_WHITE);
   lv_obj_set_pos(view->project, 20, 340);

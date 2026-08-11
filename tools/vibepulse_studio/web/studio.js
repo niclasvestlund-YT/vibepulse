@@ -278,6 +278,25 @@ function lvglTextY(baseY, role) {
   return baseY + LVGL_WEB_FONT_METRIC_Y[role];
 }
 
+function heroCopy(fixture, condition) {
+  if (condition === "missing") {
+    return {
+      quotaText: "WEEKLY",
+      percentageText: "–",
+      todayText: "– TODAY",
+      resetText: "USAGE UNAVAILABLE",
+      statusText: "NO DATA",
+    };
+  }
+  return {
+    quotaText: fixture.quota,
+    percentageText: `${fixture.percent}%`,
+    todayText: `+${fixture.today}% TODAY`,
+    resetText: fixture.reset,
+    statusText: condition === "stale" ? "STALE" : "LIVE",
+  };
+}
+
 function render(design, selection) {
   if (!design || !state.hardware) {
     return;
@@ -292,11 +311,11 @@ function render(design, selection) {
   const isMissing = selection.condition === "missing";
   const isStale = selection.condition === "stale";
   const visiblePercent = isMissing ? 0 : fixture.percent;
-  const percentageText = isMissing ? "—" : `${fixture.percent}%`;
-  const todayText = isMissing ? "— TODAY" : `+${fixture.today}% TODAY`;
-  const statusText = isMissing ? "NO DATA" : (isStale ? "STALE" : "LIVE");
+  const {quotaText, percentageText, todayText, resetText, statusText} =
+    heroCopy(fixture, selection.condition);
   const labelSize = Math.max(18, Math.round(hero.percentFontPx * 0.15));
   const smallSize = Math.max(13, Math.round(labelSize * 0.72));
+  const percentSize = isMissing ? labelSize : hero.percentFontPx;
   const contentRight = hero.safeX + hero.contentWidth;
   const barRadius = Math.floor(hero.barHeight / 2);
   const statusCenter = hero.statusY + Math.floor(hero.statusHeight / 2);
@@ -306,7 +325,7 @@ function render(design, selection) {
   document.querySelector("#preview-svg-title").textContent =
     `${fixture.provider} ${statusText}`;
   document.querySelector("#preview-svg-description").textContent =
-    `${fixture.quota}, ${percentageText}, ${todayText}, ${fixture.reset}.`;
+    `${quotaText}, ${percentageText}, ${todayText}, ${resetText}.`;
   background.setAttribute("fill", design.palette.background);
   background.setAttribute("width", String(width));
   background.setAttribute("height", String(height));
@@ -330,7 +349,7 @@ function render(design, selection) {
       y: lvglTextY(hero.quotaY, "quota"),
       ...textStyle(labelSize, design.palette.muted),
       "letter-spacing": Math.max(1, Math.round(labelSize * 0.06)),
-    }, fixture.quota),
+    }, quotaText),
     svgNode("text", {
       x: contentRight,
       y: lvglTextY(hero.quotaY, "today"),
@@ -341,8 +360,8 @@ function render(design, selection) {
     svgNode("text", {
       x: hero.safeX,
       y: lvglTextY(hero.percentY, "percent"),
-      ...textStyle(hero.percentFontPx, design.palette.text, 700),
-      "letter-spacing": Math.round(hero.percentFontPx * -0.04),
+      ...textStyle(percentSize, design.palette.text, 700),
+      "letter-spacing": Math.round(percentSize * -0.04),
     }, percentageText),
     svgNode("rect", {
       x: hero.safeX,
@@ -365,7 +384,7 @@ function render(design, selection) {
       y: lvglTextY(hero.resetY, "reset"),
       ...textStyle(labelSize, design.palette.text),
       "letter-spacing": Math.max(1, Math.round(labelSize * 0.05)),
-    }, fixture.reset),
+    }, resetText),
     svgNode("circle", {
       cx: statusDot.centerX,
       cy: statusCenter,

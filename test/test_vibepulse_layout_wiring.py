@@ -5,6 +5,8 @@ source = (root / "components/app_tokens/usage_screen.c").read_text()
 header = (root / "components/app_tokens/usage_screen.h").read_text()
 sim = (root / "sim/main.c").read_text()
 monitor = (root / "components/app_tokens/agent_monitor.c").read_text()
+status_font = (root / "platform/fonts/plex_status_64.c").read_text()
+font_script = (root / "platform/fonts/fetch-and-convert.sh").read_text()
 
 assert "#define TK_USAGE_SCREEN_VIEWS 6" in header
 assert "create_claude_details_page" in source
@@ -73,8 +75,29 @@ assert "hero->status" in hero
 assert "hero->status_dot" in hero
 assert '"— TODAY"' not in hero, "LVGL hero font has no em-dash glyph"
 assert '"– TODAY"' in hero, "missing today must use the supported en-dash glyph"
+assert "quota->has_pct ? &plex_num_146 : &plex_ui_21" in source
+assert 'quota->has_pct ? quota->pct_text : "–"' in source
+assert 'hero->pct = text(hero->content, &plex_ui_21, COL_WHITE)' in hero
+assert 'lv_label_set_text(hero->pct, "–")' in hero
 assert "usage_presenter_format_agent_metadata" in source
 assert "usage_presenter_data_status_text" in source
+assert "create_app_icon" not in source, "VibePulse pages must not spend space on app chrome"
+for forbidden_copy in (
+    '"VECKOTAKT"', '"VOLYM"', '"CLAUDE IDAG · MTOK"',
+    '"%d SESSIONER"', '"%.0f MTOK MÅNAD"',
+):
+    assert forbidden_copy not in source, f"non-English copy remains: {forbidden_copy}"
+for required_copy in (
+    '"BURN RATE"', '"VOLUME"', '"CLAUDE TODAY · MTOK"',
+    '"%d SESSIONS"', '"%.0f MTOK MONTH"',
+):
+    assert required_copy in source, f"missing English copy: {required_copy}"
+for forbidden_copy in ('"KLAR"', '"%u JOBBAR"'):
+    assert forbidden_copy not in monitor, f"non-English completion copy remains: {forbidden_copy}"
+for required_copy in ('"DONE"', '"%u WORKING"'):
+    assert required_copy in monitor, f"missing English completion copy: {required_copy}"
+assert '0x44' in font_script, "completion font recipe must include D for DONE"
+assert '/* U+0044 "D" */' in status_font, "generated completion font must contain D"
 
 create = source[source.index("void usage_screen_create"):]
 create = create[:create.index("void usage_screen_apply_tokens")]

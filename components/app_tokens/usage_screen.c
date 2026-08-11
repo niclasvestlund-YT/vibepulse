@@ -33,8 +33,6 @@ extern const lv_font_t plex_ui_12;
 #define COL_WHITE       lv_color_hex(VP_COLOR_TEXT)
 #define COL_CLAUDE      lv_color_hex(VP_COLOR_CLAUDE)
 #define COL_CODEX       lv_color_hex(VP_COLOR_CODEX)
-#define COL_APP_PLATE   lv_color_hex(0x181636)
-#define COL_APP_DOT     lv_color_hex(0x7770FF)
 #define COL_DOT         lv_color_hex(0x41444A)
 #define COL_DOT_ON      lv_color_hex(0xCDD2DA)
 
@@ -162,29 +160,6 @@ static void open_launcher(lv_event_t *event) {
   torget_launcher_open();
 }
 
-static void create_app_icon(lv_obj_t *parent, int x, int y) {
-  lv_obj_t *plate = bare(parent);
-  lv_obj_set_pos(plate, x, y);
-  lv_obj_set_size(plate, 34, 34);
-  lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, 0);
-  lv_obj_set_style_bg_color(plate, COL_APP_PLATE, 0);
-  lv_obj_set_style_radius(plate, 9, 0);
-
-  lv_obj_t *v = lv_label_create(plate);
-  lv_obj_set_style_text_font(v, &plex_text_21, 0);
-  lv_obj_set_style_text_color(v, COL_WHITE, 0);
-  lv_obj_set_style_text_letter_space(v, -1, 0);
-  lv_label_set_text(v, "V");
-  lv_obj_set_pos(v, 8, 5);
-
-  lv_obj_t *dot = bare(plate);
-  lv_obj_set_pos(dot, 25, 24);
-  lv_obj_set_size(dot, 5, 5);
-  lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-  lv_obj_set_style_bg_color(dot, COL_APP_DOT, 0);
-}
-
 static lv_obj_t *create_codex_icon_32(lv_obj_t *parent, int x, int y) {
   lv_obj_t *group = bare(parent);
   lv_obj_set_pos(group, x, y);
@@ -209,10 +184,9 @@ static lv_obj_t *create_codex_icon_32(lv_obj_t *parent, int x, int y) {
 }
 
 static void create_header(lv_obj_t *tile, const char *provider) {
-  create_app_icon(tile, LEGACY_CONTENT_X, LEGACY_HEADER_Y + 9);
   lv_obj_t *label = text(tile, &plex_text_21, COL_WHITE);
-  lv_obj_set_pos(label, 63, LEGACY_HEADER_Y + 15);
-  lv_obj_set_width(label, 190);
+  lv_obj_set_pos(label, LEGACY_CONTENT_X, LEGACY_HEADER_Y + 15);
+  lv_obj_set_width(label, LEGACY_CONTENT_W);
   lv_obj_set_style_text_letter_space(label, 2, 0);
   lv_label_set_text(label, provider);
 
@@ -355,6 +329,8 @@ static void apply_hero(hero_widgets *widgets, const usage_hero_view *view,
   lv_label_set_text(widgets->today,
                     quota->has_delta ? quota->delta_text : "– TODAY");
   lv_obj_set_style_text_color(widgets->today, provider_color, 0);
+  lv_obj_set_style_text_font(
+      widgets->pct, quota->has_pct ? &plex_num_146 : &plex_ui_21, 0);
   lv_label_set_text(widgets->pct, quota->has_pct ? quota->pct_text : "–");
   lv_label_set_text(widgets->reset, quota->reset_text);
 
@@ -487,7 +463,7 @@ static void create_hero_page(lv_obj_t *tile, hero_widgets *hero,
   lv_obj_set_style_text_letter_space(hero->today, 1, 0);
   lv_label_set_text(hero->today, "– TODAY");
 
-  hero->pct = text(hero->content, &plex_num_146, COL_WHITE);
+  hero->pct = text(hero->content, &plex_ui_21, COL_WHITE);
   lv_obj_set_pos(hero->pct, 0, VP_PERCENT_Y);
   lv_obj_set_size(hero->pct, VP_CONTENT_W, VP_BAR_Y - VP_PERCENT_Y);
   lv_label_set_long_mode(hero->pct, LV_LABEL_LONG_CLIP);
@@ -538,10 +514,9 @@ static void create_summary_header(summary_page *page, const char *title) {
   lv_obj_set_pos(page->content, VP_SAFE_X, 0);
   lv_obj_set_size(page->content, VP_CONTENT_W, VP_SCREEN_H);
 
-  create_app_icon(page->content, 0, SUMMARY_HEADER_Y + 7);
   lv_obj_t *label = text(page->content, &plex_text_21, COL_WHITE);
-  lv_obj_set_pos(label, 41, SUMMARY_HEADER_Y + 15);
-  lv_obj_set_width(label, VP_CONTENT_W - 41);
+  lv_obj_set_pos(label, 0, SUMMARY_HEADER_Y + 15);
+  lv_obj_set_width(label, VP_CONTENT_W);
   lv_obj_set_style_text_letter_space(label, 2, 0);
   lv_label_set_text(label, title);
 
@@ -669,7 +644,7 @@ static void create_overview_page(void) {
 
 static void create_forecast_page(void) {
   lv_obj_t *tile = new_tile(VIEW_FORECAST);
-  create_header(tile, "VECKOTAKT");
+  create_header(tile, "BURN RATE");
   create_card(tile, &ui.forecast_cards[0], CARD_1_Y, CARD_H, false);
   create_card(tile, &ui.forecast_cards[1], CARD_2_Y, CARD_H, false);
   create_pager(tile, VIEW_FORECAST);
@@ -677,7 +652,7 @@ static void create_forecast_page(void) {
 
 static void create_volume_page(void) {
   lv_obj_t *tile = new_tile(VIEW_VOLUME);
-  create_header(tile, "VOLYM");
+  create_header(tile, "VOLUME");
   lv_obj_t *card = bare(tile);
   lv_obj_set_pos(card, LEGACY_CONTENT_X, 88);
   lv_obj_set_size(card, LEGACY_CONTENT_W, 245);
@@ -690,7 +665,7 @@ static void create_volume_page(void) {
   lv_obj_t *caption = text(card, &plex_ui_14, COL_LABEL);
   lv_obj_set_pos(caption, 18, 18);
   lv_obj_set_style_text_letter_space(caption, 2, 0);
-  lv_label_set_text(caption, "CLAUDE IDAG · MTOK");
+  lv_label_set_text(caption, "CLAUDE TODAY · MTOK");
   ui.volume_value = text(card, &plex_num_118, COL_WHITE);
   lv_obj_set_pos(ui.volume_value, 18, 52);
   lv_obj_set_size(ui.volume_value, 400, 130);
@@ -753,9 +728,9 @@ void usage_screen_set_volume(double day_mtok, int sessions,
     snprintf(buffer, sizeof buffer, "%.1f", day_mtok);
     lv_label_set_text(ui.volume_value, buffer);
   }
-  snprintf(buffer, sizeof buffer, "%d SESSIONER", sessions);
+  snprintf(buffer, sizeof buffer, "%d SESSIONS", sessions);
   lv_label_set_text(ui.volume_sessions, buffer);
-  snprintf(buffer, sizeof buffer, "%.0f MTOK MÅNAD", month_mtok);
+  snprintf(buffer, sizeof buffer, "%.0f MTOK MONTH", month_mtok);
   lv_label_set_text(ui.volume_month, buffer);
 }
 
