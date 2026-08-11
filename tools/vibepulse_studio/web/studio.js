@@ -1,6 +1,8 @@
 "use strict";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const MIN_TEXT_ROW_STEP = 26;
+const MIN_SECTION_GAP = 8;
 const EXPORT_NAMES = Object.freeze([
   "claude-hero",
   "codex-hero",
@@ -30,7 +32,7 @@ const state = {
   headerDigest: null,
   selection: {provider: "claude", condition: "live"},
   scale: 1,
-  mutationToken: takeMutationToken(),
+  mutationToken: "",
   exportFontCss: null,
 };
 
@@ -91,18 +93,96 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function boundsFor(name) {
-  const height = state.hardware.display.height;
+function heroIsServerValid(hero, width, height) {
+  const names = [
+    "safeX", "contentWidth", "providerY", "quotaY", "percentY",
+    "percentFontPx", "barY", "barHeight", "resetY", "statusY",
+    "statusHeight",
+  ];
+  if (!names.every((name) => Number.isInteger(hero[name]))) {
+    return false;
+  }
+  if (hero.safeX < 16 || hero.safeX > 40
+      || hero.contentWidth !== width - 2 * hero.safeX
+      || hero.contentWidth < 1 || hero.contentWidth > width
+      || hero.percentFontPx < 1 || hero.percentFontPx > height
+      || hero.barHeight < 12 || hero.barHeight > 24
+      || hero.statusHeight < 1 || hero.statusHeight > height) {
+    return false;
+  }
+  const positions = [
+    hero.providerY, hero.quotaY, hero.percentY, hero.barY,
+    hero.resetY, hero.statusY,
+  ];
+  if (!positions.every((value) => value >= 0 && value < height)) {
+    return false;
+  }
+  return hero.providerY + MIN_TEXT_ROW_STEP <= hero.quotaY
+    && hero.quotaY + MIN_TEXT_ROW_STEP <= hero.percentY
+    && hero.percentY + hero.percentFontPx + MIN_SECTION_GAP <= hero.barY
+    && hero.barY + hero.barHeight <= height
+    && hero.barY + hero.barHeight + MIN_SECTION_GAP <= hero.resetY
+    && hero.resetY + MIN_TEXT_ROW_STEP <= hero.statusY
+    && hero.statusY + hero.statusHeight <= height;
+}
+
+function heroBounds(hero, name, width, height) {
+  switch (name) {
+    case "safeX":
+      return {min: 16, max: 40};
+    case "providerY":
+      return {min: 0, max: hero.quotaY - MIN_TEXT_ROW_STEP};
+    case "quotaY":
+      return {
+        min: hero.providerY + MIN_TEXT_ROW_STEP,
+        max: hero.percentY - MIN_TEXT_ROW_STEP,
+      };
+    case "percentY":
+      return {
+        min: hero.quotaY + MIN_TEXT_ROW_STEP,
+        max: hero.barY - hero.percentFontPx - MIN_SECTION_GAP,
+      };
+    case "barY":
+      return {
+        min: hero.percentY + hero.percentFontPx + MIN_SECTION_GAP,
+        max: hero.resetY - hero.barHeight - MIN_SECTION_GAP,
+      };
+    case "barHeight":
+      return {
+        min: 12,
+        max: Math.min(24, hero.resetY - hero.barY - MIN_SECTION_GAP),
+      };
+    case "resetY":
+      return {
+        min: hero.barY + hero.barHeight + MIN_SECTION_GAP,
+        max: hero.statusY - MIN_TEXT_ROW_STEP,
+      };
+    case "statusY":
+      return {
+        min: hero.resetY + MIN_TEXT_ROW_STEP,
+        max: height - hero.statusHeight,
+      };
+    case "statusHeight":
+      return {min: 1, max: height - hero.statusY};
+    default:
+      return null;
+  }
+}
+
+function applyHeroChange(hero, name, requested, width, height) {
+  const bounds = heroBounds(hero, name, width, height);
+  if (!bounds || !Number.isInteger(requested) || bounds.min > bounds.max) {
+    return {hero: {...hero}, bounds, accepted: false};
+  }
+  const value = clamp(requested, bounds.min, bounds.max);
+  const candidate = {...hero, [name]: value};
   if (name === "safeX") {
-    return {min: 16, max: 40};
+    candidate.contentWidth = width - 2 * candidate.safeX;
   }
-  if (name === "barHeight") {
-    return {min: 12, max: 24};
+  if (!heroIsServerValid(candidate, width, height)) {
+    return {hero: {...hero}, bounds, accepted: false};
   }
-  if (name === "statusHeight") {
-    return {min: 1, max: height};
-  }
-  return {min: 0, max: height - 1};
+  return {hero: candidate, bounds, accepted: true};
 }
 
 function createGeometryControls() {
@@ -114,33 +194,47 @@ function createGeometryControls() {
     label.htmlFor = `geometry-${specification.name}`;
     label.append(document.createTextNode(specification.label));
 
-    const bounds = boundsFor(specification.name);
     const input = document.createElement("input");
     input.type = "number";
     input.id = `geometry-${specification.name}`;
     input.name = specification.name;
-    input.min = String(bounds.min);
-    input.max = String(bounds.max);
     input.step = "1";
-    input.value = String(state.design.hero[specification.name]);
     input.addEventListener("input", () => {
-      const parsed = Number.parseInt(input.value, 10);
-      if (!Number.isFinite(parsed)) {
-        return;
+      const {width, height} = state.hardware.display;
+      const result = applyHeroChange(
+        state.design.hero,
+        specification.name,
+        input.valueAsNumber,
+        width,
+        height,
+      );
+      if (result.accepted) {
+        state.design = {...state.design, hero: result.hero};
       }
-      const next = clamp(parsed, bounds.min, bounds.max);
-      input.value = String(next);
-      state.design.hero[specification.name] = next;
-      if (specification.name === "safeX") {
-        const width = state.hardware.display.width;
-        state.design.hero.contentWidth = width - 2 * next;
-      }
+      refreshGeometryControls();
       render(state.design, state.selection);
     });
     label.append(input);
     fragment.append(label);
   }
   container.replaceChildren(fragment);
+  refreshGeometryControls();
+}
+
+function refreshGeometryControls() {
+  const {width, height} = state.hardware.display;
+  for (const specification of CONTROL_SPECS) {
+    const input = document.querySelector(`#geometry-${specification.name}`);
+    const bounds = heroBounds(
+      state.design.hero,
+      specification.name,
+      width,
+      height,
+    );
+    input.min = String(bounds.min);
+    input.max = String(bounds.max);
+    input.value = String(state.design.hero[specification.name]);
+  }
 }
 
 function textStyle(size, fill, weight = 600) {
@@ -178,7 +272,10 @@ function render(design, selection) {
   const dotRadius = Math.max(3, Math.floor(hero.barHeight / 4));
 
   svg.style.setProperty("--background", design.palette.background);
-  svg.setAttribute("aria-label", `${fixture.provider} ${statusText} usage preview`);
+  document.querySelector("#preview-svg-title").textContent =
+    `${fixture.provider} ${statusText}`;
+  document.querySelector("#preview-svg-description").textContent =
+    `${fixture.quota}, ${percentageText}, ${todayText}, ${fixture.reset}.`;
   background.setAttribute("fill", design.palette.background);
   background.setAttribute("width", String(width));
   background.setAttribute("height", String(height));
@@ -281,15 +378,15 @@ function configureCanvas() {
 }
 
 function setScale(scale) {
+  if (!state.hardware) {
+    return;
+  }
   const {width, height} = state.hardware.display;
   const frame = document.querySelector("#preview-frame");
-  const space = document.querySelector("#preview-space");
   state.scale = scale === 2 ? 2 : 1;
   frame.className = `scale-${state.scale}`;
-  frame.style.width = `${width}px`;
-  frame.style.height = `${height}px`;
-  space.style.width = `${width * state.scale}px`;
-  space.style.height = `${height * state.scale}px`;
+  frame.style.width = `${width * state.scale}px`;
+  frame.style.height = `${height * state.scale}px`;
   document.querySelector("#zoom-warning").hidden = state.scale === 1;
   for (const button of document.querySelectorAll("[data-scale]")) {
     button.setAttribute("aria-pressed", String(Number(button.dataset.scale) === state.scale));
@@ -333,6 +430,11 @@ async function loadExportFontCss() {
 }
 
 async function saveDesign() {
+  const {width, height} = state.hardware.display;
+  if (!heroIsServerValid(state.design.hero, width, height)) {
+    setOperationStatus("Save blocked: geometry is outside the server contract.", "error");
+    return;
+  }
   setOperationStatus("Saving reviewed tokens…", "pending");
   setActionsDisabled(true);
   try {
@@ -365,20 +467,21 @@ async function exportPng(name) {
   }
   setOperationStatus(`Exporting ${name}…`, "pending");
   setActionsDisabled(true);
-  let bitmap = null;
+  let decoded = null;
   try {
     await document.fonts.ready;
     const fontCss = await state.exportFontCss;
-    const source = document.querySelector("#device-preview").cloneNode(true);
-    const style = svgNode("style", {}, fontCss);
-    source.insertBefore(style, source.firstChild);
-    const svg = new XMLSerializer().serializeToString(source);
-    const blob = new Blob([svg], {type: "image/svg+xml"});
-    bitmap = await createImageBitmap(blob);
     const {width, height} = state.hardware.display;
+    const source = prepareStandaloneSvg(width, height, fontCss);
+    const svg = new XMLSerializer().serializeToString(source);
+    const blob = new Blob([svg], {type: "image/svg+xml;charset=utf-8"});
+    decoded = await decodeStandaloneSvg(blob);
     const canvas = Object.assign(document.createElement("canvas"), {width, height});
     const context = canvas.getContext("2d", {alpha: false});
-    context.drawImage(bitmap, 0, 0, width, height);
+    if (!context) {
+      throw new Error("Browser could not create a canvas context");
+    }
+    context.drawImage(decoded.image, 0, 0, width, height);
     const png = await new Promise((resolve, reject) => {
       canvas.toBlob((result) => {
         if (result) {
@@ -402,11 +505,75 @@ async function exportPng(name) {
   } catch (error) {
     setOperationStatus(`Export failed: ${error.message}`, "error");
   } finally {
-    if (bitmap) {
-      bitmap.close();
+    if (decoded) {
+      decoded.release();
     }
     setActionsDisabled(false);
   }
+}
+
+function resolvePreviewStyles(live, source) {
+  const liveNodes = [live, ...live.querySelectorAll("*")];
+  const sourceNodes = [source, ...source.querySelectorAll("*")];
+  for (let index = 0; index < liveNodes.length; index += 1) {
+    const liveNode = liveNodes[index];
+    const sourceNode = sourceNodes[index];
+    const computed = window.getComputedStyle(liveNode);
+    if (sourceNode.tagName.toLowerCase() === "text") {
+      sourceNode.setAttribute("fill", computed.fill);
+      sourceNode.setAttribute("font-family", computed.fontFamily);
+      sourceNode.setAttribute("font-size", computed.fontSize);
+      sourceNode.setAttribute("font-weight", computed.fontWeight);
+      sourceNode.setAttribute("letter-spacing", computed.letterSpacing);
+    } else if (sourceNode.hasAttribute("fill")) {
+      sourceNode.setAttribute("fill", computed.fill);
+    }
+  }
+}
+
+function prepareStandaloneSvg(width, height, fontCss) {
+  const live = document.querySelector("#device-preview");
+  const source = live.cloneNode(true);
+  resolvePreviewStyles(live, source);
+  source.removeAttribute("style");
+  source.setAttribute("xmlns", SVG_NS);
+  source.setAttribute("width", String(width));
+  source.setAttribute("height", String(height));
+  source.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const definitions = svgNode("defs");
+  const style = svgNode("style", {type: "text/css"}, fontCss);
+  definitions.append(style);
+  source.insertBefore(definitions, source.firstChild);
+  return source;
+}
+
+function decodeSvgWithImage(blob) {
+  const objectUrl = URL.createObjectURL(blob);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({
+      image,
+      release: () => URL.revokeObjectURL(objectUrl),
+    });
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Browser could not decode the standalone SVG"));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function decodeStandaloneSvg(blob) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(blob);
+      return {image: bitmap, release: () => bitmap.close()};
+    } catch (_error) {
+      // Chromium can reject SVG blobs containing embedded fonts. The image
+      // element decoder uses a separate path and retains the same local blob.
+    }
+  }
+  return decodeSvgWithImage(blob);
 }
 
 function bindControls() {
@@ -445,6 +612,7 @@ async function loadJson(path) {
 }
 
 async function initialize() {
+  state.mutationToken = takeMutationToken();
   bindControls();
   state.exportFontCss = loadExportFontCss();
   try {
@@ -464,4 +632,6 @@ async function initialize() {
   }
 }
 
-initialize();
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  initialize();
+}

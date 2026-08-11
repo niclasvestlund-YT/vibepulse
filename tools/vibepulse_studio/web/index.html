@@ -71,25 +71,19 @@
           <button type="button" data-scale="1" aria-pressed="true">1:1 physical pixels</button>
           <button type="button" data-scale="2" aria-pressed="false">2:1 inspect</button>
         </div>
+        <p id="zoom-warning" class="zoom-warning" hidden>
+          INSPECTION ZOOM — NOT PHYSICAL SIZE
+        </p>
       </header>
-      <p id="zoom-warning" class="zoom-warning" hidden>
-        INSPECTION ZOOM — NOT PHYSICAL SIZE
-      </p>
-      <div id="preview-viewport" class="preview-viewport" tabindex="0"
-           aria-label="Scrollable exact-size preview area">
-        <div id="preview-space">
-          <div id="preview-frame" class="scale-1">
-            <svg id="device-preview" role="img"
-                 aria-label="AMOLED usage preview">
-              <rect id="screen-background" fill="var(--background)"></rect>
-              <g id="hero-content"></g>
-            </svg>
-          </div>
-        </div>
+      <div id="preview-frame" class="scale-1">
+        <svg id="device-preview" role="img"
+             aria-label="VibePulse AMOLED preview">
+          <title id="preview-svg-title">VibePulse AMOLED preview</title>
+          <desc id="preview-svg-description">Loading preview data.</desc>
+          <rect id="screen-background" fill="var(--background)"></rect>
+          <g id="hero-content"></g>
+        </svg>
       </div>
-      <p class="preview-footnote">
-        One browser pixel maps to one panel pixel at 1:1. The preview never fits itself to the window.
-      </p>
     </section>
   </main>
 </body>

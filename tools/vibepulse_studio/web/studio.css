@@ -67,8 +67,7 @@ button.primary-action {
 }
 
 button:focus-visible,
-input:focus-visible,
-.preview-viewport:focus-visible {
+input:focus-visible {
   outline: 3px solid var(--shell-focus);
   outline-offset: 2px;
 }
@@ -108,7 +107,6 @@ input:disabled {
 .control-section h2,
 .eyebrow,
 .app-note,
-.preview-footnote,
 .field-help,
 .operation-status {
   margin: 0;
@@ -130,7 +128,6 @@ legend,
 }
 
 .app-note,
-.preview-footnote,
 .field-help,
 .operation-status {
   color: var(--shell-muted);
@@ -242,12 +239,22 @@ legend {
 }
 
 .preview-panel {
-  overflow: hidden;
+  min-height: 620px;
+  max-height: calc(100vh - 118px);
+  overflow: auto;
+  background: #050608;
 }
 
 .preview-header {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  flex-wrap: wrap;
+  min-width: 520px;
   padding: 17px 18px;
   border-bottom: 1px solid var(--shell-line);
+  background: var(--shell-panel);
 }
 
 .preview-header h2 {
@@ -255,9 +262,11 @@ legend {
 }
 
 .zoom-warning {
-  margin: 0;
-  border-bottom: 2px solid var(--shell-focus);
-  padding: 10px 18px;
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  border: 1px solid var(--shell-focus);
+  border-radius: 6px;
+  padding: 8px 12px;
   background: #332714;
   color: #ffd591;
   font-size: 12px;
@@ -265,41 +274,24 @@ legend {
   text-align: center;
 }
 
-.preview-viewport {
-  min-height: 530px;
-  overflow: auto;
-  padding: 24px;
-  background: #050608;
-}
-
-#preview-space {
-  position: relative;
-}
-
 #preview-frame {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: top left;
+  position: relative;
+  margin: 24px;
 }
 
-#preview-frame.scale-1 {
+#preview-frame.scale-1 #device-preview {
   transform: scale(1);
 }
 
-#preview-frame.scale-2 {
+#preview-frame.scale-2 #device-preview {
   transform: scale(2);
 }
 
 #device-preview {
   display: block;
   flex: none;
+  transform-origin: top left;
   background: #000000;
-}
-
-.preview-footnote {
-  padding: 12px 18px 16px;
-  border-top: 1px solid var(--shell-line);
 }
 
 @media (max-width: 1000px) {

@@ -2,7 +2,10 @@
 """Static contract checks for the dependency-free VibePulse Studio UI."""
 
 import hashlib
+import json
 import re
+import shutil
+import subprocess
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
@@ -90,7 +93,23 @@ class StudioWiringTests(unittest.TestCase):
             if tag == "svg" and attributes.get("id") == "device-preview"
         )
         self.assertEqual(svg.get("role"), "img")
-        self.assertTrue(svg.get("aria-label"))
+        self.assertEqual(svg.get("aria-label"), "VibePulse AMOLED preview")
+        self.assertNotIn('setAttribute("aria-label"', self.js)
+        self.assertIn('querySelector("#preview-svg-title")', self.js)
+        self.assertIn('querySelector("#preview-svg-description")', self.js)
+
+        hierarchy = re.search(
+            r'<section class="preview-panel" aria-labelledby="preview-title">\s*'
+            r'<header\b.*?</header>\s*'
+            r'<div id="preview-frame" class="scale-1">\s*'
+            r'<svg id="device-preview" role="img"\s*'
+            r'aria-label="VibePulse AMOLED preview">',
+            self.html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(hierarchy)
+        self.assertNotIn('id="preview-viewport"', self.html)
+        self.assertNotIn('id="preview-space"', self.html)
 
         buttons = [
             attributes for tag, attributes in self.inventory.elements
@@ -107,7 +126,11 @@ class StudioWiringTests(unittest.TestCase):
         self.assertIn("scale(1)", self.css)
         self.assertIn("scale(2)", self.css)
         self.assertIn("INSPECTION ZOOM — NOT PHYSICAL SIZE", self.html)
-        self.assertRegex(self.css, r"\.scale-2\s*\{[^}]*transform:\s*scale\(2\)")
+        self.assertRegex(
+            self.css,
+            r"#preview-frame\.scale-2\s+#device-preview\s*\{[^}]*"
+            r"transform:\s*scale\(2\)",
+        )
         svg_rule = re.search(r"#device-preview\s*\{([^}]*)\}", self.css, re.DOTALL)
         self.assertIsNotNone(svg_rule)
         self.assertNotIn("max-width", svg_rule.group(1))
@@ -139,8 +162,94 @@ class StudioWiringTests(unittest.TestCase):
         self.assertIn('input.type = "number"', self.js)
         self.assertIn('input.min = String(bounds.min)', self.js)
         self.assertIn('input.max = String(bounds.max)', self.js)
-        self.assertIn("clamp(", self.js)
+        self.assertIn("applyHeroChange(", self.js)
+        self.assertIn("refreshGeometryControls()", self.js)
+        self.assertIn("heroIsServerValid(", self.js)
+        self.assertIn("const MIN_TEXT_ROW_STEP = 26", self.js)
+        self.assertIn("const MIN_SECTION_GAP = 8", self.js)
         self.assertRegex(self.js, r"contentWidth\s*=\s*width\s*-\s*2\s*\*")
+
+    @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
+    def test_geometry_changes_match_the_server_relational_contract(self):
+        hero = {
+            "safeX": 22,
+            "contentWidth": 436,
+            "providerY": 23,
+            "quotaY": 86,
+            "percentY": 112,
+            "percentFontPx": 146,
+            "barY": 276,
+            "barHeight": 18,
+            "resetY": 312,
+            "statusY": 388,
+            "statusHeight": 66,
+        }
+        expression = f"""
+          (() => {{
+            const hero = {json.dumps(hero)};
+            const requested = {{
+              providerY: 999, quotaY: -999, percentY: 999,
+              barY: -999, barHeight: 999, resetY: -999,
+              statusY: 999, statusHeight: 999
+            }};
+            const changes = {{}};
+            for (const [name, value] of Object.entries(requested)) {{
+              const result = applyHeroChange(hero, name, value, 480, 480);
+              changes[name] = {{
+                value: result.hero[name],
+                valid: heroIsServerValid(result.hero, 480, 480),
+                accepted: result.accepted
+              }};
+            }}
+            const bounds = {{}};
+            for (const name of Object.keys(requested)) {{
+              bounds[name] = heroBounds(hero, name, 480, 480);
+            }}
+            const badType = applyHeroChange(hero, "statusY", true, 480, 480);
+            return {{changes, bounds, badType}};
+          }})()
+        """
+        result = self.evaluate_javascript(expression)
+        self.assertEqual(
+            {name: item["value"] for name, item in result["changes"].items()},
+            {
+                "providerY": 60,
+                "quotaY": 49,
+                "percentY": 122,
+                "barY": 266,
+                "barHeight": 24,
+                "resetY": 302,
+                "statusY": 414,
+                "statusHeight": 92,
+            },
+        )
+        self.assertTrue(all(
+            item["valid"] and item["accepted"]
+            for item in result["changes"].values()
+        ))
+        self.assertEqual(result["bounds"]["providerY"], {"min": 0, "max": 60})
+        self.assertEqual(result["bounds"]["quotaY"], {"min": 49, "max": 86})
+        self.assertEqual(result["bounds"]["percentY"], {"min": 112, "max": 122})
+        self.assertEqual(result["bounds"]["barY"], {"min": 266, "max": 286})
+        self.assertEqual(result["bounds"]["barHeight"], {"min": 12, "max": 24})
+        self.assertEqual(result["bounds"]["resetY"], {"min": 302, "max": 362})
+        self.assertEqual(result["bounds"]["statusY"], {"min": 338, "max": 414})
+        self.assertEqual(result["bounds"]["statusHeight"], {"min": 1, "max": 92})
+        self.assertFalse(result["badType"]["accepted"])
+        self.assertEqual(result["badType"]["hero"], hero)
+
+    @classmethod
+    def evaluate_javascript(cls, expression):
+        script = cls.js + "\nJSON.stringify(" + expression + ");\n"
+        completed = subprocess.run(
+            ["osascript", "-l", "JavaScript", "-e", script],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            raise AssertionError(completed.stderr.strip() or completed.stdout.strip())
+        return json.loads(completed.stdout)
 
     def test_disallowed_preview_features_and_copy_are_absent(self):
         combined = "\n".join((self.html, self.css, self.js))
@@ -173,6 +282,16 @@ class StudioWiringTests(unittest.TestCase):
         self.assertIn("state.hardware.display", export)
         self.assertIn("canvas.toBlob", export)
         self.assertIn("if (!response.ok)", self.js)
+        for required in (
+            'setAttribute("xmlns", SVG_NS)',
+            'setAttribute("viewBox"',
+            "resolvePreviewStyles(",
+            "createImageBitmap",
+            "new Image()",
+            "URL.createObjectURL",
+            "URL.revokeObjectURL",
+        ):
+            self.assertIn(required, export)
 
     def test_export_names_match_the_server_allowlist(self):
         block = re.search(
