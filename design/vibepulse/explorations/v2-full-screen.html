@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=480, initial-scale=1">
+  <title>VibePulse full-screen quota exploration</title>
+  <style>
+    @font-face {
+      font-family: "IBM Plex Sans";
+      src: url("../../../tools/vibepulse_studio/web/fonts/IBMPlexSans-SemiBold.woff2") format("woff2");
+      font-weight: 600;
+    }
+    @font-face {
+      font-family: "IBM Plex Sans";
+      src: url("../../../tools/vibepulse_studio/web/fonts/IBMPlexSans-Bold.woff2") format("woff2");
+      font-weight: 700;
+    }
+    :root {
+      --accent: #d97757;
+      --muted: #9298a2;
+      --dim: #5f646d;
+      --track: #303238;
+      --hairline: #202328;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 480px;
+      height: 480px;
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    body {
+      color: #fff;
+      font-family: "IBM Plex Sans", sans-serif;
+      font-variant-numeric: tabular-nums;
+    }
+    .screen {
+      position: relative;
+      width: 480px;
+      height: 480px;
+      padding: 22px;
+      background: #000;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      height: 42px;
+      border-bottom: 1px solid var(--hairline);
+      padding-bottom: 13px;
+    }
+    .provider-icon {
+      width: 29px;
+      height: 29px;
+      flex: 0 0 29px;
+      margin-right: 12px;
+    }
+    .provider-icon.claude {
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23D97757' d='M4 7h24v6h4v6h-4v6h-4v4h-4v-4h-8v4H8v-4H4v-6H0v-6h4z'/%3E%3Cpath fill='%23000' d='M9 13h3v4H9zm11 0h3v4h-3z'/%3E%3C/svg%3E") center / contain no-repeat;
+      transform: translateY(-2px);
+    }
+    .provider-icon.codex {
+      border-radius: 7px;
+      background: url("../../../components/app_tokens/assets/source/codex-icon.png") center / cover no-repeat;
+    }
+    .provider {
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: 2.5px;
+      line-height: 29px;
+    }
+    .model {
+      margin-left: auto;
+      text-align: right;
+      color: #d9dce2;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 1.1px;
+      line-height: 15px;
+    }
+    .model small {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 2px;
+    }
+    .quota {
+      position: absolute;
+      left: 22px;
+      top: 88px;
+      width: 436px;
+      color: #b2b7c0;
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      line-height: 28px;
+      white-space: nowrap;
+    }
+    .percent {
+      position: absolute;
+      left: 16px;
+      top: 104px;
+      width: 448px;
+      font-size: 164px;
+      font-weight: 700;
+      letter-spacing: -9px;
+      line-height: 1.18;
+      white-space: nowrap;
+    }
+    .track {
+      position: absolute;
+      left: 22px;
+      top: 304px;
+      width: 436px;
+      height: 20px;
+      overflow: hidden;
+      border-radius: 10px;
+      background: var(--track);
+    }
+    .fill {
+      width: var(--fill);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+    }
+    .stats {
+      position: absolute;
+      left: 22px;
+      top: 352px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      width: 436px;
+    }
+    .stat:last-child { text-align: right; }
+    .stat-value {
+      color: #fff;
+      font-size: 35px;
+      font-weight: 700;
+      letter-spacing: -1px;
+      line-height: 39px;
+    }
+    .stat:first-child .stat-value { color: var(--accent); }
+    .stat-label {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      line-height: 18px;
+    }
+    .pager {
+      position: absolute;
+      left: 0;
+      bottom: 18px;
+      display: flex;
+      justify-content: center;
+      gap: 5px;
+      width: 480px;
+      height: 6px;
+    }
+    .pager span {
+      width: 6px;
+      height: 6px;
+      border-radius: 3px;
+      background: #41444a;
+    }
+    .pager span.active {
+      width: 18px;
+      background: #cdd2da;
+    }
+    .analytics-title {
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: 2.5px;
+    }
+    .forecast-list {
+      position: absolute;
+      left: 22px;
+      top: 82px;
+      width: 436px;
+    }
+    .forecast-row {
+      position: relative;
+      height: 169px;
+    }
+    .forecast-row + .forecast-row {
+      border-top: 1px solid var(--hairline);
+      padding-top: 18px;
+    }
+    .forecast-provider {
+      color: #b2b7c0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 2px;
+    }
+    .forecast-headline {
+      margin-top: 8px;
+      color: #fff;
+      font-size: 56px;
+      font-weight: 700;
+      letter-spacing: -2px;
+      line-height: 64px;
+      white-space: nowrap;
+    }
+    .forecast-detail {
+      color: var(--accent);
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      line-height: 22px;
+    }
+    .forecast-row.codex .forecast-detail { color: #6f78ff; }
+    .volume-hero {
+      position: absolute;
+      left: 18px;
+      top: 105px;
+      display: flex;
+      align-items: baseline;
+      width: 440px;
+      height: 184px;
+    }
+    .volume-number {
+      font-size: 154px;
+      font-weight: 700;
+      letter-spacing: -8px;
+      line-height: 184px;
+    }
+    .volume-unit {
+      margin-left: 14px;
+      color: var(--muted);
+      font-size: 27px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .volume-divider {
+      position: absolute;
+      left: 22px;
+      top: 304px;
+      width: 436px;
+      height: 1px;
+      background: var(--hairline);
+    }
+  </style>
+</head>
+<body>
+  <main class="screen">
+    <header class="header">
+      <div class="provider-icon" aria-hidden="true"></div>
+      <div class="provider"></div>
+      <div class="model"><span></span><small></small></div>
+    </header>
+    <div class="quota"></div>
+    <div class="percent"></div>
+    <div class="track"><div class="fill"></div></div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value today"></div>
+        <div class="stat-label">USED TODAY</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value reset"></div>
+        <div class="stat-label">TO RESET</div>
+      </div>
+    </div>
+    <div class="pager"><span></span><span></span><span></span><span></span><span></span></div>
+  </main>
+  <script>
+    const screens = {
+      "claude-fable": {
+        provider: "CLAUDE", icon: "claude", model: "OPUS 5", effort: "ULTRA",
+        quota: "FABLE · WEEKLY", percent: "73%", fill: "73%", today: "+12%", reset: "2D 4H", page: 0,
+        accent: "#D97757"
+      },
+      "claude-all": {
+        provider: "CLAUDE", icon: "claude", model: "OPUS 5", effort: "ULTRA",
+        quota: "WEEKLY · ALL MODELS", percent: "17%", fill: "17%", today: "+4%", reset: "2D 20H", page: 1,
+        accent: "#D97757"
+      },
+      "codex": {
+        provider: "CODEX", icon: "codex", model: "GPT-5.6 SOL", effort: "XHIGH",
+        quota: "WEEKLY", percent: "43%", fill: "43%", today: "+5%", reset: "1D 14H", page: 2,
+        accent: "#6F78FF"
+      },
+      "burn-rate": {
+        analytics: "burn-rate", page: 3, accent: "#D97757"
+      },
+      "volume": {
+        analytics: "volume", page: 4, accent: "#D97757"
+      }
+    };
+    const requested = new URLSearchParams(location.search).get("screen") || "claude-all";
+    const data = screens[requested] || screens["claude-all"];
+    document.documentElement.style.setProperty("--accent", data.accent);
+    if (data.analytics === "burn-rate") {
+      document.querySelector(".screen").innerHTML = `
+        <header class="header">
+          <div class="analytics-title">BURN RATE</div>
+          <div class="model"><span>WEEKLY</span><small>FORECAST</small></div>
+        </header>
+        <div class="forecast-list">
+          <section class="forecast-row claude">
+            <div class="forecast-provider">CLAUDE · ALL MODELS</div>
+            <div class="forecast-headline">SPEED UP</div>
+            <div class="forecast-detail">1.4× CURRENT PACE TO MAX OUT</div>
+          </section>
+          <section class="forecast-row codex">
+            <div class="forecast-provider">CODEX · WEEKLY</div>
+            <div class="forecast-headline">9H EARLY</div>
+            <div class="forecast-detail">RUNS OUT SAT 06:10</div>
+          </section>
+        </div>
+        <div class="pager"><span></span><span></span><span></span><span></span><span></span></div>`;
+    } else if (data.analytics === "volume") {
+      document.querySelector(".screen").innerHTML = `
+        <header class="header">
+          <div class="provider-icon claude" aria-hidden="true"></div>
+          <div class="provider">CLAUDE</div>
+          <div class="model"><span>VOLUME</span><small>TOKENS</small></div>
+        </header>
+        <div class="quota">USED TODAY</div>
+        <div class="volume-hero"><span class="volume-number">3.2</span><span class="volume-unit">MTOK</span></div>
+        <div class="volume-divider"></div>
+        <div class="stats">
+          <div class="stat"><div class="stat-value">3</div><div class="stat-label">SESSIONS</div></div>
+          <div class="stat"><div class="stat-value">84</div><div class="stat-label">MTOK THIS MONTH</div></div>
+        </div>
+        <div class="pager"><span></span><span></span><span></span><span></span><span></span></div>`;
+    } else {
+      document.documentElement.style.setProperty("--fill", data.fill);
+      document.querySelector(".provider-icon").classList.add(data.icon);
+      document.querySelector(".provider").textContent = data.provider;
+      document.querySelector(".model span").textContent = data.model;
+      document.querySelector(".model small").textContent = data.effort;
+      document.querySelector(".quota").textContent = data.quota;
+      document.querySelector(".percent").textContent = data.percent;
+      document.querySelector(".today").textContent = data.today;
+      document.querySelector(".reset").textContent = data.reset;
+    }
+    document.querySelectorAll(".pager span")[data.page].classList.add("active");
+  </script>
+</body>
+</html>
