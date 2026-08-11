@@ -1,10 +1,14 @@
+import base64
 import copy
 import hashlib
 import io
 import json
 import os
+import socket
 import stat
 import tempfile
+import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -20,7 +24,11 @@ from tools.vibepulse_studio.design import (
 )
 from tools.vibepulse_studio.server import (
     MAX_REQUEST_BYTES,
+    MUTATION_TOKEN_HEADER,
+    DesignPairError,
     StudioApplication,
+    create_server,
+    safe_server_url,
     validate_bind,
 )
 
@@ -86,6 +94,10 @@ class StudioApplicationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(int(headers["Content-Length"]), len(body))
+        self.assertEqual(
+            headers["X-VibePulse-Header-Digest"],
+            hashlib.sha256(self.header_path.read_bytes()).hexdigest(),
+        )
         self.assertNotIn("canvas", json.loads(body))
 
         status, _, body = self.app.handle("GET", "/api/hardware", b"")
@@ -119,13 +131,14 @@ class StudioApplicationTests(unittest.TestCase):
 
     def test_invalid_save_does_not_replace_design_or_header(self):
         original = self.design_path.read_bytes()
+        original_header = self.header_path.read_bytes()
         bad = json.loads(original)
         bad["canvas"] = {"width": 1000, "height": 480}
         status, _, body = self.json_request("PUT", "/api/design", bad)
         self.assertEqual(status, 422)
         self.assertIn("error", json.loads(body))
         self.assertEqual(self.design_path.read_bytes(), original)
-        self.assertFalse(self.header_path.exists())
+        self.assertEqual(self.header_path.read_bytes(), original_header)
 
     def test_invalid_json_type_and_oversized_bodies_are_json_errors(self):
         status, _, body = self.request(
@@ -139,10 +152,10 @@ class StudioApplicationTests(unittest.TestCase):
         )
         self.assertEqual(status, 415)
 
-        status, _, _ = self.request("PUT", "/api/design", b"{}")
+        status, _, _ = self.app.handle("PUT", "/api/design", b"{}")
         self.assertEqual(status, 415)
 
-        status, _, _ = self.request(
+        status, _, _ = self.app.handle(
             "POST", "/api/export/claude-hero", png_bytes()
         )
         self.assertEqual(status, 415)
@@ -174,18 +187,18 @@ class StudioApplicationTests(unittest.TestCase):
         changed["hero"]["providerY"] = 24
 
         real_replace = os.replace
-        call_count = 0
+        failed = False
 
-        def fail_second_replace(source, target):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
+        def fail_header_replace(source, target, *args, **kwargs):
+            nonlocal failed
+            if target == self.header_path.name and not failed:
+                failed = True
                 raise OSError("simulated header replace failure")
-            return real_replace(source, target)
+            return real_replace(source, target, *args, **kwargs)
 
         with mock.patch(
             "tools.vibepulse_studio.server.os.replace",
-            side_effect=fail_second_replace,
+            side_effect=fail_header_replace,
         ):
             status, _, body = self.json_request(
                 "PUT", "/api/design", changed
@@ -196,6 +209,130 @@ class StudioApplicationTests(unittest.TestCase):
         self.assertEqual(self.header_path.read_bytes(), old_header)
         self.assertEqual(list(self.design_path.parent.glob(".*.tmp")), [])
         self.assertEqual(list(self.header_path.parent.glob(".*.tmp")), [])
+
+    def test_replace_that_commits_then_raises_restores_both_old_outputs(self):
+        old_design = self.design_path.read_bytes()
+        old_header = self.header_path.read_bytes()
+        changed = json.loads(old_design)
+        changed["hero"]["providerY"] = 24
+        real_replace = os.replace
+        failed = False
+
+        def commit_design_then_raise(source, target, *args, **kwargs):
+            nonlocal failed
+            result = real_replace(source, target, *args, **kwargs)
+            if target == self.design_path.name and not failed:
+                failed = True
+                raise OSError("replace committed then reported failure")
+            return result
+
+        with mock.patch(
+            "tools.vibepulse_studio.server.os.replace",
+            side_effect=commit_design_then_raise,
+        ):
+            status, _, _ = self.json_request("PUT", "/api/design", changed)
+        self.assertEqual(status, 500)
+        self.assertEqual(self.design_path.read_bytes(), old_design)
+        self.assertEqual(self.header_path.read_bytes(), old_header)
+
+    def test_startup_recovers_a_crash_left_between_pair_replaces(self):
+        old_design = self.design_path.read_bytes()
+        old_header = self.header_path.read_bytes()
+        changed = json.loads(old_design)
+        changed["hero"]["providerY"] = 24
+        real_replace = os.replace
+        crashed = False
+
+        class SimulatedProcessCrash(BaseException):
+            pass
+
+        def crash_after_design_replace(source, target, *args, **kwargs):
+            nonlocal crashed
+            result = real_replace(source, target, *args, **kwargs)
+            if target == self.design_path.name and not crashed:
+                crashed = True
+                raise SimulatedProcessCrash()
+            return result
+
+        with mock.patch(
+            "tools.vibepulse_studio.server.os.replace",
+            side_effect=crash_after_design_replace,
+        ):
+            with self.assertRaises(SimulatedProcessCrash):
+                self.json_request("PUT", "/api/design", changed)
+
+        recovered = StudioApplication(self.repo, self.design_path, self.spec)
+        status, _, _ = recovered.handle("GET", "/api/design", b"")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.design_path.read_bytes(), old_design)
+        self.assertEqual(self.header_path.read_bytes(), old_header)
+        self.assertFalse(
+            (self.repo / "design/vibepulse/.studio-transaction.json").exists()
+        )
+
+    def test_recovery_accepts_journal_for_any_allowed_request_size(self):
+        old_design = self.design_path.read_bytes()
+        changed = json.loads(old_design)
+        changed["fixtures"]["claude"]["reset"] = "R" * 800_000
+        encoded = json.dumps(changed).encode("utf-8")
+        self.assertLess(len(encoded), MAX_REQUEST_BYTES)
+        real_replace = os.replace
+        crashed = False
+
+        class SimulatedProcessCrash(BaseException):
+            pass
+
+        def crash_after_design_replace(source, target, *args, **kwargs):
+            nonlocal crashed
+            result = real_replace(source, target, *args, **kwargs)
+            if target == self.design_path.name and not crashed:
+                crashed = True
+                raise SimulatedProcessCrash()
+            return result
+
+        with mock.patch(
+            "tools.vibepulse_studio.server.os.replace",
+            side_effect=crash_after_design_replace,
+        ):
+            with self.assertRaises(SimulatedProcessCrash):
+                self.json_request("PUT", "/api/design", changed)
+
+        StudioApplication(self.repo, self.design_path, self.spec)
+        self.assertEqual(
+            json.loads(self.design_path.read_text(encoding="utf-8")), changed
+        )
+        self.assertFalse(
+            (self.repo / "design/vibepulse/.studio-transaction.json").exists()
+        )
+
+    def test_mismatched_pair_is_never_served_without_a_valid_journal(self):
+        self.header_path.write_text("corrupt\n", encoding="utf-8")
+        status, _, body = self.app.handle("GET", "/api/design", b"")
+        self.assertEqual(status, 500)
+        self.assertIn("pair", json.loads(body)["error"])
+        with self.assertRaisesRegex(Exception, "pair"):
+            StudioApplication(self.repo, self.design_path, self.spec)
+
+    def test_malformed_journal_types_fail_as_a_concise_pair_error(self):
+        encoded = base64.b64encode(self.design_path.read_bytes()).decode("ascii")
+        malformed_entry = {"sha256": 7, "base64": encoded}
+        malformed = {
+            "schemaVersion": 1,
+            "old": {
+                "design": malformed_entry,
+                "header": None,
+                "pairDigest": "0" * 64,
+            },
+            "new": {
+                "design": malformed_entry,
+                "header": malformed_entry,
+                "pairDigest": "0" * 64,
+            },
+        }
+        journal = self.repo / "design/vibepulse/.studio-transaction.json"
+        journal.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(DesignPairError, "journal"):
+            StudioApplication(self.repo, self.design_path, self.spec)
 
     def test_concurrent_saves_never_leave_a_mismatched_header(self):
         first = json.loads(self.design_path.read_text(encoding="utf-8"))
@@ -385,6 +522,80 @@ class StudioApplicationTests(unittest.TestCase):
         self.assertEqual(set(json.loads(body)), {"error"})
 
 
+class DescriptorSafetyTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.base = Path(self.temp.name)
+        self.repo = self.base / "repo"
+        self.repo.mkdir()
+        self.spec = REPOSITORY_ROOT / "spec"
+        self.display = load_display(self.spec)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def seed(self, path):
+        save_design(
+            path,
+            load_design(REPOSITORY_DESIGN, self.display),
+            self.display,
+        )
+
+    def test_design_path_must_be_lexically_inside_repository(self):
+        outside = self.base / "outside.json"
+        self.seed(outside)
+        with self.assertRaisesRegex(ValueError, "repository"):
+            StudioApplication(self.repo, outside, self.spec)
+
+    def test_design_and_header_symlinks_are_rejected_without_following(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        victim_design = outside / "design.json"
+        self.seed(victim_design)
+        (self.repo / "design/vibepulse").mkdir(parents=True)
+        design_path = self.repo / "design/vibepulse/studio-design.json"
+        design_path.symlink_to(victim_design)
+        with self.assertRaisesRegex(OSError, "regular|symlink"):
+            StudioApplication(self.repo, design_path, self.spec)
+
+        design_path.unlink()
+        self.seed(design_path)
+        header_dir = self.repo / "components/app_tokens"
+        header_dir.mkdir(parents=True)
+        victim_header = outside / "victim.h"
+        victim_header.write_text("VICTIM\n", encoding="utf-8")
+        (header_dir / "vibepulse_layout.generated.h").symlink_to(
+            victim_header
+        )
+        with self.assertRaisesRegex(OSError, "regular|symlink"):
+            StudioApplication(self.repo, design_path, self.spec)
+        self.assertEqual(
+            victim_header.read_text(encoding="utf-8"), "VICTIM\n"
+        )
+
+    def test_symlinked_intermediate_design_directory_is_rejected(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        (self.repo / "design").symlink_to(outside, target_is_directory=True)
+        design_path = self.repo / "design/vibepulse/studio-design.json"
+        (outside / "vibepulse").mkdir()
+        self.seed(outside / "vibepulse/studio-design.json")
+        with self.assertRaisesRegex(OSError, "directory|symlink"):
+            StudioApplication(self.repo, design_path, self.spec)
+
+    def test_design_read_does_not_follow_a_late_symlink_swap(self):
+        design_path = self.repo / "design/vibepulse/studio-design.json"
+        self.seed(design_path)
+        app = StudioApplication(self.repo, design_path, self.spec)
+        victim = self.base / "victim.json"
+        victim.write_text('{"private":"DO NOT SERVE"}\n', encoding="utf-8")
+        design_path.unlink()
+        design_path.symlink_to(victim)
+        status, _, body = app.handle("GET", "/api/design", b"")
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"DO NOT SERVE", body)
+
+
 class BindValidationTests(unittest.TestCase):
     def test_loopback_is_default_and_lan_needs_explicit_opt_in(self):
         for host in ("127.0.0.1", "::1", "localhost"):
@@ -395,6 +606,242 @@ class BindValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "allow-lan"):
             validate_bind("192.168.1.40", False)
         self.assertEqual(validate_bind("0.0.0.0", True), "0.0.0.0")
+
+    def test_every_dns_answer_must_be_loopback_without_lan_opt_in(self):
+        answers = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.8", 0)),
+        ]
+        with mock.patch(
+            "tools.vibepulse_studio.server.socket.getaddrinfo",
+            return_value=answers,
+        ):
+            with self.assertRaisesRegex(ValueError, "allow-lan"):
+                validate_bind("studio.local", False)
+            self.assertEqual(
+                validate_bind("studio.local", True), "studio.local"
+            )
+
+    def test_server_resolves_once_then_binds_the_validated_numeric_address(self):
+        real_getaddrinfo = socket.getaddrinfo
+        with mock.patch(
+            "tools.vibepulse_studio.server.socket.getaddrinfo",
+            wraps=real_getaddrinfo,
+        ) as resolver:
+            server = create_server(mock.Mock(), "127.0.0.1", 0)
+        try:
+            self.assertEqual(resolver.call_count, 1)
+            self.assertEqual(server.server_address[0], "127.0.0.1")
+        finally:
+            server.server_close()
+
+
+class LiveHTTPTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.temp.name)
+        self.spec = REPOSITORY_ROOT / "spec"
+        self.display = load_display(self.spec)
+        self.design_path = self.repo / "design/vibepulse/studio-design.json"
+        save_design(
+            self.design_path,
+            load_design(REPOSITORY_DESIGN, self.display),
+            self.display,
+        )
+        self.app = StudioApplication(self.repo, self.design_path, self.spec)
+        self.servers = []
+
+    def tearDown(self):
+        for server, thread in reversed(self.servers):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.temp.cleanup()
+
+    def start_server(self, **kwargs):
+        server = create_server(
+            self.app,
+            "127.0.0.1",
+            0,
+            request_timeout=kwargs.pop("request_timeout", 0.2),
+            worker_acquire_timeout=kwargs.pop("worker_acquire_timeout", 0.05),
+            **kwargs,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.servers.append((server, thread))
+        return server
+
+    def exchange(self, server, request, timeout=2):
+        client = socket.create_connection(server.server_address, timeout=timeout)
+        client.settimeout(timeout)
+        try:
+            client.sendall(request)
+            chunks = []
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            client.close()
+
+    def authority(self, server):
+        return f"127.0.0.1:{server.server_address[1]}"
+
+    def test_host_is_checked_against_bound_address_and_port(self):
+        server = self.start_server()
+        valid = self.exchange(
+            server,
+            (
+                f"GET /api/hardware HTTP/1.1\r\n"
+                f"Host: {self.authority(server)}\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii"),
+        )
+        self.assertIn(b" 200 ", valid.split(b"\r\n", 1)[0])
+
+        foreign = self.exchange(
+            server,
+            (
+                "GET /api/hardware HTTP/1.1\r\n"
+                f"Host: evil.example:{server.server_address[1]}\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii"),
+        )
+        self.assertIn(b" 421 ", foreign.split(b"\r\n", 1)[0])
+        self.assertIn(b"application/json", foreign)
+        self.assertIn(b"Connection: close", foreign)
+
+    def test_foreign_origin_is_rejected_before_mutation(self):
+        server = self.start_server()
+        design = self.design_path.read_bytes()
+        response = self.exchange(
+            server,
+            (
+                f"PUT /api/design HTTP/1.1\r\n"
+                f"Host: {self.authority(server)}\r\n"
+                "Origin: http://evil.example\r\n"
+                "Content-Type: application/json\r\n"
+                f"Content-Length: {len(design)}\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii") + design,
+        )
+        self.assertIn(b" 403 ", response.split(b"\r\n", 1)[0])
+
+    def test_lan_mode_requires_ephemeral_token_and_uses_fragment_url(self):
+        token = "ephemeral-test-token"
+        server = self.start_server(allow_lan=True, mutation_token=token)
+        design = self.design_path.read_bytes()
+        common = (
+            f"PUT /api/design HTTP/1.1\r\n"
+            f"Host: {self.authority(server)}\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(design)}\r\n"
+            "Connection: close\r\n"
+        )
+        denied = self.exchange(
+            server, (common + "\r\n").encode("ascii") + design
+        )
+        self.assertIn(b" 403 ", denied.split(b"\r\n", 1)[0])
+        allowed = self.exchange(
+            server,
+            (
+                common
+                + f"{MUTATION_TOKEN_HEADER}: {token}\r\n\r\n"
+            ).encode("ascii") + design,
+        )
+        self.assertIn(b" 200 ", allowed.split(b"\r\n", 1)[0])
+        url = safe_server_url(server, "127.0.0.1", token)
+        self.assertIn("#mutation-token=", url)
+        self.assertNotIn("?mutation-token=", url)
+
+    def test_strict_framing_rejects_transfer_duplicate_and_bad_lengths(self):
+        server = self.start_server()
+        bad_headers = (
+            "Transfer-Encoding: chunked\r\n",
+            "Content-Length: 0\r\nContent-Length: 0\r\n",
+            "Content-Length: +1\r\n",
+            "Content-Length: 01\r\n",
+            "Content-Length: -1\r\n",
+            f"Content-Length: {MAX_REQUEST_BYTES + 1}\r\n",
+        )
+        for framing in bad_headers:
+            with self.subTest(framing=framing):
+                response = self.exchange(
+                    server,
+                    (
+                        "PUT /api/design HTTP/1.1\r\n"
+                        f"Host: {self.authority(server)}\r\n"
+                        "Content-Type: application/json\r\n"
+                        f"{framing}"
+                        "Connection: close\r\n\r\n"
+                    ).encode("ascii"),
+                )
+                expected = (
+                    413 if str(MAX_REQUEST_BYTES + 1) in framing else 400
+                )
+                self.assertIn(
+                    f" {expected} ".encode("ascii"),
+                    response.split(b"\r\n", 1)[0],
+                )
+                self.assertIn(b"Connection: close", response)
+                self.assertIn(b"application/json", response)
+
+    def test_incomplete_body_times_out_and_connection_is_closed(self):
+        server = self.start_server(request_timeout=0.1)
+        client = socket.create_connection(server.server_address, timeout=2)
+        client.settimeout(2)
+        started = time.monotonic()
+        try:
+            client.sendall(
+                (
+                    "PUT /api/design HTTP/1.1\r\n"
+                    f"Host: {self.authority(server)}\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Content-Length: 10\r\n\r\n"
+                    "{"
+                ).encode("ascii")
+            )
+            response = client.recv(65536)
+            self.assertIn(b" 400 ", response.split(b"\r\n", 1)[0])
+            self.assertIn(b"Connection: close", response)
+            self.assertLess(time.monotonic() - started, 1.5)
+            while client.recv(65536):
+                pass
+        finally:
+            client.close()
+
+    def test_worker_limit_returns_503_instead_of_unbounded_threads(self):
+        server = self.start_server(
+            request_timeout=0.5,
+            max_workers=1,
+            worker_acquire_timeout=0.05,
+        )
+        blocker = socket.create_connection(server.server_address, timeout=2)
+        blocker.sendall(
+            (
+                "PUT /api/design HTTP/1.1\r\n"
+                f"Host: {self.authority(server)}\r\n"
+                "Content-Type: application/json\r\n"
+                "Content-Length: 10\r\n\r\n"
+                "{"
+            ).encode("ascii")
+        )
+        try:
+            response = self.exchange(
+                server,
+                (
+                    "GET /api/hardware HTTP/1.1\r\n"
+                    f"Host: {self.authority(server)}\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("ascii"),
+            )
+            self.assertIn(b" 503 ", response.split(b"\r\n", 1)[0])
+            self.assertIn(b"Connection: close", response)
+        finally:
+            blocker.close()
 
 
 if __name__ == "__main__":
