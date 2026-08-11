@@ -3,9 +3,11 @@
 ## Outcome
 
 The five-screen VibePulse redesign passes host, simulator, Studio-contract,
-and ESP-IDF build verification. This document does not approve physical
-readability or motion. Those gates remain pending until this exact batch is
-flashed and photographed on `torget-home-01`.
+and ESP-IDF build verification. Commit `32ec688` was flashed successfully on
+2026-08-11, with the image hash verified and the device hard-reset. This
+document does not yet approve physical readability or motion; those gates
+remain pending until this exact batch is inspected and photographed on
+`torget-home-01`.
 
 ## Reviewed interface
 
@@ -51,6 +53,7 @@ tracks, the exact capture set, and 480 × 480 dimensions.
 - `test/test_vibepulse_visual_landmarks.py`: 4 tests PASS
 - SDL/LVGL simulator build: PASS
 - ESP-IDF 5.5.2 target build: PASS
+- USB flash of commit `32ec688`: PASS; image hash verified and hard reset completed
 - `torget.bin`: `0x1e6210` bytes; `0x219df0` bytes / 53% of the smallest app partition free
 - Linked image size: 1,991,073 bytes
 - DIRAM: 261,187 / 341,760 bytes used; 80,573 bytes remain
@@ -59,7 +62,7 @@ tracks, the exact capture set, and 480 × 480 dimensions.
 
 | Gate | Status | Required evidence |
 |---|---|---|
-| Static AMOLED readability | PENDING FLASH / PENDING PHOTO | Arm's-length and 1–2 m inspection of this exact build |
+| Static AMOLED readability | FLASHED / PENDING PHOTO | Arm's-length and 1–2 m inspection of this exact build |
 | Touch/swipe responsiveness | PENDING STATIC APPROVAL | 20 swipes per app under active HTTPS/TLS polling |
 | Completion overlay | PENDING PHYSICAL CHECK | Done state is obvious, dismissible, and does not obscure quota data afterward |
 
