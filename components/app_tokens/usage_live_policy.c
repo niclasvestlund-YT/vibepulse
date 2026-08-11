@@ -93,8 +93,8 @@ usage_update_mode usage_live_choose_update(bool initialized, bool stale,
                                            double old_pct, bool has_new,
                                            double new_pct) {
   if (!has_new || !isfinite(new_pct)) return USAGE_UPDATE_SILENT;
-  if (!initialized || !has_old || !isfinite(old_pct)) return USAGE_UPDATE_DIRECT;
   if (stale || !visible) return USAGE_UPDATE_SILENT;
+  if (!initialized || !has_old || !isfinite(old_pct)) return USAGE_UPDATE_DIRECT;
   if (new_pct > old_pct) return USAGE_UPDATE_ANIMATE_FORWARD;
   if (new_pct < old_pct) return USAGE_UPDATE_SNAP_BACKWARD;
   return USAGE_UPDATE_DIRECT;

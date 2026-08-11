@@ -173,6 +173,12 @@ int main(void) {
   check("first accepted load is direct",
         usage_live_choose_update(false, false, true, false, 0, true, 10) ==
             USAGE_UPDATE_DIRECT);
+  check("first accepted stale sample is silent",
+        usage_live_choose_update(false, true, true, false, 0, true, 10) ==
+            USAGE_UPDATE_SILENT);
+  check("first accepted hidden sample is silent",
+        usage_live_choose_update(false, false, false, false, 0, true, 10) ==
+            USAGE_UPDATE_SILENT);
   check("stale accepted sample is silent",
         usage_live_choose_update(true, true, true, true, 10, true, 20) ==
             USAGE_UPDATE_SILENT);
