@@ -21,6 +21,16 @@ device still requires USB. Safe A/B OTA is a separate subsystem and must follow
 bootloader, partition table, and first application image require one final USB
 bootstrap before later VibePulse releases can be delivered wirelessly.
 
+## Physical execution gate
+
+The shared AMOLED workflow is stricter than the logical task grouping below.
+Tasks 3 and 5 therefore land their complete **static** object trees first:
+header context, segmented bar, a visible-but-static working halo, and static
+attention states. Exact LVGL captures and one target build are reviewed before
+an authorized USB install. Halo breathing, attention pulses, and the usage tick
+in Task 6 remain disabled until that static build has been inspected on the
+physical AMOLED. This changes sequencing only; it removes no approved behavior.
+
 ## File map
 
 - `design/vibepulse/studio-design.json`: reviewed 480 × 480 quota geometry and locked palette.
@@ -335,13 +345,14 @@ For missing daily delta, hide marker and today fill, and recolor the baseline
 fill with the provider's exact accent. For invalid contradictory data, show the
 daily dash and omit the marker rather than clamping it into a plausible split.
 
-- [ ] **Step 5: Add the bounded working halo**
+- [ ] **Step 5: Add the bounded static working halo object**
 
-Create a transparent 40 × 40 ring centered on the 32 px provider icon. Animate
-only border opacity/width with a 1350 ms playback cycle and an ease-out path.
-Start it for fresh visible-provider working state; delete or pause the animation
-for idle, unknown, stale, waiting, done, and error. Invalidate only the halo
-object; do not animate the tile, tileview, or root.
+Create a transparent 40 × 40 ring centered on the 32 px provider icon. Show its
+reviewed static midpoint for fresh visible-provider working state and hide it
+for idle, unknown, stale, waiting, done, and error. Do not start an `lv_anim`
+yet. The 1350 ms border-opacity/width breathing is enabled in Task 6 only after
+the physical static gate. The halo remains its own bounded object; the tile,
+tileview, and root are never motion targets.
 
 - [ ] **Step 6: Preserve full-screen information hierarchy**
 
@@ -448,6 +459,10 @@ Expected: the full host suite passes.
 - Modify: `components/app_tokens/agent_monitor.c`
 - Modify: `sim/main.c`
 - Modify: `test/test_vibepulse_layout_wiring.py`
+
+**Prerequisite:** the static Claude/Codex quota pages and attention states have
+passed an authorized install and physical AMOLED review. If that evidence is
+not recorded, stop here rather than enabling any motion.
 - Modify: `test/test_vibepulse_visual_landmarks.py`
 - Modify: `test/test_preview_ui.py`
 
@@ -508,12 +523,14 @@ When `same_state_count > 1`, the detail is `N CHATS WAITING` or
 `N CHATS NEED ATTENTION`. Project is always the current queue event's real,
 bounded project field.
 
-- [ ] **Step 5: Add three bounded entry pulses and preserve interaction**
+- [ ] **Step 5: Preserve interaction and defer entry pulses to the motion gate**
 
-Animate only the provider icon ring for three 1600 ms pulses. After 4800 ms it
-must be static. A normal tap dismisses only the current local event; long press
-opens Torget and suppresses the following click. Neither gesture writes to the
-computer or approves an agent action.
+Render the provider icon ring at its reviewed static midpoint. A normal tap
+dismisses only the current local event; long press opens Torget and suppresses
+the following click. Neither gesture writes to the computer or approves an
+agent action. The three 1600 ms entry pulses are enabled in Task 6 only after
+the physical static gate; after 4800 ms they must settle to this same static
+state.
 
 - [ ] **Step 6: Capture both providers and verify GREEN**
 
@@ -585,6 +602,10 @@ every call to `usage_screen_apply_tokens` as an accepted data sample. Before
 starting a new animation, delete the page's current hero/bar/today animations
 and start directly from the objects' current values toward only the newest
 authoritative endpoint.
+
+At the same gate, enable the deferred provider halo breathing (1350 ms
+ease-out playback cycle) and attention entry ring (three 1600 ms pulses, then
+static). Both animate only their bounded ring object.
 
 - [ ] **Step 4: Implement the three bounded effects**
 
