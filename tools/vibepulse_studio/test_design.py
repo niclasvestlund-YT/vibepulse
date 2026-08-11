@@ -117,6 +117,19 @@ class DesignTests(unittest.TestCase):
                 with self.assertRaisesRegex(DesignError, message):
                     validate_design(design, self.display)
 
+    def test_geometry_accounts_for_text_row_extents(self):
+        cases = (
+            ({"providerY": 78}, "provider row"),
+            ({"quotaY": 104}, "quota row"),
+            ({"resetY": 380}, "reset row"),
+        )
+        for changes, message in cases:
+            with self.subTest(changes=changes):
+                design = copy.deepcopy(self.design)
+                design["hero"].update(changes)
+                with self.assertRaisesRegex(DesignError, message):
+                    validate_design(design, self.display)
+
     def test_schema_and_document_shape_are_versioned(self):
         design = copy.deepcopy(self.design)
         design["schemaVersion"] = True

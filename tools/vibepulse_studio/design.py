@@ -61,9 +61,12 @@ FIXTURE_FIELDS = {
 }
 RGB_COLOR = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 
-# These are intentionally small, explicit optical gutters. Coordinates are
-# panel pixels; the percentage extent additionally uses its declared font size.
+# Text coordinates are top anchors, so ordering anchors alone cannot prevent
+# overlap. Studio labels reserve an 18 px row plus an 8 px optical gutter; the
+# percentage instead uses its declared font size as its real vertical extent.
+MIN_TEXT_ROW_HEIGHT_PX = 18
 MIN_SECTION_GAP_PX = 8
+MIN_TEXT_ROW_STEP_PX = MIN_TEXT_ROW_HEIGHT_PX + MIN_SECTION_GAP_PX
 
 
 def _pixel_integer(value):
@@ -137,16 +140,21 @@ def _validate_hero(hero, width, height):
             or hero["barY"] + hero["barHeight"] > height
             or hero["statusY"] + hero["statusHeight"] > height):
         raise DesignError("hero geometry must remain on screen")
-    if (hero["providerY"] + MIN_SECTION_GAP_PX > hero["quotaY"]
-            or hero["quotaY"] + MIN_SECTION_GAP_PX > hero["percentY"]):
-        raise DesignError("hero geometry must follow visual reading order")
+    if hero["providerY"] + MIN_TEXT_ROW_STEP_PX > hero["quotaY"]:
+        raise DesignError(
+            "provider row must finish before quota in visual reading order",
+        )
+    if hero["quotaY"] + MIN_TEXT_ROW_STEP_PX > hero["percentY"]:
+        raise DesignError(
+            "quota row must finish before percentage in visual reading order",
+        )
     if (hero["percentY"] + hero["percentFontPx"]
             + MIN_SECTION_GAP_PX > hero["barY"]):
         raise DesignError("percentage must not overlap the progress bar")
     if (hero["barY"] + hero["barHeight"]
             + MIN_SECTION_GAP_PX > hero["resetY"]):
         raise DesignError("progress bar must not overlap the reset row")
-    if hero["resetY"] + MIN_SECTION_GAP_PX > hero["statusY"]:
+    if hero["resetY"] + MIN_TEXT_ROW_STEP_PX > hero["statusY"]:
         raise DesignError("reset row must not overlap the status area")
 
 
