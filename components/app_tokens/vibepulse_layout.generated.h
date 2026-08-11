@@ -8,10 +8,10 @@
 #define VP_CONTENT_W 436
 #define VP_PROVIDER_Y 22
 #define VP_QUOTA_Y 72
-#define VP_PERCENT_Y 104
+#define VP_PERCENT_Y 150
 #define VP_PERCENT_FONT_PX 164
 #define VP_BAR_Y 304
-#define VP_BAR_H 20
+#define VP_BAR_H 24
 #define VP_RESET_Y 352
 #define VP_STATUS_Y 390
 #define VP_STATUS_H 66

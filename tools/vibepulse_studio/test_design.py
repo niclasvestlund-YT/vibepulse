@@ -36,10 +36,10 @@ class DesignTests(unittest.TestCase):
         self.assertNotIn("5-hour", json.dumps(design))
         self.assertEqual(design["hero"]["providerY"], 22)
         self.assertEqual(design["hero"]["quotaY"], 72)
-        self.assertEqual(design["hero"]["percentY"], 104)
+        self.assertEqual(design["hero"]["percentY"], 150)
         self.assertEqual(design["hero"]["percentFontPx"], 164)
         self.assertEqual(design["hero"]["barY"], 304)
-        self.assertEqual(design["hero"]["barHeight"], 20)
+        self.assertEqual(design["hero"]["barHeight"], 24)
         self.assertEqual(design["hero"]["resetY"], 352)
 
     def test_device_facts_cannot_be_changed(self):
@@ -110,8 +110,8 @@ class DesignTests(unittest.TestCase):
     def test_geometry_rejects_equal_or_overlapping_sections(self):
         cases = (
             ({"providerY": 86}, "reading order"),
-            ({"quotaY": 112}, "reading order"),
-            ({"percentFontPx": 193}, "percentage"),
+            ({"quotaY": 123}, "reading order"),
+            ({"percentY": 178}, "percentage"),
             ({"resetY": 294}, "progress bar"),
             ({"statusY": 312}, "reset row"),
             ({"statusY": 420, "statusHeight": 66}, "screen"),
@@ -123,11 +123,23 @@ class DesignTests(unittest.TestCase):
                 with self.assertRaisesRegex(DesignError, message):
                     validate_design(design, self.display)
 
+    def test_percent_uses_rendered_line_height(self):
+        design = copy.deepcopy(self.design)
+        design["hero"]["percentY"] = 150
+        design["hero"]["barY"] = 304
+        self.assertIs(validate_design(design, self.display), design)
+
+    def test_rendered_percent_still_needs_optical_gap(self):
+        design = copy.deepcopy(self.design)
+        design["hero"]["barY"] = 276
+        with self.assertRaisesRegex(DesignError, "percentage.*progress bar"):
+            validate_design(design, self.display)
+
     def test_geometry_accounts_for_text_row_extents(self):
         cases = (
             ({"providerY": 78}, "provider row"),
-            ({"quotaY": 77}, "quota row"),
-            ({"quotaY": 104}, "quota row"),
+            ({"quotaY": 123}, "quota row"),
+            ({"quotaY": 104, "percentY": 131}, "quota row"),
             ({"resetY": 380}, "reset row"),
         )
         for changes, message in cases:

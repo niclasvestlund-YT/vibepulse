@@ -63,10 +63,12 @@ RGB_COLOR = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 
 # Text coordinates are top anchors, so ordering anchors alone cannot prevent
 # overlap. Studio labels reserve an 18 px row plus an 8 px optical gutter; the
-# percentage instead uses its declared font size as its real vertical extent.
+# percentage instead uses its reviewed rendered line height as its real
+# vertical extent.
 MIN_TEXT_ROW_HEIGHT_PX = 18
 MIN_SECTION_GAP_PX = 8
 MIN_TEXT_ROW_STEP_PX = MIN_TEXT_ROW_HEIGHT_PX + MIN_SECTION_GAP_PX
+PERCENT_RENDERED_LINE_HEIGHT_PX = 119
 # The real LVGL raster is authoritative: the 21 px quota row needs enough
 # room for its visible glyphs plus an optical gutter before the 164 px hero.
 MIN_QUOTA_TO_PERCENT_STEP_PX = 28
@@ -152,7 +154,7 @@ def _validate_hero(hero, width, height):
         raise DesignError(
             "quota row must finish before percentage in visual reading order",
         )
-    if (hero["percentY"] + hero["percentFontPx"]
+    if (hero["percentY"] + PERCENT_RENDERED_LINE_HEIGHT_PX
             + MIN_SECTION_GAP_PX > hero["barY"]):
         raise DesignError("percentage must not overlap the progress bar")
     if (hero["barY"] + hero["barHeight"]

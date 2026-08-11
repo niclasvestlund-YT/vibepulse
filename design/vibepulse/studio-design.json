@@ -15,10 +15,10 @@
     "contentWidth": 436,
     "providerY": 22,
     "quotaY": 72,
-    "percentY": 104,
+    "percentY": 150,
     "percentFontPx": 164,
     "barY": 304,
-    "barHeight": 20,
+    "barHeight": 24,
     "resetY": 352,
     "statusY": 390,
     "statusHeight": 66
