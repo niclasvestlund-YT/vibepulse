@@ -12,10 +12,14 @@
  * musen fungerar också — det är enhetens gest).
  */
 #include <SDL.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "lvgl.h"
 
@@ -53,6 +57,7 @@ static const char *const AGENT_FIXTURES[] = {
   "agent-status-unknown.json",
 };
 static int agent_fixture_idx;
+static int capture_failures;
 
 /* ---------------------------------------------- plattforms-API:t (torget.h) */
 
@@ -67,6 +72,11 @@ int64_t torget_now_us(void) { return (int64_t)lv_tick_get() * 1000; }
 
 /* ------------------------------------------------------------------ BMP:er */
 
+static void capture_failed(const char *tag, const char *detail) {
+  capture_failures++;
+  fprintf(stderr, "snapshot: misslyckades (%s): %s\n", tag, detail);
+}
+
 /* Dumpa den faktiska framebuffern till en 32-bpp BMP — P18-verktyget och
  * pixelverifieringens facit. LVGL:s XRGB8888 är little-endian BGRX i minnet,
  * vilket är exakt BMP:s radformat, så raderna kopieras rått. Negativ höjd =
@@ -77,28 +87,60 @@ static void dump_frame(const char *tag) {
   lv_obj_update_layout(lv_screen_active());
   lv_obj_invalidate(lv_screen_active());
   lv_draw_buf_t *buf = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_XRGB8888);
-  if (!buf) { printf("snapshot: misslyckades (%s)\n", tag); return; }
+  if (!buf) { capture_failed(tag, "kunde inte skapa LVGL-snapshot"); return; }
 
+  const char *capture_dir = getenv("TORGET_CAPTURE_DIR");
+  if (!capture_dir || capture_dir[0] == '\0') capture_dir = "/tmp";
   char path[256];
-  snprintf(path, sizeof path, "/tmp/torget-%s.bmp", tag);
-  FILE *f = fopen(path, "wb");
-  if (f) {
-    int w = buf->header.w, h = buf->header.h;
-    uint32_t img_bytes = (uint32_t)(w * h * 4);
-    uint8_t hdr[54] = { 'B', 'M' };
-    uint32_t file_size = 54 + img_bytes;
-    memcpy(hdr + 2, &file_size, 4);
-    uint32_t off = 54;            memcpy(hdr + 10, &off, 4);
-    uint32_t dib = 40;            memcpy(hdr + 14, &dib, 4);
-    int32_t bw = w, bh = -h;      memcpy(hdr + 18, &bw, 4); memcpy(hdr + 22, &bh, 4);
-    uint16_t planes = 1, bpp = 32; memcpy(hdr + 26, &planes, 2); memcpy(hdr + 28, &bpp, 2);
-    memcpy(hdr + 34, &img_bytes, 4);
-    fwrite(hdr, 1, 54, f);
-    for (int y = 0; y < h; y++)
-      fwrite(buf->data + (size_t)y * buf->header.stride, 1, (size_t)w * 4, f);
-    fclose(f);
-    printf("snapshot: %s\n", path);
+  int path_len = snprintf(path, sizeof path, "%s/torget-%s.bmp", capture_dir, tag);
+  if (path_len < 0 || (size_t)path_len >= sizeof path) {
+    capture_failed(tag, "sökvägen är för lång");
+    lv_draw_buf_destroy(buf);
+    return;
   }
+
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+  if (fd < 0) {
+    char detail[512];
+    snprintf(detail, sizeof detail, "kunde inte öppna %s: %s", path, strerror(errno));
+    capture_failed(tag, detail);
+    lv_draw_buf_destroy(buf);
+    return;
+  }
+
+  FILE *f = fdopen(fd, "wb");
+  if (!f) {
+    int saved_errno = errno;
+    close(fd);
+    char detail[512];
+    snprintf(detail, sizeof detail, "kunde inte fdopen %s: %s", path,
+             strerror(saved_errno));
+    capture_failed(tag, detail);
+    lv_draw_buf_destroy(buf);
+    return;
+  }
+
+  int w = buf->header.w, h = buf->header.h;
+  uint32_t img_bytes = (uint32_t)(w * h * 4);
+  uint8_t hdr[54] = { 'B', 'M' };
+  uint32_t file_size = 54 + img_bytes;
+  memcpy(hdr + 2, &file_size, 4);
+  uint32_t off = 54;            memcpy(hdr + 10, &off, 4);
+  uint32_t dib = 40;            memcpy(hdr + 14, &dib, 4);
+  int32_t bw = w, bh = -h;      memcpy(hdr + 18, &bw, 4); memcpy(hdr + 22, &bh, 4);
+  uint16_t planes = 1, bpp = 32; memcpy(hdr + 26, &planes, 2); memcpy(hdr + 28, &bpp, 2);
+  memcpy(hdr + 34, &img_bytes, 4);
+
+  int failed = fwrite(hdr, 1, sizeof hdr, f) != sizeof hdr;
+  for (int y = 0; y < h && !failed; y++) {
+    size_t row_bytes = (size_t)w * 4;
+    if (fwrite(buf->data + (size_t)y * buf->header.stride,
+               1, row_bytes, f) != row_bytes) failed = 1;
+  }
+  if (fclose(f) != 0) failed = 1;
+
+  if (failed) capture_failed(tag, "kunde inte skriva eller stänga BMP-filen");
+  else printf("snapshot: %s\n", path);
   lv_draw_buf_destroy(buf);
 }
 
@@ -316,7 +358,8 @@ static void poll_keys(lv_timer_t *t) {
   }
 }
 
-static void run_vibepulse_static_qa(void) {
+static int run_vibepulse_static_qa(void) {
+  capture_failures = 0;
   torget_app_show(1);
 
   feed_tokens();
@@ -344,6 +387,7 @@ static void run_vibepulse_static_qa(void) {
   dump_frame("vibepulse-claude-hero-missing");
   tokens_show_view(VIEW_CODEX_HERO);
   dump_frame("vibepulse-codex-hero-missing");
+  return capture_failures == 0 ? 0 : 1;
 }
 
 static void run_vibepulse_completion_qa(void) {
@@ -392,8 +436,7 @@ int main(int argc, char **argv) {
   }
 
   if (argc == 2 && strcmp(argv[1], "--vibepulse-static-qa") == 0) {
-    run_vibepulse_static_qa();
-    return 0;
+    return run_vibepulse_static_qa();
   }
 
   /* VibePulse får sin fixtur direkt: launchern ska visa en levande app,

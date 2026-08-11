@@ -661,6 +661,11 @@ class RepositoryRegistryTests(unittest.TestCase):
             script,
             r"yaml\.__version__\s*==\s*['\"]6\.0\.3['\"]",
         )
+        self.assertIn("import PIL", script)
+        self.assertRegex(
+            script,
+            r"PIL\.__version__\s*==\s*['\"]12\.3\.0['\"]",
+        )
         self.assertLess(script.index("sys.version_info"), script.index("\ncc "))
 
         for arguments in (
@@ -668,6 +673,7 @@ class RepositoryRegistryTests(unittest.TestCase):
                 "test_agent_net_wiring.py",
                 "test_target_tls_memory.py",
                 "test_vibepulse_layout_wiring.py",
+                "test_preview_ui.py",
                 "-m unittest tools.test_hardware_registry -v"):
             with self.subTest(arguments=arguments):
                 self.assertIn(f'"$PYTHON_BIN" {arguments}', script)

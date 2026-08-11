@@ -1,16 +1,16 @@
 #!/bin/sh
 # Hosttesterna för Torgets rena kärnor. Kräver clang (Xcode CLT) samt
-# Python 3.11+ med PyYAML 6.0.3.
+# Python 3.11+ med PyYAML 6.0.3 och Pillow 12.3.0.
 set -e
 cd "$(dirname "$0")"
 
 PYTHON_BIN=${PYTHON_BIN:-python3}
 if ! "$PYTHON_BIN" -c \
-  'import sys, yaml; raise SystemExit(0 if sys.version_info >= (3, 11) and yaml.__version__ == "6.0.3" else 1)' \
+  'import PIL, sys, yaml; raise SystemExit(0 if sys.version_info >= (3, 11) and yaml.__version__ == "6.0.3" and PIL.__version__ == "12.3.0" else 1)' \
   2>/dev/null
 then
   printf '%s\n' \
-    'ERROR: Hosttesterna kräver Python 3.11+ med PyYAML 6.0.3.' \
+    'ERROR: Hosttesterna kräver Python 3.11+ med PyYAML 6.0.3 och Pillow 12.3.0.' \
     'Kör från Torget-repots rot:' \
     '  python3.12 -m venv .venv' \
     '  . .venv/bin/activate' \

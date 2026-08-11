@@ -33,7 +33,7 @@ for provider in ("claude", "codex"):
     missing = sim.index(f'vibepulse-{provider}-hero-missing')
     assert stale < missing, "stale capture must retain normal quota before missing data"
 
-static_qa = sim[sim.index("static void run_vibepulse_static_qa"):
+static_qa = sim[sim.index("static int run_vibepulse_static_qa"):
                 sim.index("static void run_vibepulse_completion_qa")]
 assert static_qa.count("feed_tokens();") == 1
 main = sim[sim.index("int main("):]

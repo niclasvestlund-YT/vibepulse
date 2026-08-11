@@ -1,141 +1,249 @@
 #!/usr/bin/env python3
-"""Wiring guard for the exact-size VibePulse preview command."""
+"""Behavioral and wiring tests for the secure VibePulse preview command."""
 
-import json
-import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
-import time
-import uuid
+import unittest
 from pathlib import Path
 
 from PIL import Image
 
 
-root = Path(__file__).resolve().parents[1]
-script_path = root / "tools/preview-ui.sh"
-script = script_path.read_text(encoding="utf-8")
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = ROOT / "tools/preview-ui.sh"
+SIM_PATH = ROOT / "sim/main.c"
+RUNNER_PATH = ROOT / "test/run.sh"
 
-assert os.access(script_path, os.X_OK), "preview-ui.sh must be executable"
-assert re.search(r"^set -eu$", script, re.MULTILINE)
-assert 'PYTHON_BIN=${PYTHON_BIN:-python3}' in script
-assert 'mktemp -d "${TMPDIR:-/tmp}/vibepulse-preview.XXXXXX"' in script
-assert "cmake -S" in script
-assert "cmake --build" in script
-assert "--vibepulse-static-qa" in script
-assert re.search(
-    r'^"\$PYTHON_BIN" - "\$repo" "\$output_dir" "\$manifest" '
-    r'<<\'PREVIEW_CONVERTER_PY\'$',
-    script,
-    re.MULTILINE,
-), (
-    "conversion must run with the selected PYTHON_BIN interpreter"
-)
-
-assert "from PIL import Image" in script
-assert "from tools.hardware_registry import load_registry" in script
-assert 'registry.capabilities["display.amoled"]' in script
-assert 'display["width"]' in script
-assert 'display["height"]' in script
-assert '["properties"]' not in script
-
-assert 'glob("torget-vibepulse-*.bmp")' in script
-assert "/tmp" in script
-assert "st_mtime_ns" in script
-assert "captures-before.json" in script
-assert "stat.st_ino" in script
-assert "stat.st_size" in script
-assert "before.get(str(capture)) != fingerprint(capture)" in script
-assert re.search(
-    r'"\$PYTHON_BIN" - "\$manifest" <<\'PREVIEW_MANIFEST_PY\'',
-    script,
-), "the selected interpreter must snapshot the pre-run manifest"
-assert script.index("PREVIEW_MANIFEST_PY") < script.index(
-    '"$repo/sim/build/torget-sim" --vibepulse-static-qa'
-)
-assert "image.size != expected" in script
-assert "no fresh VibePulse captures" in script
-assert "rm -f /tmp/torget-vibepulse" not in script
-assert "Preview directory:" in script
-assert re.search(r"print\([^\n]*output", script), (
-    "conversion must print every generated PNG path"
-)
-
-assert "usage:" in script and "vibepulse" in script
-assert "exit 2" in script
-
-heredocs = list(re.finditer(
-    r'^"\$PYTHON_BIN"[^\n]*<<\'(?P<delimiter>[A-Z_]+|PY)\'\n'
-    r'(?P<source>.*?)\n(?P=delimiter)$',
-    script,
-    re.MULTILINE | re.DOTALL,
-))
-assert heredocs, "preview-ui.sh must contain an extractable converter heredoc"
-converter = heredocs[-1]
-
-fixture_id = uuid.uuid4().hex
-old_source = Path(f"/tmp/torget-vibepulse-test-old-{fixture_id}.bmp")
-fresh_source = Path(f"/tmp/torget-vibepulse-test-fresh-{fixture_id}.bmp")
+EXPECTED_BMPS = {
+    "torget-vibepulse-claude-hero.bmp",
+    "torget-vibepulse-codex-hero.bmp",
+    "torget-vibepulse-claude-details.bmp",
+    "torget-vibepulse-overview.bmp",
+    "torget-vibepulse-claude-hero-stale.bmp",
+    "torget-vibepulse-codex-hero-stale.bmp",
+    "torget-vibepulse-claude-hero-missing.bmp",
+    "torget-vibepulse-codex-hero-missing.bmp",
+}
+EXPECTED_PNGS = {
+    f"{Path(name).stem.removeprefix('torget-')}.png"
+    for name in EXPECTED_BMPS
+}
 
 
-def fingerprint(path):
-    stat = path.stat()
-    return {
-        "inode": stat.st_ino,
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-    }
+def extract_heredoc(script, delimiter):
+    match = re.search(
+        rf"<<'{re.escape(delimiter)}'\n(?P<source>.*?)\n{re.escape(delimiter)}$",
+        script,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise ValueError(f"missing {delimiter} heredoc")
+    return match.group("source")
 
 
-try:
-    Image.new("RGB", (480, 480), "navy").save(old_source)
-    future_ns = time.time_ns() + 3_600_000_000_000
-    os.utime(old_source, ns=(future_ns, future_ns))
+def write_bmp(path, size=(480, 480), color="navy"):
+    Image.new("RGB", size, color).save(path)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        output_dir = Path(tmp)
-        manifest = output_dir / "captures-before.json"
-        before = {
-            str(path): fingerprint(path)
-            for path in Path("/tmp").glob("torget-vibepulse-*.bmp")
-        }
-        manifest.write_text(json.dumps(before), encoding="utf-8")
 
-        Image.new("RGB", (480, 480), "green").save(fresh_source)
-        result = subprocess.run(
+class PreviewWiringTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.script = SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.sim = SIM_PATH.read_text(encoding="utf-8")
+        cls.runner = RUNNER_PATH.read_text(encoding="utf-8")
+
+    def test_private_capture_command_wiring(self):
+        self.assertEqual(stat.S_IMODE(SCRIPT_PATH.stat().st_mode), 0o755)
+        self.assertRegex(self.script, r"(?m)^set -eu$")
+        self.assertIn("PYTHON_BIN=${PYTHON_BIN:-python3}", self.script)
+        self.assertIn(
+            'mktemp -d "${TMPDIR:-/tmp}/vibepulse-preview.XXXXXX"',
+            self.script,
+        )
+        self.assertIn('chmod 0700 "$output_dir"', self.script)
+        self.assertIn('capture_dir="$output_dir/captures"', self.script)
+        self.assertIn('mkdir -m 0700 "$capture_dir"', self.script)
+        self.assertIn(
+            'TORGET_CAPTURE_DIR="$capture_dir" '
+            '"$repo/sim/build/torget-sim" --vibepulse-static-qa',
+            self.script,
+        )
+        self.assertIn('cmake -S "$repo/sim"', self.script)
+        self.assertIn('cmake --build "$repo/sim/build"', self.script)
+        self.assertNotIn('Path("/tmp").glob', self.script)
+        self.assertNotIn("captures-before.json", self.script)
+        self.assertNotIn("rm -f /tmp/torget-vibepulse", self.script)
+        self.assertIn("shutil.rmtree", self.script)
+
+    def test_converter_and_registry_wiring(self):
+        self.assertRegex(
+            self.script,
+            r'(?m)^"\$PYTHON_BIN" - "\$repo" "\$output_dir" '
+            r'"\$capture_dir" <<\'PREVIEW_CONVERTER_PY\'$',
+        )
+        self.assertIn("from PIL import Image", self.script)
+        self.assertIn(
+            "from tools.hardware_registry import load_registry",
+            self.script,
+        )
+        self.assertIn('registry.capabilities["display.amoled"]', self.script)
+        self.assertIn('display["width"]', self.script)
+        self.assertIn('display["height"]', self.script)
+        self.assertNotIn('["properties"]', self.script)
+        self.assertIn("missing", self.script)
+        self.assertIn("unexpected", self.script)
+        self.assertIn("lstat()", self.script)
+        self.assertIn("stat.S_ISREG", self.script)
+        self.assertIn("os.O_NOFOLLOW", self.script)
+        self.assertIn("image.size != expected", self.script)
+        self.assertIn("Preview directory:", self.script)
+        for name in EXPECTED_BMPS:
+            with self.subTest(name=name):
+                self.assertIn(name, self.script)
+
+    def test_simulator_uses_private_dir_nofollow_and_propagates_failures(self):
+        self.assertIn('getenv("TORGET_CAPTURE_DIR")', self.sim)
+        self.assertIn("O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW", self.sim)
+        self.assertIn("0600", self.sim)
+        self.assertNotIn('fopen(path, "wb")', self.sim)
+        self.assertIn("capture_failures", self.sim)
+        self.assertIn("return capture_failures == 0 ? 0 : 1;", self.sim)
+        self.assertIn("return run_vibepulse_static_qa();", self.sim)
+        self.assertIn("fwrite", self.sim)
+        self.assertIn("fclose", self.sim)
+
+    def test_runner_preflights_exact_pillow_pin(self):
+        self.assertIn("import PIL", self.runner)
+        self.assertRegex(
+            self.runner,
+            r"PIL\.__version__\s*==\s*['\"]12\.3\.0['\"]",
+        )
+        self.assertIn('"$PYTHON_BIN" test_preview_ui.py', self.runner)
+
+    def test_usage_gate_remains_exact(self):
+        self.assertIn("usage:", self.script)
+        self.assertIn("vibepulse", self.script)
+        self.assertIn("exit 2", self.script)
+
+
+class ConverterBehaviorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        script = SCRIPT_PATH.read_text(encoding="utf-8")
+        cls.converter = extract_heredoc(script, "PREVIEW_CONVERTER_PY")
+
+    def create_case(self, root, omitted=None):
+        capture_dir = root / "captures"
+        output_dir = root / "output"
+        capture_dir.mkdir(mode=0o700)
+        output_dir.mkdir(mode=0o700)
+        for name in EXPECTED_BMPS - {omitted}:
+            write_bmp(capture_dir / name)
+        return capture_dir, output_dir
+
+    def run_converter(self, capture_dir, output_dir):
+        return subprocess.run(
             [
                 sys.executable,
                 "-",
-                str(root),
+                str(ROOT),
                 str(output_dir),
-                str(manifest),
+                str(capture_dir),
             ],
-            input=converter.group("source"),
+            input=self.converter,
             text=True,
             capture_output=True,
             check=False,
         )
-        assert result.returncode == 0, result.stderr
 
-        old_output = output_dir / f"{old_source.stem.removeprefix('torget-')}.png"
-        fresh_output = (
-            output_dir / f"{fresh_source.stem.removeprefix('torget-')}.png"
-        )
-        assert fresh_output.is_file(), "new capture was not exported"
-        assert not old_output.exists(), (
-            "unchanged future-dated pre-existing capture was exported"
-        )
-        assert old_source.is_file() and fresh_source.is_file(), (
-            "preview conversion must preserve source BMPs"
-        )
-finally:
-    old_source.unlink(missing_ok=True)
-    fresh_source.unlink(missing_ok=True)
+    def test_exact_eight_valid_captures_export_eight_pngs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            capture_dir, output_dir = self.create_case(Path(tmp))
+            result = self.run_converter(capture_dir, output_dir)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                {path.name for path in output_dir.glob("*.png")},
+                EXPECTED_PNGS,
+            )
+            self.assertEqual(len(result.stdout.splitlines()), 9)
+            for output in output_dir.glob("*.png"):
+                with Image.open(output) as image:
+                    self.assertEqual(image.size, (480, 480))
+                    self.assertEqual(image.mode, "RGB")
+            self.assertEqual(
+                {path.name for path in capture_dir.iterdir()},
+                EXPECTED_BMPS,
+            )
 
-assert converter.group("delimiter") == "PREVIEW_CONVERTER_PY", (
-    "converter heredoc needs a stable extraction delimiter"
-)
+    def test_missing_expected_capture_is_rejected_with_exact_set_error(self):
+        missing = "torget-vibepulse-overview.bmp"
+        with tempfile.TemporaryDirectory() as tmp:
+            capture_dir, output_dir = self.create_case(Path(tmp), missing)
+            result = self.run_converter(capture_dir, output_dir)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"missing: {missing}", result.stderr)
+            self.assertIn("unexpected: (none)", result.stderr)
+            self.assertEqual(
+                {path.name for path in capture_dir.iterdir()},
+                EXPECTED_BMPS - {missing},
+            )
 
-print("OK: exact-size VibePulse preview workflow")
+    def test_unexpected_capture_is_rejected_with_exact_set_error(self):
+        unexpected = "torget-vibepulse-unexpected.bmp"
+        with tempfile.TemporaryDirectory() as tmp:
+            capture_dir, output_dir = self.create_case(Path(tmp))
+            write_bmp(capture_dir / unexpected)
+            result = self.run_converter(capture_dir, output_dir)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing: (none)", result.stderr)
+            self.assertIn(f"unexpected: {unexpected}", result.stderr)
+            self.assertTrue((capture_dir / unexpected).is_file())
+
+    def test_symlink_capture_is_rejected_without_touching_victim(self):
+        linked_name = "torget-vibepulse-claude-hero.bmp"
+        with tempfile.TemporaryDirectory() as tmp:
+            case_root = Path(tmp)
+            capture_dir, output_dir = self.create_case(case_root, linked_name)
+            victim = case_root / "victim.bmp"
+            write_bmp(victim, color="red")
+            victim_before = victim.read_bytes()
+            linked_capture = capture_dir / linked_name
+            linked_capture.symlink_to(victim)
+            result = self.run_converter(capture_dir, output_dir)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not a regular non-symlink capture", result.stderr)
+            self.assertEqual(victim.read_bytes(), victim_before)
+            self.assertTrue(linked_capture.is_symlink())
+
+    def test_corrupt_expected_capture_is_rejected(self):
+        corrupt_name = "torget-vibepulse-codex-hero.bmp"
+        with tempfile.TemporaryDirectory() as tmp:
+            capture_dir, output_dir = self.create_case(Path(tmp))
+            corrupt = capture_dir / corrupt_name
+            corrupt.write_bytes(b"not a BMP")
+            result = self.run_converter(capture_dir, output_dir)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(str(corrupt), result.stderr)
+            self.assertEqual(corrupt.read_bytes(), b"not a BMP")
+
+    def test_wrong_size_expected_capture_is_rejected(self):
+        wrong_name = "torget-vibepulse-codex-hero-stale.bmp"
+        with tempfile.TemporaryDirectory() as tmp:
+            capture_dir, output_dir = self.create_case(Path(tmp))
+            wrong = capture_dir / wrong_name
+            write_bmp(wrong, size=(32, 32), color="green")
+            result = self.run_converter(capture_dir, output_dir)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(str(wrong), result.stderr)
+            self.assertIn("expected 480x480, got 32x32", result.stderr)
+            self.assertTrue(wrong.is_file())
+
+
+if __name__ == "__main__":
+    program = unittest.main(verbosity=2, exit=False)
+    if program.result.wasSuccessful():
+        print("OK: exact-size VibePulse preview workflow")
+    raise SystemExit(0 if program.result.wasSuccessful() else 1)
