@@ -46,6 +46,18 @@ REQUEST_TIMEOUT_SECONDS = 10
 MAX_WORKERS = 16
 WORKER_ACQUIRE_TIMEOUT_SECONDS = 0.25
 MUTATION_TOKEN_HEADER = "X-VibePulse-Studio-Token"
+CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "font-src 'self' data:; "
+    "img-src 'self' blob: data:; "
+    "connect-src 'self'; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'; "
+    "object-src 'none'"
+)
 CANONICAL_LENGTH = re.compile(r"(?:0|[1-9][0-9]*)\Z")
 APPROVED_EXPORT_STATES = frozenset({
     "claude-hero",
@@ -119,6 +131,7 @@ def _response(status_code, body, content_type="application/json",
         "Content-Length": str(len(body)),
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": CONTENT_SECURITY_POLICY,
     }
     if extra_headers:
         headers.update(extra_headers)

@@ -34,6 +34,7 @@ const state = {
   scale: 1,
   mutationToken: "",
   exportFontCss: null,
+  operationActive: false,
 };
 
 function takeMutationToken() {
@@ -200,6 +201,10 @@ function createGeometryControls() {
     input.name = specification.name;
     input.step = "1";
     input.addEventListener("input", () => {
+      if (state.operationActive) {
+        refreshGeometryControls();
+        return;
+      }
       const {width, height} = state.hardware.display;
       const result = applyHeroChange(
         state.design.hero,
@@ -247,6 +252,16 @@ function textStyle(size, fill, weight = 600) {
   };
 }
 
+function statusDotGeometry(hero) {
+  const dotRadius = Math.max(3, Math.floor(hero.barHeight / 4));
+  const haloRadius = dotRadius + 2;
+  return {
+    dotRadius,
+    haloRadius,
+    centerX: hero.safeX + haloRadius,
+  };
+}
+
 function render(design, selection) {
   if (!design || !state.hardware) {
     return;
@@ -269,7 +284,7 @@ function render(design, selection) {
   const contentRight = hero.safeX + hero.contentWidth;
   const barRadius = Math.floor(hero.barHeight / 2);
   const statusCenter = hero.statusY + Math.floor(hero.statusHeight / 2);
-  const dotRadius = Math.max(3, Math.floor(hero.barHeight / 4));
+  const statusDot = statusDotGeometry(hero);
 
   svg.style.setProperty("--background", design.palette.background);
   document.querySelector("#preview-svg-title").textContent =
@@ -336,19 +351,19 @@ function render(design, selection) {
       "letter-spacing": Math.max(1, Math.round(labelSize * 0.05)),
     }, fixture.reset),
     svgNode("circle", {
-      cx: hero.safeX + dotRadius,
+      cx: statusDot.centerX,
       cy: statusCenter,
-      r: dotRadius + 2,
+      r: statusDot.haloRadius,
       fill: design.palette.hairline,
     }),
     svgNode("circle", {
-      cx: hero.safeX + dotRadius,
+      cx: statusDot.centerX,
       cy: statusCenter,
-      r: dotRadius,
+      r: statusDot.dotRadius,
       fill: isMissing ? design.palette.muted : providerColor,
     }),
     svgNode("text", {
-      x: hero.safeX + dotRadius * 3,
+      x: statusDot.centerX + statusDot.haloRadius + statusDot.dotRadius,
       y: statusCenter,
       ...textStyle(smallSize, isMissing || isStale
         ? design.palette.muted
@@ -378,7 +393,7 @@ function configureCanvas() {
 }
 
 function setScale(scale) {
-  if (!state.hardware) {
+  if (!state.hardware || state.operationActive) {
     return;
   }
   const {width, height} = state.hardware.display;
@@ -417,7 +432,13 @@ async function embeddedFontFace(path, weight) {
   if (!response.ok) {
     throw new Error(`Could not load local export font (${response.status})`);
   }
-  const encoded = bytesToBase64(await response.arrayBuffer());
+  const buffer = await response.arrayBuffer();
+  const signatureBytes = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+  const fontSignature = String.fromCharCode(...signatureBytes);
+  if (fontSignature !== "wOF2") {
+    throw new Error("Local export font is not a valid WOFF2 file");
+  }
+  const encoded = bytesToBase64(buffer);
   return `@font-face{font-family:'IBM Plex Sans Local';src:url(data:font/woff2;base64,${encoded}) format('woff2');font-style:normal;font-weight:${weight};}`;
 }
 
@@ -429,19 +450,64 @@ async function loadExportFontCss() {
   return faces.join("");
 }
 
+function loadExportFontCssSafely() {
+  return loadExportFontCss().then(
+    (value) => ({ok: true, value}),
+    (error) => ({
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    }),
+  );
+}
+
+function setMutatingControlsDisabled(disabled) {
+  const selector = "[data-state], [data-scale], #geometry-controls input, "
+    + "#save-design, #export-png";
+  for (const control of document.querySelectorAll(selector)) {
+    control.disabled = disabled;
+  }
+}
+
+function beginOperation() {
+  if (state.operationActive) {
+    return false;
+  }
+  state.operationActive = true;
+  setMutatingControlsDisabled(true);
+  return true;
+}
+
+function finishOperation() {
+  state.operationActive = false;
+  setMutatingControlsDisabled(false);
+}
+
+function currentExportName(selection) {
+  const suffix = selection.condition === "live"
+    ? ""
+    : `-${selection.condition}`;
+  return `${selection.provider}-hero${suffix}`;
+}
+
 async function saveDesign() {
+  if (state.operationActive) {
+    return;
+  }
   const {width, height} = state.hardware.display;
   if (!heroIsServerValid(state.design.hero, width, height)) {
     setOperationStatus("Save blocked: geometry is outside the server contract.", "error");
     return;
   }
+  if (!beginOperation()) {
+    return;
+  }
+  const designToSave = JSON.parse(JSON.stringify(state.design));
   setOperationStatus("Saving reviewed tokens…", "pending");
-  setActionsDisabled(true);
   try {
     const response = await fetch("/api/design", {
       method: "PUT",
       headers: mutationHeaders({"Content-Type": "application/json"}),
-      body: JSON.stringify(state.design),
+      body: JSON.stringify(designToSave),
     });
     const received = await responsePayload(response);
     const payload = requireSuccessful(response, received);
@@ -456,21 +522,32 @@ async function saveDesign() {
   } catch (error) {
     setOperationStatus(`Save failed: ${error.message}`, "error");
   } finally {
-    setActionsDisabled(false);
+    finishOperation();
   }
 }
 
 async function exportPng(name) {
+  if (state.operationActive) {
+    return;
+  }
   if (!EXPORT_NAMES.includes(name)) {
     setOperationStatus("Export failed: state name is not approved.", "error");
     return;
   }
+  if (!beginOperation()) {
+    return;
+  }
   setOperationStatus(`Exporting ${name}…`, "pending");
-  setActionsDisabled(true);
   let decoded = null;
   try {
     await document.fonts.ready;
-    const fontCss = await state.exportFontCss;
+    const fontResult = await state.exportFontCss;
+    if (!fontResult.ok) {
+      throw new Error(
+        `Local export fonts unavailable: ${fontResult.error.message}`,
+      );
+    }
+    const fontCss = fontResult.value;
     const {width, height} = state.hardware.display;
     const source = prepareStandaloneSvg(width, height, fontCss);
     const svg = new XMLSerializer().serializeToString(source);
@@ -508,7 +585,7 @@ async function exportPng(name) {
     if (decoded) {
       decoded.release();
     }
-    setActionsDisabled(false);
+    finishOperation();
   }
 }
 
@@ -579,6 +656,9 @@ async function decodeStandaloneSvg(blob) {
 function bindControls() {
   for (const button of document.querySelectorAll("[data-state]")) {
     button.addEventListener("click", () => {
+      if (state.operationActive) {
+        return;
+      }
       const next = button.dataset.state;
       if (next === "claude" || next === "codex") {
         state.selection = {provider: next, condition: "live"};
@@ -589,20 +669,17 @@ function bindControls() {
     });
   }
   for (const button of document.querySelectorAll("[data-scale]")) {
-    button.addEventListener("click", () => setScale(Number(button.dataset.scale)));
+    button.addEventListener("click", () => {
+      if (state.operationActive) {
+        return;
+      }
+      setScale(Number(button.dataset.scale));
+    });
   }
   document.querySelector("#save-design").addEventListener("click", saveDesign);
   document.querySelector("#export-png").addEventListener("click", () => {
-    const suffix = state.selection.condition === "live"
-      ? ""
-      : `-${state.selection.condition}`;
-    exportPng(`${state.selection.provider}-hero${suffix}`);
+    exportPng(currentExportName(state.selection));
   });
-}
-
-function setActionsDisabled(disabled) {
-  document.querySelector("#save-design").disabled = disabled;
-  document.querySelector("#export-png").disabled = disabled;
 }
 
 async function loadJson(path) {
@@ -614,7 +691,7 @@ async function loadJson(path) {
 async function initialize() {
   state.mutationToken = takeMutationToken();
   bindControls();
-  state.exportFontCss = loadExportFontCss();
+  state.exportFontCss = loadExportFontCssSafely();
   try {
     const [design, hardware] = await Promise.all([
       loadJson("/api/design"),
@@ -628,7 +705,7 @@ async function initialize() {
     setOperationStatus("Ready at true 1:1 panel pixels.", "success");
   } catch (error) {
     setOperationStatus(`Studio failed to load: ${error.message}`, "error");
-    setActionsDisabled(true);
+    setMutatingControlsDisabled(true);
   }
 }
 

@@ -125,6 +125,20 @@ class StudioApplicationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(int(headers["Content-Length"]), len(body))
+        policy = headers["Content-Security-Policy"]
+        for directive in (
+            "default-src 'none'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "font-src 'self' data:",
+            "img-src 'self' blob: data:",
+            "connect-src 'self'",
+            "base-uri 'none'",
+            "form-action 'none'",
+            "frame-ancestors 'none'",
+            "object-src 'none'",
+        ):
+            self.assertIn(directive, policy)
         self.assertEqual(
             headers["X-VibePulse-Header-Digest"],
             hashlib.sha256(self.header_path.read_bytes()).hexdigest(),

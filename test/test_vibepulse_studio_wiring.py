@@ -238,9 +238,76 @@ class StudioWiringTests(unittest.TestCase):
         self.assertFalse(result["badType"]["accepted"])
         self.assertEqual(result["badType"]["hero"], hero)
 
+    @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
+    def test_operation_lock_covers_every_mutator_and_snapshots_export_name(self):
+        prelude = """
+          var __controls = [
+            {disabled: false}, {disabled: false}, {disabled: false},
+            {disabled: false}, {disabled: false}, {disabled: false}
+          ];
+          var document = {
+            querySelectorAll: function(_selector) { return __controls; }
+          };
+        """
+        expression = """
+          (() => {
+            const first = beginOperation();
+            const locked = __controls.every((control) => control.disabled);
+            const second = beginOperation();
+            const claudeStale = currentExportName({
+              provider: "claude", condition: "stale"
+            });
+            const codexMissing = currentExportName({
+              provider: "codex", condition: "missing"
+            });
+            finishOperation();
+            return {
+              first, second, locked,
+              unlocked: __controls.every((control) => !control.disabled),
+              active: state.operationActive,
+              claudeStale, codexMissing
+            };
+          })()
+        """
+        result = self.evaluate_javascript(expression, prelude=prelude)
+        self.assertEqual(result, {
+            "first": True,
+            "second": False,
+            "locked": True,
+            "unlocked": True,
+            "active": False,
+            "claudeStale": "claude-hero-stale",
+            "codexMissing": "codex-hero-missing",
+        })
+        self.assertIn(
+            '"[data-state], [data-scale], #geometry-controls input, "',
+            self.js,
+        )
+        self.assertGreaterEqual(self.js.count("if (state.operationActive)"), 3)
+
+    @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
+    def test_status_halo_stays_inside_the_safe_inset(self):
+        result = self.evaluate_javascript("""
+          (() => {
+            const geometry = statusDotGeometry({safeX: 22, barHeight: 18});
+            return {
+              left: geometry.centerX - geometry.haloRadius,
+              centerX: geometry.centerX,
+              haloRadius: geometry.haloRadius,
+              dotRadius: geometry.dotRadius
+            };
+          })()
+        """)
+        self.assertEqual(result, {
+            "left": 22,
+            "centerX": 28,
+            "haloRadius": 6,
+            "dotRadius": 4,
+        })
+
     @classmethod
-    def evaluate_javascript(cls, expression):
-        script = cls.js + "\nJSON.stringify(" + expression + ");\n"
+    def evaluate_javascript(cls, expression, prelude=""):
+        script = prelude + "\n" + cls.js + "\nJSON.stringify(" + expression + ");\n"
         completed = subprocess.run(
             ["osascript", "-l", "JavaScript", "-e", script],
             check=False,
@@ -292,6 +359,10 @@ class StudioWiringTests(unittest.TestCase):
             "URL.revokeObjectURL",
         ):
             self.assertIn(required, export)
+        self.assertIn("loadExportFontCssSafely()", self.js)
+        self.assertIn('fontSignature !== "wOF2"', self.js)
+        self.assertIn("fontResult.ok", export)
+        self.assertIn("Local export fonts unavailable", export)
 
     def test_export_names_match_the_server_allowlist(self):
         block = re.search(
