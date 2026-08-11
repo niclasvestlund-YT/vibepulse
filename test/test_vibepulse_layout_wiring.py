@@ -42,6 +42,8 @@ for required in (
     "tk_img_codex_cloud_32",
     "VP_COLOR_CLAUDE",
     "VP_COLOR_CODEX",
+    "usage_live_build_header",
+    "usage_live_build_today_bar",
 ):
     assert required in source, f"missing full-screen UI primitive: {required}"
 
@@ -66,8 +68,26 @@ quota = quota[:quota.index("static void create_burn_rate_page")]
 for copy in ("USED TODAY", "TO RESET"):
     assert f'"{copy}"' in quota
 assert "VP_BAR_Y" in quota and "VP_BAR_H" in quota
-assert "model" in quota and "effort" in quota
+assert "baseline_fill" in quota and "today_fill" in quota
+assert "marker" in quota
 assert "status" not in quota
+
+quota_page = source[source.index("typedef struct {"):]
+quota_page = quota_page[:quota_page.index("} quota_page;")]
+for member in ("context", "track", "baseline_fill", "today_fill", "marker", "halo"):
+    assert f"*{member};" in quota_page, f"quota_page must own {member}"
+assert "*effort;" not in quota_page, "quota header must use one context label"
+
+assert "#define COL_CLAUDE_MUTED lv_color_hex(0x8A4F42)" in source
+assert "COL_CODEX_MUTED" in source and "lv_color_hex(0x454B8A)" in source
+assert "#include \"usage_live_policy.h\"" in source
+assert "tk_agent_snapshot agent_snapshot;" in source
+assert "int64_t agent_applied_at_us;" in source
+assert "bool has_agent_snapshot;" in source
+assert "ui.agent_applied_at_us <= 0" not in source
+assert "(uint64_t)now_us - (uint64_t)ui.agent_applied_at_us" in source
+assert "lv_obj_set_size(page->track, VP_CONTENT_W, VP_BAR_H);" in quota
+assert "lv_obj_set_size(page->marker, 3, VP_BAR_H + 8);" in quota
 
 burn = source[source.index("static void create_burn_rate_page"):]
 burn = burn[:burn.index("static void create_volume_page")]
@@ -84,6 +104,7 @@ assert "COL_CARD" not in volume
 
 assert 'lv_obj_set_tile_id(ui.tileview, index, 0, LV_ANIM_OFF)' in source
 assert "lv_timer_create" not in source, "steady pages must not rotate themselves"
+assert "lv_anim" not in source, "physical static gate forbids LVGL animation objects"
 assert "lv_obj_set_style_opa" not in source
 assert "lv_canvas" not in source
 assert "lv_obj_set_style_transform" not in source

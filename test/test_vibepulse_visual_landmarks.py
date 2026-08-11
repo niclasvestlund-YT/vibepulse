@@ -40,6 +40,15 @@ EXPECTED = {
     "torget-vibepulse-claude-stale.bmp",
     "torget-vibepulse-claude-missing.bmp",
     "torget-vibepulse-codex-missing.bmp",
+    "torget-vibepulse-claude-single-working.bmp",
+    "torget-vibepulse-claude-multi-chat.bmp",
+    "torget-vibepulse-claude-idle.bmp",
+    "torget-vibepulse-codex-single-working.bmp",
+    "torget-vibepulse-codex-multi-chat.bmp",
+    "torget-vibepulse-claude-today-missing.bmp",
+    "torget-vibepulse-claude-today-contradictory.bmp",
+    "torget-vibepulse-claude-zero-total.bmp",
+    "torget-vibepulse-codex-full-total.bmp",
 }
 
 
@@ -85,23 +94,57 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(self.image(name).size, (480, 480))
 
-    def test_provider_bars_use_locked_colors_and_full_track(self):
+    def test_provider_bars_are_segmented_with_locked_colors_and_marker(self):
         cases = (
-            ("torget-vibepulse-claude-fable.bmp", (217, 119, 87)),
-            ("torget-vibepulse-claude-all.bmp", (217, 119, 87)),
-            ("torget-vibepulse-codex-weekly.bmp", (111, 120, 255)),
+            ("torget-vibepulse-claude-fable.bmp", (138, 79, 66),
+             (217, 119, 87), 287),
+            ("torget-vibepulse-claude-all.bmp", (138, 79, 66),
+             (217, 119, 87), 191),
+            ("torget-vibepulse-codex-weekly.bmp", (69, 75, 138),
+             (111, 120, 255), 152),
         )
-        for name, accent in cases:
+        for name, baseline, accent, marker_start in cases:
             with self.subTest(name=name):
                 image = self.image(name)
                 row = [
                     image.getpixel((x, BAR_SOLID_CENTER_Y))
                     for x in range(480)
                 ]
-                colored = [x for x, pixel in enumerate(row) if pixel == accent]
-                self.assertTrue(colored)
-                self.assertEqual(colored[0], 22)
+                self.assertIn(baseline, row)
+                self.assertIn(accent, row)
+                self.assertEqual(
+                    row[marker_start:marker_start + 3],
+                    [(255, 255, 255)] * 3,
+                )
                 self.assertEqual(row[457], (48, 50, 56))
+
+                for y in range(layout_token("VP_BAR_Y") - 4,
+                               layout_token("VP_BAR_Y") +
+                               layout_token("VP_BAR_H") + 4):
+                    self.assertEqual(
+                        image.getpixel((marker_start + 1, y)),
+                        (255, 255, 255),
+                    )
+
+    def test_working_halo_is_static_and_provider_colored(self):
+        cases = (
+            ("torget-vibepulse-claude-single-working.bmp", (217, 119, 87)),
+            ("torget-vibepulse-claude-multi-chat.bmp", (217, 119, 87)),
+            ("torget-vibepulse-codex-single-working.bmp", (111, 120, 255)),
+            ("torget-vibepulse-codex-multi-chat.bmp", (111, 120, 255)),
+        )
+        for name, accent in cases:
+            with self.subTest(name=name):
+                image = self.image(name)
+                halo = [
+                    image.getpixel((x, y))
+                    for y in range(14, 54)
+                    for x in range(18, 58)
+                ]
+                self.assertIn(accent, halo)
+
+        idle = self.image("torget-vibepulse-claude-idle.bmp")
+        self.assertNotEqual(idle.getpixel((37, 14)), (217, 119, 87))
 
     def test_burn_rate_is_unboxed_with_one_shared_separator(self):
         image = self.image("torget-vibepulse-burn-speed-up.bmp")
@@ -122,6 +165,35 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                     for x in range(22, 458)
                 ]
                 self.assertEqual(set(row), {(48, 50, 56)})
+
+    def test_missing_today_uses_one_accent_fill_without_marker(self):
+        image = self.image("torget-vibepulse-claude-today-missing.bmp")
+        row = [image.getpixel((x, BAR_SOLID_CENTER_Y)) for x in range(480)]
+        self.assertEqual(set(row[22:340]), {(217, 119, 87)})
+        self.assertEqual(set(row[340:458]), {(48, 50, 56)})
+        self.assertNotIn((255, 255, 255), row[22:458])
+
+    def test_contradictory_today_never_fabricates_progress(self):
+        image = self.image("torget-vibepulse-claude-today-contradictory.bmp")
+        row = [
+            image.getpixel((x, BAR_SOLID_CENTER_Y))
+            for x in range(22, 458)
+        ]
+        self.assertEqual(set(row), {(48, 50, 56)})
+
+    def test_endpoint_markers_are_clamped_inside_track(self):
+        zero = self.image("torget-vibepulse-claude-zero-total.bmp")
+        full = self.image("torget-vibepulse-codex-full-total.bmp")
+        zero_row = [
+            zero.getpixel((x, BAR_SOLID_CENTER_Y)) for x in range(22, 458)
+        ]
+        full_row = [
+            full.getpixel((x, BAR_SOLID_CENTER_Y)) for x in range(22, 458)
+        ]
+        self.assertEqual(zero_row[:3], [(255, 255, 255)] * 3)
+        self.assertEqual(zero_row[3:], [(48, 50, 56)] * 433)
+        self.assertEqual(full_row[-3:], [(255, 255, 255)] * 3)
+        self.assertIn((69, 75, 138), full_row[:-3])
 
 
 if __name__ == "__main__":

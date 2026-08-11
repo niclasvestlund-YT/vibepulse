@@ -283,6 +283,30 @@ static void apply_agent_fixture(int idx) {
   apply_agent_file(AGENT_FIXTURES[agent_fixture_idx]);
 }
 
+static tk_agent_snapshot static_working_snapshot(tk_agent_provider provider,
+                                                 const char *model,
+                                                 const char *effort) {
+  tk_agent_snapshot snapshot = {0};
+  snapshot.seq = provider == TK_AGENT_PROVIDER_CLAUDE ? 901 : 902;
+  tk_agent_provider_status *target =
+      provider == TK_AGENT_PROVIDER_CLAUDE ? &snapshot.claude
+                                           : &snapshot.codex;
+  target->active_count = 1;
+  target->job_count = 1;
+  tk_agent_status *job = &target->jobs[0];
+  snprintf(job->task_id, sizeof job->task_id, "static-working");
+  snprintf(job->event_id, sizeof job->event_id, "static-working-%u",
+           snapshot.seq);
+  snprintf(job->project, sizeof job->project, "Torget");
+  snprintf(job->model, sizeof job->model, "%s", model);
+  snprintf(job->effort, sizeof job->effort, "%s", effort);
+  job->has_model = true;
+  job->has_effort = true;
+  job->state = TK_AGENT_WORKING;
+  job->activity = TK_ACTIVITY_EDITING;
+  return snapshot;
+}
+
 static void next_fixture(lv_timer_t *t) {
   (void)t;
   apply_fixture(fixture_idx + 1);
@@ -363,7 +387,57 @@ static int run_vibepulse_static_qa(void) {
   torget_app_show(1);
 
   feed_tokens();
+  tk_agent_snapshot single = static_working_snapshot(
+      TK_AGENT_PROVIDER_CLAUDE, "OPUS 4.1", "ULTRA");
+  tokens_apply_agent_status(&single);
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("vibepulse-claude-single-working");
+
   apply_agent_file("agent-status-multi-working.json");
+  dump_frame("vibepulse-claude-multi-chat");
+
+  apply_agent_file("agent-status-idle.json");
+  dump_frame("vibepulse-claude-idle");
+
+  single = static_working_snapshot(TK_AGENT_PROVIDER_CODEX,
+                                   "GPT-5.6 SOL", "ULTRA");
+  tokens_apply_agent_status(&single);
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("vibepulse-codex-single-working");
+
+  apply_agent_file("agent-status-multi-working.json");
+  dump_frame("vibepulse-codex-multi-chat");
+
+  tk_tokens bar_case = {0};
+  bar_case.claude_model_week = forecast_limit(73, 3120);
+  snprintf(bar_case.claude_model_week_label,
+           sizeof bar_case.claude_model_week_label, "FABLE · WEEK");
+  bar_case.has_claude_model_week_label = 1;
+  tokens_apply(&bar_case);
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("vibepulse-claude-today-missing");
+
+  bar_case.claude_model_week = forecast_limit(9, 3120);
+  bar_case.claude_model_week.delta_pct = 12;
+  bar_case.claude_model_week.has_delta = 1;
+  tokens_apply(&bar_case);
+  dump_frame("vibepulse-claude-today-contradictory");
+
+  bar_case.claude_model_week = forecast_limit(0, 3120);
+  bar_case.claude_model_week.delta_pct = 0;
+  bar_case.claude_model_week.has_delta = 1;
+  tokens_apply(&bar_case);
+  dump_frame("vibepulse-claude-zero-total");
+
+  memset(&bar_case, 0, sizeof bar_case);
+  bar_case.codex_week = forecast_limit(100, 2317);
+  bar_case.codex_week.delta_pct = 0;
+  bar_case.codex_week.has_delta = 1;
+  tokens_apply(&bar_case);
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("vibepulse-codex-full-total");
+
+  feed_tokens();
   tokens_show_view(VIEW_CLAUDE_FABLE);
   dump_frame("vibepulse-claude-fable");
   tokens_show_view(VIEW_CLAUDE_ALL);

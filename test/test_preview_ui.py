@@ -30,6 +30,15 @@ EXPECTED_BMPS = {
     "torget-vibepulse-claude-stale.bmp",
     "torget-vibepulse-claude-missing.bmp",
     "torget-vibepulse-codex-missing.bmp",
+    "torget-vibepulse-claude-single-working.bmp",
+    "torget-vibepulse-claude-multi-chat.bmp",
+    "torget-vibepulse-claude-idle.bmp",
+    "torget-vibepulse-codex-single-working.bmp",
+    "torget-vibepulse-codex-multi-chat.bmp",
+    "torget-vibepulse-claude-today-missing.bmp",
+    "torget-vibepulse-claude-today-contradictory.bmp",
+    "torget-vibepulse-claude-zero-total.bmp",
+    "torget-vibepulse-codex-full-total.bmp",
 }
 EXPECTED_PNGS = {
     f"{Path(name).stem.removeprefix('torget-')}.png"
