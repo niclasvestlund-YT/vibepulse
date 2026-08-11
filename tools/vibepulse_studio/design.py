@@ -9,11 +9,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tools.hardware_registry import load_registry
+from tools.hardware_registry import RegistryError, load_registry
 
 
 class DesignError(ValueError):
@@ -59,6 +61,10 @@ FIXTURE_FIELDS = {
 }
 RGB_COLOR = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 
+# These are intentionally small, explicit optical gutters. Coordinates are
+# panel pixels; the percentage extent additionally uses its declared font size.
+MIN_SECTION_GAP_PX = 8
+
 
 def _pixel_integer(value):
     return isinstance(value, int) and not isinstance(value, bool)
@@ -77,7 +83,12 @@ def _display_dimensions(display):
 
 def load_display(spec_dir):
     """Read immutable panel dimensions from the hardware registry."""
-    registry = load_registry(spec_dir)
+    try:
+        registry = load_registry(spec_dir)
+    except (OSError, UnicodeError, RegistryError, yaml.YAMLError) as error:
+        raise DesignError(
+            f"cannot load hardware registry: {_error_summary(error)}",
+        ) from error
     capability = registry.capabilities.get("display.amoled")
     if not isinstance(capability, dict):
         raise DesignError("display.amoled is missing from the hardware registry")
@@ -126,9 +137,17 @@ def _validate_hero(hero, width, height):
             or hero["barY"] + hero["barHeight"] > height
             or hero["statusY"] + hero["statusHeight"] > height):
         raise DesignError("hero geometry must remain on screen")
-    if tuple(hero[name] for name in positions) != tuple(
-            sorted(hero[name] for name in positions)):
+    if (hero["providerY"] + MIN_SECTION_GAP_PX > hero["quotaY"]
+            or hero["quotaY"] + MIN_SECTION_GAP_PX > hero["percentY"]):
         raise DesignError("hero geometry must follow visual reading order")
+    if (hero["percentY"] + hero["percentFontPx"]
+            + MIN_SECTION_GAP_PX > hero["barY"]):
+        raise DesignError("percentage must not overlap the progress bar")
+    if (hero["barY"] + hero["barHeight"]
+            + MIN_SECTION_GAP_PX > hero["resetY"]):
+        raise DesignError("progress bar must not overlap the reset row")
+    if hero["resetY"] + MIN_SECTION_GAP_PX > hero["statusY"]:
+        raise DesignError("reset row must not overlap the status area")
 
 
 def _validate_fixtures(fixtures):
@@ -170,13 +189,20 @@ def validate_design(value, display):
     return value
 
 
+def _error_summary(error):
+    text = str(error).strip()
+    return text.splitlines()[0] if text else type(error).__name__
+
+
 def load_design(path, display):
     """Load and validate a UTF-8 JSON design document."""
     path = Path(path)
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise DesignError(f"cannot load design {path}: {error}") from error
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise DesignError(
+            f"cannot load design {path}: {_error_summary(error)}",
+        ) from error
     return validate_design(value, display)
 
 
@@ -279,8 +305,8 @@ def main(argv=None):
             )
             return 1
         return 0
-    except (DesignError, OSError) as error:
-        print(f"error: {error}", file=sys.stderr)
+    except (DesignError, OSError, UnicodeError) as error:
+        print(f"error: {_error_summary(error)}", file=sys.stderr)
         return 2
 
 

@@ -1,4 +1,6 @@
 import copy
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -10,6 +12,7 @@ from tools.vibepulse_studio.design import (
     generate_header,
     load_design,
     load_display,
+    main,
     save_design,
     save_header,
     validate_design,
@@ -97,6 +100,23 @@ class DesignTests(unittest.TestCase):
                 with self.assertRaisesRegex(DesignError, message):
                     validate_design(design, self.display)
 
+    def test_geometry_rejects_equal_or_overlapping_sections(self):
+        cases = (
+            ({"providerY": 86}, "reading order"),
+            ({"quotaY": 112}, "reading order"),
+            ({"percentFontPx": 164}, "percentage"),
+            ({"percentFontPx": 170}, "percentage"),
+            ({"resetY": 294}, "progress bar"),
+            ({"statusY": 312}, "reset row"),
+            ({"statusY": 420, "statusHeight": 66}, "screen"),
+        )
+        for changes, message in cases:
+            with self.subTest(changes=changes):
+                design = copy.deepcopy(self.design)
+                design["hero"].update(changes)
+                with self.assertRaisesRegex(DesignError, message):
+                    validate_design(design, self.display)
+
     def test_schema_and_document_shape_are_versioned(self):
         design = copy.deepcopy(self.design)
         design["schemaVersion"] = True
@@ -165,6 +185,61 @@ class DesignTests(unittest.TestCase):
             with self.subTest(display=display):
                 with self.assertRaisesRegex(DesignError, "display"):
                     validate_design(self.design, display)
+
+    def test_invalid_utf8_design_is_wrapped_as_design_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "design.json"
+            path.write_bytes(b"\xff\xfe")
+            with self.assertRaisesRegex(DesignError, "cannot load design"):
+                load_design(path, self.display)
+
+    def test_registry_parser_failures_are_wrapped_as_design_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp)
+            (spec / "hardware-sources.yaml").write_bytes(b"\xff\xfe")
+            with self.assertRaisesRegex(
+                    DesignError, "cannot load hardware registry"):
+                load_display(spec)
+
+    def test_cli_reports_invalid_inputs_without_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_design = Path(tmp) / "design.json"
+            bad_design.write_bytes(b"\xff\xfe")
+            error = io.StringIO()
+            with contextlib.redirect_stderr(error):
+                status = main([
+                    "--check",
+                    "--repo", str(self.repo),
+                    "--design", str(bad_design),
+                ])
+            self.assertEqual(status, 2)
+            self.assertIn("error: cannot load design", error.getvalue())
+            self.assertNotIn("Traceback", error.getvalue())
+            self.assertEqual(len(error.getvalue().splitlines()), 1)
+
+            bad_spec = Path(tmp) / "spec"
+            bad_spec.mkdir()
+            (bad_spec / "hardware-sources.yaml").write_text(
+                "schema_version: [\n", encoding="utf-8",
+            )
+            error = io.StringIO()
+            with contextlib.redirect_stderr(error):
+                status = main([
+                    "--check",
+                    "--repo", str(self.repo),
+                    "--spec", str(bad_spec),
+                ])
+            self.assertEqual(status, 2)
+            self.assertIn(
+                "error: cannot load hardware registry", error.getvalue(),
+            )
+            self.assertNotIn("Traceback", error.getvalue())
+            self.assertEqual(len(error.getvalue().splitlines()), 1)
+
+    def test_python_bytecode_artifacts_are_ignored(self):
+        patterns = (self.repo / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("__pycache__/", patterns)
+        self.assertIn("*.py[cod]", patterns)
 
 
 if __name__ == "__main__":

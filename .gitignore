@@ -4,6 +4,8 @@ secrets.h
 
 # Lokal utvecklingsmiljö.
 .venv/
+__pycache__/
+*.py[cod]
 
 # Byggträd är regenererbara.
 build/
