@@ -40,7 +40,34 @@ int main(void) {
         strcmp(hero.quota.pct_text, "73%") == 0);
   check("hero reset is English",
         strcmp(hero.quota.reset_text, "RESET IN 2D 4H") == 0);
-  check("week delta is English", strcmp(hero.quota.delta_text, "+3 TODAY") == 0);
+  check("week delta includes the percentage unit",
+        strcmp(hero.quota.delta_text, "+3% TODAY") == 0);
+
+  tk_agent_status metadata = {0};
+  metadata.has_model = true;
+  metadata.has_effort = true;
+  snprintf(metadata.model, sizeof metadata.model, "OPUS 5");
+  snprintf(metadata.effort, sizeof metadata.effort, "ULTRA");
+  char metadata_text[48];
+  usage_presenter_format_agent_metadata(&metadata, metadata_text,
+                                        sizeof metadata_text);
+  check("model and effort share compact hero metadata",
+        strcmp(metadata_text, "OPUS 5 · ULTRA") == 0);
+  metadata.has_effort = false;
+  usage_presenter_format_agent_metadata(&metadata, metadata_text,
+                                        sizeof metadata_text);
+  check("model metadata remains useful without effort",
+        strcmp(metadata_text, "OPUS 5") == 0);
+  usage_presenter_format_agent_metadata(NULL, metadata_text,
+                                        sizeof metadata_text);
+  check("missing agent metadata stays blank", metadata_text[0] == '\0');
+
+  check("fresh quota is live",
+        strcmp(usage_presenter_data_status_text(true, false), "LIVE") == 0);
+  check("retained quota is stale",
+        strcmp(usage_presenter_data_status_text(true, true), "STALE") == 0);
+  check("missing quota wins over stale transport",
+        strcmp(usage_presenter_data_status_text(false, true), "NO DATA") == 0);
 
   usage_detail_page_view details = {0};
   usage_presenter_build_claude_details(&tokens, &details);

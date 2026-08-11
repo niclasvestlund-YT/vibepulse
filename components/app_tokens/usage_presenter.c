@@ -4,6 +4,25 @@
 #include <string.h>
 #include <time.h>
 
+void usage_presenter_format_agent_metadata(const tk_agent_status *agent,
+                                           char *out, size_t capacity) {
+  if (!out || capacity == 0) return;
+  out[0] = '\0';
+  if (!agent) return;
+  if (agent->has_model && agent->has_effort) {
+    snprintf(out, capacity, "%s · %s", agent->model, agent->effort);
+  } else if (agent->has_model) {
+    snprintf(out, capacity, "%s", agent->model);
+  } else if (agent->has_effort) {
+    snprintf(out, capacity, "%s", agent->effort);
+  }
+}
+
+const char *usage_presenter_data_status_text(int has_data, int stale) {
+  if (!has_data) return "NO DATA";
+  return stale ? "STALE" : "LIVE";
+}
+
 static void format_reset(const tk_limit *limit, char *out, size_t capacity) {
   if (!limit->has_reset) return;
   if (limit->reset_min >= 24 * 60) {
@@ -36,7 +55,7 @@ static void build_card(usage_card_view *out, usage_card_kind kind,
     out->delta_pct = limit->delta_pct;
     snprintf(out->delta_text, sizeof out->delta_text,
              kind == USAGE_CARD_FIVE_HOURS ? "+%.0f LAST HOUR" :
-                                             "+%.0f TODAY",
+                                             "+%.0f%% TODAY",
              limit->delta_pct);
   }
   if (limit->has_pct)

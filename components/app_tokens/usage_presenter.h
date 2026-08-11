@@ -2,7 +2,9 @@
 #define USAGE_PRESENTER_H
 
 #include <stdint.h>
+#include <stddef.h>
 
+#include "agent_status.h"
 #include "tokens.h"
 
 #define USAGE_CARD_LABEL_CAP 24
@@ -83,5 +85,8 @@ void usage_presenter_build_overview(
     const tk_tokens *tokens, usage_overview_page_view *out);
 void usage_presenter_build_forecasts(const tk_tokens *tokens,
                                      usage_forecast_page_view *out);
+void usage_presenter_format_agent_metadata(const tk_agent_status *agent,
+                                           char *out, size_t capacity);
+const char *usage_presenter_data_status_text(int has_data, int stale);
 
 #endif

@@ -169,6 +169,40 @@ class StudioWiringTests(unittest.TestCase):
         self.assertIn("const MIN_SECTION_GAP = 8", self.js)
         self.assertRegex(self.js, r"contentWidth\s*=\s*width\s*-\s*2\s*\*")
 
+    def test_svg_text_uses_named_lvgl_metric_offsets(self):
+        self.assertIn("const LVGL_WEB_FONT_METRIC_Y = Object.freeze", self.js)
+        for role in (
+            "provider", "model", "quota", "today", "percent", "reset",
+            "status",
+        ):
+            self.assertRegex(
+                self.js,
+                rf"lvglTextY\([^,]+,\s*\"{role}\"\)",
+            )
+
+    @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
+    def test_svg_text_coordinates_match_lvgl_raster_authority(self):
+        result = self.evaluate_javascript("""
+          (() => ({
+            provider: lvglTextY(23, "provider"),
+            model: lvglTextY(23, "model"),
+            quota: lvglTextY(86, "quota"),
+            today: lvglTextY(86, "today"),
+            percent: lvglTextY(112, "percent"),
+            reset: lvglTextY(312, "reset"),
+            status: lvglTextY(421, "status")
+          }))()
+        """)
+        self.assertEqual(result, {
+            "provider": 28,
+            "model": 30,
+            "quota": 91,
+            "today": 94,
+            "percent": 98,
+            "reset": 317,
+            "status": 423,
+        })
+
     @unittest.skipUnless(shutil.which("osascript"), "JXA is unavailable")
     def test_geometry_changes_match_the_server_relational_contract(self):
         hero = {

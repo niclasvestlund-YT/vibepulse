@@ -4,6 +4,7 @@ root = Path(__file__).resolve().parents[1]
 source = (root / "components/app_tokens/usage_screen.c").read_text()
 header = (root / "components/app_tokens/usage_screen.h").read_text()
 sim = (root / "sim/main.c").read_text()
+monitor = (root / "components/app_tokens/agent_monitor.c").read_text()
 
 assert "#define TK_USAGE_SCREEN_VIEWS 6" in header
 assert "create_claude_details_page" in source
@@ -40,12 +41,65 @@ main = sim[sim.index("int main("):]
 assert main.index('"--vibepulse-static-qa"') < main.index("feed_tokens();")
 
 assert "extern const lv_font_t plex_num_146" in source
-assert "#define HERO_BAR_H 18" in source
 assert "create_hero_page" in source
 assert '"WEEKLY · ALL MODELS"' not in source, "copy belongs in presenter"
-assert "COL_CODEX       lv_color_hex(0x6F78FF)" in source
+assert '#include "vibepulse_layout.generated.h"' in source
+for old in (
+    "#define SCREEN_W", "#define SAFE_X", "#define CONTENT_W",
+    "#define HEADER_Y", "#define HEADER_H", "#define HERO_LABEL_Y",
+    "#define HERO_PCT_Y", "#define HERO_PCT_H", "#define HERO_BAR_Y",
+    "#define HERO_BAR_H", "#define HERO_RESET_Y", "#define HERO_STATUS_Y",
+    "#define HERO_STATUS_H",
+):
+    assert old not in source
+for token in (
+    "VP_SCREEN_W", "VP_SCREEN_H", "VP_SAFE_X", "VP_CONTENT_W",
+    "VP_PROVIDER_Y", "VP_QUOTA_Y", "VP_PERCENT_Y", "VP_BAR_Y",
+    "VP_BAR_H", "VP_RESET_Y", "VP_STATUS_Y", "VP_STATUS_H",
+    "VP_COLOR_BACKGROUND", "VP_COLOR_TEXT", "VP_COLOR_MUTED",
+    "VP_COLOR_TRACK", "VP_COLOR_HAIRLINE", "VP_COLOR_CLAUDE",
+    "VP_COLOR_CODEX",
+):
+    assert token in source
+assert "VP_PERCENT_FONT_PX == 146" in source
 hero = source[source.index("static void create_hero_page"):]
-hero = hero[:hero.index("static void create_forecast_page")]
+hero = hero[:hero.index("static void create_summary_header")]
 assert "COL_CARD" not in hero, "priority usage pages must not use cards"
+assert "create_app_icon" not in hero, "hero must not spend space on app chrome"
+assert "lv_obj_t *line" not in hero, "hero must not restore the removed header hairline"
+assert "create_pager" not in hero, "hero must not overlay a pager on usage data"
+assert "hero->today" in hero
+assert "hero->status" in hero
+assert "hero->status_dot" in hero
+assert '"— TODAY"' not in hero, "LVGL hero font has no em-dash glyph"
+assert '"– TODAY"' in hero, "missing today must use the supported en-dash glyph"
+assert "usage_presenter_format_agent_metadata" in source
+assert "usage_presenter_data_status_text" in source
+
+create = source[source.index("void usage_screen_create"):]
+create = create[:create.index("void usage_screen_apply_tokens")]
+assert "create_pager(ui.claude.tile" not in create
+assert "create_pager(ui.codex.tile" not in create
+
+assert "provider_lane" not in monitor
+assert "render_rail" not in monitor
+assert "mon.rail" not in monitor
+for literal in (
+    "lv_obj_set_size(view->root, 480, 480)",
+    "lv_obj_set_size(view->provider, 480, 24)",
+    "lv_obj_set_size(view->done, 480, 76)",
+):
+    assert literal not in monitor, "completion overlay must use generated screen tokens"
+assert "lv_obj_set_size(view->root, VP_SCREEN_W, VP_SCREEN_H)" in monitor
+assert "lv_obj_set_size(view->provider, VP_SCREEN_W, 24)" in monitor
+assert "lv_obj_set_size(view->done, VP_SCREEN_W, 76)" in monitor
+assert "lv_obj_set_pos(hero->status, 16, status_center_y - 10)" in hero
+assert 'apply_agent_file("agent-status-multi-working.json")' in sim
+
+exports = root / "design/vibepulse/exports"
+for name in ("claude-hero.png", "codex-hero.png"):
+    assert (exports / name).is_file(), f"missing approved Studio export {name}"
+for unsupported in ("claude.png", "codex.png"):
+    assert not (exports / unsupported).exists(), f"unsupported export alias {unsupported}"
 
 print("OK: VibePulse distance-first layout wiring")

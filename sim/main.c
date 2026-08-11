@@ -363,6 +363,7 @@ static int run_vibepulse_static_qa(void) {
   torget_app_show(1);
 
   feed_tokens();
+  apply_agent_file("agent-status-multi-working.json");
   tokens_show_view(VIEW_CLAUDE_HERO);
   dump_frame("vibepulse-claude-hero");
   tokens_show_view(VIEW_CODEX_HERO);

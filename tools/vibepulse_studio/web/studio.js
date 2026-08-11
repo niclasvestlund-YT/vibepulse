@@ -3,6 +3,18 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MIN_TEXT_ROW_STEP = 26;
 const MIN_SECTION_GAP = 8;
+// Browser SVG and LVGL use different font rasterizers. These measured offsets
+// align visible IBM Plex Sans ink with the LVGL simulator without changing the
+// firmware layout tokens that remain the geometry authority.
+const LVGL_WEB_FONT_METRIC_Y = Object.freeze({
+  provider: 5,
+  model: 7,
+  quota: 5,
+  today: 8,
+  percent: -14,
+  reset: 5,
+  status: 2,
+});
 const EXPORT_NAMES = Object.freeze([
   "claude-hero",
   "codex-hero",
@@ -262,6 +274,10 @@ function statusDotGeometry(hero) {
   };
 }
 
+function lvglTextY(baseY, role) {
+  return baseY + LVGL_WEB_FONT_METRIC_Y[role];
+}
+
 function render(design, selection) {
   if (!design || !state.hardware) {
     return;
@@ -298,33 +314,33 @@ function render(design, selection) {
   const nodes = [
     svgNode("text", {
       x: hero.safeX,
-      y: hero.providerY,
+      y: lvglTextY(hero.providerY, "provider"),
       ...textStyle(labelSize, design.palette.text, 700),
       "letter-spacing": Math.max(1, Math.round(labelSize * 0.08)),
     }, fixture.provider),
     svgNode("text", {
       x: contentRight,
-      y: hero.providerY,
+      y: lvglTextY(hero.providerY, "model"),
       ...textStyle(smallSize, design.palette.muted),
       "text-anchor": "end",
       "letter-spacing": Math.max(1, Math.round(smallSize * 0.07)),
     }, `${fixture.model} · ${fixture.effort}`),
     svgNode("text", {
       x: hero.safeX,
-      y: hero.quotaY,
+      y: lvglTextY(hero.quotaY, "quota"),
       ...textStyle(labelSize, design.palette.muted),
       "letter-spacing": Math.max(1, Math.round(labelSize * 0.06)),
     }, fixture.quota),
     svgNode("text", {
       x: contentRight,
-      y: hero.quotaY,
+      y: lvglTextY(hero.quotaY, "today"),
       ...textStyle(smallSize, providerColor),
       "text-anchor": "end",
       "letter-spacing": Math.max(1, Math.round(smallSize * 0.06)),
     }, todayText),
     svgNode("text", {
       x: hero.safeX,
-      y: hero.percentY,
+      y: lvglTextY(hero.percentY, "percent"),
       ...textStyle(hero.percentFontPx, design.palette.text, 700),
       "letter-spacing": Math.round(hero.percentFontPx * -0.04),
     }, percentageText),
@@ -346,7 +362,7 @@ function render(design, selection) {
     }),
     svgNode("text", {
       x: hero.safeX,
-      y: hero.resetY,
+      y: lvglTextY(hero.resetY, "reset"),
       ...textStyle(labelSize, design.palette.text),
       "letter-spacing": Math.max(1, Math.round(labelSize * 0.05)),
     }, fixture.reset),
@@ -364,7 +380,7 @@ function render(design, selection) {
     }),
     svgNode("text", {
       x: statusDot.centerX + statusDot.haloRadius + statusDot.dotRadius,
-      y: statusCenter,
+      y: lvglTextY(statusCenter, "status"),
       ...textStyle(smallSize, isMissing || isStale
         ? design.palette.muted
         : providerColor),
