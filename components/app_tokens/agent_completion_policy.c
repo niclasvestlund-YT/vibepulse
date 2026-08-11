@@ -35,20 +35,54 @@ static bool seen(const tk_completion_queue *queue, int provider,
   return false;
 }
 
-static void remember(tk_completion_queue *queue, int provider,
+static uint8_t bounded_job_count(const tk_agent_provider_status *provider) {
+  return provider->job_count > TK_AGENT_JOBS_MAX
+             ? TK_AGENT_JOBS_MAX : provider->job_count;
+}
+
+static bool snapshot_contains_attention(const tk_agent_snapshot *snapshot,
+                                        int provider, const char *event_id) {
+  const tk_agent_provider_status *status =
+      provider == TK_AGENT_PROVIDER_CLAUDE ? &snapshot->claude :
+      provider == TK_AGENT_PROVIDER_CODEX ? &snapshot->codex : NULL;
+  if (!status) return false;
+  for (uint8_t i = 0; i < bounded_job_count(status); i++) {
+    const tk_agent_status *job = &status->jobs[i];
+    if (job->event_id[0] && is_attention_state(job->state) &&
+        same_event(provider, event_id, provider, job->event_id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool remember(tk_completion_queue *queue,
+                     const tk_agent_snapshot *snapshot, int provider,
                      const char *event_id) {
-  if (!event_id[0] || seen(queue, provider, event_id)) return;
+  if (!event_id[0] || seen(queue, provider, event_id)) return true;
   uint8_t slot;
   if (queue->seen_count < TK_COMPLETION_SEEN_CAP) {
     slot = queue->seen_count++;
   } else {
-    slot = queue->seen_next;
+    bool found = false;
+    for (uint8_t offset = 0; offset < TK_COMPLETION_SEEN_CAP; offset++) {
+      uint8_t candidate =
+          (uint8_t)((queue->seen_next + offset) % TK_COMPLETION_SEEN_CAP);
+      if (!snapshot_contains_attention(snapshot, queue->seen_providers[candidate],
+                                       queue->seen_ids[candidate])) {
+        slot = candidate;
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
     queue->seen_next =
-        (uint8_t)((queue->seen_next + 1U) % TK_COMPLETION_SEEN_CAP);
+        (uint8_t)((slot + 1U) % TK_COMPLETION_SEEN_CAP);
   }
   queue->seen_providers[slot] = provider;
   snprintf(queue->seen_ids[slot], sizeof queue->seen_ids[slot], "%s",
            event_id);
+  return true;
 }
 
 static uint8_t total_active(const tk_agent_snapshot *snapshot) {
@@ -65,7 +99,7 @@ static uint8_t same_state_count(const tk_agent_snapshot *snapshot,
       &snapshot->codex,
   };
   for (int provider = 0; provider < TK_AGENT_PROVIDER_COUNT; provider++) {
-    for (uint8_t i = 0; i < providers[provider]->job_count; i++) {
+    for (uint8_t i = 0; i < bounded_job_count(providers[provider]); i++) {
       const tk_agent_status *job = &providers[provider]->jobs[i];
       if (job->event_id[0] && job->state == state) count++;
     }
@@ -82,8 +116,9 @@ static bool candidate_precedes(const completion_candidate *left,
     return left->job->updated_ms < right->job->updated_ms;
   }
   if (left->provider != right->provider) return left->provider < right->provider;
-  if (left->job_order != right->job_order) return left->job_order < right->job_order;
-  return strcmp(left->job->event_id, right->job->event_id) < 0;
+  int event_id_order = strcmp(left->job->event_id, right->job->event_id);
+  if (event_id_order != 0) return event_id_order < 0;
+  return left->job_order < right->job_order;
 }
 
 static bool queue_contains(const tk_completion_queue *queue, int provider,
@@ -142,7 +177,7 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
       &snapshot->codex,
   };
   for (int provider = 0; provider < TK_AGENT_PROVIDER_COUNT; provider++) {
-    for (uint8_t i = 0; i < providers[provider]->job_count; i++) {
+    for (uint8_t i = 0; i < bounded_job_count(providers[provider]); i++) {
       const tk_agent_status *job = &providers[provider]->jobs[i];
       if (!job->event_id[0] || !is_attention_state(job->state) ||
           candidate_contains(candidates, candidate_count, provider,
@@ -151,7 +186,10 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
       }
       bool already_queued = queue_contains(queue, provider, job->event_id);
       if (!already_queued && seen(queue, provider, job->event_id)) continue;
-      if (!already_queued) remember(queue, provider, job->event_id);
+      if (!already_queued &&
+          !remember(queue, snapshot, provider, job->event_id)) {
+        continue;
+      }
       if (!already_queued && first_snapshot &&
           job->updated_ms > TK_COMPLETION_INITIAL_MAX_AGE_MS) {
         continue;
@@ -205,9 +243,11 @@ const tk_completion_event *tk_completion_queue_current(
 tk_completion_phase tk_completion_phase_at(tk_completion_queue *queue,
                                             uint64_t now_ms) {
   if (!queue || !queue->count) return TK_COMPLETION_HIDDEN;
-  if (now_ms >= queue->last_now_ms) queue->last_now_ms = now_ms;
-  uint64_t elapsed = now_ms >= queue->current_started_ms
-                         ? now_ms - queue->current_started_ms : 0;
+  uint64_t effective_now = now_ms >= queue->last_now_ms
+                               ? now_ms : queue->last_now_ms;
+  queue->last_now_ms = effective_now;
+  uint64_t elapsed = effective_now >= queue->current_started_ms
+                         ? effective_now - queue->current_started_ms : 0;
   if (elapsed < TK_COMPLETION_PULSE_MS) return TK_COMPLETION_PULSE;
   if (queue->events[0].state != TK_AGENT_DONE ||
       elapsed < TK_COMPLETION_VISIBLE_MS) {

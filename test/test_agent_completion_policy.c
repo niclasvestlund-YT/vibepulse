@@ -65,6 +65,22 @@ static void test_freshness_and_provider_tie_break(void) {
   tk_completion_queue_apply(&tied_queue, &tied, 100);
   check("claude resolves equal freshness tie", current(&tied_queue) &&
         strcmp(current(&tied_queue)->event_id, "claude") == 0);
+
+  tk_agent_snapshot forward = {0};
+  add_job(&forward.claude, job(TK_AGENT_WAITING, "zeta", "Zeta", 1));
+  add_job(&forward.claude, job(TK_AGENT_WAITING, "alpha", "Alpha", 1));
+  tk_agent_snapshot reversed = {0};
+  add_job(&reversed.claude, job(TK_AGENT_WAITING, "alpha", "Alpha", 1));
+  add_job(&reversed.claude, job(TK_AGENT_WAITING, "zeta", "Zeta", 1));
+  tk_completion_queue forward_queue = {0};
+  tk_completion_queue reversed_queue = {0};
+  tk_completion_queue_apply(&forward_queue, &forward, 100);
+  tk_completion_queue_apply(&reversed_queue, &reversed, 100);
+  check("same-provider ties ignore snapshot order", current(&forward_queue) &&
+        current(&reversed_queue) &&
+        strcmp(current(&forward_queue)->event_id, "alpha") == 0 &&
+        strcmp(current(&forward_queue)->event_id,
+               current(&reversed_queue)->event_id) == 0);
 }
 
 static void test_non_attention_and_stale_events(void) {
@@ -139,6 +155,8 @@ static void test_phases(void) {
         TK_COMPLETION_STATIC);
   check("waiting remains static after ten seconds",
         tk_completion_phase_at(&queue, 10100) == TK_COMPLETION_STATIC);
+  check("waiting stays static when time moves backward",
+        tk_completion_phase_at(&queue, 200) == TK_COMPLETION_STATIC);
 
   tk_agent_snapshot error = {0};
   add_job(&error.claude, job(TK_AGENT_ERROR, "error", "Error", 1));
@@ -146,6 +164,8 @@ static void test_phases(void) {
   tk_completion_queue_apply(&error_queue, &error, 100);
   check("error remains static after ten seconds",
         tk_completion_phase_at(&error_queue, 10100) == TK_COMPLETION_STATIC);
+  check("error stays static when time moves backward",
+        tk_completion_phase_at(&error_queue, 200) == TK_COMPLETION_STATIC);
 
   tk_agent_snapshot done = {0};
   add_job(&done.claude, job(TK_AGENT_DONE, "done", "Done", 1));
@@ -153,6 +173,38 @@ static void test_phases(void) {
   tk_completion_queue_apply(&done_queue, &done, 100);
   check("done has bounded visibility", tk_completion_phase_at(&done_queue, 10100) ==
         TK_COMPLETION_HIDDEN);
+  check("done stays hidden when time moves backward",
+        tk_completion_phase_at(&done_queue, 200) == TK_COMPLETION_HIDDEN);
+}
+
+static void test_seen_rollover_keeps_dismissed_current_snapshot_event(void) {
+  tk_agent_snapshot target = {0};
+  add_job(&target.claude, job(TK_AGENT_WAITING, "dismissed", "Dismissed", 1));
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &target, 100);
+  tk_completion_queue_dismiss(&queue);
+
+  for (int i = 0; i < TK_COMPLETION_SEEN_CAP; i++) {
+    tk_agent_snapshot snapshot = target;
+    char event_id[TK_AGENT_ID_CAP];
+    snprintf(event_id, sizeof event_id, "new-%d", i);
+    add_job(&snapshot.codex, job(TK_AGENT_DONE, event_id, "New", 1));
+    tk_completion_queue_apply(&queue, &snapshot, (uint64_t)(101 + i));
+    tk_completion_queue_dismiss(&queue);
+  }
+  tk_completion_queue_apply(&queue, &target, 200);
+  check("seen rollover never re-admits dismissed current-snapshot event",
+        current(&queue) == NULL);
+}
+
+static void test_hostile_job_count_is_clamped(void) {
+  tk_agent_snapshot snapshot = {0};
+  add_job(&snapshot.claude, job(TK_AGENT_WAITING, "first", "First", 1));
+  snapshot.claude.job_count = UINT8_MAX;
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &snapshot, 100);
+  check("hostile job count only reads declared job storage", current(&queue) &&
+        queue.count == 1 && strcmp(current(&queue)->event_id, "first") == 0);
 }
 
 static void test_capacity_protects_current(void) {
@@ -186,6 +238,8 @@ int main(void) {
   test_independent_waiting_and_counts();
   test_reconciliation_and_transitions();
   test_phases();
+  test_seen_rollover_keeps_dismissed_current_snapshot_event();
+  test_hostile_job_count_is_clamped();
   test_capacity_protects_current();
 
   if (failures == 0) {
