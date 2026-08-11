@@ -211,6 +211,19 @@ static void test_phases(void) {
         tk_completion_phase_at(&done_queue, 200) == TK_COMPLETION_HIDDEN);
 }
 
+static void test_timed_out_done_advances_to_queued_attention(void) {
+  tk_agent_snapshot snapshot = {0};
+  add_job(&snapshot.claude, job(TK_AGENT_DONE, "done", "Done", 1));
+  add_job(&snapshot.codex, job(TK_AGENT_DONE, "next", "Next", 2));
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &snapshot, 100);
+  check("oldest done starts first", current(&queue) &&
+        strcmp(current(&queue)->event_id, "done") == 0);
+  check("timed-out done advances instead of hiding queued event",
+        tk_completion_phase_at(&queue, 10100) == TK_COMPLETION_PULSE &&
+        current(&queue) && strcmp(current(&queue)->event_id, "next") == 0);
+}
+
 static void test_seen_rollover_keeps_dismissed_current_snapshot_event(void) {
   tk_agent_snapshot target = {0};
   add_job(&target.claude, job(TK_AGENT_WAITING, "dismissed", "Dismissed", 1));
@@ -272,6 +285,7 @@ int main(void) {
   test_reconciliation_and_transitions();
   test_state_transition_restarts_entry_phase();
   test_phases();
+  test_timed_out_done_advances_to_queued_attention();
   test_seen_rollover_keeps_dismissed_current_snapshot_event();
   test_hostile_job_count_is_clamped();
   test_full_snapshot_fits_queue_capacity();

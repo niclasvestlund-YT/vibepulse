@@ -35,6 +35,10 @@ conv Bold      50 "0x30-0x39,0x25,0x2C,0x2013"           plex_num_50
 # VibePulse Burn Rate outcomes: uppercase action words plus compact durations.
 conv Bold      48 "0x20,0x30-0x39,0x41-0x5A"             plex_headline_48
 conv Bold      35 "0x20,0x25,0x2B,0x2E,0x30-0x39,0x41-0x5A,0x2013" plex_stat_35
+# Full-screen attention overlay: exact reviewed native sizes, never transforms.
+conv SemiBold  18 "0x20,0x41-0x5A"                       plex_attention_18
+conv SemiBold  25 "0x20-0x7E"                            plex_attention_25
+conv Bold      52 "0x20,0x41-0x5A"                       plex_attention_52
 # 38 bär även gemener sedan P23: Sverige-vyns "4 aug" är ett statvärde.
 conv Bold      38 "0x30-0x39,0x2C,0x20,0xA0,0x2013,0x61-0x7A" plex_num_38
 # Textfonter. 32: heroenheter "kr", "%", "GWh" (P23) och "Mtok" (Tokenmätaren).

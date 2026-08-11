@@ -7,6 +7,11 @@ app_header = (root / "components/app_tokens/app_tokens.h").read_text()
 sim = (root / "sim/main.c").read_text()
 monitor = (root / "components/app_tokens/agent_monitor.c").read_text()
 font_script = (root / "platform/fonts/fetch-and-convert.sh").read_text()
+attention_fonts = (
+    (root / "platform/fonts/plex_attention_18.c", "plex_attention_18"),
+    (root / "platform/fonts/plex_attention_25.c", "plex_attention_25"),
+    (root / "platform/fonts/plex_attention_52.c", "plex_attention_52"),
+)
 
 assert "#define TK_USAGE_SCREEN_VIEWS 5" in header
 for enum_literal in (
@@ -145,10 +150,61 @@ assert "conv Bold      48" in font_script
 assert "plex_headline_48" in font_script
 assert "conv SemiBold  16" in font_script and "plex_ui_16" in font_script
 
+for recipe, symbol in (
+    ('conv SemiBold  18 "0x20,0x41-0x5A"', "plex_attention_18"),
+    ('conv SemiBold  25 "0x20-0x7E"', "plex_attention_25"),
+    ('conv Bold      52 "0x20,0x41-0x5A"', "plex_attention_52"),
+):
+    line = next((line for line in font_script.splitlines()
+                 if line.startswith(recipe)), "")
+    assert line.endswith(symbol), f"missing deterministic attention font recipe: {recipe}"
+
+for path, symbol in attention_fonts:
+    assert path.is_file(), f"missing generated attention font: {path.name}"
+    assert f"const lv_font_t {symbol}" in path.read_text(), (
+        f"missing generated attention font symbol: {symbol}"
+    )
+
 assert "provider_lane" not in monitor
 assert "render_rail" not in monitor
 assert "mon.rail" not in monitor
-assert '"DONE"' in monitor
+for copy in (
+    "NEEDS YOU", "ERROR", "DONE", "CLAUDE IS WAITING", "CODEX IS WAITING",
+    "CHATS WAITING", "NEEDS ATTENTION", "FINISHED", "TAP TO DISMISS",
+):
+    assert copy in monitor, f"missing attention copy: {copy}"
+
+for primitive in (
+    "tk_img_claude", "tk_img_codex_cloud", "tk_img_codex_chevron",
+    "tk_img_codex_underscore", "plex_attention_18", "plex_attention_25",
+    "plex_attention_52", "same_state_count", "LV_EVENT_CLICKED",
+    "LV_EVENT_LONG_PRESSED", "torget_launcher_open",
+    "tk_completion_queue_dismiss",
+):
+    assert primitive in monitor, f"missing attention renderer primitive: {primitive}"
+
+for forbidden in (
+    "lv_anim", "lv_timer", "lv_canvas", "lv_obj_set_style_transform",
+    "lv_obj_set_style_opa",
+):
+    assert forbidden not in monitor, f"static attention gate forbids {forbidden}"
+
+for interaction in (
+    "mon.suppress_click = true;", "if (mon.suppress_click)",
+    "mon.suppress_click = false;", "lv_obj_add_flag(mon.completion.root",
+    "if (project[0])", "lv_obj_add_flag(mon.completion.project",
+):
+    assert interaction in monitor, f"missing safe attention behavior: {interaction}"
+
+assert "lv_obj_set_pos(view->outline, 8, 8);" in monitor
+assert "lv_obj_set_size(view->outline, 464, 464);" in monitor
+assert "lv_obj_set_style_border_width(view->outline, 6, 0);" in monitor
+assert "lv_obj_set_style_radius(view->outline, 36, 0);" in monitor
+assert "lv_obj_set_pos(view->icon_ring, 172, 77);" in monitor
+assert "lv_obj_set_size(view->icon_ring, 136, 136);" in monitor
+assert "184, 89, 112" in monitor
+for anchor in (31, 246, 321, 365, 430):
+    assert f", {anchor});" in monitor, f"missing attention y anchor {anchor}"
 
 assert "int usage_screen_current_view(void);" in header
 assert "usage_screen_current_view()" in sim

@@ -9,8 +9,9 @@
 #include "torget.h"
 #include "vibepulse_layout.generated.h"
 
-extern const lv_font_t plex_status_64;
-extern const lv_font_t plex_text_21;
+extern const lv_font_t plex_attention_18;
+extern const lv_font_t plex_attention_25;
+extern const lv_font_t plex_attention_52;
 extern const lv_font_t plex_ui_14;
 
 #define COL_BLACK   lv_color_hex(VP_COLOR_BACKGROUND)
@@ -21,12 +22,15 @@ extern const lv_font_t plex_ui_14;
 
 typedef struct {
   lv_obj_t *root;
+  lv_obj_t *outline;
   lv_obj_t *provider;
+  lv_obj_t *icon_ring;
   lv_obj_t *claude_icon;
   lv_obj_t *codex_icon;
-  lv_obj_t *done;
+  lv_obj_t *title;
   lv_obj_t *project;
-  lv_obj_t *other_jobs;
+  lv_obj_t *detail;
+  lv_obj_t *dismiss;
 } completion_view;
 
 static struct {
@@ -60,7 +64,7 @@ static lv_obj_t *create_codex_icon(lv_obj_t *parent,
                                    const lv_image_dsc_t *cloud,
                                    const lv_image_dsc_t *chevron,
                                    const lv_image_dsc_t *underscore,
-                                   int x, int y, int size, bool scale) {
+                                   int x, int y, int size) {
   lv_obj_t *group = bare(parent);
   lv_obj_set_pos(group, x, y);
   lv_obj_set_size(group, size, size);
@@ -70,8 +74,9 @@ static lv_obj_t *create_codex_icon(lv_obj_t *parent,
     lv_obj_t *image = lv_image_create(group);
     lv_image_set_src(image, layers[i]);
     lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
-    if (scale) lv_image_set_scale(image, 213); /* 180 px -> 150 px. */
-    lv_obj_align(image, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_size(image, size, size);
+    lv_image_set_inner_align(image, LV_IMAGE_ALIGN_STRETCH);
+    lv_obj_set_pos(image, 0, 0);
     if (i > 0) {
       lv_obj_set_style_image_recolor(image, COL_WHITE, 0);
       lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
@@ -103,16 +108,16 @@ static void render_completion(uint64_t now_ms) {
   }
 
   int provider = event->provider;
+  lv_color_t accent = provider == TK_AGENT_PROVIDER_CLAUDE
+                          ? COL_CLAUDE : COL_CODEX;
+  const char *provider_name = provider == TK_AGENT_PROVIDER_CLAUDE
+                                  ? "CLAUDE" : "CODEX";
   lv_obj_remove_flag(mon.completion.root, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(mon.completion.root);
-  lv_label_set_text(mon.completion.done, "DONE");
-  lv_obj_invalidate(mon.completion.done);
-  lv_label_set_text(mon.completion.provider,
-                    provider == TK_AGENT_PROVIDER_CLAUDE
-                        ? "CLAUDE CODE" : "CODEX");
-  lv_obj_set_style_text_color(mon.completion.provider,
-                              provider == TK_AGENT_PROVIDER_CLAUDE
-                                  ? COL_CLAUDE : COL_CODEX, 0);
+  lv_label_set_text(mon.completion.provider, provider_name);
+  lv_obj_set_style_text_color(mon.completion.provider, accent, 0);
+  lv_obj_set_style_border_color(mon.completion.outline, accent, 0);
+  lv_obj_set_style_border_color(mon.completion.icon_ring, accent, 0);
   if (provider == TK_AGENT_PROVIDER_CLAUDE) {
     lv_obj_remove_flag(mon.completion.claude_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(mon.completion.codex_icon, LV_OBJ_FLAG_HIDDEN);
@@ -124,19 +129,43 @@ static void render_completion(uint64_t now_ms) {
   char project[TK_AGENT_PROJECT_CAP];
   uppercase_project(event->project, project, sizeof project);
   lv_label_set_text(mon.completion.project, project);
+  lv_obj_set_style_text_color(mon.completion.project, accent, 0);
   if (project[0]) lv_obj_remove_flag(mon.completion.project,
                                      LV_OBJ_FLAG_HIDDEN);
   else lv_obj_add_flag(mon.completion.project, LV_OBJ_FLAG_HIDDEN);
 
-  char jobs[24];
-  if (event->other_active_count > 0) {
-    snprintf(jobs, sizeof jobs, "%u WORKING",
-             (unsigned)event->other_active_count);
-    lv_label_set_text(mon.completion.other_jobs, jobs);
-    lv_obj_remove_flag(mon.completion.other_jobs, LV_OBJ_FLAG_HIDDEN);
+  char detail[32];
+  const char *title = "DONE";
+  if (event->state == TK_AGENT_WAITING) {
+    title = "NEEDS YOU";
+    if (event->same_state_count > 1) {
+      snprintf(detail, sizeof detail, "%u CHATS WAITING",
+               (unsigned)event->same_state_count);
+    } else {
+      snprintf(detail, sizeof detail, "%s",
+               provider == TK_AGENT_PROVIDER_CLAUDE
+                   ? "CLAUDE IS WAITING" : "CODEX IS WAITING");
+    }
+  } else if (event->state == TK_AGENT_ERROR) {
+    title = "ERROR";
+    if (event->same_state_count > 1) {
+      snprintf(detail, sizeof detail, "%u CHATS NEED ATTENTION",
+               (unsigned)event->same_state_count);
+    } else {
+      snprintf(detail, sizeof detail, "%s",
+               provider == TK_AGENT_PROVIDER_CLAUDE
+                   ? "CLAUDE NEEDS ATTENTION" : "CODEX NEEDS ATTENTION");
+    }
+  } else if (event->same_state_count > 1) {
+    snprintf(detail, sizeof detail, "%u CHATS FINISHED",
+             (unsigned)event->same_state_count);
   } else {
-    lv_obj_add_flag(mon.completion.other_jobs, LV_OBJ_FLAG_HIDDEN);
+    snprintf(detail, sizeof detail, "%s",
+             provider == TK_AGENT_PROVIDER_CLAUDE
+                 ? "CLAUDE FINISHED" : "CODEX FINISHED");
   }
+  lv_label_set_text(mon.completion.title, title);
+  lv_label_set_text(mon.completion.detail, detail);
 }
 
 static void completion_event(lv_event_t *event) {
@@ -167,39 +196,66 @@ static void create_completion(lv_obj_t *app_root) {
   lv_obj_add_event_cb(view->root, completion_event,
                       LV_EVENT_LONG_PRESSED, NULL);
 
-  view->provider = label(view->root, &plex_ui_14, COL_WHITE);
-  lv_obj_set_pos(view->provider, 0, 28);
-  lv_obj_set_size(view->provider, VP_SCREEN_W, 24);
+  view->outline = bare(view->root);
+  lv_obj_set_pos(view->outline, 8, 8);
+  lv_obj_set_size(view->outline, 464, 464);
+  lv_obj_set_style_bg_opa(view->outline, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_opa(view->outline, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(view->outline, 6, 0);
+  lv_obj_set_style_radius(view->outline, 36, 0);
+
+  view->provider = label(view->root, &plex_attention_18, COL_WHITE);
+  lv_obj_set_pos(view->provider, 20, 31);
+  lv_obj_set_size(view->provider, 440, 25);
   lv_obj_set_style_text_align(view->provider, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_letter_space(view->provider, 3, 0);
 
-  view->claude_icon = lv_image_create(view->root);
+  view->icon_ring = bare(view->root);
+  lv_obj_set_pos(view->icon_ring, 172, 77);
+  lv_obj_set_size(view->icon_ring, 136, 136);
+  lv_obj_set_style_bg_opa(view->icon_ring, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_opa(view->icon_ring, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(view->icon_ring, 3, 0);
+  lv_obj_set_style_radius(view->icon_ring, LV_RADIUS_CIRCLE, 0);
+
+  lv_obj_t *claude_group = bare(view->root);
+  lv_obj_set_pos(claude_group, 184, 89);
+  lv_obj_set_size(claude_group, 112, 112);
+  view->claude_icon = lv_image_create(claude_group);
   lv_image_set_src(view->claude_icon, &tk_img_claude);
-  lv_obj_align(view->claude_icon, LV_ALIGN_TOP_MID, 0, 57);
+  lv_obj_set_size(view->claude_icon, 112, 112);
+  lv_image_set_inner_align(view->claude_icon, LV_IMAGE_ALIGN_STRETCH);
+  lv_obj_set_pos(view->claude_icon, 0, 0);
   lv_obj_set_style_image_recolor(view->claude_icon, COL_CLAUDE, 0);
   lv_obj_set_style_image_recolor_opa(view->claude_icon, LV_OPA_COVER, 0);
 
   view->codex_icon = create_codex_icon(
       view->root, &tk_img_codex_cloud, &tk_img_codex_chevron,
-      &tk_img_codex_underscore, 150, 57, 180, false);
+      &tk_img_codex_underscore, 184, 89, 112);
 
-  view->done = label(view->root, &plex_status_64, COL_WHITE);
-  lv_obj_set_pos(view->done, 0, 252);
-  lv_obj_set_size(view->done, VP_SCREEN_W, 76);
-  lv_obj_set_style_text_align(view->done, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_text(view->done, "DONE");
+  view->title = label(view->root, &plex_attention_52, COL_WHITE);
+  lv_obj_set_pos(view->title, 14, 246);
+  lv_obj_set_size(view->title, 452, 68);
+  lv_obj_set_style_text_align(view->title, LV_TEXT_ALIGN_CENTER, 0);
 
-  view->project = label(view->root, &plex_text_21, COL_WHITE);
-  lv_obj_set_pos(view->project, 20, 340);
+  view->project = label(view->root, &plex_attention_25, COL_WHITE);
+  lv_obj_set_pos(view->project, 20, 321);
   lv_obj_set_size(view->project, 440, 34);
   lv_obj_set_style_text_align(view->project, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_letter_space(view->project, 2, 0);
 
-  view->other_jobs = label(view->root, &plex_ui_14, COL_MUTED);
-  lv_obj_set_pos(view->other_jobs, 20, 414);
-  lv_obj_set_size(view->other_jobs, 440, 24);
-  lv_obj_set_style_text_align(view->other_jobs, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_letter_space(view->other_jobs, 2, 0);
+  view->detail = label(view->root, &plex_ui_14, COL_MUTED);
+  lv_obj_set_pos(view->detail, 20, 365);
+  lv_obj_set_size(view->detail, 440, 25);
+  lv_obj_set_style_text_align(view->detail, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(view->detail, 2, 0);
+
+  view->dismiss = label(view->root, &plex_ui_14, COL_MUTED);
+  lv_obj_set_pos(view->dismiss, 20, 430);
+  lv_obj_set_size(view->dismiss, 440, 26);
+  lv_obj_set_style_text_align(view->dismiss, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(view->dismiss, 2, 0);
+  lv_label_set_text(view->dismiss, "TAP TO DISMISS");
 
   lv_obj_add_flag(view->root, LV_OBJ_FLAG_HIDDEN);
 }

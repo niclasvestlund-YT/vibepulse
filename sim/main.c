@@ -308,6 +308,43 @@ static tk_agent_snapshot static_working_snapshot(tk_agent_provider provider,
   return snapshot;
 }
 
+static tk_agent_snapshot static_attention_snapshot(
+    tk_agent_provider provider, tk_agent_state state, const char *event_id,
+    const char *project) {
+  tk_agent_snapshot snapshot = {0};
+  snapshot.seq = provider == TK_AGENT_PROVIDER_CLAUDE ? 903 : 904;
+  tk_agent_provider_status *target =
+      provider == TK_AGENT_PROVIDER_CLAUDE ? &snapshot.claude
+                                           : &snapshot.codex;
+  target->active_count = state == TK_AGENT_DONE ? 0 : 1;
+  target->job_count = 1;
+  tk_agent_status *job = &target->jobs[0];
+  snprintf(job->task_id, sizeof job->task_id, "attention-%s", event_id);
+  snprintf(job->event_id, sizeof job->event_id, "%s", event_id);
+  snprintf(job->project, sizeof job->project, "%s", project);
+  job->state = state;
+  job->updated_ms = 1;
+  return snapshot;
+}
+
+static tk_agent_snapshot two_waiting_snapshot(void) {
+  tk_agent_snapshot snapshot = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CLAUDE, TK_AGENT_WAITING,
+      "capture-claude-waiting-two", "Buddy");
+  snapshot.seq = 905;
+  snapshot.codex.active_count = 1;
+  snapshot.codex.job_count = 1;
+  tk_agent_status *codex = &snapshot.codex.jobs[0];
+  snprintf(codex->task_id, sizeof codex->task_id,
+           "attention-capture-codex-waiting-two");
+  snprintf(codex->event_id, sizeof codex->event_id,
+           "capture-codex-waiting-two");
+  snprintf(codex->project, sizeof codex->project, "Solelkollen");
+  codex->state = TK_AGENT_WAITING;
+  codex->updated_ms = 2;
+  return snapshot;
+}
+
 static void next_fixture(lv_timer_t *t) {
   (void)t;
   apply_fixture(fixture_idx + 1);
@@ -504,6 +541,54 @@ static int run_vibepulse_static_qa(void) {
   dump_frame("vibepulse-claude-missing");
   tokens_show_view(VIEW_CODEX_WEEKLY);
   dump_frame("vibepulse-codex-missing");
+
+  tk_agent_snapshot attention = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CLAUDE, TK_AGENT_WAITING,
+      "capture-claude-needs-you", "Torget");
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-claude-needs-you");
+  tk_agent_monitor_dismiss_current();
+
+  attention = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CODEX, TK_AGENT_WAITING,
+      "capture-codex-needs-you", "Torget");
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-codex-needs-you");
+  tk_agent_monitor_dismiss_current();
+
+  attention = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CLAUDE, TK_AGENT_ERROR,
+      "capture-claude-error", "Torget");
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-claude-error");
+  tk_agent_monitor_dismiss_current();
+
+  attention = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CODEX, TK_AGENT_ERROR,
+      "capture-codex-error", "Torget");
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-codex-error");
+  tk_agent_monitor_dismiss_current();
+
+  attention = two_waiting_snapshot();
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-two-waiting-queued");
+  tk_agent_monitor_dismiss_current();
+  tk_agent_monitor_dismiss_current();
+
+  attention = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CLAUDE, TK_AGENT_DONE,
+      "capture-claude-done", "Torget");
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-claude-done-static");
+  tk_agent_monitor_dismiss_current();
+
+  attention = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CODEX, TK_AGENT_DONE,
+      "capture-codex-done", "Torget");
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-codex-done-static");
+  tk_agent_monitor_dismiss_current();
   return capture_failures == 0 ? 0 : 1;
 }
 

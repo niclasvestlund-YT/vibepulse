@@ -109,6 +109,13 @@ expected_names = {
     "torget-vibepulse-claude-today-contradictory.bmp",
     "torget-vibepulse-claude-zero-total.bmp",
     "torget-vibepulse-codex-full-total.bmp",
+    "torget-vibepulse-claude-needs-you.bmp",
+    "torget-vibepulse-codex-needs-you.bmp",
+    "torget-vibepulse-claude-error.bmp",
+    "torget-vibepulse-codex-error.bmp",
+    "torget-vibepulse-two-waiting-queued.bmp",
+    "torget-vibepulse-claude-done-static.bmp",
+    "torget-vibepulse-codex-done-static.bmp",
 }
 actual_names = {path.name for path in capture_dir.iterdir()}
 missing = sorted(expected_names - actual_names)

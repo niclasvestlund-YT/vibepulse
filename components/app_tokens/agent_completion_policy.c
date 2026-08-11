@@ -260,7 +260,8 @@ tk_completion_phase tk_completion_phase_at(tk_completion_queue *queue,
       elapsed < TK_COMPLETION_VISIBLE_MS) {
     return TK_COMPLETION_STATIC;
   }
-  return TK_COMPLETION_HIDDEN;
+  tk_completion_queue_dismiss(queue);
+  return queue->count ? TK_COMPLETION_PULSE : TK_COMPLETION_HIDDEN;
 }
 
 void tk_completion_queue_dismiss(tk_completion_queue *queue) {

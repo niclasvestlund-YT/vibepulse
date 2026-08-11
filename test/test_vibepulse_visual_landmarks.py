@@ -52,6 +52,13 @@ EXPECTED = {
     "torget-vibepulse-claude-today-contradictory.bmp",
     "torget-vibepulse-claude-zero-total.bmp",
     "torget-vibepulse-codex-full-total.bmp",
+    "torget-vibepulse-claude-needs-you.bmp",
+    "torget-vibepulse-codex-needs-you.bmp",
+    "torget-vibepulse-claude-error.bmp",
+    "torget-vibepulse-codex-error.bmp",
+    "torget-vibepulse-two-waiting-queued.bmp",
+    "torget-vibepulse-claude-done-static.bmp",
+    "torget-vibepulse-codex-done-static.bmp",
 }
 
 
@@ -88,7 +95,9 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         cls.temp.cleanup()
 
     def image(self, name):
-        return Image.open(self.capture_dir / name).convert("RGB")
+        path = self.capture_dir / name
+        self.assertTrue(path.is_file(), f"missing expected capture: {name}")
+        return Image.open(path).convert("RGB")
 
     def test_capture_matrix_is_complete_and_true_size(self):
         actual = {path.name for path in self.capture_dir.iterdir()}
@@ -254,6 +263,114 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         self.assertEqual(zero_row[3:], [(48, 50, 56)] * 433)
         self.assertEqual(full_row[-3:], [(255, 255, 255)] * 3)
         self.assertIn((69, 75, 138), full_row[:-3])
+
+    def test_attention_outline_is_six_pixels_at_exact_inset_and_color(self):
+        cases = (
+            ("torget-vibepulse-claude-needs-you.bmp", (217, 119, 87)),
+            ("torget-vibepulse-codex-needs-you.bmp", (111, 120, 255)),
+            ("torget-vibepulse-claude-error.bmp", (217, 119, 87)),
+            ("torget-vibepulse-codex-error.bmp", (111, 120, 255)),
+        )
+        for name, accent in cases:
+            with self.subTest(name=name):
+                image = self.image(name)
+                self.assertEqual(
+                    [image.getpixel((240, y)) for y in range(8, 14)],
+                    [accent] * 6,
+                )
+                self.assertEqual(image.getpixel((240, 7)), (0, 0, 0))
+                self.assertEqual(image.getpixel((240, 14)), (0, 0, 0))
+                self.assertEqual(
+                    [image.getpixel((x, 240)) for x in range(8, 14)],
+                    [accent] * 6,
+                )
+                self.assertEqual(
+                    [image.getpixel((x, 240)) for x in range(466, 472)],
+                    [accent] * 6,
+                )
+                self.assertEqual(
+                    [image.getpixel((240, y)) for y in range(466, 472)],
+                    [accent] * 6,
+                )
+
+    def test_attention_icons_use_real_provider_assets_inside_exact_box(self):
+        claude = self.image("torget-vibepulse-claude-needs-you.bmp")
+        codex = self.image("torget-vibepulse-codex-needs-you.bmp")
+        box = (184, 89, 296, 201)
+        claude_pixels = list(claude.crop(box).get_flattened_data())
+        codex_pixels = list(codex.crop(box).get_flattened_data())
+        self.assertIn((217, 119, 87), claude_pixels)
+        self.assertIn((255, 255, 255), codex_pixels)
+        self.assertGreater(
+            sum(1 for red, green, blue in codex_pixels
+                if blue > red + 30 and blue > green + 20),
+            1000,
+            "Codex cloud must retain a substantial source-colored area",
+        )
+
+    def test_attention_ring_is_static_at_reviewed_midpoint(self):
+        cases = (
+            ("torget-vibepulse-claude-needs-you.bmp", (217, 119, 87)),
+            ("torget-vibepulse-codex-needs-you.bmp", (111, 120, 255)),
+        )
+        for name, accent in cases:
+            with self.subTest(name=name):
+                image = self.image(name)
+                self.assertEqual(image.getpixel((240, 77)), accent)
+                self.assertEqual(image.getpixel((240, 78)), accent)
+
+    def test_attention_copy_occupies_reviewed_rows(self):
+        cases = (
+            "torget-vibepulse-claude-needs-you.bmp",
+            "torget-vibepulse-codex-needs-you.bmp",
+            "torget-vibepulse-claude-error.bmp",
+            "torget-vibepulse-codex-error.bmp",
+            "torget-vibepulse-two-waiting-queued.bmp",
+            "torget-vibepulse-claude-done-static.bmp",
+            "torget-vibepulse-codex-done-static.bmp",
+        )
+        regions = ((31, 56), (246, 314), (321, 355),
+                   (365, 390), (430, 456))
+        for name in cases:
+            with self.subTest(name=name):
+                image = self.image(name)
+                for top, bottom in regions:
+                    pixels = [
+                        image.getpixel((x, y))
+                        for y in range(top, bottom)
+                        for x in range(30, 450)
+                    ]
+                    self.assertTrue(any(pixel != (0, 0, 0)
+                                        for pixel in pixels))
+
+        waiting = self.image("torget-vibepulse-claude-needs-you.bmp")
+        done = self.image("torget-vibepulse-claude-done-static.bmp")
+        waiting_white = [
+            (x, y) for y in range(246, 314) for x in range(14, 466)
+            if waiting.getpixel((x, y)) == (255, 255, 255)
+        ]
+        done_white = [
+            (x, y) for y in range(246, 314) for x in range(14, 466)
+            if done.getpixel((x, y)) == (255, 255, 255)
+        ]
+        self.assertGreater(max(x for x, _ in waiting_white) -
+                           min(x for x, _ in waiting_white), 260)
+        self.assertLess(max(x for x, _ in done_white) -
+                        min(x for x, _ in done_white), 180)
+
+    def test_attention_count_and_error_states_have_distinct_rasters(self):
+        one = self.image("torget-vibepulse-claude-needs-you.bmp")
+        two = self.image("torget-vibepulse-two-waiting-queued.bmp")
+        claude_error = self.image("torget-vibepulse-claude-error.bmp")
+        codex_error = self.image("torget-vibepulse-codex-error.bmp")
+        detail = (14, 365, 466, 390)
+        title = (14, 246, 466, 314)
+        self.assertNotEqual(one.crop(detail).tobytes(),
+                            two.crop(detail).tobytes())
+        self.assertNotEqual(one.crop(title).tobytes(),
+                            claude_error.crop(title).tobytes())
+        self.assertNotEqual(claude_error.crop((14, 31, 466, 390)).tobytes(),
+                            codex_error.crop((14, 31, 466, 390)).tobytes())
 
 
 if __name__ == "__main__":
