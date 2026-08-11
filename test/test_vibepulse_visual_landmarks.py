@@ -45,6 +45,8 @@ EXPECTED = {
     "torget-vibepulse-claude-idle.bmp",
     "torget-vibepulse-codex-single-working.bmp",
     "torget-vibepulse-codex-multi-chat.bmp",
+    "torget-vibepulse-codex-idle.bmp",
+    "torget-vibepulse-codex-stale.bmp",
     "torget-vibepulse-claude-today-missing.bmp",
     "torget-vibepulse-claude-today-contradictory.bmp",
     "torget-vibepulse-claude-zero-total.bmp",
@@ -133,18 +135,43 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             ("torget-vibepulse-codex-single-working.bmp", (111, 120, 255)),
             ("torget-vibepulse-codex-multi-chat.bmp", (111, 120, 255)),
         )
+        halo_only_point = (37, 14)
         for name, accent in cases:
             with self.subTest(name=name):
                 image = self.image(name)
-                halo = [
-                    image.getpixel((x, y))
-                    for y in range(14, 54)
-                    for x in range(18, 58)
-                ]
-                self.assertIn(accent, halo)
+                self.assertEqual(image.getpixel(halo_only_point), accent)
 
-        idle = self.image("torget-vibepulse-claude-idle.bmp")
-        self.assertNotEqual(idle.getpixel((37, 14)), (217, 119, 87))
+        inactive = (
+            "torget-vibepulse-claude-idle.bmp",
+            "torget-vibepulse-claude-stale.bmp",
+            "torget-vibepulse-claude-missing.bmp",
+            "torget-vibepulse-codex-idle.bmp",
+            "torget-vibepulse-codex-stale.bmp",
+            "torget-vibepulse-codex-missing.bmp",
+        )
+        for name in inactive:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    self.image(name).getpixel(halo_only_point),
+                    (0, 0, 0),
+                )
+
+    def test_missing_and_stale_headers_have_empty_context_region(self):
+        names = (
+            "torget-vibepulse-claude-stale.bmp",
+            "torget-vibepulse-claude-missing.bmp",
+            "torget-vibepulse-codex-stale.bmp",
+            "torget-vibepulse-codex-missing.bmp",
+        )
+        for name in names:
+            with self.subTest(name=name):
+                image = self.image(name)
+                context_region = {
+                    image.getpixel((x, y))
+                    for y in range(18, 56)
+                    for x in range(200, 458)
+                }
+                self.assertEqual(context_region, {(0, 0, 0)})
 
     def test_burn_rate_is_unboxed_with_one_shared_separator(self):
         image = self.image("torget-vibepulse-burn-speed-up.bmp")

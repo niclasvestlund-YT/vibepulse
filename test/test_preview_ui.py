@@ -35,6 +35,8 @@ EXPECTED_BMPS = {
     "torget-vibepulse-claude-idle.bmp",
     "torget-vibepulse-codex-single-working.bmp",
     "torget-vibepulse-codex-multi-chat.bmp",
+    "torget-vibepulse-codex-idle.bmp",
+    "torget-vibepulse-codex-stale.bmp",
     "torget-vibepulse-claude-today-missing.bmp",
     "torget-vibepulse-claude-today-contradictory.bmp",
     "torget-vibepulse-claude-zero-total.bmp",

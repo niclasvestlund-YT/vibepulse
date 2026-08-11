@@ -398,6 +398,8 @@ static int run_vibepulse_static_qa(void) {
 
   apply_agent_file("agent-status-idle.json");
   dump_frame("vibepulse-claude-idle");
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("vibepulse-codex-idle");
 
   single = static_working_snapshot(TK_AGENT_PROVIDER_CODEX,
                                    "GPT-5.6 SOL", "ULTRA");
@@ -407,6 +409,9 @@ static int run_vibepulse_static_qa(void) {
 
   apply_agent_file("agent-status-multi-working.json");
   dump_frame("vibepulse-codex-multi-chat");
+  usage_screen_set_stale(true);
+  dump_frame("vibepulse-codex-stale");
+  usage_screen_set_stale(false);
 
   tk_tokens bar_case = {0};
   bar_case.claude_model_week = forecast_limit(73, 3120);

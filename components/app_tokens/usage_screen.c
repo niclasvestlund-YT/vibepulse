@@ -394,17 +394,10 @@ static void refresh_header(quota_page *page, int64_t now_us) {
   usage_live_header_view view = {0};
   usage_live_build_header(agent_provider_for(page->provider),
                           agent_packet_age_ms(now_us), ui.stale,
-                          ui.has_agent_snapshot, &view);
+                          ui.has_agent_snapshot && page->has_data, &view);
+  lv_label_set_text(page->context, view.context);
 
-  if (!page->has_data) {
-    lv_label_set_text(page->context, "NO DATA");
-  } else if (ui.stale) {
-    lv_label_set_text(page->context, "STALE");
-  } else {
-    lv_label_set_text(page->context, view.context);
-  }
-
-  if (page->has_data && !ui.stale && view.halo_active) {
+  if (view.halo_active) {
     lv_obj_remove_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
   } else {
     lv_obj_add_flag(page->halo, LV_OBJ_FLAG_HIDDEN);

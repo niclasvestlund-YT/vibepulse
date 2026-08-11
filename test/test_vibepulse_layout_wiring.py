@@ -89,6 +89,17 @@ assert "(uint64_t)now_us - (uint64_t)ui.agent_applied_at_us" in source
 assert "lv_obj_set_size(page->track, VP_CONTENT_W, VP_BAR_H);" in quota
 assert "lv_obj_set_size(page->marker, 3, VP_BAR_H + 8);" in quota
 
+refresh_header = source[source.index("static void refresh_header"):]
+refresh_header = refresh_header[
+    :refresh_header.index("static void apply_today_bar")
+]
+assert "ui.has_agent_snapshot && page->has_data" in refresh_header
+assert "lv_label_set_text(page->context, view.context);" in refresh_header
+assert 'lv_label_set_text(page->context, "NO DATA")' not in refresh_header
+assert 'lv_label_set_text(page->context, "STALE")' not in refresh_header
+assert "if (view.halo_active)" in refresh_header
+assert "page->has_data && !ui.stale && view.halo_active" not in refresh_header
+
 burn = source[source.index("static void create_burn_rate_page"):]
 burn = burn[:burn.index("static void create_volume_page")]
 for copy in ("BURN RATE", "WEEKLY", "FORECAST"):
