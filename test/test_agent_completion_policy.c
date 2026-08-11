@@ -144,6 +144,40 @@ static void test_reconciliation_and_transitions(void) {
   check("gone current is invalidated", current(&queue) == NULL);
 }
 
+static void test_state_transition_restarts_entry_phase(void) {
+  tk_agent_snapshot waiting = {0};
+  add_job(&waiting.claude,
+          job(TK_AGENT_WAITING, "same-id", "Waiting", 1));
+  tk_completion_queue error_queue = {0};
+  tk_completion_queue_apply(&error_queue, &waiting, 100);
+  check("old waiting event becomes static",
+        tk_completion_phase_at(&error_queue, 10100) == TK_COMPLETION_STATIC);
+
+  tk_agent_snapshot error = {0};
+  add_job(&error.claude, job(TK_AGENT_ERROR, "same-id", "Error", 1));
+  tk_completion_queue_apply(&error_queue, &error, 10101);
+  check("waiting-to-error transition starts a fresh pulse",
+        tk_completion_phase_at(&error_queue, 10101) == TK_COMPLETION_PULSE);
+  check("error transition pulse lasts through 4799ms",
+        tk_completion_phase_at(&error_queue, 14900) == TK_COMPLETION_PULSE);
+  check("error transition becomes static at 4800ms",
+        tk_completion_phase_at(&error_queue, 14901) == TK_COMPLETION_STATIC);
+
+  tk_completion_queue done_queue = {0};
+  tk_completion_queue_apply(&done_queue, &waiting, 100);
+  check("second old waiting event becomes static",
+        tk_completion_phase_at(&done_queue, 10100) == TK_COMPLETION_STATIC);
+  tk_agent_snapshot done = {0};
+  add_job(&done.claude, job(TK_AGENT_DONE, "same-id", "Done", 1));
+  tk_completion_queue_apply(&done_queue, &done, 10101);
+  check("waiting-to-done transition starts a fresh pulse",
+        tk_completion_phase_at(&done_queue, 10101) == TK_COMPLETION_PULSE);
+  check("transitioned done becomes static after fresh pulse",
+        tk_completion_phase_at(&done_queue, 14901) == TK_COMPLETION_STATIC);
+  check("transitioned done hides from its new start",
+        tk_completion_phase_at(&done_queue, 20101) == TK_COMPLETION_HIDDEN);
+}
+
 static void test_phases(void) {
   tk_agent_snapshot waiting = {0};
   add_job(&waiting.claude, job(TK_AGENT_WAITING, "wait", "Wait", 1));
@@ -207,28 +241,27 @@ static void test_hostile_job_count_is_clamped(void) {
         queue.count == 1 && strcmp(current(&queue)->event_id, "first") == 0);
 }
 
-static void test_capacity_protects_current(void) {
-  tk_completion_queue queue = {0};
-  queue.initialized = true;
-  queue.count = TK_COMPLETION_QUEUE_CAP;
-  queue.current_started_ms = 100;
-  queue.events[0].provider = TK_AGENT_PROVIDER_CLAUDE;
-  queue.events[0].state = TK_AGENT_WAITING;
-  snprintf(queue.events[0].event_id, sizeof queue.events[0].event_id,
-           "visible");
-  for (uint8_t i = 1; i < queue.count; i++) {
-    queue.events[i].provider = TK_AGENT_PROVIDER_CLAUDE;
-    queue.events[i].state = TK_AGENT_DONE;
-    snprintf(queue.events[i].event_id, sizeof queue.events[i].event_id,
-             "queued-%u", (unsigned)i);
-  }
+static void test_full_snapshot_fits_queue_capacity(void) {
+  check("queue capacity fits every job in one snapshot",
+        TK_COMPLETION_QUEUE_CAP >=
+            TK_AGENT_PROVIDER_COUNT * TK_AGENT_JOBS_MAX);
+
   tk_agent_snapshot snapshot = {0};
-  add_job(&snapshot.claude, job(TK_AGENT_WAITING, "visible", "Visible", 1));
-  add_job(&snapshot.codex, job(TK_AGENT_DONE, "new", "New", 1));
-  tk_completion_queue_apply(&queue, &snapshot, 101);
-  check("capacity stays bounded", queue.count <= TK_COMPLETION_QUEUE_CAP);
-  check("overflow does not remove visible event", current(&queue) &&
-        strcmp(current(&queue)->event_id, "visible") == 0);
+  for (int i = 0; i < TK_AGENT_JOBS_MAX; i++) {
+    char event_id[TK_AGENT_ID_CAP];
+    snprintf(event_id, sizeof event_id, "claude-%d", i);
+    add_job(&snapshot.claude,
+            job(TK_AGENT_WAITING, event_id, "Claude", 1));
+    snprintf(event_id, sizeof event_id, "codex-%d", i);
+    add_job(&snapshot.codex,
+            job(TK_AGENT_WAITING, event_id, "Codex", 1));
+  }
+  tk_completion_queue queue = {0};
+  tk_completion_queue_apply(&queue, &snapshot, 100);
+  check("full valid snapshot fills queue exactly",
+        queue.count == TK_AGENT_PROVIDER_COUNT * TK_AGENT_JOBS_MAX);
+  check("full valid snapshot keeps deterministic current", current(&queue) &&
+        strcmp(current(&queue)->event_id, "claude-0") == 0);
 }
 
 int main(void) {
@@ -237,10 +270,11 @@ int main(void) {
   test_non_attention_and_stale_events();
   test_independent_waiting_and_counts();
   test_reconciliation_and_transitions();
+  test_state_transition_restarts_entry_phase();
   test_phases();
   test_seen_rollover_keeps_dismissed_current_snapshot_event();
   test_hostile_job_count_is_clamped();
-  test_capacity_protects_current();
+  test_full_snapshot_fits_queue_capacity();
 
   if (failures == 0) {
     printf("OK: all completion-policy tests pass\n");

@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
+_Static_assert(TK_COMPLETION_QUEUE_CAP >=
+                   TK_AGENT_PROVIDER_COUNT * TK_AGENT_JOBS_MAX,
+               "completion queue must fit one full agent snapshot");
+
 typedef struct {
   const tk_agent_status *job;
   int provider;
@@ -162,8 +166,10 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
   bool first_snapshot = !queue->initialized;
   char previous_id[TK_AGENT_ID_CAP] = {0};
   int previous_provider = -1;
+  tk_agent_state previous_state = TK_AGENT_UNKNOWN;
   if (queue->count) {
     previous_provider = queue->events[0].provider;
+    previous_state = queue->events[0].state;
     snprintf(previous_id, sizeof previous_id, "%s", queue->events[0].event_id);
   }
   queue->initialized = true;
@@ -229,8 +235,9 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
   queue->count = (uint8_t)kept;
 
   if (queue->count &&
-      !same_event(previous_provider, previous_id, queue->events[0].provider,
-                  queue->events[0].event_id)) {
+      (!same_event(previous_provider, previous_id, queue->events[0].provider,
+                   queue->events[0].event_id) ||
+       previous_state != queue->events[0].state)) {
     queue->current_started_ms = queue->last_now_ms;
   }
 }
