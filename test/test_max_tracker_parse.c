@@ -195,6 +195,31 @@ int main(void) {
   build_doc(doc, sizeof doc, "1", "20", "false", "0", claude_full, codex_full);
   check("streak 0 parsar", PARSE(doc, &t) && t.coding_streak_days == 0);
 
+  /* --- Aggregat räknade över hela historiken (inte bara det synliga
+   * 20-veckorsfönstret) accepteras upp till display-taket 999 — en tung
+   * användare kan ärligt ha en 25-veckorsstreak eller 150 maxdagar. --- */
+  char claude_history[3072];
+  snprintf(claude_history, sizeof claude_history,
+          "{\"avgPeakPct\":null,\"maxWeeksStreak\":25,\"maxWeeks\":25,"
+          "\"maxDays\":150,\"weekMaxed\":" WEEK_MAXED_20 ",\"days\":%s}",
+          full_days);
+  build_doc(doc, sizeof doc, "1", "20", "false", "400", claude_history,
+           codex_full);
+  check("historik-aggregat över fönstret parsar", PARSE(doc, &t));
+  check("claude maxWeeksStreak 25 (över fönstret) accepteras",
+        t.claude.max_weeks_streak == 25);
+  check("claude maxWeeks 25 (över fönstret) accepteras",
+        t.claude.max_weeks == 25);
+  check("claude maxDays 150 (över fönstret) accepteras",
+        t.claude.max_days == 150);
+  check("codingStreakDays 400 (över fönstret) accepteras",
+        t.coding_streak_days == 400);
+
+  build_doc(doc, sizeof doc, "1", "20", "false", "999", claude_full,
+           codex_full);
+  check("streak vid display-taket (999) accepteras",
+        PARSE(doc, &t) && t.coding_streak_days == 999);
+
   /* --- planLabel: syntaktiskt ogiltig etikett tappas, resten parsar --- */
 
   char claude_plan[2048];
@@ -269,6 +294,11 @@ int main(void) {
   check_rejected_untouched("oändlig streak avvisas",
       "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":1e999,"
       "\"claude\":{},\"codex\":{}}", &t);
+  /* Aggregaten är historik-härledda (upp till 400 dagars sparad historik),
+   * inte fönster-härledda — 999 är display-taket, inte TK_MT_WEEKS/DAYS. */
+  check_rejected_untouched("streak över display-taket (1000) avvisas",
+      "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":1000,"
+      "\"claude\":{},\"codex\":{}}", &t);
   check_rejected_untouched("error-formen avvisas",
       "{\"error\":1}", &t);
   check_rejected_untouched("dubblerad toppnyckel avvisas",
@@ -298,18 +328,33 @@ int main(void) {
   check_rejected_untouched("claude avgPeakPct negativ avvisas",
       "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
       "\"claude\":{\"avgPeakPct\":-1},\"codex\":{}}", &t);
-  check_rejected_untouched("claude maxWeeksStreak över 20 avvisas",
+  /* Aggregaten räknas över servern hela sparade historik (upp till 400
+   * dagar), inte det synliga 20-veckorsfönstret, så 21/25/150 är GILTIGA
+   * värden här (se accept-fallen nedan) — bara display-taket 999 avvisar. */
+  check_rejected_untouched("claude maxWeeksStreak över display-taket (1000) avvisas",
       "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
-      "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":21},"
+      "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":1000},"
       "\"codex\":{}}", &t);
-  check_rejected_untouched("claude maxWeeks över 20 avvisas",
+  check_rejected_untouched("claude maxWeeksStreak negativ avvisas",
+      "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
+      "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":-1},"
+      "\"codex\":{}}", &t);
+  check_rejected_untouched("claude maxWeeks över display-taket (1000) avvisas",
       "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
       "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":0,"
-      "\"maxWeeks\":21},\"codex\":{}}", &t);
-  check_rejected_untouched("claude maxDays över 140 avvisas",
+      "\"maxWeeks\":1000},\"codex\":{}}", &t);
+  check_rejected_untouched("claude maxWeeks negativ avvisas",
       "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
       "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":0,"
-      "\"maxWeeks\":0,\"maxDays\":141},\"codex\":{}}", &t);
+      "\"maxWeeks\":-1},\"codex\":{}}", &t);
+  check_rejected_untouched("claude maxDays över display-taket (1000) avvisas",
+      "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
+      "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":0,"
+      "\"maxWeeks\":0,\"maxDays\":1000},\"codex\":{}}", &t);
+  check_rejected_untouched("claude maxDays negativ avvisas",
+      "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
+      "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":0,"
+      "\"maxWeeks\":0,\"maxDays\":-1},\"codex\":{}}", &t);
   check_rejected_untouched("claude weekMaxed fel längd (19) avvisas",
       "{\"v\":1,\"weeks\":20,\"stale\":false,\"codingStreakDays\":null,"
       "\"claude\":{\"avgPeakPct\":null,\"maxWeeksStreak\":0,"

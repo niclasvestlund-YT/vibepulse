@@ -6,6 +6,15 @@
 
 #include "../../third_party/cjson/cJSON.h"
 
+/* Aggregaten (maxWeeksStreak, maxWeeks, maxDays, codingStreakDays) räknas
+ * av servern över HELA dess sparade historik (upp till 400 dagar), inte
+ * bara det synliga 20-veckorsfönstret — en tung användare kan alltså
+ * ärligt ha en 25-veckorsstreak eller 150 maxdagar. 999 är ingen
+ * kontraktsgräns utan en display-tak: siffertilen ritar högst tre
+ * positioner, så allt däröver är ändå inte visbart. Ett negativt eller
+ * brutet tal är fortfarande en lögn och avvisas. */
+#define TK_MT_AGGREGATE_MAX 999
+
 /* Samma kontraktshållning som Solelkollens och tokens-parsern: varje
  * obligatoriskt fält måste finnas, ha rätt typ och ligga i sitt intervall,
  * annars avvisas hela payloaden. En halvparsead historik är värre än en
@@ -18,7 +27,8 @@ static bool num(const cJSON *root, const char *key, double *out) {
 }
 
 /* Ett heltalsfält med ett stängt intervall — maxWeeksStreak/maxWeeks/
- * maxDays kan aldrig ärligt överstiga fönstrets egen storlek. */
+ * maxDays är historik-härledda (se TK_MT_AGGREGATE_MAX ovan), inte
+ * fönster-härledda, så gränsen är display-taket, inte TK_MT_WEEKS/DAYS. */
 static bool bounded_int(const cJSON *root, const char *key, double minimum,
                         double maximum, int *out) {
   double value;
@@ -30,7 +40,9 @@ static bool bounded_int(const cJSON *root, const char *key, double minimum,
 
 /* codingStreakDays: null är GILTIGT (enheten mappar det till -1 = okänt —
  * ingen aktivitet registrerad ännu), men ett SAKNAT fält är ett
- * kontraktsbrott och ett negativt eller brutet tal är en lögn. */
+ * kontraktsbrott och ett negativt eller brutet tal är en lögn. Streaken är
+ * också historik-härledd (se TK_MT_AGGREGATE_MAX ovan) — bunden av
+ * display-taket, inte det synliga fönstret. */
 static bool coding_streak(const cJSON *root, const char *key, int *out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
   if (!item) return false;
@@ -40,7 +52,7 @@ static bool coding_streak(const cJSON *root, const char *key, int *out) {
   }
   if (cJSON_IsNumber(item)) {
     double value = item->valuedouble;
-    if (!isfinite(value) || value < 0 || value > INT32_MAX ||
+    if (!isfinite(value) || value < 0 || value > TK_MT_AGGREGATE_MAX ||
         trunc(value) != value) {
       return false;
     }
@@ -249,14 +261,16 @@ static bool parse_provider(const cJSON *node, bool trust_strings,
 
   tk_mt_provider p = {0};
   if (!avg_peak_pct(node, &p.avg_peak_pct, &p.has_avg)) return false;
-  if (!bounded_int(node, "maxWeeksStreak", 0, TK_MT_WEEKS,
+  if (!bounded_int(node, "maxWeeksStreak", 0, TK_MT_AGGREGATE_MAX,
                    &p.max_weeks_streak)) {
     return false;
   }
-  if (!bounded_int(node, "maxWeeks", 0, TK_MT_WEEKS, &p.max_weeks)) {
+  if (!bounded_int(node, "maxWeeks", 0, TK_MT_AGGREGATE_MAX, &p.max_weeks)) {
     return false;
   }
-  if (!bounded_int(node, "maxDays", 0, TK_MT_DAYS, &p.max_days)) return false;
+  if (!bounded_int(node, "maxDays", 0, TK_MT_AGGREGATE_MAX, &p.max_days)) {
+    return false;
+  }
   if (!parse_week_maxed(node, p.week_maxed)) return false;
   if (!parse_days(node, p.days)) return false;
   parse_plan_label(node, trust_strings, &p);
