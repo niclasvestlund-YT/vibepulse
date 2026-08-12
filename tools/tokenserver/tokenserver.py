@@ -51,16 +51,26 @@ from pathlib import Path
 if __package__:
     from .agent_status import AgentStatusService
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
+    from .max_tracker import MaxTrackerStore
     from .quota_cache import CachedQuota, QuotaCache
     from .usage_history import Forecast, UsageHistory
 else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from agent_status import AgentStatusService
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
+    from max_tracker import MaxTrackerStore
     from quota_cache import CachedQuota, QuotaCache
     from usage_history import Forecast, UsageHistory
 
 RECOMPUTE_EVERY_S = 30
 LIMITS_EVERY_S = 120  # rate-limit-proben: snäll mot API:t, färsk nog för hyllan
+MAX_TRACKER_BACKFILL_TICK_S = 0.5  # samma kadens som agent_status.POLL_S
+# Claude bär aldrig fönstrets minuttal i klartext (bara namnen "5h"/"7d") --
+# till skillnad från Codex, vars rate-limits-snapshot har window_minutes
+# rakt i JSON:en (se _codex_window nedan). Dessa två är plan-kontraktets
+# fasta motsvarigheter, klassade enligt samma >600-minutersregel som
+# MaxTrackerStore.observe_quota redan använder.
+MAX_TRACKER_CLAUDE_SESSION_MINUTES = 300   # 5 timmar
+MAX_TRACKER_CLAUDE_WEEK_MINUTES = 10080    # 7 dygn
 
 # (day, ts, tokens, session, key) per loggrad med usage — det minsta som
 # behövs för dag-, månads-, takt- och sessionsaggregaten.
@@ -164,7 +174,12 @@ def _parse_file(path: Path, month_start: datetime, start_offset=0):
     return records, parsed_until
 
 
-def _compute(projects_dir: Path):
+def _observe_claude_volume(store, records):
+    for day, _ts, tokens, _session, _key in records:
+        store.observe_volume("claude", day, tokens)
+
+
+def _compute(projects_dir: Path, max_tracker_store=None):
     now = datetime.now().astimezone()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_key = month_start.strftime("%Y-%m")
@@ -172,6 +187,7 @@ def _compute(projects_dir: Path):
     hour_ago = now.timestamp() - 3600
 
     live_paths = set()
+    volume_observed = False
     for path in projects_dir.glob("**/*.jsonl"):
         try:
             st = path.stat()
@@ -200,6 +216,9 @@ def _compute(projects_dir: Path):
             cached["records"].extend(new_records)
             cached["stat"] = stat_key
             cached["offset"] = parsed_until
+            if max_tracker_store is not None and new_records:
+                _observe_claude_volume(max_tracker_store, new_records)
+                volume_observed = True
         else:
             records, parsed_until = _parse_file(
                 path, month_start, start_offset=0)
@@ -210,8 +229,13 @@ def _compute(projects_dir: Path):
                 "month": month_key,
                 "records": records,
             }
+            if max_tracker_store is not None and records:
+                _observe_claude_volume(max_tracker_store, records)
+                volume_observed = True
     for stale in set(_file_cache) - live_paths:
         del _file_cache[stale]
+    if volume_observed:
+        _mark_max_tracker_dirty(max_tracker_store)
 
     day_tokens = 0
     month_tokens = 0
@@ -666,6 +690,7 @@ def _codex_general_observation(rate_limits, observed_at, now_ts):
             "observed_at": int(observed_at),
             "identity": _quota_identity(
                 "codex", "general_weekly", raw_identity),
+            "window_minutes": window_minutes,
         }
     return None
 
@@ -680,7 +705,8 @@ def _codex_session_observation(rate_limits, observed_at, now_ts):
         pct, reset_min, window_minutes = parsed
         if window_minutes <= 600:
             return {"pct": pct, "reset_min": reset_min,
-                    "observed_at": observed_at}
+                    "observed_at": observed_at,
+                    "window_minutes": window_minutes}
     return None
 
 
@@ -722,6 +748,7 @@ def _parse_codex_rate_limits_response(body, observed_at, now_ts):
         "codexWeekObservedAt": weekly["observed_at"],
         "codexWeekIdentity": weekly["identity"],
         "codexWeekStale": False,
+        "codexWeekWindowMinutes": weekly["window_minutes"],
     }
     session = _codex_session_observation(
         normalized, observed_at=observed_at, now_ts=now_ts)
@@ -729,6 +756,7 @@ def _parse_codex_rate_limits_response(body, observed_at, now_ts):
         out.update({
             "codexSessionPct": session["pct"],
             "codexSessionResetMin": session["reset_min"],
+            "codexSessionWindowMinutes": session["window_minutes"],
         })
     return out
 
@@ -936,12 +964,14 @@ def _scan_codex_limits():
             "codexWeekObservedAt": weekly["observed_at"],
             "codexWeekIdentity": weekly["identity"],
             "codexWeekStale": False,
+            "codexWeekWindowMinutes": weekly["window_minutes"],
         })
     if session_candidates:
         session = max(session_candidates, key=lambda item: item["observed_at"])
         out.update({
             "codexSessionPct": session["pct"],
             "codexSessionResetMin": session["reset_min"],
+            "codexSessionWindowMinutes": session["window_minutes"],
         })
     return out
 
@@ -1054,6 +1084,54 @@ def _persist_quota_records_async(cache, records):
         ).start()
 
 
+# MaxTrackerStore.save() rewrites every provider-day it knows about (the
+# quota cache above persists one small record at a time instead), so the
+# analogous "atomic save" trigger here is a dirty flag drained by a single
+# background writer -- mirroring _persist_quota_records_async's shape
+# (queue off the calling thread, coalesce a burst into one trailing write)
+# without a per-record dedup this store has no notion of.
+_max_tracker_writer_lock = threading.Lock()
+_max_tracker_dirty = False
+_max_tracker_writer_running = False
+
+
+def _max_tracker_writer(store):
+    global _max_tracker_dirty, _max_tracker_writer_running
+    while True:
+        with _max_tracker_writer_lock:
+            if not _max_tracker_dirty:
+                _max_tracker_writer_running = False
+                return
+            _max_tracker_dirty = False
+        try:
+            store.save()
+        except Exception:
+            pass
+
+
+def _mark_max_tracker_dirty(store):
+    """Queue an atomic MaxTrackerStore.save() off the calling thread."""
+    global _max_tracker_dirty, _max_tracker_writer_running
+    start_writer = False
+    with _max_tracker_writer_lock:
+        _max_tracker_dirty = True
+        if not _max_tracker_writer_running:
+            _max_tracker_writer_running = True
+            start_writer = True
+    if start_writer:
+        threading.Thread(
+            target=_max_tracker_writer,
+            args=(store,),
+            name="max-tracker-writer",
+            daemon=True,
+        ).start()
+
+
+def _valid_window_minutes(value):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value > 0)
+
+
 def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
                           now_ts, label_key=None):
     """Resolve authoritative live truth, otherwise an unexpired cache row."""
@@ -1112,10 +1190,10 @@ def _add_forecast(result, prefix, forecast):
     result[f"{prefix}ForecastOffsetMin"] = forecast.offset_minutes
 
 
-def _refresh_usage_totals(projects_dir):
+def _refresh_usage_totals(projects_dir, max_tracker_store=None):
     global _last_result, _last_computed, _snapshot_refreshing
     try:
-        refreshed = _compute(projects_dir)
+        refreshed = _compute(projects_dir, max_tracker_store)
     except Exception:
         refreshed = None
     with _cache_lock:
@@ -1126,18 +1204,27 @@ def _refresh_usage_totals(projects_dir):
 
 
 def get_snapshot(projects_dir: Path, history=None, now_ts=None,
-                 quota_cache=None):
+                 quota_cache=None, max_tracker_store=None):
+    """Build the /api/tokens v2 payload.
+
+    ``max_tracker_store`` is the Max Tracker live-rollup hook: omitted
+    (``None``, the default), every Max Tracker call below is a no-op, which
+    keeps every existing caller -- and every test that predates Max Tracker
+    -- byte-identical. Only Handler.do_GET passes the server's real store,
+    so live percentages/volume only ever reach the on-disk history for
+    actual requests, never for a caller that didn't ask for it.
+    """
     global _last_result, _last_computed, _snapshot_refreshing
     with _cache_lock:
         if _last_result is None:
-            _last_result = _compute(projects_dir)
+            _last_result = _compute(projects_dir, max_tracker_store)
             _last_computed = time.monotonic()
         elif (time.monotonic() - _last_computed > RECOMPUTE_EVERY_S and
               not _snapshot_refreshing):
             _snapshot_refreshing = True
             threading.Thread(
                 target=_refresh_usage_totals,
-                args=(projects_dir,),
+                args=(projects_dir, max_tracker_store),
                 name="usage-total-refresh",
                 daemon=True,
             ).start()
@@ -1160,6 +1247,15 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         session_reset_min = None
     result["claudeSessionPct"] = session_pct
     result["claudeSessionResetMin"] = session_reset_min
+    # Never disk-cached (a Claude session window resets every 5h, so a
+    # fallback would be meaningless) -- a non-None reading here is always a
+    # genuinely fresh probe result, the honest gate Task 6 requires before
+    # anything reaches Max Tracker's day peaks.
+    if max_tracker_store is not None and session_pct is not None:
+        max_tracker_store.observe_quota(
+            "claude", MAX_TRACKER_CLAUDE_SESSION_MINUTES, session_pct,
+            current_ts)
+        _mark_max_tracker_dirty(max_tracker_store)
 
     claude_week = _resolve_weekly_quota(
         claude, "claude", "general_weekly", "week", cache, current_ts)
@@ -1179,6 +1275,13 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         claude_week["reset_at"], current_ts)
     result["claudeWeekStale"] = bool(
         claude_week["pct"] is not None and claude_week["stale"])
+    # The exact "*Stale: false" gate: claude_week["live"] is precisely what
+    # made claudeWeekStale false above -- never Max Tracker's own clock.
+    if max_tracker_store is not None and claude_week["live"]:
+        max_tracker_store.observe_quota(
+            "claude", MAX_TRACKER_CLAUDE_WEEK_MINUTES, claude_week["pct"],
+            claude_week["cache_record"].observed_at)
+        _mark_max_tracker_dirty(max_tracker_store)
     result["claudeModelWeekPct"] = claude_model["pct"]
     result["claudeModelWeekResetMin"] = _reset_minutes(
         claude_model["reset_at"], current_ts)
@@ -1192,6 +1295,25 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         codex_week["reset_at"], current_ts)
     result["codexWeekStale"] = bool(
         codex_week["pct"] is not None and codex_week["stale"])
+    if max_tracker_store is not None:
+        # Codex's own rate-limit snapshot carries window_minutes natively
+        # (threaded through above onto codex*WindowMinutes) -- unlike
+        # Claude's headers, which only name a window ("5h"/"7d"), so this
+        # is the real value rather than an assumed constant.
+        codex_session_pct = result["codexSessionPct"]
+        codex_session_window = codex.get("codexSessionWindowMinutes")
+        if (codex_session_pct is not None and
+                _valid_window_minutes(codex_session_window)):
+            max_tracker_store.observe_quota(
+                "codex", codex_session_window, codex_session_pct,
+                current_ts)
+            _mark_max_tracker_dirty(max_tracker_store)
+        codex_week_window = codex.get("codexWeekWindowMinutes")
+        if codex_week["live"] and _valid_window_minutes(codex_week_window):
+            max_tracker_store.observe_quota(
+                "codex", codex_week_window, codex_week["pct"],
+                codex_week["cache_record"].observed_at)
+            _mark_max_tracker_dirty(max_tracker_store)
 
     claude_session_reset = session_reset_at
     claude_week_reset = (
@@ -1253,6 +1375,8 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
 class Handler(BaseHTTPRequestHandler):
     projects_dir = None  # sätts i main
     agent_status = None  # bakgrundstjänst, sätts i main
+    max_tracker_store = None  # sätts i main
+    plans = {"claude": None, "codex": None}  # sätts i main från --*-plan
 
     def _send(self, code, payload):
         body = json.dumps(payload).encode()
@@ -1262,18 +1386,41 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _max_tracker_payload(self):
+        # get_snapshot() is the single place fresh, non-stale/non-cached
+        # Claude and Codex percentages get published (see the observe_quota
+        # hooks inside it) -- calling it here both feeds today's peaks and
+        # gives us the exact "*Stale: false" signal to mirror, so the top-
+        # level stale flag below is never an invented second clock.
+        quota_snapshot = get_snapshot(
+            self.projects_dir, max_tracker_store=self.max_tracker_store)
+        today = datetime.now().astimezone().date().isoformat()
+        payload = self.max_tracker_store.snapshot(today, self.plans)
+        payload["stale"] = bool(
+            quota_snapshot.get("claudeWeekStale") or
+            quota_snapshot.get("codexWeekStale"))
+        return payload
+
     def do_GET(self):
         if self.path == "/api/tokens":
             try:
-                self._send(200, get_snapshot(self.projects_dir))
+                self._send(200, get_snapshot(
+                    self.projects_dir,
+                    max_tracker_store=self.max_tracker_store))
             except Exception:  # skärmen avvisar error-formen per kontrakt
                 self._send(500, {"error": "internal server error"})
         elif self.path == "/api/agent-status":
             self._send(200, self.agent_status.snapshot())
+        elif self.path == "/api/max-tracker":
+            try:
+                self._send(200, self._max_tracker_payload())
+            except Exception:  # skärmen avvisar error-formen per kontrakt
+                self._send(500, {"error": "internal server error"})
         elif self.path == "/":
             self._send(200, {"service": "torget-tokenserver",
                              "endpoint": "/api/tokens",
-                             "endpoints": ["/api/tokens", "/api/agent-status"],
+                             "endpoints": ["/api/tokens", "/api/agent-status",
+                                          "/api/max-tracker"],
                              "claudeProbe": _probe_status,
                              "ratelimitHeaders": _probe_headers,
                              "unknownRateLimitBuckets":
@@ -1285,10 +1432,45 @@ class Handler(BaseHTTPRequestHandler):
         pass  # 30 s-pollning ska inte fylla loggen
 
 
-def main():
+def _build_arg_parser():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--port", type=int, default=8737)
     ap.add_argument("--dir", default=os.path.expanduser("~/.claude/projects"))
+    ap.add_argument(
+        "--claude-plan", choices=["pro", "max5x", "max20x"], default=None,
+        help="Claude-planen för Max Trackers badge (frivillig, allowlistad "
+             "i max_tracker.PLAN_LABELS)")
+    ap.add_argument(
+        "--codex-plan", choices=["plus", "pro"], default=None,
+        help="Codex-planen för Max Trackers badge (frivillig, allowlistad "
+             "i max_tracker.PLAN_LABELS)")
+    return ap
+
+
+def _run_max_tracker_backfill(store, stop_event):
+    """Drain MaxTrackerStore.backfill_step() on the same 0.5 s cadence as
+    agent_status.POLL_S, forever -- never permanently stopping.
+
+    Design choice, made explicit per Task 6: backfill_step()'s idle path
+    (both roots fully drained) only globs each root and stats already-known
+    files -- see MaxTrackerStore._advance_one_file, which returns without
+    opening anything once every discovered inode is marked done. That is
+    cheap enough to call every tick indefinitely, so this loop never
+    switches itself off; it just keeps discovering newly-appeared rollout/
+    session files on its own, without needing a restart.
+    """
+    while not stop_event.is_set():
+        try:
+            if store.backfill_step():
+                _mark_max_tracker_dirty(store)
+        except Exception:
+            pass
+        if stop_event.wait(MAX_TRACKER_BACKFILL_TICK_S):
+            break
+
+
+def main():
+    ap = _build_arg_parser()
     args = ap.parse_args()
 
     Handler.projects_dir = Path(args.dir)
@@ -1309,15 +1491,38 @@ def main():
     status_service.start()
     Handler.agent_status = status_service
 
+    max_tracker_store = MaxTrackerStore(
+        Path.home() / "Library" / "Application Support" / "VibePulse" /
+        "max-tracker.json",
+        CODEX_SESSIONS, Handler.projects_dir)
+    Handler.max_tracker_store = max_tracker_store
+    Handler.plans = {"claude": args.claude_plan, "codex": args.codex_plan}
+
+    backfill_stop = threading.Event()
+    backfill_thread = threading.Thread(
+        target=_run_max_tracker_backfill,
+        args=(max_tracker_store, backfill_stop),
+        name="max-tracker-backfill",
+        daemon=True,
+    )
+    backfill_thread.start()
+
     srv = None
     try:
         srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
-        print(f"serverar http://0.0.0.0:{args.port}/api/tokens och "
-              f"/api/agent-status (LAN — exponera inte utåt)")
+        print(f"serverar http://0.0.0.0:{args.port}/api/tokens, "
+              f"/api/agent-status och /api/max-tracker "
+              f"(LAN — exponera inte utåt)")
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        backfill_stop.set()
+        backfill_thread.join(timeout=max(1.0, MAX_TRACKER_BACKFILL_TICK_S * 4))
+        try:
+            max_tracker_store.save()  # slutlig flush, samma som stop()-flödet
+        except Exception:
+            pass
         status_service.stop()
         if srv is not None:
             srv.server_close()

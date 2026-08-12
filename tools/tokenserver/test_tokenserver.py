@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import tempfile
 import threading
@@ -738,7 +740,7 @@ class UsageSnapshotTests(unittest.TestCase):
         old_base = self._base()
         new_base = dict(old_base, dayTokens=999)
 
-        def slow_compute(_projects_dir):
+        def slow_compute(_projects_dir, _max_tracker_store=None):
             started.set()
             release.wait(timeout=1)
             return new_base
@@ -1338,6 +1340,388 @@ class HandlerPrivacyTests(unittest.TestCase):
         self.assertEqual(payload["ratelimitHeaders"], [
             "anthropic-ratelimit-unified-7d-utilization"])
         self.assertEqual(payload["unknownRateLimitBuckets"], ["7d_haiku"])
+
+
+class MaxTrackerLiveHookTests(unittest.TestCase):
+    """get_snapshot()'s observe_quota wiring: session/week windows, the
+    *Stale: false gate, and Codex's natively-carried window_minutes."""
+
+    @staticmethod
+    def _base():
+        return {
+            "v": 1, "dayTokens": 0, "dayTokensPerHour": 0,
+            "daySessions": 0, "monthTokens": 0,
+            "at": "2026-08-07T12:00:00+02:00",
+        }
+
+    def _snapshot(self, now_ts, claude=None, codex=None, store=None):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(
+                    tokenserver, "_persist_quota_records_async"), \
+                mock.patch.object(tokenserver, "_compute",
+                                  return_value=self._base()), \
+                mock.patch.object(tokenserver, "get_limits",
+                                  return_value=claude or {}), \
+                mock.patch.object(tokenserver, "_read_codex_limits",
+                                  return_value=codex or {}):
+            tokenserver._last_result = None
+            tokenserver._last_computed = 0.0
+            return tokenserver.get_snapshot(
+                Path("/unused"), history=StubHistory(), now_ts=now_ts,
+                quota_cache=QuotaCache(Path(temp_dir) / "quota.json",
+                                       now=lambda: now_ts),
+                max_tracker_store=store)
+
+    def test_live_claude_session_observation_uses_the_300_minute_window(self):
+        store = mock.Mock()
+        now_ts = 1_800_000_000
+        self._snapshot(now_ts, claude={
+            "sessionPct": 21.0,
+            "sessionResetAt": now_ts + 3600,
+        }, store=store)
+
+        store.observe_quota.assert_any_call("claude", 300, 21.0, now_ts)
+
+    def test_live_claude_week_observation_uses_the_10080_minute_window(self):
+        store = mock.Mock()
+        now_ts = 1_800_000_000
+        self._snapshot(now_ts, claude={
+            "weekPct": 47.0,
+            "weekResetAt": now_ts + 300 * 60,
+            "weekObservedAt": now_ts,
+            "weekIdentity": tokenserver._quota_identity(
+                "claude", "general_weekly"),
+        }, store=store)
+
+        store.observe_quota.assert_any_call("claude", 10080, 47.0, now_ts)
+
+    def test_stale_or_absent_claude_never_reaches_observe_quota(self):
+        store = mock.Mock()
+        # No live claude payload at all: _resolve_weekly_quota's "live"
+        # stays False (no cache hit either), session_pct stays None.
+        self._snapshot(1_800_000_000, claude={}, store=store)
+
+        for call in store.observe_quota.call_args_list:
+            self.assertNotEqual(call.args[0], "claude")
+
+    def test_codex_observations_carry_their_real_window_minutes(self):
+        store = mock.Mock()
+        now_ts = 1_800_000_000
+        self._snapshot(now_ts, codex={
+            "codexSessionPct": 12.0,
+            "codexSessionResetMin": 90,
+            "codexSessionWindowMinutes": 300,
+            "codexWeekPct": 35.0,
+            "codexWeekResetAt": now_ts + 300 * 60,
+            "codexWeekObservedAt": now_ts,
+            "codexWeekIdentity": tokenserver._quota_identity(
+                "codex", "general_weekly", "synthetic"),
+            "codexWeekWindowMinutes": 10080,
+        }, store=store)
+
+        store.observe_quota.assert_any_call("codex", 300, 12.0, now_ts)
+        store.observe_quota.assert_any_call("codex", 10080, 35.0, now_ts)
+
+    def test_codex_observation_without_window_minutes_is_never_guessed(self):
+        store = mock.Mock()
+        self._snapshot(1_800_000_000, codex={
+            "codexSessionPct": 12.0,
+            "codexSessionResetMin": 90,
+            # deliberately no codexSessionWindowMinutes: never fabricate one
+        }, store=store)
+
+        for call in store.observe_quota.call_args_list:
+            self.assertNotEqual(call.args[0], "codex")
+
+    def test_no_store_means_the_hook_is_a_total_no_op(self):
+        result = self._snapshot(1_800_000_000, claude={
+            "sessionPct": 21.0, "sessionResetAt": 1_800_003_600})
+        self.assertEqual(result["claudeSessionPct"], 21.0)  # ran normally
+
+
+class MaxTrackerVolumeHookTests(unittest.TestCase):
+    """_compute()'s observe_volume wiring: only newly-parsed records."""
+
+    def setUp(self):
+        self.previous_cache = tokenserver._file_cache
+        tokenserver._file_cache = {}
+
+    def tearDown(self):
+        tokenserver._file_cache = self.previous_cache
+
+    @staticmethod
+    def _line(message_id, tokens):
+        return json.dumps({
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "sessionId": "session-a",
+            "requestId": f"request-{message_id}",
+            "message": {"id": message_id, "usage": {"input_tokens": tokens}},
+        }) + "\n"
+
+    def test_newly_parsed_records_observe_volume_exactly_once(self):
+        store = mock.Mock()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            (projects / "session.jsonl").write_text(self._line("first", 5))
+
+            tokenserver._compute(projects, store)
+            tokenserver._compute(projects, store)  # unchanged: no new work
+
+        today = datetime.now().astimezone().strftime("%Y-%m-%d")
+        store.observe_volume.assert_called_once_with("claude", today, 5)
+
+    def test_growth_only_observes_the_new_tail(self):
+        store = mock.Mock()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            path = projects / "session.jsonl"
+            path.write_text(self._line("first", 5))
+            tokenserver._compute(projects, store)
+            with path.open("a") as output:
+                output.write(self._line("second", 7))
+            tokenserver._compute(projects, store)
+
+        today = datetime.now().astimezone().strftime("%Y-%m-%d")
+        self.assertEqual(store.observe_volume.call_args_list, [
+            mock.call("claude", today, 5),
+            mock.call("claude", today, 7),
+        ])
+
+    def test_no_store_skips_the_volume_hook_entirely(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            (projects / "session.jsonl").write_text(self._line("first", 5))
+            result = tokenserver._compute(projects)  # max_tracker_store=None
+
+        self.assertEqual(result["dayTokens"], 5)
+
+
+class MaxTrackerDirtyWriterTests(unittest.TestCase):
+    def setUp(self):
+        self.previous = (
+            tokenserver._max_tracker_dirty,
+            tokenserver._max_tracker_writer_running,
+        )
+        tokenserver._max_tracker_dirty = False
+        tokenserver._max_tracker_writer_running = False
+
+    def tearDown(self):
+        (tokenserver._max_tracker_dirty,
+         tokenserver._max_tracker_writer_running) = self.previous
+
+    def test_marking_dirty_eventually_saves_off_the_calling_thread(self):
+        store = mock.Mock()
+        calling_thread = threading.current_thread()
+        saved_from = []
+        store.save.side_effect = (
+            lambda: saved_from.append(threading.current_thread()))
+
+        tokenserver._mark_max_tracker_dirty(store)
+
+        for _ in range(50):
+            if store.save.called:
+                break
+            time.sleep(0.01)
+
+        store.save.assert_called_once()
+        self.assertNotEqual(saved_from[0], calling_thread)
+
+    def test_bursts_of_dirty_marks_coalesce_without_a_second_writer(self):
+        store = mock.Mock()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_save():
+            entered.set()
+            release.wait(timeout=1)
+
+        store.save.side_effect = slow_save
+
+        tokenserver._mark_max_tracker_dirty(store)
+        self.assertTrue(entered.wait(timeout=1))
+        for _ in range(5):  # burst while the writer is mid-save
+            tokenserver._mark_max_tracker_dirty(store)
+        release.set()
+
+        for _ in range(50):
+            if not tokenserver._max_tracker_writer_running:
+                break
+            time.sleep(0.01)
+
+        # Coalesced into (at most) one trailing save after the in-flight
+        # one, never a save per dirty mark.
+        self.assertLessEqual(store.save.call_count, 2)
+
+
+class MaxTrackerBackfillLoopTests(unittest.TestCase):
+    def test_loop_ticks_forever_and_marks_dirty_only_on_progress(self):
+        store = mock.Mock()
+        store.backfill_step.return_value = True
+        stop_event = threading.Event()
+
+        with mock.patch.object(
+                tokenserver, "MAX_TRACKER_BACKFILL_TICK_S", 0.01), \
+                mock.patch.object(
+                    tokenserver, "_mark_max_tracker_dirty") as dirty:
+            thread = threading.Thread(
+                target=tokenserver._run_max_tracker_backfill,
+                args=(store, stop_event))
+            thread.start()
+            for _ in range(200):
+                if store.backfill_step.call_count >= 3:
+                    break
+                time.sleep(0.005)
+            stop_event.set()
+            thread.join(timeout=1)
+
+        self.assertFalse(thread.is_alive())
+        self.assertGreaterEqual(store.backfill_step.call_count, 3)
+        self.assertGreaterEqual(dirty.call_count, 3)
+
+    def test_loop_keeps_polling_after_backfill_step_goes_idle(self):
+        store = mock.Mock()
+        store.backfill_step.return_value = False
+        stop_event = threading.Event()
+
+        with mock.patch.object(
+                tokenserver, "MAX_TRACKER_BACKFILL_TICK_S", 0.01), \
+                mock.patch.object(
+                    tokenserver, "_mark_max_tracker_dirty") as dirty:
+            thread = threading.Thread(
+                target=tokenserver._run_max_tracker_backfill,
+                args=(store, stop_event))
+            thread.start()
+            for _ in range(200):
+                if store.backfill_step.call_count >= 3:
+                    break
+                time.sleep(0.005)
+            stop_event.set()
+            thread.join(timeout=1)
+
+        self.assertFalse(thread.is_alive())
+        self.assertGreaterEqual(store.backfill_step.call_count, 3)
+        dirty.assert_not_called()  # idle: cheap glob+stat only, never saved
+
+
+class MaxTrackerEndpointTests(unittest.TestCase):
+    @staticmethod
+    def _stub_payload():
+        return {
+            "v": 1, "weeks": 20, "stale": False, "codingStreakDays": None,
+            "claude": {"avgPeakPct": None, "maxWeeksStreak": 0,
+                       "maxWeeks": 0, "maxDays": 0, "weekMaxed": [0] * 20,
+                       "days": [[-1, -1]] * 140},
+            "codex": {"avgPeakPct": None, "maxWeeksStreak": 0,
+                      "maxWeeks": 0, "maxDays": 0, "weekMaxed": [0] * 20,
+                      "days": [[-1, -1]] * 140},
+        }
+
+    def _handler(self, max_tracker_store, plans=None):
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        handler.path = "/api/max-tracker"
+        handler.projects_dir = Path("/private/source/path")
+        handler.agent_status = mock.Mock()
+        handler.max_tracker_store = max_tracker_store
+        handler.plans = plans or {"claude": "max20x", "codex": "plus"}
+        handler._send = mock.Mock()
+        return handler
+
+    def test_route_serves_v1_payload_with_stale_mirroring_quota_cache(self):
+        store = mock.Mock()
+        store.snapshot.return_value = self._stub_payload()
+        handler = self._handler(store)
+        with mock.patch.object(
+                tokenserver, "get_snapshot",
+                return_value={"claudeWeekStale": True,
+                             "codexWeekStale": False}):
+            handler.do_GET()
+
+        handler._send.assert_called_once()
+        code, payload = handler._send.call_args.args
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["v"], 1)
+        self.assertEqual(payload["weeks"], 20)
+        self.assertIn("claude", payload)
+        self.assertIn("codex", payload)
+        self.assertTrue(payload["stale"])
+
+        store.snapshot.assert_called_once()
+        call_args = store.snapshot.call_args.args
+        self.assertEqual(call_args[1], {"claude": "max20x", "codex": "plus"})
+
+    def test_route_is_not_stale_when_both_quota_windows_are_live(self):
+        store = mock.Mock()
+        store.snapshot.return_value = self._stub_payload()
+        handler = self._handler(store)
+        with mock.patch.object(
+                tokenserver, "get_snapshot",
+                return_value={"claudeWeekStale": False,
+                             "codexWeekStale": False}):
+            handler.do_GET()
+
+        payload = handler._send.call_args.args[1]
+        self.assertFalse(payload["stale"])
+
+    def test_route_is_stale_when_only_codex_week_is_stale(self):
+        store = mock.Mock()
+        store.snapshot.return_value = self._stub_payload()
+        handler = self._handler(store)
+        with mock.patch.object(
+                tokenserver, "get_snapshot",
+                return_value={"claudeWeekStale": False,
+                             "codexWeekStale": True}):
+            handler.do_GET()
+
+        payload = handler._send.call_args.args[1]
+        self.assertTrue(payload["stale"])
+
+    def test_route_error_is_sanitized(self):
+        handler = self._handler(mock.Mock())
+        with mock.patch.object(
+                tokenserver, "get_snapshot",
+                side_effect=RuntimeError("/private/source/path secret")):
+            handler.do_GET()
+
+        handler._send.assert_called_once_with(
+            500, {"error": "internal server error"})
+
+    def test_root_listing_includes_max_tracker(self):
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        handler.path = "/"
+        handler.agent_status = mock.Mock()
+        handler._send = mock.Mock()
+
+        handler.do_GET()
+
+        payload = handler._send.call_args.args[1]
+        self.assertIn("/api/max-tracker", payload["endpoints"])
+
+
+class ArgumentParsingTests(unittest.TestCase):
+    def test_claude_plan_choices_reject_unknown_value(self):
+        parser = tokenserver._build_arg_parser()
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["--claude-plan", "not-a-real-plan"])
+
+    def test_codex_plan_choices_reject_unknown_value(self):
+        parser = tokenserver._build_arg_parser()
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["--codex-plan", "not-a-real-plan"])
+
+    def test_valid_plan_flags_are_accepted(self):
+        parser = tokenserver._build_arg_parser()
+        args = parser.parse_args(
+            ["--claude-plan", "max5x", "--codex-plan", "pro"])
+        self.assertEqual(args.claude_plan, "max5x")
+        self.assertEqual(args.codex_plan, "pro")
+
+    def test_plan_flags_default_to_none(self):
+        parser = tokenserver._build_arg_parser()
+        args = parser.parse_args([])
+        self.assertIsNone(args.claude_plan)
+        self.assertIsNone(args.codex_plan)
 
 
 if __name__ == "__main__":

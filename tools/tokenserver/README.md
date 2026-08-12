@@ -2,12 +2,16 @@
 
 > **English quickstart:** `python3 tokenserver.py` — pure Python 3 stdlib,
 > nothing to install. It reads your local Claude Code/Codex logs and serves
-> `/api/tokens` + `/api/agent-status` on port 8737 for the screen. Autostart
-> on login: `cp se.torget.tokenserver.plist ~/Library/LaunchAgents/ &&
-> launchctl load ~/Library/LaunchAgents/se.torget.tokenserver.plist` (edit
-> the path inside if the repo isn't at `~/Torget`). Privacy contract: only
-> percentages and counts are ever served; no prompts, commands or file
-> contents are stored. Full details below in Swedish — your agent translates.
+> `/api/tokens` + `/api/agent-status` + `/api/max-tracker` on port 8737 for
+> the screen. Add `--claude-plan {pro,max5x,max20x}` and/or `--codex-plan
+> {plus,pro}` to show a plan badge on the Max Tracker pages — both flags are
+> optional and purely cosmetic (a display label, never used in any
+> percentage math). Autostart on login: `cp se.torget.tokenserver.plist
+> ~/Library/LaunchAgents/ && launchctl load
+> ~/Library/LaunchAgents/se.torget.tokenserver.plist` (edit the path inside
+> if the repo isn't at `~/Torget`). Privacy contract: only percentages and
+> counts are ever served; no prompts, commands or file contents are stored.
+> Full details below in Swedish — your agent translates.
 
 Serverar Claude- och Codex-användningen som platt JSON enligt glance-
 mönstret (kontrakt v2). Skärmen hämtar `/api/tokens` över LAN var 30:e
@@ -148,6 +152,52 @@ Lokalt röktest från repots rot, på en alternativ port:
 ```
 python3 tools/tokenserver/tokenserver.py --port 8738
 curl http://127.0.0.1:8738/api/agent-status
+```
+
+## Max Tracker
+
+`/api/max-tracker` serverar kontrakt v1 för de två heatmap-sidorna: dagens
+kvot-topp per leverantör de senaste 20 ISO-veckorna, plus STREAK/MAX WEEKS/
+AVG PEAK/MAX DAYS-aggregat. Flaggorna `--claude-plan {pro,max5x,max20x}` och
+`--codex-plan {plus,pro}` är frivilliga och renderar bara en muted badge
+("PRO", "MAX 5X", "MAX 20X", "PLUS") i sidans hörn — ogiltiga värden avvisas
+direkt av argparse (`SystemExit`), och etiketten påverkar aldrig någon
+procenträkning.
+
+Data kommer från två oberoende kanaler i `tools/tokenserver/max_tracker.py`
+(`MaxTrackerStore`):
+
+- **Backfill**: en bakgrundstråd kör `backfill_step()` var 0,5:e sekund
+  (samma kadens som agentstatusens poll), obundet i tiden — den fortsätter
+  ticka för evigt istället för att stänga av sig efter att ha hunnit ikapp,
+  eftersom ett tomt steg bara läser filsystemets stat-info och därför är
+  billigt nog att köra hur ofta som helst; det gör att en helt ny rollout-
+  eller sessionsfil upptäcks automatiskt utan omstart. Codex-kvoten
+  rekonstrueras ur `~/.codex/sessions/**/rollout-*.jsonl`; Claude-kvoten är
+  inte rekonstruerbar i efterhand, så historiska Claude-dagar får bara
+  aktivitet och volymnivå, aldrig procent.
+- **Löpande observation**: samma ställen som redan publicerar en färsk,
+  icke-cachad, icke-`stale`-procent till `/api/tokens` (Claude-proben var
+  120:e sekund, Codex läsning via app-servern eller rollout-fallbacken, och
+  den befintliga dagsvolym-uppräkningen) matar också dagens topp här —
+  aldrig ett `*Stale: true`-värde ur kvotcachen. Sessionsfönstret (5 h,
+  300 min) och det generella veckofönstret (10 080 min) hålls isär enligt
+  samma >600-minutersregel som redan används för Claude/Codex-kvoterna;
+  Codex bär sitt fönster i klartext i egen data, Claude klassas på samma
+  sätt som `/api/tokens` redan gör det.
+
+Toppnivåfältet `stale` speglar exakt samma regel som `claudeWeekStale`/
+`codexWeekStale` ovan (ingen ny klocka) — sant när servern inte lyckats
+uppdatera den generella veckokvoten på sistone.
+
+Persistens: `~/Library/Application Support/VibePulse/max-tracker.json`,
+atomisk skrivning i läge 0600, 400 dagars gles retention. Sparningen körs
+asynkront på en egen bakgrundstråd som töms tills ingen ändring väntar —
+samma mönster som kvotcachens skrivare, fast med en enda sammanslagen
+sparning istället för en post i taget.
+
+```
+curl http://127.0.0.1:8738/api/max-tracker
 ```
 
 När Claude Desktop körs används dess färska processtoken utan dialog. Vid
