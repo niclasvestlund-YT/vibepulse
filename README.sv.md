@@ -1,5 +1,9 @@
 # Torget
 
+> Snabbstart och öppen källkods-README på engelska: [README.md](README.md).
+> Den här filen är den djupa dokumentationen — struktur, appkontraktet och
+> hårdvarufällorna.
+
 Appplattformen för hyllskärmen (Waveshare ESP32-S3-Touch-AMOLED-2.16,
 480×480). Torget äger den fysiska skärmen och producerar DEN enda
 firmware-binär som flashas; appar pluggar in som ESP-IDF-komponenter och

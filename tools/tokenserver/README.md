@@ -1,5 +1,14 @@
 # tokenserver — VibePulse Mac-tjänst
 
+> **English quickstart:** `python3 tokenserver.py` — pure Python 3 stdlib,
+> nothing to install. It reads your local Claude Code/Codex logs and serves
+> `/api/tokens` + `/api/agent-status` on port 8737 for the screen. Autostart
+> on login: `cp se.torget.tokenserver.plist ~/Library/LaunchAgents/ &&
+> launchctl load ~/Library/LaunchAgents/se.torget.tokenserver.plist` (edit
+> the path inside if the repo isn't at `~/Torget`). Privacy contract: only
+> percentages and counts are ever served; no prompts, commands or file
+> contents are stored. Full details below in Swedish — your agent translates.
+
 Serverar Claude- och Codex-användningen som platt JSON enligt glance-
 mönstret (kontrakt v2). Skärmen hämtar `/api/tokens` över LAN var 30:e
 sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
