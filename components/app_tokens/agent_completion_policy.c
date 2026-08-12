@@ -96,17 +96,15 @@ static uint8_t total_active(const tk_agent_snapshot *snapshot) {
 }
 
 static uint8_t same_state_count(const tk_agent_snapshot *snapshot,
-                                tk_agent_state state) {
+                                int provider, tk_agent_state state) {
   uint16_t count = 0;
   const tk_agent_provider_status *providers[TK_AGENT_PROVIDER_COUNT] = {
       &snapshot->claude,
       &snapshot->codex,
   };
-  for (int provider = 0; provider < TK_AGENT_PROVIDER_COUNT; provider++) {
-    for (uint8_t i = 0; i < bounded_job_count(providers[provider]); i++) {
-      const tk_agent_status *job = &providers[provider]->jobs[i];
-      if (job->event_id[0] && job->state == state) count++;
-    }
+  for (uint8_t i = 0; i < bounded_job_count(providers[provider]); i++) {
+    const tk_agent_status *job = &providers[provider]->jobs[i];
+    if (job->event_id[0] && job->state == state) count++;
   }
   return count > UINT8_MAX ? UINT8_MAX : (uint8_t)count;
 }
@@ -229,7 +227,8 @@ void tk_completion_queue_apply(tk_completion_queue *queue,
                     ? candidate_count : TK_COMPLETION_QUEUE_CAP;
   for (size_t i = 0; i < kept; i++) {
     copy_event(&reconciled[i], &candidates[i], active_count,
-               same_state_count(snapshot, candidates[i].job->state));
+               same_state_count(snapshot, candidates[i].provider,
+                                candidates[i].job->state));
   }
   memcpy(queue->events, reconciled, sizeof reconciled);
   queue->count = (uint8_t)kept;

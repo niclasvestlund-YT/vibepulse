@@ -26,6 +26,9 @@ from typing import Any, Callable, Dict, Optional
 
 
 LEASE_S = 120.0
+# Attention is a signal, not a todo list: even a genuine unanswered chat ages
+# out after two hours rather than remaining indefinitely actionable.
+WAITING_LEASE_S = 2 * 60 * 60
 POLL_S = 0.5
 PUBLIC_JOB_LIMIT = 4
 TRACKED_JOB_LIMIT = 16
@@ -413,7 +416,9 @@ class AgentStatusStore:
         age_s = max(0.0, now - record["observed_at"])
         state = record["state"]
         activity = record["activity"]
-        if state == "working" and age_s > LEASE_S:
+        if ((state == "working" and age_s > LEASE_S) or
+                (state in ("waiting", "error") and
+                 age_s > WAITING_LEASE_S)):
             state = "unknown"
             activity = None
         return {

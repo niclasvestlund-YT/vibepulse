@@ -116,6 +116,17 @@ int main(void) {
   nonworking.jobs[0].state = TK_AGENT_ERROR;
   check_header("one error job remains truthful without halo", &nonworking, 0,
                false, true, "1 CHAT ACTIVE", false);
+  check_header("error stays active at packet lease boundary", &nonworking,
+               TK_AGENT_WORKING_LEASE_MS, false, true, "1 CHAT ACTIVE", false);
+  check_header("error expires after packet lease", &nonworking,
+               TK_AGENT_WORKING_LEASE_MS + 1, false, true,
+               "NO ACTIVE CHAT", false);
+  nonworking.jobs[0].state = TK_AGENT_WAITING;
+  check_header("waiting stays active at packet lease boundary", &nonworking,
+               TK_AGENT_WORKING_LEASE_MS, false, true, "1 CHAT ACTIVE", false);
+  check_header("waiting expires after packet lease", &nonworking,
+               TK_AGENT_WORKING_LEASE_MS + 1, false, true,
+               "NO ACTIVE CHAT", false);
   nonworking.jobs[0].state = TK_AGENT_DONE;
   check_header("done alone is not an active chat", &nonworking, 0, false,
                true, "NO ACTIVE CHAT", false);

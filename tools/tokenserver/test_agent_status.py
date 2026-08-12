@@ -542,6 +542,41 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(first["seq"], 1)
         self.assertEqual(second["seq"], 1)
 
+    def test_waiting_and_error_attention_age_out_after_two_hours(self):
+        now = [agent_status.WAITING_LEASE_S]
+        store = AgentStatusStore(now=lambda: now[0])
+        waiting = Event("waiting", "waiting_input", "waiting", "source", None)
+        error = Event("error", None, "error", "source", None)
+        store.apply("claude", waiting, observed_at=0.0)
+        store.apply("claude", error, observed_at=0.0)
+
+        boundary = store.snapshot()
+        self.assertEqual(boundary["agents"]["claude"]["active_count"], 2)
+        self.assertEqual({job["state"] for job in provider_jobs(boundary, "claude")},
+                         {"waiting", "error"})
+        self.assertEqual(boundary["seq"], 2)
+
+        now[0] += 0.001
+        expired = store.snapshot()
+        self.assertEqual(expired["agents"]["claude"], {
+            "active_count": 0,
+            "jobs": [],
+        })
+        self.assertEqual(expired["seq"], 2)
+
+    def test_fresh_attention_observation_revives_aged_waiting_without_seq_change(self):
+        now = [agent_status.WAITING_LEASE_S + 1.0]
+        store = AgentStatusStore(now=lambda: now[0])
+        event = Event("waiting", "waiting_input", "task", "source", None)
+        store.apply("claude", event, observed_at=0.0)
+
+        self.assertEqual(store.snapshot()["agents"]["claude"]["jobs"], [])
+        self.assertFalse(store.apply("claude", event, observed_at=now[0]))
+        revived = store.snapshot()
+
+        self.assertEqual(self._job(revived, "claude")["state"], "waiting")
+        self.assertEqual(revived["seq"], 1)
+
     def test_snapshot_is_a_deep_copy(self):
         store = AgentStatusStore(now=lambda: 0.0)
         store.apply("claude", Event(
@@ -557,7 +592,7 @@ class StoreTests(unittest.TestCase):
         now = [-1.0]
         store = AgentStatusStore(now=lambda: now[0])
         store.apply("claude", Event(
-            "waiting", None, "task", "source", None), observed_at=0.0)
+            "done", None, "task", "source", None), observed_at=0.0)
         self.assertEqual(
             self._job(store.snapshot(), "claude")["updated_ms"], 0)
 

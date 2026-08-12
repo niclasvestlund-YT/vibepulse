@@ -6,9 +6,11 @@
 
 #include "agent_monitor_policy.h"
 
-static bool is_effectively_active(tk_agent_state state) {
-  return state == TK_AGENT_WORKING || state == TK_AGENT_WAITING ||
-         state == TK_AGENT_ERROR;
+static bool is_effectively_active(tk_agent_state state,
+                                  uint64_t packet_age_ms) {
+  if (state == TK_AGENT_WORKING) return true;
+  return (state == TK_AGENT_WAITING || state == TK_AGENT_ERROR) &&
+         packet_age_ms <= TK_AGENT_WORKING_LEASE_MS;
 }
 
 static void build_now_context(const tk_agent_status *working,
@@ -43,7 +45,7 @@ void usage_live_build_header(const tk_agent_provider_status *provider,
   for (uint8_t i = 0; i < job_count; i++) {
     tk_agent_state state =
         tk_agent_monitor_effective_state(&provider->jobs[i], packet_age_ms);
-    if (!is_effectively_active(state)) continue;
+    if (!is_effectively_active(state, packet_age_ms)) continue;
     active_count++;
     if (state == TK_AGENT_WORKING) working = &provider->jobs[i];
   }

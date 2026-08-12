@@ -100,19 +100,27 @@ static void test_non_attention_and_stale_events(void) {
   check("ignored first-snapshot event is remembered", current(&stale_queue) == NULL);
 }
 
-static void test_independent_waiting_and_counts(void) {
+static void test_independent_waiting_and_provider_counts(void) {
   tk_agent_snapshot snapshot = {0};
   add_job(&snapshot.claude, job(TK_AGENT_WAITING, "one", "One", 1));
-  add_job(&snapshot.codex, job(TK_AGENT_WAITING, "two", "Two", 2));
+  add_job(&snapshot.claude, job(TK_AGENT_WAITING, "two", "Two", 2));
+  add_job(&snapshot.codex, job(TK_AGENT_WAITING, "three", "Three", 3));
   tk_completion_queue queue = {0};
   tk_completion_queue_apply(&queue, &snapshot, 100);
-  check("same-state count spans both providers", current(&queue) &&
+  check("Claude waiting count excludes Codex", current(&queue) &&
         current(&queue)->same_state_count == 2);
   check("first waiting event is displayed", current(&queue) &&
         strcmp(current(&queue)->event_id, "one") == 0);
   tk_completion_queue_dismiss(&queue);
-  check("dismissing one waiting event reveals next", current(&queue) &&
+  check("second Claude waiting keeps provider count", current(&queue) &&
         strcmp(current(&queue)->event_id, "two") == 0);
+  check("second Claude waiting count excludes Codex", current(&queue) &&
+        current(&queue)->same_state_count == 2);
+  tk_completion_queue_dismiss(&queue);
+  check("dismissing Claude waitings reveals Codex", current(&queue) &&
+        strcmp(current(&queue)->event_id, "three") == 0);
+  check("Codex waiting count excludes Claude", current(&queue) &&
+        current(&queue)->same_state_count == 1);
 }
 
 static void test_reconciliation_and_transitions(void) {
@@ -346,7 +354,7 @@ int main(void) {
   test_priority_order();
   test_freshness_and_provider_tie_break();
   test_non_attention_and_stale_events();
-  test_independent_waiting_and_counts();
+  test_independent_waiting_and_provider_counts();
   test_reconciliation_and_transitions();
   test_state_transition_restarts_entry_phase();
   test_phases();
