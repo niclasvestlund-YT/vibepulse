@@ -589,6 +589,13 @@ static int run_vibepulse_static_qa(void) {
   tokens_apply_agent_status(&attention);
   dump_frame("vibepulse-codex-done-static");
   tk_agent_monitor_dismiss_current();
+
+  attention = static_attention_snapshot(
+      TK_AGENT_PROVIDER_CLAUDE, TK_AGENT_WAITING,
+      "capture-claude-swedish-project", "Räksmörgås");
+  tokens_apply_agent_status(&attention);
+  dump_frame("vibepulse-claude-swedish-project");
+  tk_agent_monitor_dismiss_current();
   return capture_failures == 0 ? 0 : 1;
 }
 

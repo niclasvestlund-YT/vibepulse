@@ -85,19 +85,6 @@ static lv_obj_t *create_codex_icon(lv_obj_t *parent,
   return group;
 }
 
-static void uppercase_project(const char *source, char *destination,
-                              size_t capacity) {
-  size_t index = 0;
-  if (!source) source = "";
-  while (source[index] && index + 1 < capacity) {
-    char byte = source[index];
-    destination[index] = (byte >= 'a' && byte <= 'z')
-                             ? (char)(byte - 'a' + 'A') : byte;
-    index++;
-  }
-  destination[index] = '\0';
-}
-
 static void render_completion(uint64_t now_ms) {
   const tk_completion_event *event =
       tk_completion_queue_current(&mon.queue);
@@ -127,7 +114,7 @@ static void render_completion(uint64_t now_ms) {
   }
 
   char project[TK_AGENT_PROJECT_CAP];
-  uppercase_project(event->project, project, sizeof project);
+  tk_agent_monitor_project_label(event->project, project, sizeof project);
   lv_label_set_text(mon.completion.project, project);
   lv_obj_set_style_text_color(mon.completion.project, accent, 0);
   if (project[0]) lv_obj_remove_flag(mon.completion.project,

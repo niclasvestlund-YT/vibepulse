@@ -49,6 +49,7 @@ EXPECTED_BMPS = {
     "torget-vibepulse-two-waiting-queued.bmp",
     "torget-vibepulse-claude-done-static.bmp",
     "torget-vibepulse-codex-done-static.bmp",
+    "torget-vibepulse-claude-swedish-project.bmp",
 }
 EXPECTED_PNGS = {
     f"{Path(name).stem.removeprefix('torget-')}.png"

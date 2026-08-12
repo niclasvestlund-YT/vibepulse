@@ -2,6 +2,7 @@
 #define AGENT_MONITOR_POLICY_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "agent_status.h"
@@ -30,6 +31,13 @@ uint8_t tk_agent_monitor_presence_mask(
 bool tk_agent_monitor_tick_should_render(bool has_snapshot, int selected,
                                          uint8_t rendered_presence_mask,
                                          uint8_t current_presence_mask);
+
+/* Display-safe project alphabet: ASCII A-Z, 0-9, space, '-', '.', '_',
+ * plus Swedish ÅÄÖ. ASCII and Swedish lowercase are uppercased; every other
+ * valid UTF-8 code point becomes '?'. Output is always NUL-terminated when
+ * capacity is nonzero and never ends with a partial UTF-8 sequence. */
+void tk_agent_monitor_project_label(const char *source, char *destination,
+                                    size_t capacity);
 
 void tk_agent_monitor_manual_choice_set(tk_agent_manual_choice *choice,
                                         int provider,

@@ -59,6 +59,7 @@ EXPECTED = {
     "torget-vibepulse-two-waiting-queued.bmp",
     "torget-vibepulse-claude-done-static.bmp",
     "torget-vibepulse-codex-done-static.bmp",
+    "torget-vibepulse-claude-swedish-project.bmp",
 }
 
 
@@ -371,6 +372,17 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                             claude_error.crop(title).tobytes())
         self.assertNotEqual(claude_error.crop((14, 31, 466, 390)).tobytes(),
                             codex_error.crop((14, 31, 466, 390)).tobytes())
+
+    def test_attention_project_renders_uppercase_swedish_glyphs(self):
+        image = self.image("torget-vibepulse-claude-swedish-project.bmp")
+        accent = (217, 119, 87)
+        project_pixels = [
+            (x, y) for y in range(321, 355) for x in range(20, 460)
+            if image.getpixel((x, y)) == accent
+        ]
+        self.assertGreater(len(project_pixels), 900)
+        self.assertEqual(min(y for _, y in project_pixels), 321)
+        self.assertEqual(max(y for _, y in project_pixels), 344)
 
 
 if __name__ == "__main__":

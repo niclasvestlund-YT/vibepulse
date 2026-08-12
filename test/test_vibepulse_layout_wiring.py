@@ -152,7 +152,7 @@ assert "conv SemiBold  16" in font_script and "plex_ui_16" in font_script
 
 for recipe, symbol in (
     ('conv SemiBold  18 "0x20,0x41-0x5A"', "plex_attention_18"),
-    ('conv SemiBold  25 "0x20-0x7E"', "plex_attention_25"),
+    ('conv SemiBold  25 "0x20,0x2D,0x2E,0x30-0x39,0x3F,0x41-0x5A,0x5F,0xC4,0xC5,0xD6"', "plex_attention_25"),
     ('conv Bold      52 "0x20,0x41-0x5A"', "plex_attention_52"),
 ):
     line = next((line for line in font_script.splitlines()
@@ -164,6 +164,9 @@ for path, symbol in attention_fonts:
     assert f"const lv_font_t {symbol}" in path.read_text(), (
         f"missing generated attention font symbol: {symbol}"
     )
+
+project_font_source = attention_fonts[1][0].read_text()
+assert "--range 0x20,0x2D,0x2E,0x30-0x39,0x3F,0x41-0x5A,0x5F,0xC4,0xC5,0xD6" in project_font_source
 
 assert "provider_lane" not in monitor
 assert "render_rail" not in monitor
@@ -195,6 +198,9 @@ for interaction in (
     "if (project[0])", "lv_obj_add_flag(mon.completion.project",
 ):
     assert interaction in monitor, f"missing safe attention behavior: {interaction}"
+
+assert "tk_agent_monitor_project_label" in monitor
+assert "uppercase_project" not in monitor
 
 assert "lv_obj_set_pos(view->outline, 8, 8);" in monitor
 assert "lv_obj_set_size(view->outline, 464, 464);" in monitor

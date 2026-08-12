@@ -24,6 +24,24 @@ static tk_agent_status agent(tk_agent_state state, uint32_t updated_ms,
 }
 
 int main(void) {
+  char project[TK_AGENT_PROJECT_CAP];
+  tk_agent_monitor_project_label("my-app 2", project, sizeof project);
+  check("ascii project alphabet uppercases deterministically",
+        strcmp(project, "MY-APP 2") == 0);
+  tk_agent_monitor_project_label("R\xC3\xA4ksm\xC3\xB6rg\xC3\xA5s",
+                                 project, sizeof project);
+  check("svenska projektbokstäver uppercases as UTF-8",
+        strcmp(project, "R\xC3\x84KSM\xC3\x96RG\xC3\x85S") == 0);
+  tk_agent_monitor_project_label("M\xC3\xBCnchen!", project,
+                                 sizeof project);
+  check("unsupported UTF-8 and punctuation use display-safe replacement",
+        strcmp(project, "M?NCHEN?") == 0);
+  char bounded[4] = {0};
+  tk_agent_monitor_project_label("\xC3\xA5\xC3\xA5", bounded,
+                                 sizeof bounded);
+  check("bounded project output never splits a UTF-8 glyph",
+        strcmp(bounded, "\xC3\x85") == 0);
+
   tk_agent_status agents[2] = {
       agent(TK_AGENT_WORKING, 50, "work-1"),
       agent(TK_AGENT_WAITING, 90, "wait-1"),
