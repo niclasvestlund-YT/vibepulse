@@ -45,7 +45,7 @@
 - Modify `components/app_tokens/usage_screen.c`: render source stale in the
   reserved header slot and suppress the working halo for stale quota.
 - Modify `tools/agent_assets/build-agent-images.py`: one composited I4 Codex
-  image at 180 and 32 px.
+  image at native 112 and 32 px.
 - Regenerate `components/app_tokens/agent_assets.h/.c`: remove separate Codex
   glyph descriptors.
 - Modify `tools/agent_assets/test_build_agent_images.py`: palette, silhouette,
@@ -160,6 +160,10 @@ spark = {"rate_limits": {
 Assert a newer Spark file cannot replace the 46% general weekly value; the
 scanner examines at most 20 newest files and the existing 1 MiB tail per file;
 freshness selects within the general identity; raw IDs are never returned.
+Accept `rate_limits` only from the expected rollout event envelope so quoted
+fixtures or tool output inside conversation content cannot become quota data.
+Missing `window_minutes` is unclassifiable, not a session limit. Hash stable
+source identity before constructing a `CachedQuota`.
 
 - [ ] **Step 2: Write failing provenance/cache integration tests**
 
@@ -180,6 +184,9 @@ inside the data service when no trusted label was ever observed. Also prove
 that a successful in-memory sample stops being classified as live immediately
 after the next scheduled source probe fails; it may only reappear through the
 cache with `stale: true`.
+Unknown named Claude buckets such as `7d_haiku` must not overwrite the general
+week bucket. Cached reset minutes are recomputed at serve time from the stored
+absolute reset timestamp. Stale samples are never written into usage history.
 
 - [ ] **Step 3: Run focused tests and verify RED**
 
@@ -258,6 +265,11 @@ check("missing Fable keeps stable page name",
       strcmp(page.quota.label, "FABLE · WEEK") == 0);
 ```
 
+Add hostile numeric cases for non-finite or greater-than-100 percentages,
+unbounded reset values before integer conversion, and fractional protocol
+versions. Increase the token response body cap to 2048 and keep a host payload
+headroom test in the full gate.
+
 - [ ] **Step 2: Run focused tests and verify RED**
 
 Run the parser and presenter commands already registered in `test/run.sh`.
@@ -285,7 +297,9 @@ else context = view.context;
 
 Pass `ui.stale || page->quota_stale` to the live-header policy so cached quota
 never shows a working halo. Preserve the existing context and halo render
-caches; add no per-tick label churn.
+caches. Route the final `LIVE`/`STALE`/`NO DATA` choice through the presenter,
+not three separate renderer policies, and add last-rendered-string guards to
+the 10 Hz volume labels so unchanged text causes no allocation/invalidation.
 
 - [ ] **Step 5: Verify and commit ESP provenance**
 
@@ -316,16 +330,18 @@ git commit -m "Render cached VibePulse quotas as stale"
 Replace the tuple contract with:
 
 ```python
-large = build.build_codex(180)
+large = build.build_codex(112)
 small = build.build_codex(32)
-self.assertEqual(len(large), 16 * 4 + 180 * 180 // 2)
+self.assertEqual(len(large), 16 * 4 + 112 * 112 // 2)
 self.assertEqual(len(small), 16 * 4 + 32 * 32 // 2)
-self.assertEqual(large, build.build_codex(180))
+self.assertEqual(large, build.build_codex(112))
 ```
 
 Decode I4 in the test and assert index zero transparency, one exact white
 palette entry, substantial blue and white pixels, non-rectangular alpha bounds,
-and no visible white plate at the canvas corners.
+no visible white plate or lavender fringe at the canvas corners, and no stretch
+API in either Codex render path. Run generator tests from the full host gate and
+verify regeneration produces no diff.
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
@@ -338,16 +354,18 @@ Expected: tuple/descriptor assertions fail with the existing three-layer asset.
 - [ ] **Step 3: Implement deterministic compositing**
 
 Derive the colored cloud bounding box and the two enclosed white terminal
-components from `codex-icon.png`. Compose them before scaling. Reserve I4 index
-zero for transparency and one exact palette entry for white; quantize cloud
-pixels deterministically into the remaining 14 entries. Emit only
-`tk_img_codex` and `tk_img_codex_32`.
+components from `codex-icon.png`. De-fringe the white plate, compose cloud and
+glyphs before alpha-aware high-quality scaling, and generate directly at 112
+and 32 px. Reserve I4 index zero for transparency and one exact palette entry
+for white; quantize cloud pixels deterministically into the remaining 14
+entries. Emit only `tk_img_codex` and `tk_img_codex_32`.
 
 - [ ] **Step 4: Regenerate and simplify LVGL renderers**
 
 Run the pinned generator. Replace both `create_codex_icon` layer loops with one
-`lv_image_create`, one source descriptor and no recolor. Keep the exact 112 ×
-112 attention box and 32 × 32 header box.
+`lv_image_create`, one source descriptor, no recolor and no stretch transform.
+Render the native 112 × 112 attention asset and native 32 × 32 header asset at
+1:1 in their exact boxes.
 
 - [ ] **Step 5: Verify generated scope and commit**
 
@@ -390,7 +408,8 @@ composited icon. Do not add animation checkpoints.
 
 Assert the 112 × 112 Codex icon has black corners, source-blue gradient, exact
 white terminal pixels, non-rectangular silhouette and no pixels outside the
-box. Assert stale/no-data text occupies the one reserved header slot and bars,
+box. Assert the 32 × 32 header asset independently has the same structural
+landmarks. Assert stale/no-data text occupies the one reserved header slot and bars,
 reset and delta never fabricate missing values.
 
 - [ ] **Step 4: Run the complete static verification matrix**
