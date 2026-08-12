@@ -438,6 +438,14 @@ static bool apply_today_bar(quota_page *page,
       quota->pct, quota->has_pct, quota->delta_pct, quota->has_delta,
       VP_CONTENT_W, &bar);
 
+  if (!available) {
+    lv_obj_add_flag(page->baseline_fill, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(page->today_fill, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_remove_flag(page->baseline_fill, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(page->today_fill, LV_OBJ_FLAG_HIDDEN);
+  }
+
   lv_obj_set_x(page->baseline_fill, 0);
   lv_obj_set_width(page->baseline_fill,
                    available && bar.has_today ? bar.baseline_px : 0);

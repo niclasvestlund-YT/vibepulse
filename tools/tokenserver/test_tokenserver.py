@@ -36,6 +36,39 @@ class StubHistory:
 
 
 class ClaudeLimitHeaderTests(unittest.TestCase):
+    def test_usage_endpoint_maps_active_fable_scope_without_guessing(self):
+        parsed = tokenserver._parse_usage_limits({
+            "limits": [
+                {"kind": "session", "percent": 2,
+                 "resets_at": "2026-08-12T16:00:00+00:00"},
+                {"kind": "weekly_all", "percent": 30,
+                 "resets_at": "2026-08-14T06:00:00+00:00"},
+                {"kind": "weekly_scoped", "percent": 41,
+                 "resets_at": "2026-08-14T06:00:00+00:00",
+                 "is_active": True,
+                 "scope": {"model": {"display_name": "Fable"}}},
+            ],
+        }, now_ts=1_786_531_200)
+
+        self.assertEqual(parsed["sessionPct"], 2.0)
+        self.assertEqual(parsed["weekPct"], 30.0)
+        self.assertEqual(parsed["modelPct"], 41.0)
+        self.assertEqual(parsed["modelLabel"], "FABLE · WEEK")
+        self.assertIn("modelIdentity", parsed)
+
+    def test_usage_endpoint_does_not_label_unknown_scoped_pool(self):
+        parsed = tokenserver._parse_usage_limits({
+            "limits": [{
+                "kind": "weekly_scoped", "percent": 41,
+                "resets_at": "2026-08-14T06:00:00+00:00",
+                "is_active": True,
+                "scope": {"model": {"display_name": "Future"}},
+            }],
+        }, now_ts=1_786_531_200)
+
+        self.assertNotIn("modelPct", parsed)
+        self.assertNotIn("modelLabel", parsed)
+
     def test_desktop_process_token_wins_over_expired_keychain_token(self):
         process_command = (
             "/Users/test/Library/Application Support/Claude/claude-code/"

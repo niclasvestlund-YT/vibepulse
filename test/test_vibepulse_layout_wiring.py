@@ -120,6 +120,10 @@ assert "usage_live_build_header" in refresh_header
 apply_today = source[source.index("static bool apply_today_bar"):]
 apply_today = apply_today[:apply_today.index("static void apply_quota")]
 assert "return available;" in apply_today
+assert "lv_obj_add_flag(page->baseline_fill, LV_OBJ_FLAG_HIDDEN)" in apply_today
+assert "lv_obj_add_flag(page->today_fill, LV_OBJ_FLAG_HIDDEN)" in apply_today
+assert "lv_obj_remove_flag(page->baseline_fill, LV_OBJ_FLAG_HIDDEN)" in apply_today
+assert "lv_obj_remove_flag(page->today_fill, LV_OBJ_FLAG_HIDDEN)" in apply_today
 apply_quota = source[source.index("static void apply_quota"):]
 apply_quota = apply_quota[:apply_quota.index("static void apply_forecast_row")]
 assert "bool bar_available = apply_today_bar(page, quota);" in apply_quota

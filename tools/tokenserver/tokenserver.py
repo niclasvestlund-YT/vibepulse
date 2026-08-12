@@ -419,6 +419,66 @@ def _parse_limit_headers(headers, now_ts):
     return found
 
 
+def _parse_usage_limits(body, now_ts):
+    """Map the read-only OAuth usage contract without inventing pool names."""
+    if not isinstance(body, dict) or not isinstance(body.get("limits"), list):
+        return {}
+    found = {}
+    model_labels = {
+        "fable": "FABLE · WEEK",
+        "opus": "OPUS · WEEK",
+        "sonnet": "SONNET · WEEK",
+    }
+    for limit in body["limits"]:
+        if not isinstance(limit, dict):
+            continue
+        kind = limit.get("kind")
+        pct = limit.get("percent")
+        reset_at = _parse_reset_at(limit.get("resets_at"), now_ts)
+        if (not isinstance(pct, (int, float)) or isinstance(pct, bool) or
+                not math.isfinite(pct) or not 0 <= pct <= 100 or
+                reset_at is None or reset_at <= now_ts):
+            continue
+        if kind == "session":
+            prefix = "session"
+        elif kind == "weekly_all":
+            prefix = "week"
+        elif kind == "weekly_scoped" and limit.get("is_active") is True:
+            scope = limit.get("scope")
+            model = scope.get("model") if isinstance(scope, dict) else None
+            display = (model.get("display_name")
+                       if isinstance(model, dict) else None)
+            normalized = display.strip().lower() if isinstance(display, str) else ""
+            if normalized not in model_labels:
+                continue
+            prefix = "model"
+            found["modelLabel"] = model_labels[normalized]
+        else:
+            continue
+        found[f"{prefix}Pct"] = round(float(pct), 1)
+        found[f"{prefix}ResetAt"] = reset_at
+        found[f"{prefix}ResetMin"] = max(
+            0, int(round((reset_at - now_ts) / 60)))
+        if prefix in {"week", "model"}:
+            scope_name = ("general_weekly" if prefix == "week"
+                          else "model_weekly")
+            found[f"{prefix}ObservedAt"] = int(now_ts)
+            found[f"{prefix}Identity"] = _quota_identity(
+                "claude", scope_name)
+    return found
+
+
+def _usage_request(token):
+    return urllib.request.Request(
+        "https://api.anthropic.com/api/oauth/usage",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": "claude-cli/2.1.227 (external, cli)",
+        },
+    )
+
+
 def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
@@ -433,6 +493,23 @@ def _probe_limits():
         _probe_status = (f"token_expired_"
                          f"{datetime.fromtimestamp(expires_at / 1000):%H:%M}")
         return None
+
+    # The read-only usage contract is the only observed source that names an
+    # active scoped weekly pool (for example Fable) and its reset explicitly.
+    try:
+        with urllib.request.urlopen(_usage_request(token), timeout=15) as resp:
+            usage = json.load(resp)
+        found = _parse_usage_limits(usage, time.time())
+        if "sessionPct" in found:
+            _probe_status = "usage_http_200 + ok"
+            _probe_headers = []
+            _probe_unknown_buckets = []
+            return found
+        _probe_status = "usage_http_200 + no_mapped_limits"
+    except urllib.error.HTTPError as error:
+        _probe_status = f"usage_http_{error.code}"
+    except Exception as error:
+        _probe_status = f"usage_request_failed: {type(error).__name__}"
 
     body = json.dumps({
         "model": "claude-haiku-4-5",  # billigaste proben; headrarna är desamma
