@@ -23,7 +23,7 @@
 static const char *TAG = "tokens";
 
 #define FETCH_EVERY_MS 30000
-#define BODY_MAX 1024
+#define BODY_MAX 2048
 
 #ifdef TK_TOKENS_URL
 
