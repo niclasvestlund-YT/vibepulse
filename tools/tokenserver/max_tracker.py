@@ -27,7 +27,17 @@ den blir aldrig en del av svaret, bara underlag för tercil-nivån.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import json
+import math
+import os
+import tempfile
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+if __package__:
+    from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
+else:  # direktkörning: python3 tools/tokenserver/max_tracker.py
+    from codex_rollout import codex_rollout_rate_limits, observation_timestamp
 
 
 PROVIDERS: tuple[str, ...] = ("claude", "codex")
@@ -255,3 +265,507 @@ def build_payload(state: dict, today: str,
         payload[provider] = provider_payload
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# MaxTrackerStore: backfill, ongoing rollup and persistence. Everything
+# above this line is pure (no IO, no clock); everything below owns the
+# durable ``state`` dict described in the module docstring plus the
+# filesystem scans that fill it in.
+
+def _local_date_str(ts: float) -> str:
+    """Epoch seconds -> the Mac's local calendar date, "YYYY-MM-DD".
+
+    Same day-boundary convention as the rest of tokenserver: the day is
+    whichever one it is on this machine's clock, never UTC's.
+    """
+    return datetime.fromtimestamp(ts).astimezone().date().isoformat()
+
+
+def _finite_pct(value) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and 0 <= value <= 100)
+
+
+def _finite_minutes(value) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value > 0)
+
+
+class MaxTrackerStore:
+    """Owns Max Tracker's durable state: backfill, live rollup, persistence.
+
+    Two independent channels feed the same per-provider ``days``/``weeks``
+    state that :func:`build_payload` (via :meth:`snapshot`) renders:
+
+    * **Backfill** (:meth:`backfill_step`) — a bounded, resumable forward
+      scan of ``codex_root`` (``rollout-*.jsonl``, for historical quota-%
+      peaks and week-maxed flags — Codex logs its own rate limits) and
+      ``claude_root`` (``*.jsonl`` usage records, for historical activity +
+      token volume only — Claude's quota-% is never reconstructible after
+      the fact, so those days keep ``pct: None`` forever).
+    * **Live rollup** (:meth:`observe_quota` / :meth:`observe_volume`) — the
+      immediate-freshness path a running probe uses for *today*.
+
+    ``observe_quota`` precondition (enforced by the CALLER, not here): every
+    call must be a genuinely fresh, live observation. A stale/cached quota
+    value must never reach this method — it would silently become a
+    day's recorded peak with no way to tell it apart from a real one. Task
+    6's endpoint wiring owns that filtering.
+    """
+
+    RETENTION_DAYS = 400
+    _GENERAL_WINDOW_MINUTES = 600  # Codex README rule: >600 min = the week
+    _BLOCK_BYTES = 64 * 1024
+    _MAX_RECORDS_PER_STEP = 256
+    _SCHEMA_VERSION = 1
+
+    def __init__(self, path: Path, codex_root: Path, claude_root: Path):
+        self.path = Path(path)
+        self.codex_root = Path(codex_root)
+        self.claude_root = Path(claude_root)
+        self._state = {provider: {"days": {}, "weeks": {}}
+                       for provider in PROVIDERS}
+        # Keyed by (inode, size) -- NEVER by path: a path under
+        # ~/.claude/projects encodes the project name, which the privacy
+        # contract forbids writing to disk. See _advance_one_file.
+        self._backfill = {provider: {} for provider in PROVIDERS}
+        self._load()
+
+    # -- live rollup ---------------------------------------------------
+
+    def observe_quota(self, provider: str, window_minutes: float | None,
+                      pct: float, ts: float) -> None:
+        """Roll one live quota observation into today's peak / this week.
+
+        ``window_minutes`` classifies the observation exactly like the
+        Codex README rule: absent/``None`` or <= 600 minutes is the primary
+        (session) window and bumps ``date(ts)``'s recorded peak percent up
+        to ``pct`` (never down -- only the day's maximum survives); a
+        numeric value > 600 minutes is the general weekly window, which
+        marks that ISO week maxed only when ``pct`` is exactly 100 (never
+        un-marks it otherwise -- once maxed, a week stays maxed).
+
+        Deliberately never marks a day active: this method is driven by a
+        fixed-cadence background probe that fires whether or not the user
+        did anything, so treating "we got a quota reading" as "coding
+        happened" would fabricate a streak. Activity comes only from
+        :meth:`observe_volume`.
+        """
+        if provider not in self._state or not _finite_pct(pct):
+            return
+        if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not math.isfinite(ts):
+            return
+        date_str = _local_date_str(ts)
+        bucket = self._state[provider]
+        if window_minutes is None:
+            self._bump_day_pct(bucket, date_str, pct)
+        elif _finite_minutes(window_minutes):
+            if window_minutes <= self._GENERAL_WINDOW_MINUTES:
+                self._bump_day_pct(bucket, date_str, pct)
+            elif pct >= 100:
+                bucket["weeks"][week_key(date_str)] = True
+        # else: garbage window_minutes -- ignore the observation entirely,
+        # never guess which window it meant.
+
+    @staticmethod
+    def _bump_day_pct(bucket: dict, date_str: str, pct: float) -> None:
+        day = bucket["days"].setdefault(date_str, {})
+        rounded = round(float(pct), 1)
+        current = day.get("pct")
+        if current is None or rounded > current:
+            day["pct"] = rounded
+
+    def observe_volume(self, provider: str, date_str: str, tokens: int) -> None:
+        """Add ``tokens`` of raw activity to ``date_str`` and mark it active.
+
+        Accumulates (does not overwrite): repeated calls for the same date
+        add up, matching how usage log records are naturally summed as they
+        are parsed. A zero (or invalid) amount is a pure no-op -- it never
+        fabricates activity for a day nothing actually happened on.
+        """
+        if provider not in self._state:
+            return
+        if (not isinstance(tokens, (int, float)) or isinstance(tokens, bool)
+                or not math.isfinite(tokens) or tokens <= 0):
+            return
+        try:
+            date.fromisoformat(date_str)
+        except (TypeError, ValueError):
+            return
+        day = self._state[provider]["days"].setdefault(date_str, {})
+        day["act"] = True
+        day["vol"] = int(day.get("vol") or 0) + int(tokens)
+
+    # -- backfill --------------------------------------------------------
+
+    def backfill_step(self, budget_bytes: int = 1_048_576) -> bool:
+        """Drain one bounded slice of historical backfill work.
+
+        Advances at most one not-yet-complete file per root (Codex, then
+        Claude), each capped at ``budget_bytes`` (default 1 MiB) or 256
+        records -- whichever comes first -- read in 64 KiB blocks. A file
+        already fully drained at its current (inode, size) is never
+        reopened. Returns True while there is more work to drain (call
+        again); False once both roots are fully caught up.
+        """
+        codex_more = self._advance_one_file(
+            "codex", self.codex_root, "**/rollout-*.jsonl",
+            budget_bytes, self._handle_codex_event)
+        claude_more = self._advance_one_file(
+            "claude", self.claude_root, "**/*.jsonl",
+            budget_bytes, self._handle_claude_event)
+        return codex_more or claude_more
+
+    def _advance_one_file(self, provider: str, root: Path, pattern: str,
+                          budget_bytes: int, handle_event) -> bool:
+        if not root.is_dir():
+            return False
+        bucket = self._backfill[provider]
+        try:
+            paths = sorted(root.glob(pattern))
+        except OSError:
+            return False
+
+        chosen = None
+        for path in paths:
+            try:
+                info = path.stat()
+            except OSError:
+                continue
+            identity = (info.st_ino, info.st_size)
+            entry = bucket.get(identity)
+            if entry is not None and entry.get("done"):
+                continue  # this exact (inode, size) was already drained
+            chosen = (path, identity, info, entry)
+            break
+        if chosen is None:
+            return False
+
+        path, identity, info, entry = chosen
+        start_offset = entry["offset"] if entry is not None else 0
+        new_offset = self._drain_file(
+            path, start_offset, budget_bytes, handle_event)
+        done = new_offset >= info.st_size
+        bucket[identity] = {"offset": new_offset, "done": done}
+        if not done:
+            return True
+
+        # This file just finished -- is any OTHER discovered file still
+        # incomplete? (Cheap dict lookups only; re-stat'ing here is fine,
+        # it never reads file content.)
+        for other in paths:
+            if other == path:
+                continue
+            try:
+                other_info = other.stat()
+            except OSError:
+                continue
+            other_identity = (other_info.st_ino, other_info.st_size)
+            other_entry = bucket.get(other_identity)
+            if not (other_entry and other_entry.get("done")):
+                return True
+        return False
+
+    def _drain_file(self, path: Path, start_offset: int, budget_bytes: int,
+                    handle_event) -> int:
+        """Parse complete JSON lines from ``start_offset`` forward, up to
+        ``budget_bytes`` (or 256 records), reading in 64 KiB blocks.
+
+        Returns the offset just past the last fully-consumed line -- always
+        a safe resume point, even mid-line, since a straddling trailing
+        fragment is simply left unconsumed for the next call to re-read.
+        """
+        offset = start_offset
+        records_seen = 0
+        bytes_read = 0
+        buf = b""
+        try:
+            with path.open("rb") as source:
+                source.seek(start_offset)
+                while (bytes_read < budget_bytes and
+                       records_seen < self._MAX_RECORDS_PER_STEP):
+                    chunk = source.read(
+                        min(self._BLOCK_BYTES, budget_bytes - bytes_read))
+                    if not chunk:
+                        break
+                    bytes_read += len(chunk)
+                    buf += chunk
+                    while records_seen < self._MAX_RECORDS_PER_STEP:
+                        newline = buf.find(b"\n")
+                        if newline < 0:
+                            break
+                        raw_line, buf = buf[:newline], buf[newline + 1:]
+                        offset += newline + 1
+                        records_seen += 1
+                        if raw_line.strip():
+                            try:
+                                event = json.loads(raw_line)
+                            except (json.JSONDecodeError, UnicodeDecodeError):
+                                event = None
+                            if event is not None:
+                                handle_event(event)
+        except OSError:
+            return start_offset
+        return offset
+
+    def _handle_codex_event(self, event) -> None:
+        rate_limits = codex_rollout_rate_limits(event)
+        if rate_limits is None:
+            return
+        limit_name = rate_limits.get("limit_name")
+        if limit_name is not None:
+            if not isinstance(limit_name, str) or limit_name:
+                return  # a named/scoped quota, not the plan's own general one
+        observed_at = (event.get("timestamp")
+                      if isinstance(event, dict) else None)
+        observed_at = observation_timestamp(observed_at)
+        if observed_at is None:
+            return
+        date_str = _local_date_str(observed_at)
+
+        found_any = False
+        for key in ("primary", "secondary"):
+            parsed = self._backfill_window(rate_limits.get(key))
+            if parsed is None:
+                continue
+            found_any = True
+            pct, window_minutes = parsed
+            if window_minutes <= self._GENERAL_WINDOW_MINUTES:
+                self._bump_day_pct(self._state["codex"], date_str, pct)
+            elif pct >= 100:
+                self._state["codex"]["weeks"][week_key(date_str)] = True
+        if found_any:
+            # A genuine rollout rate-limit snapshot is real evidence Codex
+            # was running that day -- unlike observe_quota's fixed-cadence
+            # probe, this only happens when a session actually produced one.
+            self._state["codex"]["days"].setdefault(
+                date_str, {})["act"] = True
+
+    @staticmethod
+    def _backfill_window(window):
+        """Validate one rate-limit window for historical backfill.
+
+        Deliberately does not check ``resets_at`` against "now" (unlike the
+        live probe's window validation) -- a backfilled window's reset time
+        is essentially always long past by the time we read it, and that
+        says nothing about whether the historical percent/window it
+        recorded was real.
+        """
+        if not isinstance(window, dict):
+            return None
+        pct = window.get("used_percent")
+        window_minutes = window.get("window_minutes")
+        if not _finite_pct(pct) or not _finite_minutes(window_minutes):
+            return None
+        return round(float(pct), 1), window_minutes
+
+    def _handle_claude_event(self, event) -> None:
+        """Feed one ``~/.claude/projects`` usage record into the day's
+        activity/volume total. Unlike tokenserver.py's own ``/api/tokens``
+        aggregate, this intentionally does not dedup resumed-session
+        message/request ids: the result only ever becomes a coarse 0-2
+        tercile level (:func:`volume_levels`), never a displayed number, so
+        an occasional duplicate cannot change what the user sees.
+        """
+        if not isinstance(event, dict):
+            return
+        usage = (event.get("message") or {}).get("usage")
+        ts_raw = event.get("timestamp")
+        if not usage or not isinstance(usage, dict) or not ts_raw:
+            return
+        try:
+            ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+        except ValueError:
+            return
+        tokens = (
+            (usage.get("input_tokens") or 0)
+            + (usage.get("output_tokens") or 0)
+            + (usage.get("cache_creation_input_tokens") or 0)
+            + (usage.get("cache_read_input_tokens") or 0))
+        if not isinstance(tokens, (int, float)) or tokens <= 0:
+            return
+        self.observe_volume("claude", ts.astimezone().date().isoformat(),
+                            tokens)
+
+    # -- output ------------------------------------------------------------
+
+    def snapshot(self, today: str, plans: dict) -> dict:
+        """Build the v1 Max Tracker contract dict for ``today``/``plans``.
+
+        A thin wrapper around :func:`build_payload`: feeds it this store's
+        FULL in-memory history (every aggregate needs the whole thing, not
+        just the visible window -- see the module docstring). ``stale`` is
+        always reported False here; this store has no notion of "the
+        server failed to refresh" to surface, so a future caller that needs
+        that must layer it on top of the returned dict.
+        """
+        state = {
+            provider: {
+                "days": {
+                    day: {
+                        "pct": record.get("pct"),
+                        "act": bool(record.get("act")),
+                        "vol": record.get("vol") or 0,
+                    }
+                    for day, record in self._state[provider]["days"].items()
+                },
+                "weeks": dict(self._state[provider]["weeks"]),
+            }
+            for provider in PROVIDERS
+        }
+        state["stale"] = False
+        return build_payload(state, today, plans)
+
+    # -- persistence ---------------------------------------------------
+
+    def _prune_retention(self) -> None:
+        cutoff = date.today() - timedelta(days=self.RETENTION_DAYS)
+        week_cutoff = cutoff - timedelta(days=7)
+        for provider in PROVIDERS:
+            days = self._state[provider]["days"]
+            for day in list(days):
+                try:
+                    stale = date.fromisoformat(day) < cutoff
+                except ValueError:
+                    stale = True  # corrupt key -- drop it defensively
+                if stale:
+                    del days[day]
+            weeks = self._state[provider]["weeks"]
+            for week in list(weeks):
+                try:
+                    monday = _week_key_to_monday(week)
+                except (ValueError, IndexError):
+                    del weeks[week]
+                    continue
+                if monday < week_cutoff:
+                    del weeks[week]
+
+    def _load(self) -> None:
+        try:
+            raw = self.path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(payload, dict):
+            return
+        for provider in PROVIDERS:
+            section = payload.get(provider)
+            if isinstance(section, dict):
+                self._load_provider(provider, section)
+
+    def _load_provider(self, provider: str, section: dict) -> None:
+        days_in = section.get("days")
+        if isinstance(days_in, dict):
+            days_out = self._state[provider]["days"]
+            for day, record in days_in.items():
+                try:
+                    date.fromisoformat(day)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                pct = record.get("pct")
+                act = bool(record.get("act"))
+                lvl = record.get("lvl")
+                out = {"act": act}
+                if _finite_pct(pct):
+                    out["pct"] = round(float(pct), 1)
+                if act and isinstance(lvl, int) and not isinstance(lvl, bool):
+                    out["vol"] = max(0, min(2, lvl))
+                days_out[day] = out
+
+        weeks_in = section.get("weeks")
+        if isinstance(weeks_in, dict):
+            weeks_out = self._state[provider]["weeks"]
+            for week, maxed in weeks_in.items():
+                if maxed:
+                    weeks_out[week] = True
+
+        backfill_in = section.get("backfill")
+        if isinstance(backfill_in, dict):
+            bucket = self._backfill[provider]
+            for key, entry in backfill_in.items():
+                identity = self._parse_backfill_key(key)
+                if identity is None or not isinstance(entry, dict):
+                    continue
+                offset = entry.get("offset")
+                done = entry.get("done")
+                if (isinstance(offset, int) and not isinstance(offset, bool)
+                        and offset >= 0 and isinstance(done, bool)):
+                    bucket[identity] = {"offset": offset, "done": done}
+
+    @staticmethod
+    def _parse_backfill_key(key):
+        if not isinstance(key, str) or ":" not in key:
+            return None
+        ino_str, _, size_str = key.partition(":")
+        if not ino_str.isdigit() or not size_str.isdigit():
+            return None
+        return int(ino_str), int(size_str)
+
+    def save(self) -> None:
+        """Persist state atomically: write a sibling ``.tmp``, then
+        ``os.replace`` it into place, mode 0600. Prunes anything older than
+        :data:`RETENTION_DAYS` first, and never serializes anything beyond
+        the ``{v, days: {pct, act, lvl}, weeks: bool, backfill}`` allowlist
+        per provider -- no prompts, commands, projects, models, file names
+        or raw log events, ever.
+        """
+        self._prune_retention()
+        payload = {provider: self._provider_payload(provider)
+                  for provider in PROVIDERS}
+        self._atomic_write(payload)
+
+    def _provider_payload(self, provider: str) -> dict:
+        bucket = self._state[provider]
+        volumes = {day: (record.get("vol") or 0)
+                  for day, record in bucket["days"].items()
+                  if record.get("act")}
+        levels = volume_levels(volumes)
+
+        days_out = {}
+        for day, record in bucket["days"].items():
+            act = bool(record.get("act"))
+            pct = record.get("pct")
+            days_out[day] = {
+                "pct": pct,
+                "act": act,
+                "lvl": levels.get(day, 0) if act else None,
+            }
+        weeks_out = {week: True for week, maxed in bucket["weeks"].items()
+                    if maxed}
+        backfill_out = {
+            f"{ino}:{size}": {"offset": entry["offset"],
+                              "done": bool(entry["done"])}
+            for (ino, size), entry in self._backfill[provider].items()
+        }
+        return {"v": self._SCHEMA_VERSION, "days": days_out,
+               "weeks": weeks_out, "backfill": backfill_out}
+
+    def _atomic_write(self, payload: dict) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=self.path.parent,
+                    prefix=f".{self.path.name}.", suffix=".tmp",
+                    delete=False) as stream:
+                temp_path = Path(stream.name)
+                os.chmod(temp_path, 0o600)
+                json.dump(payload, stream, ensure_ascii=False,
+                         separators=(",", ":"))
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, self.path)
+            temp_path = None
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass

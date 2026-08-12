@@ -50,10 +50,12 @@ from pathlib import Path
 
 if __package__:
     from .agent_status import AgentStatusService
+    from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from .quota_cache import CachedQuota, QuotaCache
     from .usage_history import Forecast, UsageHistory
 else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from agent_status import AgentStatusService
+    from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from quota_cache import CachedQuota, QuotaCache
     from usage_history import Forecast, UsageHistory
 
@@ -609,25 +611,12 @@ _last_codex_read = 0.0
 _codex_refreshing = False
 
 
-def _codex_rollout_rate_limits(obj):
-    """Accept only Codex's observed token-count rollout event envelope."""
-    if not isinstance(obj, dict) or obj.get("type") != "event_msg":
-        return None
-    payload = obj.get("payload")
-    if not isinstance(payload, dict) or payload.get("type") != "token_count":
-        return None
-    rate_limits = payload.get("rate_limits")
-    return rate_limits if isinstance(rate_limits, dict) else None
-
-
-def _observation_timestamp(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return int(parsed.timestamp())
-    except (ValueError, OverflowError):
-        return None
+# Moved to codex_rollout.py (a leaf module max_tracker.py's backfill can
+# import too, without the two modules ever importing each other): the
+# envelope-acceptance rule and timestamp parsing are re-exported here under
+# their original private names so every existing call site is unchanged.
+_codex_rollout_rate_limits = codex_rollout_rate_limits
+_observation_timestamp = observation_timestamp
 
 
 def _codex_window(win, now_ts):

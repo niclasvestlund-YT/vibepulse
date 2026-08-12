@@ -1,12 +1,18 @@
 import json
+import os
+import stat
+import tempfile
 import unittest
+from datetime import date, datetime
 from pathlib import Path
+from unittest import mock
 
 from tools.tokenserver.max_tracker import (
     AGGREGATE_MAX,
     PROVIDERS,
     WINDOW_DAYS,
     WINDOW_WEEKS,
+    MaxTrackerStore,
     build_payload,
     coding_streak,
     dense_window,
@@ -17,6 +23,490 @@ from tools.tokenserver.max_tracker import (
 
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "sim-fixtures"
+
+
+def _rollout_event(rate_limits, timestamp="2026-08-07T10:00:00Z"):
+    """Mirror test_tokenserver.py's CodexLimitLogTests._event fixture shape:
+    a real Codex rollout ``event_msg``/``token_count`` line."""
+    return {
+        "timestamp": timestamp,
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": None,
+            "rate_limits": rate_limits,
+        },
+    }
+
+
+def _rollout_limits(primary_pct=None, secondary_pct=None, *,
+                    primary_minutes=300, secondary_minutes=10080,
+                    limit_name=None, limit_id="synthetic"):
+    result = {"limit_id": limit_id}
+    if limit_name is not None:
+        result["limit_name"] = limit_name
+    if primary_pct is not None:
+        result["primary"] = {
+            "used_percent": primary_pct,
+            "window_minutes": primary_minutes,
+            "resets_at": 1_900_000_000,
+        }
+    if secondary_pct is not None:
+        result["secondary"] = {
+            "used_percent": secondary_pct,
+            "window_minutes": secondary_minutes,
+            "resets_at": 1_900_000_000,
+        }
+    return result
+
+
+def _write_jsonl(path, rows):
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows),
+                    encoding="utf-8")
+
+
+def _claude_usage_line(message_id, tokens, timestamp):
+    return {
+        "timestamp": timestamp,
+        "sessionId": "session-a",
+        "requestId": f"request-{message_id}",
+        "message": {"id": message_id, "usage": {"input_tokens": tokens}},
+    }
+
+
+def _new_store(directory, **kwargs):
+    codex_root = Path(directory) / "codex"
+    claude_root = Path(directory) / "claude"
+    codex_root.mkdir(exist_ok=True)
+    claude_root.mkdir(exist_ok=True)
+    path = kwargs.pop("path", Path(directory) / "max-tracker.json")
+    return MaxTrackerStore(path, codex_root, claude_root), codex_root, claude_root
+
+
+def _drain(store):
+    while store.backfill_step():
+        pass
+
+
+class MaxTrackerStoreCodexBackfillTests(unittest.TestCase):
+    def test_primary_window_percent_becomes_the_days_peak(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(primary_pct=42.0),
+                               "2026-08-07T10:00:00Z"),
+            ])
+
+            _drain(store)
+
+            payload = store.snapshot("2026-08-07", {})
+            self.assertEqual(payload["codex"]["avgPeakPct"], 42.0)
+
+    def test_secondary_window_marks_the_iso_week_maxed_only_at_100(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(secondary_pct=87.0),
+                               "2026-08-07T10:00:00Z"),
+                _rollout_event(_rollout_limits(secondary_pct=100.0),
+                               "2026-08-08T10:00:00Z"),
+            ])
+
+            _drain(store)
+
+            payload = store.snapshot("2026-08-08", {})
+            self.assertEqual(payload["codex"]["maxWeeks"], 1)
+
+    def test_only_the_expected_rollout_event_envelope_is_accepted(self):
+        limits = _rollout_limits(primary_pct=77.0)
+        impostors = [
+            {"rate_limits": limits},
+            {"type": "message", "payload": {"rate_limits": limits}},
+            {"type": "event_msg", "payload": {
+                "type": "message", "rate_limits": limits}},
+            {"type": "event_msg", "payload": {
+                "type": "token_count", "message": {"rate_limits": limits}}},
+            {"type": "event_msg", "payload": {
+                "type": "token_count",
+                "content": json.dumps({"rate_limits": limits})}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", impostors)
+
+            _drain(store)
+
+            payload = store.snapshot("2026-08-07", {})
+            self.assertIsNone(payload["codex"]["avgPeakPct"])
+            self.assertIsNone(payload["codingStreakDays"])
+
+    def test_named_scoped_quota_never_feeds_day_peak_or_week_maxed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(
+                    primary_pct=99.0, secondary_pct=100.0,
+                    limit_name="GPT-5.3-Codex-Spark"),
+                    "2026-08-07T10:00:00Z"),
+            ])
+
+            _drain(store)
+
+            payload = store.snapshot("2026-08-07", {})
+            self.assertIsNone(payload["codex"]["avgPeakPct"])
+            self.assertEqual(payload["codex"]["maxWeeks"], 0)
+
+    def test_empty_limit_name_still_counts_as_the_general_week(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(
+                    primary_pct=64.0, limit_name=""),
+                    "2026-08-07T10:00:00Z"),
+            ])
+
+            _drain(store)
+
+            self.assertEqual(
+                store.snapshot("2026-08-07", {})["codex"]["avgPeakPct"], 64.0)
+
+    def test_missing_codex_root_is_handled_without_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            codex_root.rmdir()
+
+            self.assertFalse(store.backfill_step())
+
+    def test_a_qualifying_backfilled_day_is_marked_active(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(primary_pct=10.0),
+                               "2026-08-07T10:00:00Z"),
+            ])
+
+            _drain(store)
+
+            self.assertIsNotNone(store.snapshot("2026-08-07", {})[
+                "codingStreakDays"])
+
+
+class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
+    def test_a_file_longer_than_the_budget_drains_over_two_steps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            first_row = _rollout_event(
+                _rollout_limits(primary_pct=10.0), "2026-08-01T10:00:00Z")
+            second_row = _rollout_event(
+                _rollout_limits(primary_pct=88.0), "2026-08-02T10:00:00Z")
+            path = codex_root / "rollout-a.jsonl"
+            _write_jsonl(path, [first_row, second_row])
+            first_line_bytes = len(json.dumps(first_row).encode("utf-8")) + 1
+            # Enough for the first complete line and a few stray bytes of
+            # the second, never enough to also finish it in one step.
+            budget = first_line_bytes + 2
+
+            first_more = store.backfill_step(budget_bytes=budget)
+
+            self.assertTrue(first_more)
+            self.assertEqual(
+                store.snapshot("2026-08-02", {})["codex"]["avgPeakPct"], 10.0)
+
+            second_more = store.backfill_step(budget_bytes=budget)
+
+            self.assertFalse(second_more)
+            self.assertEqual(
+                store.snapshot("2026-08-02", {})["codex"]["avgPeakPct"], 49.0)
+
+    def test_completed_file_is_never_reopened_on_a_later_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(primary_pct=10.0),
+                               "2026-08-07T10:00:00Z"),
+            ])
+            _drain(store)
+
+            with mock.patch.object(
+                    Path, "open",
+                    side_effect=AssertionError("must not reopen a "
+                                               "completed file")):
+                more = store.backfill_step()
+
+            self.assertFalse(more)
+
+    def test_backfill_state_is_keyed_by_inode_and_size_not_by_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(primary_pct=10.0),
+                               "2026-08-07T10:00:00Z"),
+            ])
+            _drain(store)
+
+            for key in store._backfill["codex"]:
+                self.assertIsInstance(key, tuple)
+                self.assertEqual(len(key), 2)
+                for part in key:
+                    self.assertIsInstance(part, int)
+
+
+class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
+    def test_claude_volume_backfill_sets_activity_and_volume_never_pct(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            _write_jsonl(claude_root / "session.jsonl", [
+                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
+                _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
+            ])
+
+            _drain(store)
+
+            day = store._state["claude"]["days"]["2026-08-07"]
+            self.assertTrue(day["act"])
+            self.assertEqual(day["vol"], 150)
+            self.assertIsNone(day.get("pct"))
+
+    def test_missing_claude_root_is_handled_without_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            claude_root.rmdir()
+
+            self.assertFalse(store.backfill_step())
+
+
+class MaxTrackerStoreLiveObserveQuotaTests(unittest.TestCase):
+    def test_primary_window_pct_becomes_the_days_peak_of_the_max_seen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            ts = datetime(2026, 8, 7, 12, 0).timestamp()
+
+            store.observe_quota("claude", 300, 40.0, ts)
+            store.observe_quota("claude", 300, 65.0, ts + 60)
+            store.observe_quota("claude", 300, 20.0, ts + 120)
+
+            self.assertEqual(
+                store.snapshot("2026-08-07", {})["claude"]["avgPeakPct"], 65.0)
+
+    def test_secondary_window_marks_the_week_maxed_only_at_100(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            ts = datetime(2026, 8, 7, 12, 0).timestamp()
+
+            store.observe_quota("claude", 10080, 87.0, ts)
+            self.assertEqual(
+                store.snapshot("2026-08-07", {})["claude"]["maxWeeks"], 0)
+
+            store.observe_quota("claude", 10080, 100.0, ts + 60)
+            self.assertEqual(
+                store.snapshot("2026-08-07", {})["claude"]["maxWeeks"], 1)
+
+    def test_none_window_minutes_is_treated_as_the_primary_session_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            ts = datetime(2026, 8, 7, 12, 0).timestamp()
+
+            store.observe_quota("codex", None, 55.0, ts)
+
+            self.assertEqual(
+                store.snapshot("2026-08-07", {})["codex"]["avgPeakPct"], 55.0)
+
+    def test_quota_observation_alone_never_marks_a_day_active(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            ts = datetime(2026, 8, 7, 12, 0).timestamp()
+
+            store.observe_quota("claude", 300, 40.0, ts)
+
+            self.assertIsNone(
+                store.snapshot("2026-08-07", {})["codingStreakDays"])
+
+    def test_out_of_range_pct_is_ignored_defensively(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            ts = datetime(2026, 8, 7, 12, 0).timestamp()
+
+            store.observe_quota("claude", 300, 140.0, ts)
+            store.observe_quota("claude", 300, -5.0, ts)
+            store.observe_quota("nonexistent-provider", 300, 50.0, ts)
+
+            self.assertIsNone(
+                store.snapshot("2026-08-07", {})["claude"]["avgPeakPct"])
+
+
+class MaxTrackerStoreObserveVolumeTests(unittest.TestCase):
+    def test_tokens_accumulate_and_mark_the_day_active(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+
+            store.observe_volume("claude", "2026-08-07", 100)
+            store.observe_volume("claude", "2026-08-07", 50)
+
+            day = store._state["claude"]["days"]["2026-08-07"]
+            self.assertEqual(day["vol"], 150)
+            self.assertTrue(day["act"])
+
+    def test_zero_tokens_never_fabricates_activity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+
+            store.observe_volume("claude", "2026-08-07", 0)
+
+            self.assertNotIn(
+                "2026-08-07", store._state["claude"]["days"])
+
+    def test_invalid_date_string_is_ignored_defensively(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+
+            store.observe_volume("claude", "not-a-date", 100)
+
+            self.assertNotIn(
+                "not-a-date", store._state["claude"]["days"])
+
+
+class MaxTrackerStoreSnapshotTests(unittest.TestCase):
+    def test_snapshot_matches_build_payload_over_the_same_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            store.observe_volume("claude", "2026-08-01", 400)
+            store.observe_quota("codex", 300, 71.0,
+                                datetime(2026, 8, 12, 9, 0).timestamp())
+
+            payload = store.snapshot("2026-08-12", {"claude": "max20x"})
+
+            expected_state = {
+                "claude": {"days": {"2026-08-01": {
+                    "pct": None, "act": True, "vol": 400}}, "weeks": {}},
+                "codex": {"days": {"2026-08-12": {
+                    "pct": 71.0, "act": False, "vol": 0}}, "weeks": {}},
+                "stale": False,
+            }
+            self.assertEqual(
+                payload, build_payload(
+                    expected_state, "2026-08-12", {"claude": "max20x"}))
+
+    def test_snapshot_defaults_stale_to_false(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+
+            payload = store.snapshot("2026-08-12", {})
+
+            self.assertFalse(payload["stale"])
+
+
+class MaxTrackerStorePersistenceTests(unittest.TestCase):
+    def test_save_is_atomic_leaves_no_tmp_files_and_sets_mode_0600(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "max-tracker.json"
+            store, _, _ = _new_store(directory, path=path)
+            store.observe_volume("claude", "2026-08-07", 400)
+
+            store.save()
+
+            self.assertTrue(path.exists())
+            leftovers = [p for p in path.parent.iterdir() if p != path]
+            self.assertEqual(leftovers, [])
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_reloaded_store_produces_an_identical_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            store.observe_volume("claude", "2026-08-07", 400)
+            store.observe_quota("codex", 10080, 100.0,
+                                datetime(2026, 8, 6, 9, 0).timestamp())
+            store.observe_quota("claude", 300, 33.0,
+                                datetime(2026, 8, 7, 9, 0).timestamp())
+
+            store.save()
+            reloaded = MaxTrackerStore(path, codex_root, claude_root)
+
+            self.assertEqual(
+                reloaded.snapshot("2026-08-07", {}),
+                store.snapshot("2026-08-07", {}))
+
+    def test_reload_of_a_missing_file_starts_empty_without_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+
+            payload = store.snapshot("2026-08-07", {})
+
+            self.assertIsNone(payload["codingStreakDays"])
+
+    def test_days_older_than_the_retention_window_are_pruned_on_save(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            store.observe_volume("claude", "2000-01-01", 500)
+            recent = date.today().isoformat()
+            store.observe_volume("claude", recent, 500)
+
+            store.save()
+            reloaded = MaxTrackerStore(path, codex_root, claude_root)
+
+            self.assertNotIn("2000-01-01", reloaded._state["claude"]["days"])
+            self.assertIn(recent, reloaded._state["claude"]["days"])
+
+
+class MaxTrackerStorePrivacySchemaTests(unittest.TestCase):
+    """Schema-walker: the persisted file must never carry anything beyond
+    the {v, days:{pct,act,lvl}, weeks: bool, backfill} allowlist -- no
+    prompts, commands, projects, models, file names or raw log events."""
+
+    def test_persisted_json_contains_no_keys_outside_the_allowlist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(
+                    primary_pct=61.0, secondary_pct=100.0),
+                    "2026-08-01T10:00:00Z"),
+            ])
+            _write_jsonl(claude_root / "session.jsonl", [
+                _claude_usage_line("m1", 500, "2026-08-02T10:00:00Z"),
+            ])
+            _drain(store)
+            store.observe_quota("claude", 300, 55.0,
+                                datetime(2026, 8, 3, 9, 0).timestamp())
+            store.observe_quota("claude", 10080, 100.0,
+                                datetime(2026, 8, 3, 9, 0).timestamp())
+
+            store.save()
+            raw = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(set(raw), set(PROVIDERS))
+        for provider in PROVIDERS:
+            section = raw[provider]
+            self.assertLessEqual(set(section), {"v", "days", "weeks",
+                                                 "backfill"})
+            for day, record in section["days"].items():
+                date.fromisoformat(day)
+                self.assertLessEqual(set(record), {"pct", "act", "lvl"})
+            for week, value in section["weeks"].items():
+                self.assertRegex(week, r"^\d{4}-W\d{2}$")
+                self.assertIsInstance(value, bool)
+            serialized_backfill = json.dumps(section["backfill"])
+            self.assertNotIn(str(codex_root), serialized_backfill)
+            self.assertNotIn(str(claude_root), serialized_backfill)
+            self.assertNotIn("rollout-a", serialized_backfill)
+            self.assertNotIn("session.jsonl", serialized_backfill)
+
+    def test_backfill_bookkeeping_keys_are_plain_numeric_strings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [
+                _rollout_event(_rollout_limits(primary_pct=10.0),
+                               "2026-08-01T10:00:00Z"),
+            ])
+            _drain(store)
+
+            store.save()
+            raw = json.loads(path.read_text(encoding="utf-8"))
+
+        for key in raw["codex"]["backfill"]:
+            self.assertRegex(key, r"^\d+:\d+$")
 
 
 def _load_fixture(name: str) -> dict:
