@@ -151,6 +151,12 @@ before any hardware-dependent work.
 
 MIT © Niclas Vestlund
 
+The "Claude" and "Codex" names and icons belong to Anthropic and OpenAI.
+They appear here only to identify which provider a number belongs to, they
+are not covered by the MIT license, and they will be removed on request.
+The IBM Plex fonts are used under the SIL Open Font License
+([platform/fonts/LICENSE-OFL.txt](platform/fonts/LICENSE-OFL.txt)).
+
 This is my first open source release. Issues and PRs are very welcome, and
 if VibePulse ends up on your shelf, a ⭐ helps others find it.
 
