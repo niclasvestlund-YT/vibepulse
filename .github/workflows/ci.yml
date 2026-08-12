@@ -1,0 +1,50 @@
+# CI: the two lanes that are rock solid on headless runners.
+# Lane 3 (the full host gate incl. SDL landmark captures) needs display
+# plumbing on CI and is tracked as a follow-up issue.
+name: CI
+
+on:
+  push:
+    branches: [main, worktree-max-tracker]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tokenserver:
+    name: Tokenserver tests (Python stdlib)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run tokenserver unit tests
+        run: |
+          python -m unittest \
+            tools.tokenserver.test_tokenserver \
+            tools.tokenserver.test_agent_status \
+            tools.tokenserver.test_usage_history \
+            tools.tokenserver.test_quota_cache \
+            tools.tokenserver.test_max_tracker -v
+
+  firmware:
+    name: ESP32-S3 firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # CI has no real WiFi or LAN service: empty example values compile,
+      # and undefined VibePulse URLs simply disable the fetch tasks.
+      - name: Create CI secrets.h from the example
+        run: cp secrets.h.example secrets.h
+      - name: Build with ESP-IDF 5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.2
+          target: esp32s3
+          command: idf.py build

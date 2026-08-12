@@ -1,17 +1,17 @@
 # tokenserver — VibePulse Mac-tjänst
 
-> **English quickstart:** `python3 tokenserver.py` — pure Python 3 stdlib,
+> **English quickstart:** `python3 tokenserver.py`. Pure Python 3 stdlib,
 > nothing to install. It reads your local Claude Code/Codex logs and serves
 > `/api/tokens` + `/api/agent-status` + `/api/max-tracker` on port 8737 for
 > the screen. Add `--claude-plan {pro,max5x,max20x}` and/or `--codex-plan
-> {plus,pro}` to show a plan badge on the Max Tracker pages — both flags are
+> {plus,pro}` to show a plan badge on the Max Tracker pages; both flags are
 > optional and purely cosmetic (a display label, never used in any
 > percentage math). Autostart on login: `cp se.torget.tokenserver.plist
 > ~/Library/LaunchAgents/ && launchctl load
 > ~/Library/LaunchAgents/se.torget.tokenserver.plist` (edit the path inside
 > if the repo isn't at `~/Torget`). Privacy contract: only percentages and
 > counts are ever served; no prompts, commands or file contents are stored.
-> Full details below in Swedish — your agent translates.
+> Full details below in Swedish. Your agent translates.
 
 Serverar Claude- och Codex-användningen som platt JSON enligt glance-
 mönstret (kontrakt v2). Skärmen hämtar `/api/tokens` över LAN var 30:e
