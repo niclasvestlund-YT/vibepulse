@@ -154,12 +154,12 @@ static bool raw_string_has_nul_escape(const char *json, size_t start,
   return false;
 }
 
-static void optional_label(const cJSON *root, const char *json,
-                           size_t json_length, const char *key, char *out,
-                           size_t capacity, int *has_out) {
+static void optional_label(const cJSON *root, bool trust_strings,
+                           const char *key, char *out, size_t capacity,
+                           int *has_out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
   if (!cJSON_IsString(item) || !item->valuestring) return;
-  if (raw_string_has_nul_escape(json, 0, json_length)) return;
+  if (!trust_strings) return;
   const unsigned char *source = (const unsigned char *)item->valuestring;
   size_t length = 0;
   if (!valid_utf8_label(source, capacity, &length)) return;
@@ -181,7 +181,7 @@ static bool optional_integer(const cJSON *root, const char *key,
 }
 
 static void optional_forecast(const cJSON *root, const char *prefix,
-                              tk_forecast *out) {
+                              bool trust_strings, tk_forecast *out) {
   char state_key[40];
   char pct_key[48];
   char pace_key[48];
@@ -194,7 +194,7 @@ static void optional_forecast(const cJSON *root, const char *prefix,
   snprintf(offset_key, sizeof offset_key, "%sForecastOffsetMin", prefix);
 
   const cJSON *state = cJSON_GetObjectItemCaseSensitive(root, state_key);
-  if (!cJSON_IsString(state) || !state->valuestring) return;
+  if (!trust_strings || !cJSON_IsString(state) || !state->valuestring) return;
   if (strcmp(state->valuestring, "collecting") == 0) {
     out->state = TK_FORECAST_COLLECTING;
     return;
@@ -238,6 +238,7 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
   bool ok = false;
   tk_tokens t = {0};
   double v = 0, day = 0, per_hour = 0, sessions = 0, month = 0;
+  bool trust_optional_strings = !raw_string_has_nul_escape(json, 0, len);
 
   /* Tjänstens felform ({"error": "..."}) parsar fint som JSON — avvisa den
    * per kontrakt, inte av misstag. */
@@ -265,7 +266,7 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
                       &t.claude_model_week)) goto done;
   if (!optional_stale(root, "codexWeekStale", &t.codex_week)) goto done;
 
-  optional_label(root, json, len, "claudeModelWeekLabel",
+  optional_label(root, trust_optional_strings, "claudeModelWeekLabel",
                  t.claude_model_week_label,
                  sizeof t.claude_model_week_label,
                  &t.has_claude_model_week_label);
@@ -281,8 +282,10 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
   optional_nonnegative_number(
       root, "codexWeekTodayDeltaPct", 100,
       &t.codex_week.delta_pct, &t.codex_week.has_delta);
-  optional_forecast(root, "claude", &t.claude_forecast);
-  optional_forecast(root, "codex", &t.codex_forecast);
+  optional_forecast(root, "claude", trust_optional_strings,
+                    &t.claude_forecast);
+  optional_forecast(root, "codex", trust_optional_strings,
+                    &t.codex_forecast);
 
   /* Inget på den här mätaren kan ärligt vara negativt — ett minustecken är
    * en lögn med ett stavfel (samma regel som sv_group_ll). */

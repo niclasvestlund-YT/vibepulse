@@ -212,6 +212,17 @@ int main(void) {
               "\"claudeModelWeekLabel\":\"GOOD\\\\u0000BAD\"}", &t) &&
               t.has_claude_model_week_label &&
               strcmp(t.claude_model_week_label, "GOOD\\u0000BAD") == 0);
+  check("NUL-trunkerad prognosstatus ignoreras",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeForecastState\":\"collecting\\u0000BAD\"}", &t) &&
+              t.day_tokens == 1 &&
+              t.claude_forecast.state == TK_FORECAST_UNAVAILABLE);
+  check("literal backslash i prognosstatus matchar inte collecting",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeForecastState\":\"collecting\\\\u0000BAD\"}", &t) &&
+              t.claude_forecast.state == TK_FORECAST_UNAVAILABLE);
   check("Unicode-kontrolltecken i valfri etikett ignoreras",
         PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
