@@ -127,8 +127,10 @@ date strings on the wire — index position alone carries the day).
 
 - Fixtures: `max-tracker-full.json` (Codex 20 weeks, reds in maxed weeks),
   `max-tracker-coldstart.json` (Claude gray gradient + 5 colored days),
-  `max-tracker-empty.json` (all absent), `max-tracker-hostile.json`
-  (parser tests only: wrong types, >100 pct, bad dates, giant arrays).
+  `max-tracker-empty.json` (all absent). Hostile cases (wrong types, >100
+  pct, bad dates, giant arrays, duplicate keys, truncated JSON) live as
+  inline JSON string literals in `test/test_max_tracker_parse.c`, not a
+  fixture file — same pattern as the tokens and agent-status parser tests.
 - Sim key `M` feeds the next tracker fixture; `[`/`]` paging already covers
   the new views. Tour dumps `vibepulse-tracker-claude` and
   `vibepulse-tracker-codex`; static QA adds stale + empty states.

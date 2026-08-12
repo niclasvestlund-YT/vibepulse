@@ -34,7 +34,7 @@ components/
   torget_fmt/             sv-SE-formatering, hosttestad
   torget_ticker/          den lokala tickern, hosttestad
   app_solelkollen/        app 1: fyra vyer, /api/glance + /api/glance-sverige
-  app_tokens/             app 2: VibePulse (agentstatus + Claude/Codex-usage)
+  app_tokens/             app 2: VibePulse (agentstatus, Claude/Codex-usage + Max Tracker-heatmap)
 ~/Buddy/components/
   app_buddy/              app 3: Vibbe/Buddy, companion build input
 sim/                      SDL-simulatorn: hela plattformen + apparna på Macen
@@ -94,7 +94,8 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 ```
 
 Tangent 1-4 väljer Solelkollen-fixtur, T matar om VibePulse-usage, S cyklar
-agentstatus, N växlar app (KEY3-knappens bänkmotsvarighet), L öppnar launchern (långtryck med
+agentstatus, M cyklar Max Tracker-fixtur (Claude- och Codex-sidorna, två av
+VibePulse-vyns sex sidor), N växlar app (KEY3-knappens bänkmotsvarighet), L öppnar launchern (långtryck med
 musen fungerar också — det är enhetens gest). På enheten växlar KEY3
 (GPIO18) app med ett tryck.
 En obevakad körning BMP-dumpar vyerna för Solelkollen, VibePulse och

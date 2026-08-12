@@ -86,11 +86,14 @@ static void set_dash(tk_mt_tile *tile) {
 }
 
 /* Formaterar ett ärligt heltal (aldrig ett streck). Klampas defensivt till
- * >= 0 — parsern begränsar redan aggregaten till [0,999], men
- * presentatorn ska ändå aldrig visa ett negativt tal om något uppströms
- * ändå bryter kontraktet. */
+ * [0,999] — parsern begränsar redan aggregaten till samma intervall
+ * (TK_MT_AGGREGATE_MAX), men presentatorn ska ändå aldrig kunna skriva ett
+ * tal utanför det intervallet till den lilla buffertn om något uppströms
+ * ändå bryter kontraktet. Övre klampen håller dessutom snprintf-bredden
+ * bevisbart inom tile->value (8 byte) för kompilatorn. */
 static void set_int(tk_mt_tile *tile, int value, const char *unit) {
   if (value < 0) value = 0;
+  else if (value > 999) value = 999;
   snprintf(tile->value, sizeof tile->value, "%d", value);
   snprintf(tile->unit, sizeof tile->unit, "%s", unit);
 }

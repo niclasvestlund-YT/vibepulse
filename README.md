@@ -79,6 +79,8 @@ a simulator frame.
   waiting for your input. Tap to dismiss.
 - **Burn rate** — a forecast per provider: on pace, running out early (and
   when), or how much head-room is left at reset.
+- **Max Tracker** — a GitHub-style daily quota heatmap with streaks; per
+  provider.
 
 ## Privacy
 
