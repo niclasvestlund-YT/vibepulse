@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,30 @@ def decode_i4(data, size):
 
 
 class AgentAssetTests(unittest.TestCase):
+    def test_checked_in_generated_sources_match_exactly(self):
+        header, source = build.render_generated_sources()
+
+        self.assertEqual(
+            header,
+            (build.ROOT / "components/app_tokens/agent_assets.h").read_text(
+                encoding="utf-8"
+            ),
+        )
+        self.assertEqual(
+            source,
+            (build.ROOT / "components/app_tokens/agent_assets.c").read_text(
+                encoding="utf-8"
+            ),
+        )
+
+    def test_generated_source_drift_is_detected(self):
+        header, source = build.render_generated_sources()
+        with tempfile.TemporaryDirectory() as directory:
+            generated = Path(directory) / "agent_assets.c"
+            generated.write_text(source + "/* hand edit */\n", encoding="utf-8")
+
+            self.assertNotEqual(source, generated.read_text(encoding="utf-8"))
+
     def test_claude_small_asset_is_exactly_32_by_32_a8(self):
         data = build.build_claude(32)
 

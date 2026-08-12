@@ -181,12 +181,12 @@ def descriptor(name: str, data_name: str, color_format: str, stride: int,
 """
 
 
-def main() -> None:
+def render_generated_sources() -> tuple[str, str]:
     claude = build_claude()
     codex = build_codex(112)
     claude_32 = build_claude(32)
     codex_32 = build_codex(32)
-    OUT_H.write_text("""#ifndef AGENT_ASSETS_H
+    header = """#ifndef AGENT_ASSETS_H
 #define AGENT_ASSETS_H
 
 #include "lvgl.h"
@@ -197,7 +197,7 @@ extern const lv_image_dsc_t tk_img_claude_32;
 extern const lv_image_dsc_t tk_img_codex_32;
 
 #endif
-""", encoding="utf-8")
+"""
     source = "#include \"agent_assets.h\"\n\n"
     source += c_array("tk_img_claude_data", claude)
     source += c_array("tk_img_codex_data", codex)
@@ -212,6 +212,12 @@ extern const lv_image_dsc_t tk_img_codex_32;
                          "LV_COLOR_FORMAT_A8", 32, len(claude_32), 32)
     source += descriptor("tk_img_codex_32", "tk_img_codex_32_data",
                          "LV_COLOR_FORMAT_I4", 16, len(codex_32), 32)
+    return header, source
+
+
+def main() -> None:
+    header, source = render_generated_sources()
+    OUT_H.write_text(header, encoding="utf-8")
     OUT_C.write_text(source, encoding="utf-8")
 
 
