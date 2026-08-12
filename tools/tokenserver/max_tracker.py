@@ -405,9 +405,12 @@ class MaxTrackerStore:
         Advances at most one not-yet-complete file per root (Codex, then
         Claude), each capped at ``budget_bytes`` (default 1 MiB) or 256
         records -- whichever comes first -- read in 64 KiB blocks. A file
-        already fully drained at its current (inode, size) is never
-        reopened. Returns True while there is more work to drain (call
-        again); False once both roots are fully caught up.
+        already fully drained at its current size is never reopened; one
+        that has since GROWN (still being appended to) resumes from the
+        offset already recorded for its inode rather than rescanning from
+        the start, so already-counted volume is never double-counted.
+        Returns True while there is more work to drain (call again); False
+        once both roots are fully caught up.
         """
         codex_more = self._advance_one_file(
             "codex", self.codex_root, "**/rollout-*.jsonl",
@@ -433,21 +436,34 @@ class MaxTrackerStore:
                 info = path.stat()
             except OSError:
                 continue
-            identity = (info.st_ino, info.st_size)
-            entry = bucket.get(identity)
-            if entry is not None and entry.get("done"):
-                continue  # this exact (inode, size) was already drained
-            chosen = (path, identity, info, entry)
+            entry = bucket.get(info.st_ino)
+            if self._is_fully_drained(entry, info):
+                continue  # this inode was already drained at this size
+            chosen = (path, info, entry)
             break
         if chosen is None:
             return False
 
-        path, identity, info, entry = chosen
-        start_offset = entry["offset"] if entry is not None else 0
+        path, info, entry = chosen
+        if entry is None or entry.get("size", 0) > info.st_size:
+            # Brand-new inode, or the file at this inode got SMALLER since
+            # we last looked (truncated/rewritten in place) -- not safe to
+            # resume mid-file, so start over. Every downstream effect this
+            # scan produces (day-peak = max, week-maxed = OR-in True,
+            # volume = sum) stays correct under a full replay; only a
+            # shrink can make a stored offset point past real content.
+            start_offset = 0
+        else:
+            # Same inode, same or LARGER size (the normal "still being
+            # appended to" case) -- resume exactly where the last call left
+            # off instead of rescanning from 0, which would otherwise
+            # double-count every already-drained record on each growth.
+            start_offset = entry.get("offset", 0)
         new_offset = self._drain_file(
             path, start_offset, budget_bytes, handle_event)
         done = new_offset >= info.st_size
-        bucket[identity] = {"offset": new_offset, "done": done}
+        bucket[info.st_ino] = {
+            "offset": new_offset, "size": info.st_size, "done": done}
         if not done:
             return True
 
@@ -461,11 +477,15 @@ class MaxTrackerStore:
                 other_info = other.stat()
             except OSError:
                 continue
-            other_identity = (other_info.st_ino, other_info.st_size)
-            other_entry = bucket.get(other_identity)
-            if not (other_entry and other_entry.get("done")):
+            other_entry = bucket.get(other_info.st_ino)
+            if not self._is_fully_drained(other_entry, other_info):
                 return True
         return False
+
+    @staticmethod
+    def _is_fully_drained(entry, info) -> bool:
+        return bool(entry and entry.get("done") and
+                    entry.get("size") == info.st_size)
 
     def _drain_file(self, path: Path, start_offset: int, budget_bytes: int,
                     handle_event) -> int:
@@ -619,8 +639,9 @@ class MaxTrackerStore:
 
     # -- persistence ---------------------------------------------------
 
-    def _prune_retention(self) -> None:
-        cutoff = date.today() - timedelta(days=self.RETENTION_DAYS)
+    def _prune_retention(self, today: str | None = None) -> None:
+        anchor = date.today() if today is None else date.fromisoformat(today)
+        cutoff = anchor - timedelta(days=self.RETENTION_DAYS)
         week_cutoff = cutoff - timedelta(days=7)
         for provider in PROVIDERS:
             days = self._state[provider]["days"]
@@ -689,33 +710,37 @@ class MaxTrackerStore:
         if isinstance(backfill_in, dict):
             bucket = self._backfill[provider]
             for key, entry in backfill_in.items():
-                identity = self._parse_backfill_key(key)
-                if identity is None or not isinstance(entry, dict):
+                inode = self._parse_backfill_key(key)
+                if inode is None or not isinstance(entry, dict):
                     continue
                 offset = entry.get("offset")
+                size = entry.get("size")
                 done = entry.get("done")
                 if (isinstance(offset, int) and not isinstance(offset, bool)
-                        and offset >= 0 and isinstance(done, bool)):
-                    bucket[identity] = {"offset": offset, "done": done}
+                        and offset >= 0 and
+                        isinstance(size, int) and not isinstance(size, bool)
+                        and size >= 0 and isinstance(done, bool)):
+                    bucket[inode] = {
+                        "offset": offset, "size": size, "done": done}
 
     @staticmethod
     def _parse_backfill_key(key):
-        if not isinstance(key, str) or ":" not in key:
+        if not isinstance(key, str) or not key.isdigit():
             return None
-        ino_str, _, size_str = key.partition(":")
-        if not ino_str.isdigit() or not size_str.isdigit():
-            return None
-        return int(ino_str), int(size_str)
+        return int(key)
 
-    def save(self) -> None:
+    def save(self, today: str | None = None) -> None:
         """Persist state atomically: write a sibling ``.tmp``, then
         ``os.replace`` it into place, mode 0600. Prunes anything older than
-        :data:`RETENTION_DAYS` first, and never serializes anything beyond
+        :data:`RETENTION_DAYS` first, anchored on ``today`` (an ISO date
+        string) -- omit it to anchor on the real current date; tests pass
+        an explicit value so the retention boundary is exact and
+        independent of wall-clock timing. Never serializes anything beyond
         the ``{v, days: {pct, act, lvl}, weeks: bool, backfill}`` allowlist
         per provider -- no prompts, commands, projects, models, file names
         or raw log events, ever.
         """
-        self._prune_retention()
+        self._prune_retention(today)
         payload = {provider: self._provider_payload(provider)
                   for provider in PROVIDERS}
         self._atomic_write(payload)
@@ -739,9 +764,9 @@ class MaxTrackerStore:
         weeks_out = {week: True for week, maxed in bucket["weeks"].items()
                     if maxed}
         backfill_out = {
-            f"{ino}:{size}": {"offset": entry["offset"],
-                              "done": bool(entry["done"])}
-            for (ino, size), entry in self._backfill[provider].items()
+            str(inode): {"offset": entry["offset"], "size": entry["size"],
+                        "done": bool(entry["done"])}
+            for inode, entry in self._backfill[provider].items()
         }
         return {"v": self._SCHEMA_VERSION, "days": days_out,
                "weeks": weeks_out, "backfill": backfill_out}

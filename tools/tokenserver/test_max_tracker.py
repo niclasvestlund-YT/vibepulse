@@ -3,7 +3,7 @@ import os
 import stat
 import tempfile
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -235,7 +235,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
 
             self.assertFalse(more)
 
-    def test_backfill_state_is_keyed_by_inode_and_size_not_by_path(self):
+    def test_backfill_state_is_keyed_by_inode_not_by_path(self):
         with tempfile.TemporaryDirectory() as directory:
             store, codex_root, _ = _new_store(directory)
             _write_jsonl(codex_root / "rollout-a.jsonl", [
@@ -244,11 +244,78 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             ])
             _drain(store)
 
+            self.assertEqual(len(store._backfill["codex"]), 1)
             for key in store._backfill["codex"]:
-                self.assertIsInstance(key, tuple)
-                self.assertEqual(len(key), 2)
-                for part in key:
-                    self.assertIsInstance(part, int)
+                self.assertIsInstance(key, int)
+
+    def test_a_grown_claude_file_resumes_from_its_offset_without_double_counting(self):
+        # Regression: an actively-written session file is the normal case,
+        # not an edge case -- draining it twice must never recount the
+        # portion already drained the first time.
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [
+                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z")])
+            _drain(store)
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+            inode_before = path.stat().st_ino
+
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(_claude_usage_line(
+                    "m2", 50, "2026-08-07T11:00:00Z")) + "\n")
+            self.assertEqual(path.stat().st_ino, inode_before)
+
+            _drain(store)
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 150)
+
+    def test_a_grown_codex_file_resumes_from_its_offset_without_double_counting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            path = codex_root / "rollout-a.jsonl"
+            _write_jsonl(path, [_rollout_event(
+                _rollout_limits(primary_pct=40.0), "2026-08-01T10:00:00Z")])
+            _drain(store)
+            self.assertEqual(
+                store.snapshot("2026-08-02", {})["codex"]["avgPeakPct"], 40.0)
+
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(_rollout_event(
+                    _rollout_limits(primary_pct=90.0),
+                    "2026-08-02T10:00:00Z")) + "\n")
+            _drain(store)
+
+            # Two distinct days, each recorded exactly once (40 then 90) --
+            # a double count of the first row would drag the average down.
+            self.assertEqual(
+                store.snapshot("2026-08-02", {})["codex"]["avgPeakPct"], 65.0)
+
+    def test_a_truncated_file_at_the_same_inode_is_rescanned_from_the_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [
+                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
+                _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
+            ])
+            _drain(store)
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 150)
+            inode_before = path.stat().st_ino
+
+            # Truncated and rewritten in place (same path, same inode,
+            # smaller size) -- simulates a rotated/rewritten log.
+            _write_jsonl(path, [
+                _claude_usage_line("m3", 77, "2026-08-09T10:00:00Z")])
+            self.assertEqual(path.stat().st_ino, inode_before)
+
+            _drain(store)
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-09"]["vol"], 77)
 
 
 class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
@@ -435,18 +502,37 @@ class MaxTrackerStorePersistenceTests(unittest.TestCase):
             self.assertIsNone(payload["codingStreakDays"])
 
     def test_days_older_than_the_retention_window_are_pruned_on_save(self):
+        # Uses save()'s injectable `today` so the 400-day boundary is
+        # exact and independent of the real wall-clock date (a bare
+        # date.today() vs. year-2000 comparison would never actually
+        # exercise the boundary itself).
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            anchor = date(2026, 8, 12)
+            kept_day = (anchor - timedelta(days=399)).isoformat()
+            pruned_day = (anchor - timedelta(days=401)).isoformat()
+            store.observe_volume("claude", kept_day, 500)
+            store.observe_volume("claude", pruned_day, 500)
+
+            store.save(today=anchor.isoformat())
+            reloaded = MaxTrackerStore(path, codex_root, claude_root)
+
+            self.assertIn(kept_day, reloaded._state["claude"]["days"])
+            self.assertNotIn(pruned_day, reloaded._state["claude"]["days"])
+
+    def test_save_with_no_today_argument_still_prunes_using_the_real_clock(self):
+        # Default-path sanity check for the injectable seam: an
+        # obviously-ancient day must still be gone when `today` is omitted.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "max-tracker.json"
             store, codex_root, claude_root = _new_store(directory, path=path)
             store.observe_volume("claude", "2000-01-01", 500)
-            recent = date.today().isoformat()
-            store.observe_volume("claude", recent, 500)
 
             store.save()
             reloaded = MaxTrackerStore(path, codex_root, claude_root)
 
             self.assertNotIn("2000-01-01", reloaded._state["claude"]["days"])
-            self.assertIn(recent, reloaded._state["claude"]["days"])
 
 
 class MaxTrackerStorePrivacySchemaTests(unittest.TestCase):
@@ -505,8 +591,9 @@ class MaxTrackerStorePrivacySchemaTests(unittest.TestCase):
             store.save()
             raw = json.loads(path.read_text(encoding="utf-8"))
 
-        for key in raw["codex"]["backfill"]:
-            self.assertRegex(key, r"^\d+:\d+$")
+        for key, entry in raw["codex"]["backfill"].items():
+            self.assertRegex(key, r"^\d+$")
+            self.assertLessEqual(set(entry), {"offset", "size", "done"})
 
 
 def _load_fixture(name: str) -> dict:
