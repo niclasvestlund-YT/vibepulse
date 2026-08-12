@@ -95,6 +95,19 @@ class QuotaCacheTests(unittest.TestCase):
 
             self.assertEqual(cache.latest("codex", "general_weekly"), valid)
 
+    def test_load_ignores_sibling_with_unhashable_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quota.json"
+            valid = self.record()
+            malformed = dict(valid.__dict__, provider=["codex"])
+            path.write_text(json.dumps({"v": 1, "records": [
+                valid.__dict__, malformed,
+            ]}), encoding="utf-8")
+
+            cache = QuotaCache(path, now=lambda: 1_100)
+
+            self.assertEqual(cache.latest("codex", "general_weekly"), valid)
+
     def test_rejects_invalid_values(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = QuotaCache(Path(directory) / "quota.json")
@@ -147,6 +160,41 @@ class QuotaCacheTests(unittest.TestCase):
             self.assertEqual(cache.latest("codex", "general_weekly", now=300),
                              original)
             self.assertEqual(path.read_text(encoding="utf-8"), on_disk)
+
+    def test_unencodable_label_is_rejected_without_changing_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quota.json"
+            cache = QuotaCache(path)
+            original = self.record(pct=40, observed_at=100)
+            self.assertTrue(cache.put(original))
+            on_disk = path.read_text(encoding="utf-8")
+
+            self.assertFalse(cache.put(self.record(
+                pct=46, observed_at=200, label="bad\ud800label")))
+
+            self.assertEqual(cache.latest("codex", "general_weekly", now=300),
+                             original)
+            self.assertEqual(path.read_text(encoding="utf-8"), on_disk)
+
+    def test_serialization_failures_restore_memory_and_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quota.json"
+            cache = QuotaCache(path)
+            original = self.record(pct=40, observed_at=100)
+            self.assertTrue(cache.put(original))
+            on_disk = path.read_text(encoding="utf-8")
+
+            for error in (UnicodeError("encoding failed"),
+                          TypeError("not serializable"),
+                          ValueError("invalid value")):
+                with self.subTest(error=type(error).__name__), mock.patch(
+                        "tools.tokenserver.quota_cache.json.dump",
+                        side_effect=error):
+                    self.assertFalse(cache.put(self.record(
+                        pct=46, observed_at=200)))
+                    self.assertEqual(cache.latest(
+                        "codex", "general_weekly", now=300), original)
+                    self.assertEqual(path.read_text(encoding="utf-8"), on_disk)
 
     def test_latest_deterministically_uses_greatest_observed_at(self):
         with tempfile.TemporaryDirectory() as directory:

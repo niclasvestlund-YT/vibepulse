@@ -44,8 +44,15 @@ def _identity(value: Any) -> bool:
 
 
 def _label(value: Any) -> bool:
-    return value is None or (isinstance(value, str) and
-                             len(value) <= _MAX_LABEL_LENGTH)
+    if value is None:
+        return True
+    if not isinstance(value, str) or len(value) > _MAX_LABEL_LENGTH:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        return False
+    return True
 
 
 class QuotaCache:
@@ -59,7 +66,9 @@ class QuotaCache:
 
     @staticmethod
     def _valid(record: CachedQuota) -> bool:
-        return (record.provider in _PROVIDERS and record.scope in _SCOPES and
+        return (isinstance(record.provider, str) and
+                record.provider in _PROVIDERS and
+                isinstance(record.scope, str) and record.scope in _SCOPES and
                 _identity(record.identity) and _finite_number(record.pct) and
                 0 <= record.pct <= 100 and _timestamp(record.reset_at) and
                 _timestamp(record.observed_at) and _label(record.label))
@@ -151,7 +160,7 @@ class QuotaCache:
         self._records = updated
         try:
             self._persist()
-        except OSError:
+        except (OSError, UnicodeError, TypeError, ValueError):
             self._records = old_records
             return False
         return True
