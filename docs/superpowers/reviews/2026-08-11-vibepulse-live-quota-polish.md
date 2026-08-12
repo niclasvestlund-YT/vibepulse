@@ -5,10 +5,9 @@
 The original static portion of Tasks 1–5 and the static evidence portion of
 Task 7 were implemented through commit `43a21a4`; the quota-source, parser,
 native Codex-asset and corrected raster-evidence chain continues through
-`95808ec` plus the final no-data mask tightening recorded immediately after
-that commit. Studio validation, the complete host
-gate, the private exact-size preview, static raster landmarks, and the ESP-IDF
-target build passed for the current source tree.
+`3b83b30`. Current focused VibePulse, parser, preview, native-asset and Studio
+suites pass. The repository-wide host gate is externally blocked by five root
+`README.md` hardware-registry documentation tests outside these scoped commits.
 
 This is not a physical AMOLED approval. Task 6 motion is **not implemented or
 enabled**. The usage tick, halo breathing, and attention entry pulses cannot be
@@ -57,9 +56,9 @@ mutation was performed while producing this evidence.
 Observed verification for this correction:
 
 - `tools/vibepulse_studio/design.py --check`: exit 0.
-- complete host gate `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh`:
-  exit 0, including 11 preview workflow tests, 7 native asset tests, 56 Studio
-  tests, 18 Studio wiring tests and 18 exact visual-landmark tests.
+- the current host-gate run passes 11 preview workflow tests, 7 native asset
+  tests, 56 Studio tests, 18 Studio wiring tests and 18 exact visual-landmark
+  tests before the five unrelated root-document failures described below.
 - private preview: 36 allowlisted PNG/BMP pairs, each exactly 480 x 480.
 - ESP-IDF 5.5.2 target build: exit 0; `torget.bin` is `0x1d77f0` bytes and
   leaves `0x228810` bytes (54%) of the 4 MiB app partition free.
@@ -76,9 +75,10 @@ The following are completed observations, not expected results:
 | Gate | Command/evidence | Observed result |
 |---|---|---|
 | Studio contract | `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh` invokes `tools/vibepulse_studio/design.py --check` | PASS; generated layout and Studio design were in sync |
-| Full host gate | `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh` | PASS / exit 0, including pure C policy tests, 11 preview tests, 7 native asset tests, 56 Studio design/server tests, 18 Studio wiring tests, and 18 static visual-landmark tests |
+| Historical full host gate (before `3b83b30`) | `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh` | PASS / exit 0 for the then-current source tree; superseded as current repository-wide evidence |
+| Current full host gate at `3b83b30` | `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh` | BLOCKED after all scoped VibePulse/parser/preview/native-asset/Studio suites pass; five root `README.md` hardware-registry documentation tests fail outside this chain |
 | Private preview | `PYTHON_BIN="$PWD/.venv/bin/python" ./tools/preview-ui.sh vibepulse` | PASS / exit 0; exact allowlisted matrix generated privately by the shared SDL/LVGL renderer |
-| Static visual landmarks | `test/test_vibepulse_visual_landmarks.py`, as part of the full host gate | 18 tests PASS; complete 36-capture matrix, every image 480 × 480 |
+| Current static visual landmarks | `test/test_vibepulse_visual_landmarks.py` | 18 tests PASS; complete 36-capture matrix, every image 480 × 480 |
 | Target build | ESP-IDF 5.5.2 `idf.py build` | PASS / exit 0; `/Users/niclasvestlund/Torget/build/torget.bin` is `0x1d77f0` bytes; the 4 MiB app partition has `0x228810` bytes, 54%, free |
 
 The target build compiled `agent_completion_policy.c` and `agent_monitor.c`
@@ -165,14 +165,15 @@ brightness, viewing distance, touch behavior, or appearance on physical glass.
   while uppercasing and the 25 px font were ASCII-only. Commit `e074473`
   defined the display-safe alphabet, added deterministic Swedish uppercasing
   and pinned glyph generation, and added a non-ASCII raster regression. Its
-  focused tests, full host gate, private preview, and target build passed.
+  focused tests, the then-current full host gate, private preview, and target
+  build passed at that historical point.
 - Quality review found one Important blocker: the 100 ms monitor tick repeated
   unchanged label/style writes for persistent overlays. Commit `43a21a4`
   added a render key covering visibility, event generation, provider, state,
   project, and count/detail inputs. Focused regression tests prove unchanged
   WAITING/ERROR skips rendering while the policy tick still advances DONE to
-  the next queued event. Its focused tests, full host gate, private preview,
-  and target build passed.
+  the next queued event. Its focused tests, the then-current full host gate,
+  private preview, and target build passed at that historical point.
 
 No review outcome authorizes physical installation or Task 6 motion.
 
