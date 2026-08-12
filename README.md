@@ -113,6 +113,22 @@ zeros. The deeper docs (architecture, writing an app, hardware traps) are in
 [README.sv.md](README.sv.md) — in Swedish, because this started as a Swedish
 hobby project. Your agent reads Swedish just fine.
 
+## Hardware knowledge
+
+Running `./test/run.sh` (the host test gate) needs a reproducible Python:
+
+```sh
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+```
+
+Python 3.11+ is required. `./test/run.sh` uses the activated environment's
+Python by default; set `PYTHON_BIN` to point at a different Python 3.11+
+interpreter instead. Hardware truth (capabilities, sources, verified units)
+lives in the validated registries under `spec/` — see `spec/hardware.md`
+before any hardware-dependent work.
+
 ## FAQ
 
 - **Windows/Linux for the Mac service?** Not yet — contributions welcome.
