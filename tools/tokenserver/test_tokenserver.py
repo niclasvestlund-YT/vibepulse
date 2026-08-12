@@ -189,7 +189,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                         "claude", "model_weekly"),
                 }), \
                 mock.patch.object(tokenserver, "_read_codex_limits",
-                                  return_value={}):
+                                  return_value={}), \
+                mock.patch.object(
+                    tokenserver, "_persist_quota_records_async"):
             tokenserver._last_result = None
             tokenserver._last_computed = 0.0
             snapshot = tokenserver.get_snapshot(
@@ -592,7 +594,9 @@ class UsageSnapshotTests(unittest.TestCase):
     def _snapshot(self, history, now_ts, claude=None, codex=None,
                   quota_cache=None):
         if quota_cache is None:
-            with tempfile.TemporaryDirectory() as temp_dir:
+            with tempfile.TemporaryDirectory() as temp_dir, \
+                    mock.patch.object(
+                        tokenserver, "_persist_quota_records_async"):
                 return self._snapshot(
                     history, now_ts, claude=claude, codex=codex,
                     quota_cache=QuotaCache(Path(temp_dir) / "quota.json",
@@ -763,10 +767,21 @@ class UsageSnapshotTests(unittest.TestCase):
             history = UsageHistory(Path(temp_dir) / "history.json")
             cache = QuotaCache(Path(temp_dir) / "quota.json",
                                now=lambda: now_ts)
+            cache_write = threading.Event()
+            cache_write_count = 0
+
+            def record_cache_write(_record):
+                nonlocal cache_write_count
+                cache_write_count += 1
+                if cache_write_count == 3:
+                    cache_write.set()
+                return True
+
             with mock.patch(
                     "tools.tokenserver.usage_history.os.replace",
                     wraps=os.replace) as replace, \
-                    mock.patch.object(cache, "put", return_value=True):
+                    mock.patch.object(
+                        cache, "put", side_effect=record_cache_write):
                 self._snapshot(
                     history, now_ts,
                     claude={
@@ -784,6 +799,7 @@ class UsageSnapshotTests(unittest.TestCase):
                             "claude", "model_weekly"),
                     },
                     codex=self._live_codex(now_ts), quota_cache=cache)
+                self.assertTrue(cache_write.wait(timeout=1))
 
             replace.assert_called_once()
             self.assertEqual(len(history.records), 4)
@@ -843,10 +859,22 @@ class UsageSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             cache = QuotaCache(Path(temp_dir) / "quota.json",
                                now=lambda: now_ts)
-            fresh = self._snapshot(
-                StubHistory(), now_ts,
-                claude=self._live_claude(now_ts),
-                codex=self._live_codex(now_ts), quota_cache=cache)
+            original_put = cache.put
+            persisted = threading.Event()
+
+            def persist(record):
+                result = original_put(record)
+                if (record.provider == "codex" and
+                        record.scope == "general_weekly"):
+                    persisted.set()
+                return result
+
+            with mock.patch.object(cache, "put", side_effect=persist):
+                fresh = self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts),
+                    codex=self._live_codex(now_ts), quota_cache=cache)
+                self.assertTrue(persisted.wait(timeout=1))
             stale = self._snapshot(
                 StubHistory(), now_ts + 60,
                 claude={}, codex={}, quota_cache=cache)
@@ -855,6 +883,211 @@ class UsageSnapshotTests(unittest.TestCase):
         self.assertFalse(fresh["codexWeekStale"])
         self.assertTrue(stale["claudeWeekStale"])
         self.assertTrue(stale["codexWeekStale"])
+
+    def test_slow_cache_put_does_not_block_snapshot_and_is_single_flight(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            write_started = threading.Event()
+            release_write = threading.Event()
+            snapshot_returned = threading.Event()
+            created_threads = []
+            real_thread = threading.Thread
+
+            def slow_put(_record):
+                write_started.set()
+                release_write.wait(timeout=2)
+                return True
+
+            def make_thread(*args, **kwargs):
+                thread = real_thread(*args, **kwargs)
+                created_threads.append(thread)
+                return thread
+
+            def serve():
+                self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts), quota_cache=cache)
+                snapshot_returned.set()
+
+            with mock.patch.object(cache, "put", side_effect=slow_put), \
+                    mock.patch.object(tokenserver.threading, "Thread",
+                                      side_effect=make_thread):
+                caller = real_thread(target=serve)
+                caller.start()
+                self.assertTrue(write_started.wait(timeout=1))
+                self.assertTrue(snapshot_returned.wait(timeout=0.2))
+                for offset in range(1, 6):
+                    self._snapshot(
+                        StubHistory(), now_ts + offset,
+                        claude=self._live_claude(now_ts + offset,
+                                                 pct=47.0 + offset),
+                        quota_cache=cache)
+                self.assertEqual(len(created_threads), 1)
+                release_write.set()
+                caller.join(timeout=1)
+                created_threads[0].join(timeout=1)
+
+    def test_unchanged_live_snapshot_does_not_replace_cache_again(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            first_put = threading.Event()
+            original_put = cache.put
+
+            def persist(record):
+                result = original_put(record)
+                first_put.set()
+                return result
+
+            with mock.patch.object(cache, "put", side_effect=persist):
+                self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts), quota_cache=cache)
+                self.assertTrue(first_put.wait(timeout=1))
+            with mock.patch(
+                    "tools.tokenserver.quota_cache.os.replace",
+                    wraps=os.replace) as replace:
+                self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts), quota_cache=cache)
+
+            self.assertEqual(replace.call_count, 0)
+
+    def test_changed_live_observation_is_eventually_cached_for_failure(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "quota.json"
+            cache = QuotaCache(path, now=lambda: now_ts)
+            original_put = cache.put
+            changed_persisted = threading.Event()
+
+            def persist(record):
+                result = original_put(record)
+                if record.pct == 48.0:
+                    changed_persisted.set()
+                return result
+
+            with mock.patch.object(cache, "put", side_effect=persist):
+                self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts), quota_cache=cache)
+                self._snapshot(
+                    StubHistory(), now_ts + 60,
+                    claude=self._live_claude(now_ts + 60, pct=48.0),
+                    quota_cache=cache)
+                self.assertTrue(changed_persisted.wait(timeout=1))
+
+            stale = self._snapshot(
+                StubHistory(), now_ts + 120, claude={}, quota_cache=cache)
+
+        self.assertEqual(stale["claudeWeekPct"], 48.0)
+        self.assertTrue(stale["claudeWeekStale"])
+
+    def test_failed_async_cache_write_retries_unchanged_observation(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            original_put = cache.put
+            first_failed = threading.Event()
+            retry_persisted = threading.Event()
+            attempts = 0
+            workers = []
+            real_thread = threading.Thread
+
+            def flaky_put(record):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    first_failed.set()
+                    return False
+                result = original_put(record)
+                retry_persisted.set()
+                return result
+
+            def make_thread(*args, **kwargs):
+                thread = real_thread(*args, **kwargs)
+                workers.append(thread)
+                return thread
+
+            with mock.patch.object(cache, "put", side_effect=flaky_put), \
+                    mock.patch.object(tokenserver.threading, "Thread",
+                                      side_effect=make_thread):
+                self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts), quota_cache=cache)
+                self.assertTrue(first_failed.wait(timeout=1))
+                workers[0].join(timeout=1)
+                self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts), quota_cache=cache)
+                self.assertTrue(retry_persisted.wait(timeout=1))
+                workers[1].join(timeout=1)
+
+            stale = self._snapshot(
+                StubHistory(), now_ts + 60, claude={}, quota_cache=cache)
+
+        self.assertEqual(attempts, 2)
+        self.assertEqual(stale["claudeWeekPct"], 47.0)
+        self.assertTrue(stale["claudeWeekStale"])
+
+    def test_cache_lock_held_by_writer_does_not_block_changed_snapshot(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            lock_held = threading.Event()
+            release_lock = threading.Event()
+            snapshot_returned = threading.Event()
+            workers = []
+            real_thread = threading.Thread
+
+            def hold_cache_lock():
+                with cache._lock:
+                    lock_held.set()
+                    release_lock.wait(timeout=2)
+
+            def make_thread(*args, **kwargs):
+                thread = real_thread(*args, **kwargs)
+                workers.append(thread)
+                return thread
+
+            def serve_changed():
+                claude = self._live_claude(now_ts + 60, pct=48.0)
+                claude.update({
+                    "modelPct": 73.0,
+                    "modelResetAt": int(now_ts + 360 * 60),
+                    "modelObservedAt": int(now_ts + 60),
+                    "modelIdentity": tokenserver._quota_identity(
+                        "claude", "model_weekly"),
+                })
+                self._snapshot(
+                    StubHistory(), now_ts + 60,
+                    claude=claude,
+                    codex=self._live_codex(now_ts + 60, pct=36.0),
+                    quota_cache=cache)
+                snapshot_returned.set()
+
+            holder = real_thread(target=hold_cache_lock)
+            holder.start()
+            self.assertTrue(lock_held.wait(timeout=1))
+            try:
+                with mock.patch.object(tokenserver.threading, "Thread",
+                                       side_effect=make_thread):
+                    caller = real_thread(target=serve_changed)
+                    caller.start()
+                    returned_without_cache_lock = snapshot_returned.wait(
+                        timeout=0.2)
+            finally:
+                release_lock.set()
+            holder.join(timeout=1)
+            caller.join(timeout=1)
+            for worker in workers:
+                worker.join(timeout=1)
+            self.assertTrue(returned_without_cache_lock)
 
     def test_restart_cache_expires_exactly_and_reset_minutes_decrease(self):
         now_ts = 1_800_000_000

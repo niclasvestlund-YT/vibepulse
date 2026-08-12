@@ -41,6 +41,7 @@ import subprocess
 import threading
 import time
 import urllib.request
+import weakref
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -68,6 +69,8 @@ _history_lock = threading.Lock()
 _default_usage_history = None
 _quota_cache_lock = threading.Lock()
 _default_quota_cache = None
+_quota_writer_lock = threading.Lock()
+_quota_writers = weakref.WeakKeyDictionary()
 
 
 def _get_usage_history(path=None):
@@ -792,6 +795,71 @@ def _reset_minutes(reset_at, now_ts):
     return max(0, int(round((reset_at - now_ts) / 60)))
 
 
+def _quota_record_key(record):
+    return record.provider, record.scope, record.identity
+
+
+def _quota_cache_writer(cache):
+    """Drain changed records through one background writer per cache."""
+    while True:
+        with _quota_writer_lock:
+            state = _quota_writers.get(cache)
+            if state is None or not state["queued"]:
+                if state is not None:
+                    state["running"] = False
+                return
+            key = next(iter(state["queued"]))
+            record = state["queued"].pop(key)
+            state["inflight"][key] = record
+        try:
+            persisted = cache.put(record)
+        except Exception:
+            persisted = False
+        with _quota_writer_lock:
+            state = _quota_writers.get(cache)
+            if state is None:
+                continue
+            if state["inflight"].get(key) == record:
+                del state["inflight"][key]
+            if persisted:
+                state["persisted"][key] = record
+
+
+def _persist_quota_records_async(cache, records):
+    """Queue changed live observations without blocking the serving thread."""
+    records = tuple(record for record in records if record is not None)
+    if not records:
+        return
+    start_writer = False
+    with _quota_writer_lock:
+        state = _quota_writers.get(cache)
+        if state is None:
+            state = {
+                "queued": {},
+                "inflight": {},
+                "persisted": {},
+                "running": False,
+            }
+            _quota_writers[cache] = state
+        for record in records:
+            key = _quota_record_key(record)
+            if (state["persisted"].get(key) == record or
+                    state["inflight"].get(key) == record or
+                    state["queued"].get(key) == record):
+                continue
+            state["queued"][key] = record
+        if state["queued"] and not state["running"]:
+            state["running"] = True
+            start_writer = True
+    if start_writer:
+        threading.Thread(
+            target=_quota_cache_writer,
+            args=(cache,),
+            name="quota-cache-writer",
+            daemon=True,
+        ).start()
+
+
 def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
                           now_ts, label_key=None):
     """Resolve authoritative live truth, otherwise an unexpired cache row."""
@@ -820,13 +888,13 @@ def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
             observed_at=int(observed_at),
             label=label if isinstance(label, str) else None,
         )
-        quota_cache.put(record)
         return {
             "pct": round(float(pct), 1),
             "reset_at": int(reset_at),
             "label": record.label,
             "stale": False,
             "live": True,
+            "cache_record": record,
         }
     cached = quota_cache.latest(provider, scope, now=now_ts)
     if cached is not None:
@@ -836,9 +904,10 @@ def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
             "label": cached.label,
             "stale": True,
             "live": False,
+            "cache_record": None,
         }
     return {"pct": None, "reset_at": None, "label": None,
-            "stale": False, "live": False}
+            "stale": False, "live": False, "cache_record": None}
 
 
 def _add_forecast(result, prefix, forecast):
@@ -905,6 +974,11 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         label_key="modelLabel")
     codex_week = _resolve_weekly_quota(
         codex, "codex", "general_weekly", "codexWeek", cache, current_ts)
+    _persist_quota_records_async(cache, (
+        claude_week["cache_record"],
+        claude_model["cache_record"],
+        codex_week["cache_record"],
+    ))
 
     result["claudeWeekPct"] = claude_week["pct"]
     result["claudeWeekResetMin"] = _reset_minutes(

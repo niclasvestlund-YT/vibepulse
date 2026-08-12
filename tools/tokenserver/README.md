@@ -20,8 +20,9 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    verktygsdata ignoreras.
 
 Generella veckotak hålls strikt åtskilda från namngivna modellkvoter. För
-Codex måste `limit_name` saknas eller vara null och `window_minutes` vara ett
-tal större än 600 (det normala veckofönstret är 10080). Spark och andra
+Codex måste `limit_name` saknas, vara null eller vara en tom sträng och
+`window_minutes` vara ett tal större än 600 (det normala veckofönstret är
+10080). Spark och andra
 namngivna kvoter kan därför aldrig ersätta WEEK. För Claude är exakt `7d` eller
 `week` den generella veckan; Fable, Opus, Sonnet och explicit `model` är
 modellveckan. Ett okänt namn som `7d_haiku` blir endast ett sanerat namn i
