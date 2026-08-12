@@ -135,10 +135,81 @@ static bool valid_utf8_label(const unsigned char *source, size_t capacity,
   return true;
 }
 
-static void optional_label(const cJSON *root, const char *key, char *out,
+static size_t raw_json_string_end(const char *json, size_t length,
+                                  size_t opening_quote) {
+  for (size_t offset = opening_quote + 1; offset < length; offset++) {
+    if (json[offset] == '\\') {
+      offset++;
+    } else if (json[offset] == '"') {
+      return offset;
+    }
+  }
+  return length;
+}
+
+/* cJSON representerar ett avkodat \u0000 som C-strängens terminator. Läs
+ * därför just det valfria råfältet innan en avkortad prefixetikett betros. */
+static bool raw_string_has_nul_escape(const char *json, size_t start,
+                                      size_t end) {
+  for (size_t offset = start; offset < end; offset++) {
+    if (json[offset] != '\\' || offset + 1 >= end) continue;
+    if (json[offset + 1] == 'u' && offset + 5 < end &&
+        memcmp(json + offset + 2, "0000", 4) == 0) {
+      return true;
+    }
+    offset++;
+  }
+  return false;
+}
+
+static bool optional_label_has_raw_nul(const char *json, size_t length,
+                                       const char *key) {
+  int object_depth = 0;
+  size_t key_length = strlen(key);
+  for (size_t offset = 0; offset < length; offset++) {
+    if (json[offset] == '{') {
+      object_depth++;
+      continue;
+    }
+    if (json[offset] == '}') {
+      object_depth--;
+      continue;
+    }
+    if (json[offset] != '"') continue;
+
+    size_t end = raw_json_string_end(json, length, offset);
+    if (end == length) return false;
+    if (object_depth == 1 && end - offset - 1 == key_length &&
+        memcmp(json + offset + 1, key, key_length) == 0) {
+      size_t value = end + 1;
+      while (value < length &&
+             (json[value] == ' ' || json[value] == '\t' ||
+              json[value] == '\r' || json[value] == '\n')) {
+        value++;
+      }
+      if (value >= length || json[value] != ':') return false;
+      value++;
+      while (value < length &&
+             (json[value] == ' ' || json[value] == '\t' ||
+              json[value] == '\r' || json[value] == '\n')) {
+        value++;
+      }
+      if (value >= length || json[value] != '"') return false;
+      size_t value_end = raw_json_string_end(json, length, value);
+      return value_end < length &&
+             raw_string_has_nul_escape(json, value + 1, value_end);
+    }
+    offset = end;
+  }
+  return false;
+}
+
+static void optional_label(const cJSON *root, const char *json,
+                           size_t json_length, const char *key, char *out,
                            size_t capacity, int *has_out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
   if (!cJSON_IsString(item) || !item->valuestring) return;
+  if (optional_label_has_raw_nul(json, json_length, key)) return;
   const unsigned char *source = (const unsigned char *)item->valuestring;
   size_t length = 0;
   if (!valid_utf8_label(source, capacity, &length)) return;
@@ -244,7 +315,7 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
                       &t.claude_model_week)) goto done;
   if (!optional_stale(root, "codexWeekStale", &t.codex_week)) goto done;
 
-  optional_label(root, "claudeModelWeekLabel",
+  optional_label(root, json, len, "claudeModelWeekLabel",
                  t.claude_model_week_label,
                  sizeof t.claude_model_week_label,
                  &t.has_claude_model_week_label);

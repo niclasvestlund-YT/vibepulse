@@ -195,6 +195,17 @@ int main(void) {
               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
               "\"claudeModelWeekLabel\":\"BAD\\u001fLABEL\"}", &t) &&
               !t.has_claude_model_week_label);
+  check("NUL-kontroll i valfri etikett ignoreras utan att fälla usage",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeModelWeekLabel\":\"GOOD\\u0000BAD\"}", &t) &&
+              t.day_tokens == 1 && !t.has_claude_model_week_label);
+  check("literal backslash-u0000 är inte en NUL-kontroll",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeModelWeekLabel\":\"GOOD\\\\u0000BAD\"}", &t) &&
+              t.has_claude_model_week_label &&
+              strcmp(t.claude_model_week_label, "GOOD\\u0000BAD") == 0);
   check("Unicode-kontrolltecken i valfri etikett ignoreras",
         PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
