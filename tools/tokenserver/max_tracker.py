@@ -516,10 +516,22 @@ class MaxTrackerStore:
             start_offset = entry.get("offset", 0)
             discarding = bool(entry.get("discarding", False))
         pending_buf = pending.get(info.st_ino, b"")
-        new_offset, new_pending_buf, still_discarding = self._drain_file(
+        (new_offset, new_pending_buf, still_discarding,
+         dangling_eof) = self._drain_file(
             path, start_offset, budget_bytes, handle_event, pending_buf,
             discarding)
-        done = new_offset >= info.st_size
+        # Normally "done" just means we've read up to the file's current
+        # size. The one exception is Finding 6: a final line that never
+        # got a terminating newline (a writer that crashed or is still
+        # mid-write) would otherwise leave new_offset permanently short of
+        # info.st_size with nothing more this file can offer right now --
+        # starving every file behind it forever. _drain_file signals that
+        # case explicitly (dangling_eof) so it's treated as "done at this
+        # size" instead: offset stays at the START of that unterminated
+        # tail (nothing was counted for it), and _is_fully_drained already
+        # reopens the moment the file's size actually changes, at which
+        # point the (now-complete) line is parsed exactly once from there.
+        done = dangling_eof or new_offset >= info.st_size
         bucket[info.st_ino] = {
             "offset": new_offset, "size": info.st_size, "done": done,
             "discarding": still_discarding}
@@ -584,25 +596,46 @@ class MaxTrackerStore:
         several calls instead of restarting the same failed scan from
         the same stuck point every time.
 
-        Returns ``(new_offset, new_pending_buf, still_discarding)``.
+        Every iteration tries to resolve a line ALREADY sitting in
+        ``buf`` before ever touching the file again -- only once ``buf``
+        has no complete line left (and isn't already known-oversized) do
+        we read more. This is what makes the record-cap handoff safe: if
+        the 256-record cap is hit while ``buf`` still holds complete,
+        already-read lines (common when many small records land in one
+        block), those lines are carried forward in ``new_pending_buf``
+        and are the very first thing the NEXT call resolves -- without
+        that ordering, a call that starts by seeking to (and finding
+        nothing past) the exact byte those cached lines already cover
+        would treat that as EOF and make zero progress, forever.
+
+        Returns ``(new_offset, new_pending_buf, still_discarding,
+        dangling_eof)``. ``dangling_eof`` is True only when we've
+        confirmed true end-of-file while a NON-oversized, NON-terminated
+        line remains in ``buf`` -- Finding 6's "writer never finished
+        this line" case. In that case ``new_pending_buf`` is always
+        empty: the caller is expected to treat the file as done at its
+        current size (see :meth:`_advance_one_file`) rather than carry
+        the dangling fragment forward.
         """
         offset = start_offset
         seek_position = start_offset + (0 if discarding else len(pending_buf))
         records_seen = 0
         bytes_read = 0
         buf = b"" if discarding else pending_buf
+        hit_eof = False
         try:
             with path.open("rb") as source:
                 source.seek(seek_position)
-                while (bytes_read < budget_bytes and
-                       records_seen < self._MAX_RECORDS_PER_STEP):
-                    chunk = source.read(
-                        min(self._BLOCK_BYTES, budget_bytes - bytes_read))
-                    if not chunk:
-                        break
-                    bytes_read += len(chunk)
-
+                while records_seen < self._MAX_RECORDS_PER_STEP:
                     if discarding:
+                        if bytes_read >= budget_bytes:
+                            break
+                        chunk = source.read(
+                            min(self._BLOCK_BYTES, budget_bytes - bytes_read))
+                        if not chunk:
+                            hit_eof = True
+                            break
+                        bytes_read += len(chunk)
                         newline = chunk.find(b"\n")
                         if newline < 0:
                             # Pure garbage we're throwing away regardless
@@ -615,22 +648,11 @@ class MaxTrackerStore:
                         records_seen += 1
                         offset += newline + 1
                         buf = chunk[newline + 1:]
-                    else:
-                        buf += chunk
+                        continue
 
-                    while records_seen < self._MAX_RECORDS_PER_STEP:
-                        newline = buf.find(b"\n")
-                        if newline < 0:
-                            if len(buf) > self._MAX_LINE_BYTES:
-                                # Only now, having crossed the cap, do we
-                                # commit to discarding -- everything
-                                # collected so far is unrecoverable
-                                # garbage either way, so it's safe to mark
-                                # it as consumed.
-                                discarding = True
-                                offset += len(buf)
-                                buf = b""
-                            break
+                    newline = buf.find(b"\n")
+                    if newline >= 0:
+                        # Resolve straight from buf -- no disk read needed.
                         raw_line, buf = buf[:newline], buf[newline + 1:]
                         offset += newline + 1
                         records_seen += 1
@@ -641,9 +663,41 @@ class MaxTrackerStore:
                                 event = None
                             if event is not None:
                                 handle_event(event)
+                        continue
+
+                    if len(buf) > self._MAX_LINE_BYTES:
+                        # Only now, having crossed the cap, do we commit to
+                        # discarding -- everything collected so far is
+                        # unrecoverable garbage either way, so it's safe
+                        # to mark it as consumed.
+                        discarding = True
+                        offset += len(buf)
+                        buf = b""
+                        continue
+
+                    if bytes_read >= budget_bytes:
+                        break
+                    chunk = source.read(
+                        min(self._BLOCK_BYTES, budget_bytes - bytes_read))
+                    if not chunk:
+                        hit_eof = True
+                        break
+                    bytes_read += len(chunk)
+                    buf += chunk
         except OSError:
-            return start_offset, pending_buf, discarding
-        return offset, (b"" if discarding else buf), discarding
+            return start_offset, pending_buf, discarding, False
+
+        if hit_eof and not discarding and buf:
+            # Finding 6: confirmed end-of-file with a genuinely
+            # unterminated tail (never oversized, never resolved). Not
+            # "budget ran out, more to read next time" -- there IS no
+            # more, right now. Count nothing for it and let the caller
+            # mark the file done at its current size so it stops blocking
+            # every file behind it; a later regrowth naturally reopens it
+            # (see _is_fully_drained) and this exact tail parses cleanly
+            # from `offset`, which was never advanced past it.
+            return offset, b"", False, True
+        return offset, (b"" if discarding else buf), discarding, False
 
     def _handle_codex_event(self, event) -> None:
         rate_limits = codex_rollout_rate_limits(event)

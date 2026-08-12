@@ -406,6 +406,84 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             self.assertEqual(
                 store.snapshot("2026-08-07", {})["codex"]["avgPeakPct"], 33.0)
 
+    def test_lines_still_pending_after_the_record_cap_are_drained_next_call(self):
+        # Regression: when the 256-record cap is hit while buf still
+        # holds a complete, already-read line, the NEXT call used to seek
+        # straight to (and find nothing past) the exact byte those cached
+        # bytes already cover, read empty, and stop -- without ever
+        # scanning the carried line. offset frozen, that record (and
+        # everything behind it) starved forever.
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [
+                _claude_usage_line(f"m{i}", 1, "2026-08-07T10:00:00Z")
+                for i in range(257)
+            ])
+
+            _drain(store)  # would hang/starve at 256 of 257 if regressed
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 257)
+            self.assertTrue(
+                store._backfill["claude"][path.stat().st_ino]["done"])
+
+    def test_unterminated_final_line_marks_done_and_does_not_starve_later_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            complete_line = json.dumps(_claude_usage_line(
+                "m1", 100, "2026-08-07T10:00:00Z"))
+            dangling = json.dumps(_claude_usage_line(
+                "m2", 999, "2026-08-07T11:00:00Z"))
+            path_a = claude_root / "session-a.jsonl"
+            # No trailing newline on the last line -- a writer that
+            # crashed or simply hasn't finished this line yet.
+            path_a.write_text(complete_line + "\n" + dangling)
+            path_b = claude_root / "session-b.jsonl"
+            _write_jsonl(path_b, [_claude_usage_line(
+                "m3", 50, "2026-08-08T10:00:00Z")])
+
+            _drain(store)
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+            # The sibling file (sorts after the stuck one) still drained.
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-08"]["vol"], 50)
+
+            entry = store._backfill["claude"][path_a.stat().st_ino]
+            self.assertTrue(entry["done"])
+            # offset sits at the START of the unterminated tail -- nothing
+            # was counted for it, and it's the correct resume point.
+            self.assertEqual(entry["offset"], len(complete_line) + 1)
+
+    def test_unterminated_line_completes_once_the_file_grows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            complete_line = json.dumps(_claude_usage_line(
+                "m1", 100, "2026-08-07T10:00:00Z"))
+            dangling = json.dumps(_claude_usage_line(
+                "m2", 999, "2026-08-07T11:00:00Z"))
+            path = claude_root / "session.jsonl"
+            path.write_text(complete_line + "\n" + dangling)
+
+            _drain(store)
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+
+            # The writer finishes the dangling line and appends another.
+            another_line = json.dumps(_claude_usage_line(
+                "m3", 25, "2026-08-07T12:00:00Z"))
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write("\n" + another_line + "\n")
+
+            _drain(store)
+
+            # 100 (first pass, unchanged) + 999 (now-completed dangling
+            # line) + 25 (new line) -- each counted exactly once.
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 1124)
+
 
 class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
     def test_claude_volume_backfill_sets_activity_and_volume_never_pct(self):
