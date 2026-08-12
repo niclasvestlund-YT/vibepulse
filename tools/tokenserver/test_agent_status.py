@@ -1348,6 +1348,19 @@ class AgentStatusServiceTests(unittest.TestCase):
             service = AgentStatusService(
                 root / "claude", root / "codex", now=lambda: now[0],
                 _wall_time=lambda: 1000.0)
+            # Pin the identity cap well below the production default so
+            # eviction is driven only by the guaranteed-distinct identities
+            # of on-disk files (target + twelve fillers), never by whether
+            # this platform's filesystem happens to mint a fresh inode on
+            # os.replace(). Inode allocators recycle freed numbers at very
+            # different rates across filesystems (e.g. ext4 reuses recently
+            # freed inodes aggressively; APFS does not), so relying on
+            # replace-churn alone to exceed the real cap of 48 identities
+            # is not portable across platforms. Twelve keeps every actively
+            # tracked filler safe (aliased identities are never evicted)
+            # while guaranteeing the thirteenth (cold, unaliased) identity
+            # -- target -- is the one LRU eviction removes.
+            service._tailer._MAX_TRACKED_IDENTITIES = 12
             self.assertEqual(service.poll_once(), 1)
             baseline_seq = service.snapshot()["seq"]
             target_stat = target.stat()
