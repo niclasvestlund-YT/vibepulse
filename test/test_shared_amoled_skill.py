@@ -104,6 +104,14 @@ class SharedAmoledSkillTests(unittest.TestCase):
             "one dominant metric",
             "round secondary values",
             "encode discovered spacing as validator tests",
+            "source provenance",
+            "live, cached/stale, and no-data",
+            "same active fixture",
+            "native final sizes",
+            "byte-for-byte",
+            "transparent corners",
+            "Do not infer visual correctness from a green test",
+            "two-stage review",
         )
         for phrase in required_workflow:
             with self.subTest(phrase=phrase):
