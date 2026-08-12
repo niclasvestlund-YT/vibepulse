@@ -332,6 +332,16 @@ static tk_agent_snapshot two_waiting_snapshot(void) {
       TK_AGENT_PROVIDER_CLAUDE, TK_AGENT_WAITING,
       "capture-claude-waiting-two", "Buddy");
   snapshot.seq = 905;
+  snapshot.claude.active_count = 2;
+  snapshot.claude.job_count = 2;
+  tk_agent_status *claude = &snapshot.claude.jobs[1];
+  snprintf(claude->task_id, sizeof claude->task_id,
+           "attention-capture-claude-waiting-queued");
+  snprintf(claude->event_id, sizeof claude->event_id,
+           "capture-claude-waiting-queued");
+  snprintf(claude->project, sizeof claude->project, "Torget");
+  claude->state = TK_AGENT_WAITING;
+  claude->updated_ms = 2;
   snapshot.codex.active_count = 1;
   snapshot.codex.job_count = 1;
   tk_agent_status *codex = &snapshot.codex.jobs[0];
@@ -341,7 +351,7 @@ static tk_agent_snapshot two_waiting_snapshot(void) {
            "capture-codex-waiting-two");
   snprintf(codex->project, sizeof codex->project, "Solelkollen");
   codex->state = TK_AGENT_WAITING;
-  codex->updated_ms = 2;
+  codex->updated_ms = 3;
   return snapshot;
 }
 
