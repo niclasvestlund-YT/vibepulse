@@ -103,6 +103,7 @@ cd ..
 "$PYTHON_BIN" test/test_vibepulse_studio_wiring.py
 "$PYTHON_BIN" test/test_vibepulse_visual_landmarks.py
 "$PYTHON_BIN" test/test_shared_amoled_skill.py
+"$PYTHON_BIN" test/test_token_body_capacity.py
 "$PYTHON_BIN" -m unittest tools.test_hardware_registry -v
 "$PYTHON_BIN" -m unittest \
   tools.tokenserver.test_tokenserver \
