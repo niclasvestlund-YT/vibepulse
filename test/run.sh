@@ -51,6 +51,13 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-max-tracker-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/max_tracker_presenter.c \
+  test_max_tracker_presenter.c \
+  -lm \
+  -o /tmp/torget-max-tracker-presenter-test
+/tmp/torget-max-tracker-presenter-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/usage_presenter.c \
   test_usage_presenter.c \
   -o /tmp/torget-usage-presenter-test
