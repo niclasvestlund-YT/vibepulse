@@ -8,7 +8,7 @@ idf_component_register(
        "agent_monitor.c" "agent_assets.c"
        "agent_net_policy.c" "net.c" "agent_net.c"
   INCLUDE_DIRS "."
-  REQUIRES torget_app torget_fmt torget_ticker cjson
+  REQUIRES torget_app torget_fmt cjson
   # secrets.h bor i repytroten (gitignorad), därav "../..".
   PRIV_INCLUDE_DIRS "../.."
   PRIV_REQUIRES torget_net esp_http_client)

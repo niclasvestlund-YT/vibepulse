@@ -377,16 +377,14 @@ static void platform_tour_cb(lv_timer_t *t) {
     case 8: dump_frame("vibepulse-codex-static"); break;
     case 9: tokens_show_view(VIEW_BURN_RATE); break;
     case 10: dump_frame("vibepulse-forecast-collecting"); break;
-    case 11: tokens_show_view(VIEW_VOLUME); break;
-    case 12: dump_frame("vibepulse-volume"); break;
-    case 13:
+    case 11:
       tokens_show_view(VIEW_CLAUDE_FABLE);
       apply_agent_fixture(0);
       feed_tokens_file("tokens-missing.json");
       break;
-    case 14: dump_frame("vibepulse-claude-missing"); break;
-    case 15: feed_tokens(); break;
-    case 16: dump_frame("vibepulse-claude-restored"); break;
+    case 12: dump_frame("vibepulse-claude-missing"); break;
+    case 13: feed_tokens(); break;
+    case 14: dump_frame("vibepulse-claude-restored"); break;
     default: torget_app_show(0); break;
   }
   lv_timer_set_period(t, 500);
@@ -571,8 +569,6 @@ static int run_vibepulse_static_qa(void) {
   dump_frame("vibepulse-burn-unavailable");
 
   feed_tokens();
-  tokens_show_view(VIEW_VOLUME);
-  dump_frame("vibepulse-volume");
 
   tokens_show_view(VIEW_CLAUDE_ALL);
   usage_screen_set_stale(true);

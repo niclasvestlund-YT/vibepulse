@@ -1,12 +1,10 @@
 #include "app_tokens.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "lvgl.h"
 
-#include "ticker.h"
 #include "torget.h"
 #include "usage_screen.h"
 
@@ -20,9 +18,6 @@ extern const lv_font_t plex_icon_64;
 #define TICK_EVERY_MS 100
 
 static struct {
-  sg_ticker ticker;
-  int sessions;
-  double month_mtok;
   int64_t last_success_us;
   bool has_data;
   bool stale;
@@ -33,18 +28,7 @@ void tokens_apply(const tk_tokens *tokens) {
   int64_t now_us = torget_now_us();
   usage_screen_apply_tokens(tokens);
 
-  double mtok = tokens->day_tokens / 1e6;
   double rate = tokens->day_tokens_per_hour / 1e6;
-  double slack = rate / 120.0 + 0.001;
-  double shown = sg_ticker_value(&app.ticker, now_us);
-  double base = app.ticker.has_data && mtok > 0.0 && mtok < shown &&
-                        shown - mtok < slack
-                    ? shown
-                    : mtok;
-  sg_ticker_set(&app.ticker, now_us, base, rate);
-  app.sessions = tokens->day_sessions;
-  app.month_mtok = tokens->month_tokens / 1e6;
-  usage_screen_set_volume(base, app.sessions, app.month_mtok);
 
   app.has_data = true;
   app.last_success_us = now_us;
@@ -90,10 +74,6 @@ static void tick_cb(lv_timer_t *timer) {
   }
 #endif
 
-  if (app.ticker.has_data) {
-    usage_screen_set_volume(sg_ticker_value(&app.ticker, now_us),
-                            app.sessions, app.month_mtok);
-  }
   bool stale = app.has_data && now_us - app.last_success_us > STALE_AFTER_US;
   if (stale != app.stale) {
     app.stale = stale;

@@ -13,15 +13,15 @@ attention_fonts = (
     (root / "platform/fonts/plex_attention_52.c", "plex_attention_52"),
 )
 
-assert "#define TK_USAGE_SCREEN_VIEWS 5" in header
+assert "#define TK_USAGE_SCREEN_VIEWS 4" in header
 for enum_literal in (
     "VIEW_CLAUDE_FABLE = 0",
     "VIEW_CLAUDE_ALL = 1",
     "VIEW_CODEX_WEEKLY = 2",
     "VIEW_BURN_RATE = 3",
-    "VIEW_VOLUME = 4",
 ):
     assert enum_literal in app_header
+assert "VIEW_VOLUME" not in app_header
 
 for removed in (
     "create_claude_details_page",
@@ -38,7 +38,6 @@ for removed in (
 for required in (
     "create_quota_page",
     "create_burn_rate_page",
-    "create_volume_page",
     "usage_presenter_build_quota_page",
     "plex_num_164",
     "plex_headline_48",
@@ -60,12 +59,14 @@ assert "VIEW_CLAUDE_DETAILS" not in source
 assert "VIEW_OVERVIEW" not in source
 assert "VIEW_CLAUDE_HERO" not in source
 assert "VIEW_CODEX_HERO" not in source
+assert "VIEW_VOLUME" not in source
+assert "create_volume_page" not in source
+assert "usage_screen_set_volume" not in source
 
 create = source[source.index("void usage_screen_create"):]
 create = create[:create.index("void usage_screen_apply_tokens")]
 assert create.count("create_quota_page(") == 3
 assert create.count("create_burn_rate_page(") == 1
-assert create.count("create_volume_page(") == 1
 assert "tk_agent_monitor_create(root);" in create
 
 quota = source[source.index("static void create_quota_page"):]
@@ -133,35 +134,20 @@ assert "lv_label_set_text(page->percent, quota->pct_text);" in apply_quota
 assert 'quota->has_pct ? quota->pct_text : ""' not in apply_quota
 
 burn = source[source.index("static void create_burn_rate_page"):]
-burn = burn[:burn.index("static void create_volume_page")]
+burn = burn[:burn.index("static uint64_t agent_packet_age_ms")]
 for copy in ("BURN RATE", "WEEKLY", "FORECAST"):
     assert f'"{copy}"' in burn
 assert "251" in burn, "Burn Rate rows need the approved separator"
 assert "COL_CARD" not in burn
 
-volume = source[source.index("static void create_volume_page"):]
-volume = volume[:volume.index("void usage_screen_create")]
-for copy in ("VOLUME", "TOKENS", "USED TODAY", "SESSIONS", "MTOK THIS MONTH"):
-    assert f'"{copy}"' in source
-assert "COL_CARD" not in volume
-
-volume_setter = source[source.index("void usage_screen_set_volume"):]
-volume_setter = volume_setter[:volume_setter.index(
-    "void usage_screen_set_stale"
-)]
-for rendered in (
+for removed_volume in (
     "rendered_volume_value", "rendered_volume_sessions",
-    "rendered_volume_month",
+    "rendered_volume_month", "volume_value_initialized",
+    "volume_sessions_initialized", "volume_month_initialized",
+    "set_cached_label_text",
 ):
-    assert rendered in source, f"missing volume string cache: {rendered}"
-    assert rendered in volume_setter, f"volume setter does not use {rendered}"
-assert "isfinite(day_mtok)" in volume_setter
-assert "isfinite(month_mtok)" in volume_setter
-assert volume_setter.count("set_cached_label_text(") == 3
-cache_helper = source[source.index("static void set_cached_label_text"):]
-cache_helper = cache_helper[:cache_helper.index("static void open_launcher")]
-assert "strcmp(rendered, text) == 0" in cache_helper
-assert cache_helper.count("lv_label_set_text") == 1
+    assert removed_volume not in source, \
+        f"removed volume structure remains: {removed_volume}"
 
 assert 'lv_obj_set_tile_id(ui.tileview, index, 0, LV_ANIM_OFF)' in source
 assert "lv_timer_create" not in source, "steady pages must not rotate themselves"
@@ -266,4 +252,4 @@ for anchor in (31, 246, 321, 365, 430):
 assert "int usage_screen_current_view(void);" in header
 assert "usage_screen_current_view()" in sim
 
-print("OK: VibePulse five-page full-screen layout wiring")
+print("OK: VibePulse four-page full-screen layout wiring")

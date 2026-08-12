@@ -1,6 +1,5 @@
 #include "usage_screen.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,7 +14,6 @@
 extern const lv_font_t plex_num_164;
 extern const lv_font_t plex_headline_48;
 extern const lv_font_t plex_stat_35;
-extern const lv_font_t plex_unit_27;
 extern const lv_font_t plex_ui_21;
 extern const lv_font_t plex_ui_16;
 extern const lv_font_t plex_ui_14;
@@ -79,16 +77,6 @@ static struct {
   lv_obj_t *tiles[TK_USAGE_SCREEN_VIEWS];
   quota_page quotas[3];
   forecast_row forecast_rows[2];
-  lv_obj_t *volume_value;
-  lv_obj_t *volume_unit;
-  lv_obj_t *volume_sessions;
-  lv_obj_t *volume_month;
-  char rendered_volume_value[48];
-  char rendered_volume_sessions[48];
-  char rendered_volume_month[48];
-  bool volume_value_initialized;
-  bool volume_sessions_initialized;
-  bool volume_month_initialized;
   tk_agent_snapshot agent_snapshot;
   int64_t agent_applied_at_us;
   int64_t last_now_us;
@@ -115,15 +103,6 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font,
   lv_label_set_long_mode(object, LV_LABEL_LONG_CLIP);
   lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
   return object;
-}
-
-static void set_cached_label_text(lv_obj_t *object, const char *text,
-                                  char *rendered, size_t capacity,
-                                  bool *initialized) {
-  if (*initialized && strcmp(rendered, text) == 0) return;
-  lv_label_set_text(object, text);
-  snprintf(rendered, capacity, "%s", text);
-  *initialized = true;
 }
 
 static void open_launcher(lv_event_t *event) {
@@ -189,21 +168,6 @@ static void create_quota_header(quota_page *page) {
   lv_obj_set_style_text_align(page->context, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_set_style_text_letter_space(page->context, 1, 0);
   create_hairline(page->tile, HEADER_LINE_Y);
-}
-
-static void create_volume_header(lv_obj_t *tile) {
-  create_provider_identity(tile, USAGE_PROVIDER_CLAUDE);
-  lv_obj_t *top = label(tile, &plex_ui_14, COL_META,
-                        258, VP_PROVIDER_Y - 1, 200, 18);
-  lv_obj_set_style_text_align(top, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_style_text_letter_space(top, 1, 0);
-  lv_label_set_text(top, "VOLUME");
-  lv_obj_t *bottom = label(tile, &plex_ui_12, COL_MUTED,
-                           258, VP_PROVIDER_Y + 20, 200, 16);
-  lv_obj_set_style_text_align(bottom, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_style_text_letter_space(bottom, 2, 0);
-  lv_label_set_text(bottom, "TOKENS");
-  create_hairline(tile, HEADER_LINE_Y);
 }
 
 static void create_analytics_header(lv_obj_t *tile, const char *title,
@@ -357,40 +321,6 @@ static void create_burn_rate_page(void) {
   create_pager(tile, VIEW_BURN_RATE);
 }
 
-static void create_volume_page(void) {
-  lv_obj_t *tile = new_tile(VIEW_VOLUME);
-  create_volume_header(tile);
-
-  lv_obj_t *caption = label(tile, &plex_ui_21, COL_LABEL,
-                            VP_SAFE_X, VP_QUOTA_Y, VP_CONTENT_W, 30);
-  lv_obj_set_style_text_letter_space(caption, 2, 0);
-  lv_label_set_text(caption, "USED TODAY");
-
-  ui.volume_value = label(tile, &plex_num_164, COL_WHITE,
-                          18, 105, 330, 188);
-  lv_obj_set_style_text_letter_space(ui.volume_value, -8, 0);
-  set_cached_label_text(ui.volume_value, "–", ui.rendered_volume_value,
-                        sizeof ui.rendered_volume_value,
-                        &ui.volume_value_initialized);
-  ui.volume_unit = label(tile, &plex_unit_27, COL_MUTED,
-                         340, 235, 118, 38);
-  lv_obj_set_style_text_letter_space(ui.volume_unit, 1, 0);
-  lv_label_set_text(ui.volume_unit, "MTOK");
-  create_hairline(tile, 304);
-  create_stat(tile, &ui.volume_sessions, VP_SAFE_X, 210, false,
-              COL_WHITE, "SESSIONS");
-  create_stat(tile, &ui.volume_month, RIGHT_STAT_X, RIGHT_STAT_W, true,
-              COL_WHITE, "MTOK THIS MONTH");
-  set_cached_label_text(ui.volume_sessions, "–",
-                        ui.rendered_volume_sessions,
-                        sizeof ui.rendered_volume_sessions,
-                        &ui.volume_sessions_initialized);
-  set_cached_label_text(ui.volume_month, "–", ui.rendered_volume_month,
-                        sizeof ui.rendered_volume_month,
-                        &ui.volume_month_initialized);
-  create_pager(tile, VIEW_VOLUME);
-}
-
 static uint64_t agent_packet_age_ms(int64_t now_us) {
   if (!ui.has_agent_snapshot || now_us <= ui.agent_applied_at_us) {
     return 0;
@@ -512,7 +442,6 @@ void usage_screen_create(lv_obj_t *root) {
   create_quota_page(&ui.quotas[2], VIEW_CODEX_WEEKLY,
                     USAGE_QUOTA_CODEX_WEEK, USAGE_PROVIDER_CODEX);
   create_burn_rate_page();
-  create_volume_page();
   tk_agent_monitor_create(root);
 }
 
@@ -540,30 +469,6 @@ void usage_screen_tick(int64_t now_us) {
   ui.last_now_us = now_us;
   for (int i = 0; i < 3; i++) refresh_header(&ui.quotas[i], now_us);
   tk_agent_monitor_tick(now_us);
-}
-
-void usage_screen_set_volume(double day_mtok, int sessions,
-                             double month_mtok) {
-  char buffer[48];
-  if (isfinite(day_mtok))
-    snprintf(buffer, sizeof buffer, "%.0f", day_mtok);
-  else
-    snprintf(buffer, sizeof buffer, "–");
-  set_cached_label_text(ui.volume_value, buffer, ui.rendered_volume_value,
-                        sizeof ui.rendered_volume_value,
-                        &ui.volume_value_initialized);
-  snprintf(buffer, sizeof buffer, "%d", sessions);
-  set_cached_label_text(ui.volume_sessions, buffer,
-                        ui.rendered_volume_sessions,
-                        sizeof ui.rendered_volume_sessions,
-                        &ui.volume_sessions_initialized);
-  if (isfinite(month_mtok))
-    snprintf(buffer, sizeof buffer, "%.0f", month_mtok);
-  else
-    snprintf(buffer, sizeof buffer, "–");
-  set_cached_label_text(ui.volume_month, buffer, ui.rendered_volume_month,
-                        sizeof ui.rendered_volume_month,
-                        &ui.volume_month_initialized);
 }
 
 void usage_screen_set_stale(bool stale) {

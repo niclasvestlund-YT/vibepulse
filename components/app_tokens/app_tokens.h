@@ -20,7 +20,6 @@ enum {
   VIEW_CLAUDE_ALL = 1,
   VIEW_CODEX_WEEKLY = 2,
   VIEW_BURN_RATE = 3,
-  VIEW_VOLUME = 4,
 };
 
 /* Ett lyckat /api/tokens-svar. Snappar tickern, stämplar färskhet och

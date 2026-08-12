@@ -97,7 +97,6 @@ expected_names = {
     "torget-vibepulse-burn-early.bmp",
     "torget-vibepulse-burn-learning.bmp",
     "torget-vibepulse-burn-unavailable.bmp",
-    "torget-vibepulse-volume.bmp",
     "torget-vibepulse-claude-stale.bmp",
     "torget-vibepulse-claude-missing.bmp",
     "torget-vibepulse-codex-missing.bmp",

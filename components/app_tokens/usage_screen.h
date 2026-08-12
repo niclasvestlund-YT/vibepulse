@@ -9,15 +9,13 @@
 #include "agent_status.h"
 #include "tokens.h"
 
-#define TK_USAGE_SCREEN_VIEWS 5
+#define TK_USAGE_SCREEN_VIEWS 4
 
 void usage_screen_create(lv_obj_t *root);
 void usage_screen_apply_tokens(const tk_tokens *tokens);
 void usage_screen_apply_agent(const tk_agent_snapshot *snapshot,
                               int64_t now_us);
 void usage_screen_tick(int64_t now_us);
-void usage_screen_set_volume(double day_mtok, int sessions,
-                             double month_mtok);
 void usage_screen_set_stale(bool stale);
 void usage_screen_show_view(int index);
 int usage_screen_current_view(void);
