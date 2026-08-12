@@ -502,6 +502,37 @@ static int run_vibepulse_static_qa(void) {
   tokens_show_view(VIEW_CODEX_WEEKLY);
   dump_frame("vibepulse-codex-weekly");
 
+  /* Source-provenance evidence is built directly rather than read from the
+   * live token service. Each capture therefore proves one exact wire state. */
+  tk_tokens quota_truth = {0};
+  quota_truth.codex_week = forecast_limit(46, 8640);
+  quota_truth.codex_week.delta_pct = 8;
+  quota_truth.codex_week.has_delta = 1;
+  tokens_apply(&quota_truth);
+  apply_agent_file("agent-status-idle.json");
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("vibepulse-codex-weekly-live-46");
+
+  quota_truth.codex_week.stale = 1;
+  tokens_apply(&quota_truth);
+  dump_frame("vibepulse-codex-weekly-cached-stale");
+
+  memset(&quota_truth, 0, sizeof quota_truth);
+  quota_truth.claude_model_week = forecast_limit(73, 3120);
+  quota_truth.claude_model_week.delta_pct = 12;
+  quota_truth.claude_model_week.has_delta = 1;
+  quota_truth.claude_model_week.stale = 1;
+  snprintf(quota_truth.claude_model_week_label,
+           sizeof quota_truth.claude_model_week_label, "FABLE · WEEK");
+  quota_truth.has_claude_model_week_label = 1;
+  tokens_apply(&quota_truth);
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("vibepulse-claude-fable-cached-stale");
+
+  memset(&quota_truth, 0, sizeof quota_truth);
+  tokens_apply(&quota_truth);
+  dump_frame("vibepulse-claude-fable-no-data");
+
   feed_forecast_outcomes();
   tokens_show_view(VIEW_BURN_RATE);
   dump_frame("vibepulse-burn-speed-up");

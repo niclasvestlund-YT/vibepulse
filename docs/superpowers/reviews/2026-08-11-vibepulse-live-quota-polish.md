@@ -29,6 +29,38 @@ explicitly reject `lv_anim` in the quota and attention renderers.
 
 ## Verification evidence
 
+### 2026-08-12 static fidelity correction
+
+The quota-provenance and native Codex-asset correction adds four explicit,
+content-free simulator states: Codex general weekly live at 46%, the same
+Codex cycle served from cache as `STALE`, Claude Fable served from cache as
+`STALE`, and Claude Fable without a safe value as `NO DATA`. The no-data page
+retains the fixed `FABLE · WEEK` identity and dash while leaving progress,
+reset and today's delta unavailable. These fixtures construct `tk_tokens`
+directly and never query or mutate the user's running tokenserver.
+
+The exact raster gate also checks both source-derived Codex assets independently:
+the 32 x 32 quota header and 112 x 112 attention mark have black corners,
+substantial blue-gradient and exact-white glyph regions, and a non-rectangular
+transparent silhouette. Both render at native 1:1 size.
+
+Latest exact private preview root:
+
+`/var/folders/86/2jzw_gkj3c71ygn1hdvrsnx80000gn/T/vibepulse-preview.bSmruN`
+
+The corrected physical AMOLED gate remains pending. No flash or live-service
+mutation was performed while producing this evidence.
+
+Observed verification for this correction:
+
+- `tools/vibepulse_studio/design.py --check`: exit 0.
+- complete host gate `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh`:
+  exit 0, including 11 preview workflow tests, 7 native asset tests, 56 Studio
+  tests, 18 Studio wiring tests and 18 exact visual-landmark tests.
+- private preview: 36 allowlisted PNG/BMP pairs, each exactly 480 x 480.
+- ESP-IDF 5.5.2 target build: exit 0; `torget.bin` is `0x1d77f0` bytes and
+  leaves `0x228810` bytes (54%) of the 4 MiB app partition free.
+
 The following are completed observations, not expected results:
 
 | Gate | Command/evidence | Observed result |
