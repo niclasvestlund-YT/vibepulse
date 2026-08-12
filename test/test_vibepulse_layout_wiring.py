@@ -44,7 +44,7 @@ for required in (
     "plex_headline_48",
     "plex_ui_16",
     "tk_img_claude_32",
-    "tk_img_codex_cloud_32",
+    "tk_img_codex_32",
     "VP_COLOR_CLAUDE",
     "VP_COLOR_CODEX",
     "usage_live_build_header",
@@ -200,13 +200,27 @@ for copy in (
     assert copy in monitor, f"missing attention copy: {copy}"
 
 for primitive in (
-    "tk_img_claude", "tk_img_codex_cloud", "tk_img_codex_chevron",
-    "tk_img_codex_underscore", "plex_attention_18", "plex_attention_25",
+    "tk_img_claude", "tk_img_codex", "plex_attention_18", "plex_attention_25",
     "plex_attention_52", "same_state_count", "LV_EVENT_CLICKED",
     "LV_EVENT_LONG_PRESSED", "torget_launcher_open",
     "tk_completion_queue_dismiss",
 ):
     assert primitive in monitor, f"missing attention renderer primitive: {primitive}"
+
+usage_codex_icon = source[source.index("static lv_obj_t *create_codex_icon"):]
+usage_codex_icon = usage_codex_icon[:usage_codex_icon.index(
+    "static void create_claude_icon"
+)]
+monitor_codex_icon = monitor[monitor.index("static lv_obj_t *create_codex_icon"):]
+monitor_codex_icon = monitor_codex_icon[:monitor_codex_icon.index(
+    "static void render_completion"
+)]
+for removed_codex_layer in (
+    "tk_img_codex_cloud", "tk_img_codex_chevron", "tk_img_codex_underscore",
+    "LV_IMAGE_ALIGN_STRETCH", "lv_obj_set_style_image_recolor",
+):
+    assert removed_codex_layer not in usage_codex_icon
+    assert removed_codex_layer not in monitor_codex_icon
 
 for forbidden in (
     "lv_anim", "lv_timer", "lv_canvas", "lv_obj_set_style_transform",
@@ -241,7 +255,7 @@ assert "lv_obj_set_style_border_width(view->outline, 6, 0);" in monitor
 assert "lv_obj_set_style_radius(view->outline, 36, 0);" in monitor
 assert "lv_obj_set_pos(view->icon_ring, 172, 77);" in monitor
 assert "lv_obj_set_size(view->icon_ring, 136, 136);" in monitor
-assert "184, 89, 112" in monitor
+assert "create_codex_icon(view->root, 184, 89)" in monitor
 for anchor in (31, 246, 321, 365, 430):
     assert f", {anchor});" in monitor, f"missing attention y anchor {anchor}"
 

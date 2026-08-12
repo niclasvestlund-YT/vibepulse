@@ -61,29 +61,12 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font,
   return object;
 }
 
-static lv_obj_t *create_codex_icon(lv_obj_t *parent,
-                                   const lv_image_dsc_t *cloud,
-                                   const lv_image_dsc_t *chevron,
-                                   const lv_image_dsc_t *underscore,
-                                   int x, int y, int size) {
-  lv_obj_t *group = bare(parent);
-  lv_obj_set_pos(group, x, y);
-  lv_obj_set_size(group, size, size);
-
-  const lv_image_dsc_t *layers[3] = { cloud, chevron, underscore };
-  for (int i = 0; i < 3; i++) {
-    lv_obj_t *image = lv_image_create(group);
-    lv_image_set_src(image, layers[i]);
-    lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(image, size, size);
-    lv_image_set_inner_align(image, LV_IMAGE_ALIGN_STRETCH);
-    lv_obj_set_pos(image, 0, 0);
-    if (i > 0) {
-      lv_obj_set_style_image_recolor(image, COL_WHITE, 0);
-      lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
-    }
-  }
-  return group;
+static lv_obj_t *create_codex_icon(lv_obj_t *parent, int x, int y) {
+  lv_obj_t *image = lv_image_create(parent);
+  lv_image_set_src(image, &tk_img_codex);
+  lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_pos(image, x, y);
+  return image;
 }
 
 static void render_completion(uint64_t now_ms) {
@@ -220,9 +203,7 @@ static void create_completion(lv_obj_t *app_root) {
   lv_obj_set_style_image_recolor(view->claude_icon, COL_CLAUDE, 0);
   lv_obj_set_style_image_recolor_opa(view->claude_icon, LV_OPA_COVER, 0);
 
-  view->codex_icon = create_codex_icon(
-      view->root, &tk_img_codex_cloud, &tk_img_codex_chevron,
-      &tk_img_codex_underscore, 184, 89, 112);
+  view->codex_icon = create_codex_icon(view->root, 184, 89);
 
   view->title = label(view->root, &plex_attention_52, COL_WHITE);
   lv_obj_set_pos(view->title, 14, 246);

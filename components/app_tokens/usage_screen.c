@@ -132,25 +132,11 @@ static void open_launcher(lv_event_t *event) {
 }
 
 static lv_obj_t *create_codex_icon(lv_obj_t *parent, int x, int y) {
-  lv_obj_t *group = bare(parent);
-  lv_obj_set_pos(group, x, y);
-  lv_obj_set_size(group, 32, 32);
-  const lv_image_dsc_t *layers[] = {
-      &tk_img_codex_cloud_32,
-      &tk_img_codex_chevron_32,
-      &tk_img_codex_underscore_32,
-  };
-  for (size_t i = 0; i < sizeof layers / sizeof layers[0]; i++) {
-    lv_obj_t *image = lv_image_create(group);
-    lv_image_set_src(image, layers[i]);
-    lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(image, LV_ALIGN_CENTER, 0, 0);
-    if (i > 0) {
-      lv_obj_set_style_image_recolor(image, COL_WHITE, 0);
-      lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
-    }
-  }
-  return group;
+  lv_obj_t *image = lv_image_create(parent);
+  lv_image_set_src(image, &tk_img_codex_32);
+  lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_pos(image, x, y);
+  return image;
 }
 
 static void create_claude_icon(lv_obj_t *parent, int x, int y) {

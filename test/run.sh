@@ -97,6 +97,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_preview_ui.py
 
 cd ..
+"$PYTHON_BIN" -m unittest tools.agent_assets.test_build_agent_images -v
 "$PYTHON_BIN" -m unittest tools.vibepulse_studio.test_design \
   tools.vibepulse_studio.test_server -v
 "$PYTHON_BIN" tools/vibepulse_studio/design.py --check
