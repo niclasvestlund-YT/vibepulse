@@ -1,5 +1,7 @@
 # VibePulse
 
+[![CI](https://github.com/niclasvestlund-YT/vibepulse/actions/workflows/ci.yml/badge.svg)](https://github.com/niclasvestlund-YT/vibepulse/actions/workflows/ci.yml)
+
 A little always-on screen for your shelf that shows what your AI agents are
 up to: **Claude Code and Codex usage, live agent activity, and a full-screen
 heads-up when an agent is waiting for you.**
