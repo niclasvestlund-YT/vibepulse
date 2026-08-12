@@ -13,7 +13,7 @@
  * payloaden. En halvparsead mätare är värre än en gammal. */
 static bool num(const cJSON *root, const char *key, double *out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
-  if (!cJSON_IsNumber(item)) return false;
+  if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble)) return false;
   *out = item->valuedouble;
   return true;
 }
@@ -21,12 +21,15 @@ static bool num(const cJSON *root, const char *key, double *out) {
 /* Limit-fälten: null är ett GILTIGT värde (källan otillgänglig — has 0),
  * men ett SAKNAT fält är ett kontraktsbrott, och negativt är en lögn.
  * Samma regel som sharePct i Sverige-parsern. */
-static bool num_or_null(const cJSON *root, const char *key,
+static bool pct_or_null(const cJSON *root, const char *key,
                         double *out, int *has_out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
   if (!item) return false;
   if (cJSON_IsNumber(item)) {
-    if (item->valuedouble < 0) return false;
+    if (!isfinite(item->valuedouble) || item->valuedouble < 0 ||
+        item->valuedouble > 100) {
+      return false;
+    }
     *out = item->valuedouble;
     *has_out = 1;
     return true;
@@ -34,15 +37,41 @@ static bool num_or_null(const cJSON *root, const char *key,
   return cJSON_IsNull(item); /* has_out lämnas 0 */
 }
 
+static bool reset_or_null(const cJSON *root, const char *key,
+                          int *out, int *has_out) {
+  const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+  if (!item) return false;
+  if (cJSON_IsNumber(item)) {
+    double value = item->valuedouble;
+    if (!isfinite(value) || value < 0 || value > INT_MAX ||
+        trunc(value) != value) {
+      return false;
+    }
+    *out = (int)value;
+    *has_out = 1;
+    return true;
+  }
+  return cJSON_IsNull(item);
+}
+
 /* En limit = ett procentfält + ett reset-fält, t.ex. "claudeSessionPct" +
  * "claudeSessionResetMin". */
 static bool limit_pair(const cJSON *root, const char *pct_key,
                        const char *reset_key, tk_limit *out) {
-  double reset = 0;
-  if (!num_or_null(root, pct_key, &out->pct, &out->has_pct)) return false;
-  if (!num_or_null(root, reset_key, &reset, &out->has_reset)) return false;
-  out->reset_min = (int)reset;
+  if (!pct_or_null(root, pct_key, &out->pct, &out->has_pct)) return false;
+  if (!reset_or_null(root, reset_key, &out->reset_min, &out->has_reset)) {
+    return false;
+  }
   return true;
+}
+
+static bool optional_stale(const cJSON *root, const char *key,
+                           tk_limit *out) {
+  const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+  if (!item) return true;
+  if (!cJSON_IsBool(item)) return false;
+  out->stale = cJSON_IsTrue(item) ? 1 : 0;
+  return !out->stale || out->has_pct;
 }
 
 static void optional_nonnegative_number(const cJSON *root, const char *key,
@@ -57,16 +86,62 @@ static void optional_nonnegative_number(const cJSON *root, const char *key,
   *has_out = 1;
 }
 
+static bool unicode_control(uint32_t codepoint) {
+  return codepoint <= 0x1f || (codepoint >= 0x7f && codepoint <= 0x9f) ||
+         (codepoint >= 0x200b && codepoint <= 0x200f) ||
+         (codepoint >= 0x2028 && codepoint <= 0x202e) ||
+         (codepoint >= 0x2060 && codepoint <= 0x206f) ||
+         codepoint == 0xfeff;
+}
+
+static bool valid_utf8_label(const unsigned char *source, size_t capacity,
+                             size_t *length_out) {
+  size_t offset = 0;
+  while (source[offset]) {
+    uint32_t codepoint = 0;
+    size_t width = 0;
+    unsigned char first = source[offset];
+    if (first < 0x80) {
+      codepoint = first;
+      width = 1;
+    } else if (first >= 0xc2 && first <= 0xdf) {
+      codepoint = first & 0x1f;
+      width = 2;
+    } else if (first >= 0xe0 && first <= 0xef) {
+      codepoint = first & 0x0f;
+      width = 3;
+    } else if (first >= 0xf0 && first <= 0xf4) {
+      codepoint = first & 0x07;
+      width = 4;
+    } else {
+      return false;
+    }
+    if (offset + width >= capacity) return false;
+    for (size_t index = 1; index < width; index++) {
+      unsigned char next = source[offset + index];
+      if ((next & 0xc0) != 0x80) return false;
+      codepoint = (codepoint << 6) | (next & 0x3f);
+    }
+    if ((width == 2 && codepoint < 0x80) ||
+        (width == 3 && codepoint < 0x800) ||
+        (width == 4 && codepoint < 0x10000) ||
+        (codepoint >= 0xd800 && codepoint <= 0xdfff) ||
+        codepoint > 0x10ffff || unicode_control(codepoint)) {
+      return false;
+    }
+    offset += width;
+  }
+  *length_out = offset;
+  return true;
+}
+
 static void optional_label(const cJSON *root, const char *key, char *out,
                            size_t capacity, int *has_out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
   if (!cJSON_IsString(item) || !item->valuestring) return;
   const unsigned char *source = (const unsigned char *)item->valuestring;
   size_t length = 0;
-  while (source[length]) {
-    if (source[length] < 0x20 || length + 1 >= capacity) return;
-    length++;
-  }
+  if (!valid_utf8_label(source, capacity, &length)) return;
   memcpy(out, source, length + 1);
   *has_out = 1;
 }
@@ -147,7 +222,7 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
    * per kontrakt, inte av misstag. */
   if (cJSON_GetObjectItemCaseSensitive(root, "error")) goto done;
 
-  if (!num(root, "v", &v) || (int)v != 2) goto done;
+  if (!num(root, "v", &v) || v != 2.0) goto done;
   if (!num(root, "dayTokens", &day)) goto done;
   if (!num(root, "dayTokensPerHour", &per_hour)) goto done;
   if (!num(root, "daySessions", &sessions)) goto done;
@@ -163,6 +238,11 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
                   &t.codex_session)) goto done;
   if (!limit_pair(root, "codexWeekPct", "codexWeekResetMin",
                   &t.codex_week)) goto done;
+
+  if (!optional_stale(root, "claudeWeekStale", &t.claude_week)) goto done;
+  if (!optional_stale(root, "claudeModelWeekStale",
+                      &t.claude_model_week)) goto done;
+  if (!optional_stale(root, "codexWeekStale", &t.codex_week)) goto done;
 
   optional_label(root, "claudeModelWeekLabel",
                  t.claude_model_week_label,
@@ -185,7 +265,10 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
 
   /* Inget på den här mätaren kan ärligt vara negativt — ett minustecken är
    * en lögn med ett stavfel (samma regel som sv_group_ll). */
-  if (day < 0 || per_hour < 0 || sessions < 0 || month < 0) goto done;
+  if (day < 0 || per_hour < 0 || sessions < 0 || sessions > INT_MAX ||
+      trunc(sessions) != sessions || month < 0) {
+    goto done;
+  }
 
   t.day_tokens = day;
   t.day_tokens_per_hour = per_hour;

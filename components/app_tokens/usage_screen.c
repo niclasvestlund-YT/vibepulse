@@ -64,6 +64,7 @@ typedef struct {
   bool halo_visible;
   bool halo_initialized;
   bool has_data;
+  bool quota_stale;
 } quota_page;
 
 typedef struct {
@@ -82,6 +83,12 @@ static struct {
   lv_obj_t *volume_unit;
   lv_obj_t *volume_sessions;
   lv_obj_t *volume_month;
+  char rendered_volume_value[48];
+  char rendered_volume_sessions[48];
+  char rendered_volume_month[48];
+  bool volume_value_initialized;
+  bool volume_sessions_initialized;
+  bool volume_month_initialized;
   tk_agent_snapshot agent_snapshot;
   int64_t agent_applied_at_us;
   int64_t last_now_us;
@@ -108,6 +115,15 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font,
   lv_label_set_long_mode(object, LV_LABEL_LONG_CLIP);
   lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
   return object;
+}
+
+static void set_cached_label_text(lv_obj_t *object, const char *text,
+                                  char *rendered, size_t capacity,
+                                  bool *initialized) {
+  if (*initialized && strcmp(rendered, text) == 0) return;
+  lv_label_set_text(object, text);
+  snprintf(rendered, capacity, "%s", text);
+  *initialized = true;
 }
 
 static void open_launcher(lv_event_t *event) {
@@ -367,7 +383,9 @@ static void create_volume_page(void) {
   ui.volume_value = label(tile, &plex_num_164, COL_WHITE,
                           18, 105, 330, 188);
   lv_obj_set_style_text_letter_space(ui.volume_value, -8, 0);
-  lv_label_set_text(ui.volume_value, "–");
+  set_cached_label_text(ui.volume_value, "–", ui.rendered_volume_value,
+                        sizeof ui.rendered_volume_value,
+                        &ui.volume_value_initialized);
   ui.volume_unit = label(tile, &plex_unit_27, COL_MUTED,
                          340, 235, 118, 38);
   lv_obj_set_style_text_letter_space(ui.volume_unit, 1, 0);
@@ -377,8 +395,13 @@ static void create_volume_page(void) {
               COL_WHITE, "SESSIONS");
   create_stat(tile, &ui.volume_month, RIGHT_STAT_X, RIGHT_STAT_W, true,
               COL_WHITE, "MTOK THIS MONTH");
-  lv_label_set_text(ui.volume_sessions, "–");
-  lv_label_set_text(ui.volume_month, "–");
+  set_cached_label_text(ui.volume_sessions, "–",
+                        ui.rendered_volume_sessions,
+                        sizeof ui.rendered_volume_sessions,
+                        &ui.volume_sessions_initialized);
+  set_cached_label_text(ui.volume_month, "–", ui.rendered_volume_month,
+                        sizeof ui.rendered_volume_month,
+                        &ui.volume_month_initialized);
   create_pager(tile, VIEW_VOLUME);
 }
 
@@ -397,16 +420,12 @@ static const tk_agent_provider_status *agent_provider_for(
 
 static void refresh_header(quota_page *page, int64_t now_us) {
   usage_live_header_view view = {0};
+  bool stale = ui.stale || page->quota_stale;
   usage_live_build_header(agent_provider_for(page->provider),
-                          agent_packet_age_ms(now_us), ui.stale,
+                          agent_packet_age_ms(now_us), stale,
                           ui.has_agent_snapshot && page->has_data, &view);
-  const char *context;
-  if (!page->has_data)
-    context = "NO DATA";
-  else if (ui.stale)
-    context = "STALE";
-  else
-    context = view.context;
+  const char *context = usage_presenter_quota_status_text(
+      page->has_data, stale, view.context);
 
   if (!page->context_initialized ||
       strcmp(page->rendered_context, context) != 0) {
@@ -461,9 +480,9 @@ static void apply_quota(quota_page *page, const tk_tokens *tokens) {
   usage_presenter_build_quota_page(tokens, page->scope, &view);
   const usage_card_view *quota = &view.quota;
   page->has_data = quota->has_pct;
+  page->quota_stale = quota->stale;
   lv_label_set_text(page->quota, quota->label);
-  lv_label_set_text(page->percent,
-                    quota->has_pct ? quota->pct_text : "");
+  lv_label_set_text(page->percent, quota->pct_text);
   bool bar_available = apply_today_bar(page, quota);
   lv_label_set_text(page->today,
                     quota->has_delta && bar_available
@@ -532,14 +551,25 @@ void usage_screen_tick(int64_t now_us) {
 void usage_screen_set_volume(double day_mtok, int sessions,
                              double month_mtok) {
   char buffer[48];
-  if (isfinite(day_mtok)) {
+  if (isfinite(day_mtok))
     snprintf(buffer, sizeof buffer, "%.0f", day_mtok);
-    lv_label_set_text(ui.volume_value, buffer);
-  }
+  else
+    snprintf(buffer, sizeof buffer, "–");
+  set_cached_label_text(ui.volume_value, buffer, ui.rendered_volume_value,
+                        sizeof ui.rendered_volume_value,
+                        &ui.volume_value_initialized);
   snprintf(buffer, sizeof buffer, "%d", sessions);
-  lv_label_set_text(ui.volume_sessions, buffer);
-  snprintf(buffer, sizeof buffer, "%.0f", month_mtok);
-  lv_label_set_text(ui.volume_month, buffer);
+  set_cached_label_text(ui.volume_sessions, buffer,
+                        ui.rendered_volume_sessions,
+                        sizeof ui.rendered_volume_sessions,
+                        &ui.volume_sessions_initialized);
+  if (isfinite(month_mtok))
+    snprintf(buffer, sizeof buffer, "%.0f", month_mtok);
+  else
+    snprintf(buffer, sizeof buffer, "–");
+  set_cached_label_text(ui.volume_month, buffer, ui.rendered_volume_month,
+                        sizeof ui.rendered_volume_month,
+                        &ui.volume_month_initialized);
 }
 
 void usage_screen_set_stale(bool stale) {

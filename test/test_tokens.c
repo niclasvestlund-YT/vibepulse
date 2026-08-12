@@ -58,6 +58,16 @@ static void check(const char *what, int cond) {
   "\"codexForecastAt\":1800007200," \
   "\"codexForecastOffsetMin\":-540"
 
+static void check_rejected_untouched(const char *what, const char *json,
+                                     tk_tokens *out) {
+  tk_tokens before;
+  char preserved[160];
+  memcpy(&before, out, sizeof before);
+  check(what, !PARSE(json, out));
+  snprintf(preserved, sizeof preserved, "%s preserves output", what);
+  check(preserved, memcmp(&before, out, sizeof before) == 0);
+}
+
 int main(void) {
   size_t len;
   char *json;
@@ -92,7 +102,42 @@ int main(void) {
   check("nollor + null ok",
         PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
               "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS "}", &t)
-        && t.day_tokens == 0 && !t.claude_session.has_pct);
+        && t.day_tokens == 0 && !t.claude_session.has_pct &&
+        !t.claude_session.stale && !t.claude_week.stale &&
+        !t.claude_model_week.stale && !t.codex_session.stale &&
+        !t.codex_week.stale);
+
+  check("stale true requires and accepts paired percentages",
+        PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+              "\"daySessions\":0,\"monthTokens\":0,"
+              "\"claudeSessionPct\":null,\"claudeSessionResetMin\":null,"
+              "\"claudeWeekPct\":47,\"claudeWeekResetMin\":120,"
+              "\"claudeModelWeekPct\":73,"
+              "\"claudeModelWeekResetMin\":240,"
+              "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+              "\"codexWeekPct\":35,\"codexWeekResetMin\":360,"
+              "\"claudeWeekStale\":true,"
+              "\"claudeModelWeekStale\":true,"
+              "\"codexWeekStale\":true}", &t) &&
+              t.claude_week.stale && t.claude_model_week.stale &&
+              t.codex_week.stale && !t.claude_session.stale &&
+              !t.codex_session.stale);
+
+  check("stale false accepts null percentages",
+        PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+              "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS ","
+              "\"claudeWeekStale\":false,"
+              "\"claudeModelWeekStale\":false,"
+              "\"codexWeekStale\":false}", &t) &&
+              !t.claude_week.stale && !t.claude_model_week.stale &&
+              !t.codex_week.stale);
+
+  check("unpublished session stale keys never set provenance",
+        PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+              "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS ","
+              "\"claudeSessionStale\":true,"
+              "\"codexSessionStale\":true}", &t) &&
+              !t.claude_session.stale && !t.codex_session.stale);
 
   check("valfria usagefält parsar",
         PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
@@ -145,6 +190,21 @@ int main(void) {
               "\"claudeModelWeekLabel\":"
               "\"12345678901234567\"}", &t) &&
               !t.has_claude_model_week_label);
+  check("kontrolltecken i valfri etikett ignoreras",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeModelWeekLabel\":\"BAD\\u001fLABEL\"}", &t) &&
+              !t.has_claude_model_week_label);
+  check("Unicode-kontrolltecken i valfri etikett ignoreras",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeModelWeekLabel\":\"BAD\\u0085LABEL\"}", &t) &&
+              !t.has_claude_model_week_label);
+  check("ogiltig UTF-8 i valfri etikett ignoreras",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"claudeModelWeekLabel\":\"\xC3\x28\"}", &t) &&
+              !t.has_claude_model_week_label);
   check("okänd prognos underkänner inte usage",
         PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
@@ -155,34 +215,148 @@ int main(void) {
 
   /* Fientliga indata: allt som inte är hela kontraktet avvisas utan att
    * röra utdata. */
-  tk_tokens before = t;
-  check("error-formen avvisas",
-        !PARSE("{\"error\":\"scan failed\"}", &t));
-  check("gammal version avvisas",
-        !PARSE("{\"v\":1,\"dayTokens\":1,\"dayTokensPerHour\":0,"
-               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t));
-  check("saknat volymfält avvisas",
-        !PARSE("{\"v\":2,\"dayTokens\":1," BASE_NULLS "}", &t));
-  check("saknat limitfält avvisas",
-        !PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
-               "\"daySessions\":1,\"monthTokens\":1}", &t));
-  check("negativ volym avvisas",
-        !PARSE("{\"v\":2,\"dayTokens\":-5,\"dayTokensPerHour\":0,"
-               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t));
-  check("negativ limit avvisas",
-        !PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
-               "\"daySessions\":1,\"monthTokens\":1,"
-               "\"claudeSessionPct\":-3,\"claudeSessionResetMin\":null,"
-               "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
-               "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
-               "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
-               "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t));
-  check("sträng i talfält avvisas",
-        !PARSE("{\"v\":2,\"dayTokens\":\"48\",\"dayTokensPerHour\":0,"
-               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t));
-  check("trunkerad avvisas", !PARSE("{\"v\":2,\"dayTok", &t));
-  check("html avvisas", !PARSE("<html>502</html>", &t));
-  check("avvisning rör inte utdata", memcmp(&before, &t, sizeof t) == 0);
+  check_rejected_untouched("error-formen avvisas",
+                           "{\"error\":\"scan failed\"}", &t);
+  check_rejected_untouched(
+      "gammal version avvisas",
+      "{\"v\":1,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "fraktionell version avvisas",
+      "{\"v\":2.9,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "oändlig version avvisas",
+      "{\"v\":1e999,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched("saknat volymfält avvisas",
+                           "{\"v\":2,\"dayTokens\":1," BASE_NULLS "}",
+                           &t);
+  check_rejected_untouched(
+      "saknat limitfält avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1}", &t);
+  check_rejected_untouched(
+      "negativ volym avvisas",
+      "{\"v\":2,\"dayTokens\":-5,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "oändlig dayTokens avvisas",
+      "{\"v\":2,\"dayTokens\":1e999,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "oändlig dayTokensPerHour avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":1e999,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "oändlig monthTokens avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1e999," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "fraktionella sessioner avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1.5,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "för många sessioner avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":2147483648,\"monthTokens\":1," BASE_NULLS "}",
+      &t);
+  check_rejected_untouched(
+      "oändligt sessionsantal avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1e999,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "negativ limit avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":-3,\"claudeSessionResetMin\":null,"
+      "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t);
+  check_rejected_untouched(
+      "limit över hundra avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":101,\"claudeSessionResetMin\":null,"
+      "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t);
+  check_rejected_untouched(
+      "oändlig limit avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":1e999,\"claudeSessionResetMin\":null,"
+      "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t);
+  check_rejected_untouched(
+      "fraktionell reset avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":3,\"claudeSessionResetMin\":1.5,"
+      "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t);
+  check_rejected_untouched(
+      "för stor reset avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":3,\"claudeSessionResetMin\":2147483648,"
+      "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t);
+  check_rejected_untouched(
+      "oändlig reset avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":3,\"claudeSessionResetMin\":1e999,"
+      "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null}", &t);
+  check_rejected_untouched(
+      "sträng i talfält avvisas",
+      "{\"v\":2,\"dayTokens\":\"48\",\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+
+  const char *stale_keys[] = {
+      "claudeWeekStale", "claudeModelWeekStale", "codexWeekStale",
+  };
+  const char *nonbooleans[] = {"null", "\"true\"", "1", "{}", "[]"};
+  for (size_t key = 0; key < sizeof stale_keys / sizeof stale_keys[0]; key++) {
+    for (size_t value = 0;
+         value < sizeof nonbooleans / sizeof nonbooleans[0]; value++) {
+      char payload[1024];
+      char name[120];
+      snprintf(payload, sizeof payload,
+               "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS
+               ",\"%s\":%s}", stale_keys[key], nonbooleans[value]);
+      snprintf(name, sizeof name, "%s rejects non-boolean %s",
+               stale_keys[key], nonbooleans[value]);
+      check_rejected_untouched(name, payload, &t);
+    }
+  }
+
+  for (size_t key = 0; key < sizeof stale_keys / sizeof stale_keys[0]; key++) {
+    char payload[1024];
+    char name[120];
+    snprintf(payload, sizeof payload,
+             "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+             "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS
+             ",\"%s\":true}", stale_keys[key]);
+    snprintf(name, sizeof name, "%s rejects true with null percentage",
+             stale_keys[key]);
+    check_rejected_untouched(name, payload, &t);
+  }
+
+  check_rejected_untouched("trunkerad avvisas", "{\"v\":2,\"dayTok", &t);
+  check_rejected_untouched("html avvisas", "<html>502</html>", &t);
 
   if (failures == 0) { printf("OK: alla tokens-tester gröna\n"); return 0; }
   printf("%d test föll\n", failures);

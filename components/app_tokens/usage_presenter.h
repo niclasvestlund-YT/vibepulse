@@ -35,6 +35,7 @@ typedef struct {
   double delta_pct;
   int has_pct;
   int has_delta;
+  int stale;
 } usage_card_view;
 
 typedef struct {
@@ -102,6 +103,7 @@ void usage_presenter_build_forecasts(const tk_tokens *tokens,
                                      usage_forecast_page_view *out);
 void usage_presenter_format_agent_metadata(const tk_agent_status *agent,
                                            char *out, size_t capacity);
-const char *usage_presenter_data_status_text(int has_data, int stale);
+const char *usage_presenter_quota_status_text(int has_data, int stale,
+                                              const char *live_context);
 
 #endif

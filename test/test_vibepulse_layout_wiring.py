@@ -86,7 +86,7 @@ for member in (
 assert "*effort;" not in quota_page, "quota header must use one context label"
 for member in (
     "rendered_context[64]", "context_initialized", "halo_visible",
-    "halo_initialized",
+    "halo_initialized", "quota_stale",
 ):
     assert member in quota_page, f"quota_page must cache {member}"
 
@@ -106,9 +106,10 @@ refresh_header = refresh_header[
     :refresh_header.index("static bool apply_today_bar")
 ]
 assert "ui.has_agent_snapshot && page->has_data" in refresh_header
-assert 'context = "NO DATA"' in refresh_header
-assert 'context = "STALE"' in refresh_header
-assert "context = view.context" in refresh_header
+assert "ui.stale || page->quota_stale" in refresh_header
+assert "usage_presenter_quota_status_text" in refresh_header
+for renderer_local_status in ('"NO DATA"', '"STALE"', '"LIVE"'):
+    assert renderer_local_status not in refresh_header
 assert "strcmp(page->rendered_context, context) != 0" in refresh_header
 assert "lv_label_set_text(page->context, context);" in refresh_header
 assert "page->halo_visible != view.halo_active" in refresh_header
@@ -123,6 +124,9 @@ apply_quota = source[source.index("static void apply_quota"):]
 apply_quota = apply_quota[:apply_quota.index("static void apply_forecast_row")]
 assert "bool bar_available = apply_today_bar(page, quota);" in apply_quota
 assert "quota->has_delta && bar_available" in apply_quota
+assert "page->quota_stale = quota->stale;" in apply_quota
+assert "lv_label_set_text(page->percent, quota->pct_text);" in apply_quota
+assert 'quota->has_pct ? quota->pct_text : ""' not in apply_quota
 
 burn = source[source.index("static void create_burn_rate_page"):]
 burn = burn[:burn.index("static void create_volume_page")]
@@ -136,6 +140,24 @@ volume = volume[:volume.index("void usage_screen_create")]
 for copy in ("VOLUME", "TOKENS", "USED TODAY", "SESSIONS", "MTOK THIS MONTH"):
     assert f'"{copy}"' in source
 assert "COL_CARD" not in volume
+
+volume_setter = source[source.index("void usage_screen_set_volume"):]
+volume_setter = volume_setter[:volume_setter.index(
+    "void usage_screen_set_stale"
+)]
+for rendered in (
+    "rendered_volume_value", "rendered_volume_sessions",
+    "rendered_volume_month",
+):
+    assert rendered in source, f"missing volume string cache: {rendered}"
+    assert rendered in volume_setter, f"volume setter does not use {rendered}"
+assert "isfinite(day_mtok)" in volume_setter
+assert "isfinite(month_mtok)" in volume_setter
+assert volume_setter.count("set_cached_label_text(") == 3
+cache_helper = source[source.index("static void set_cached_label_text"):]
+cache_helper = cache_helper[:cache_helper.index("static void open_launcher")]
+assert "strcmp(rendered, text) == 0" in cache_helper
+assert cache_helper.count("lv_label_set_text") == 1
 
 assert 'lv_obj_set_tile_id(ui.tileview, index, 0, LV_ANIM_OFF)' in source
 assert "lv_timer_create" not in source, "steady pages must not rotate themselves"

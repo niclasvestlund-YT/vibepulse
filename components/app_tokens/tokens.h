@@ -27,6 +27,7 @@ typedef struct {
   double delta_pct; /* förändring i samma resetcykel */
   int reset_min; /* minuter till fönstret nollas */
   int has_pct, has_reset, has_delta;
+  int stale;     /* 1 när värdet är unexpired last-known-good */
 } tk_limit;
 
 typedef enum {

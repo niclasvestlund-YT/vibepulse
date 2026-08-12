@@ -41,6 +41,7 @@ int main(void) {
   tokens.claude_week = limit(47, 249, 4);
   tokens.codex_week = limit(57, 2210, 5);
   tokens.claude_session = limit(21, 80, 11);
+  tokens.claude_model_week.stale = 1;
   tokens.has_claude_model_week_label = 1;
   snprintf(tokens.claude_model_week_label,
            sizeof tokens.claude_model_week_label, "FABLE · WEEK");
@@ -53,7 +54,10 @@ int main(void) {
         strcmp(page.quota.label, "FABLE · WEEK") == 0 &&
         strcmp(page.quota.pct_text, "73%") == 0 &&
         strcmp(page.quota.delta_text, "+12%") == 0 &&
-        strcmp(page.quota.reset_short_text, "2D 4H") == 0);
+        strcmp(page.quota.reset_short_text, "2D 4H") == 0 &&
+        page.quota.stale == 1);
+  check("cached Fable keeps trusted label",
+        strcmp(page.quota.label, "FABLE · WEEK") == 0);
 
   usage_presenter_build_quota_page(&tokens, USAGE_QUOTA_CLAUDE_ALL, &page);
   check("Claude all-model page is independent",
@@ -74,11 +78,18 @@ int main(void) {
   usage_presenter_build_quota_page(&missing, USAGE_QUOTA_CLAUDE_MODEL,
                                    &page);
   check("missing model quota remains truthful",
-        strcmp(page.quota.label, "MODEL · WEEK") == 0 &&
+        strcmp(page.quota.label, "FABLE · WEEK") == 0 &&
         strcmp(page.quota.pct_text, "–") == 0 &&
         strcmp(page.quota.delta_text, "–") == 0 &&
         strcmp(page.quota.reset_short_text, "–") == 0 &&
         !page.quota.has_pct && !page.quota.has_delta);
+
+  usage_detail_page_view details = {0};
+  usage_presenter_build_claude_details(&missing, &details);
+  check("Claude details use stable Fable identity without data",
+        details.row_count == 2 &&
+        strcmp(details.rows[0].label, "FABLE · WEEK") == 0 &&
+        strcmp(details.rows[0].pct_text, "–") == 0);
 
   tk_agent_status metadata = {0};
   metadata.has_model = true;
@@ -90,12 +101,21 @@ int main(void) {
                                         sizeof metadata_text);
   check("legacy compact metadata remains available to overlays",
         strcmp(metadata_text, "OPUS 5 · ULTRA") == 0);
-  check("fresh quota is live",
-        strcmp(usage_presenter_data_status_text(true, false), "LIVE") == 0);
-  check("retained quota is stale",
-        strcmp(usage_presenter_data_status_text(true, true), "STALE") == 0);
-  check("missing quota wins over stale transport",
-        strcmp(usage_presenter_data_status_text(false, true), "NO DATA") == 0);
+  check("fresh quota without agent context is live",
+        strcmp(usage_presenter_quota_status_text(true, false, ""),
+               "LIVE") == 0);
+  check("live agent context replaces live",
+        strcmp(usage_presenter_quota_status_text(
+                   true, false, "WORKING · 2 CHATS"),
+               "WORKING · 2 CHATS") == 0);
+  check("retained quota is stale despite agent context",
+        strcmp(usage_presenter_quota_status_text(
+                   true, true, "WORKING · 2 CHATS"),
+               "STALE") == 0);
+  check("missing quota wins over stale and agent context",
+        strcmp(usage_presenter_quota_status_text(
+                   false, true, "WORKING · 2 CHATS"),
+               "NO DATA") == 0);
 
   tk_tokens forecasts = {0};
   forecasts.claude_week = limit(47, 300, 7);

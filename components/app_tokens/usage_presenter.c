@@ -18,9 +18,12 @@ void usage_presenter_format_agent_metadata(const tk_agent_status *agent,
   }
 }
 
-const char *usage_presenter_data_status_text(int has_data, int stale) {
+const char *usage_presenter_quota_status_text(int has_data, int stale,
+                                              const char *live_context) {
   if (!has_data) return "NO DATA";
-  return stale ? "STALE" : "LIVE";
+  if (stale) return "STALE";
+  if (live_context && live_context[0]) return live_context;
+  return "LIVE";
 }
 
 static void format_reset(const tk_limit *limit,
@@ -49,6 +52,7 @@ static void build_card(usage_card_view *out, usage_card_kind kind,
                        const char *label, const tk_limit *limit) {
   memset(out, 0, sizeof *out);
   out->kind = kind;
+  out->stale = limit->stale;
   snprintf(out->label, sizeof out->label, "%s", label);
   if (limit->has_pct) {
     out->has_pct = 1;
@@ -121,7 +125,7 @@ void usage_presenter_build_quota_page(const tk_tokens *tokens,
                  tokens->has_claude_model_week_label &&
                          tokens->claude_model_week_label[0]
                      ? tokens->claude_model_week_label
-                     : "MODEL · WEEK",
+                     : "FABLE · WEEK",
                  &tokens->claude_model_week);
       break;
     case USAGE_QUOTA_CLAUDE_ALL:
@@ -148,7 +152,7 @@ void usage_presenter_build_claude_details(
              tokens->has_claude_model_week_label &&
                      tokens->claude_model_week_label[0]
                  ? tokens->claude_model_week_label
-                 : "MODEL · WEEK",
+                 : "FABLE · WEEK",
              &tokens->claude_model_week);
   build_card(&out->rows[1], USAGE_CARD_ALL_WEEK, "ALL MODELS",
              &tokens->claude_week);
