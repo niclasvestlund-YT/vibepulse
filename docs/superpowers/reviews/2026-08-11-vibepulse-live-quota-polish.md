@@ -5,7 +5,8 @@
 The original static portion of Tasks 1–5 and the static evidence portion of
 Task 7 were implemented through commit `43a21a4`; the quota-source, parser,
 native Codex-asset and corrected raster-evidence chain continues through
-`eb578fe`. Studio validation, the complete host
+`95808ec` plus the final no-data mask tightening recorded immediately after
+that commit. Studio validation, the complete host
 gate, the private exact-size preview, static raster landmarks, and the ESP-IDF
 target build passed for the current source tree.
 
@@ -62,6 +63,13 @@ Observed verification for this correction:
 - private preview: 36 allowlisted PNG/BMP pairs, each exactly 480 x 480.
 - ESP-IDF 5.5.2 target build: exit 0; `torget.bin` is `0x1d77f0` bytes and
   leaves `0x228810` bytes (54%) of the 4 MiB app partition free.
+
+After the final no-data mask tightening, the focused 18-test visual suite
+passes. A fresh complete host-gate run reaches and passes all VibePulse,
+preview, native-asset and Studio suites, then fails five hardware-registry
+documentation checks because the concurrently committed public landing-page
+`README.md` no longer contains the registry's required root-document sections.
+That unrelated documentation failure is not recorded as a complete host pass.
 
 The following are completed observations, not expected results:
 

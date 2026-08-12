@@ -183,9 +183,12 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         )
         hero = [(x, y) for y in range(140, 280) for x in range(22, 458)
                 if no_data.getpixel((x, y)) == (255, 255, 255)]
-        self.assertTrue(hero)
-        self.assertLess(max(x for x, _ in hero) - min(x for x, _ in hero),
-                        90, "no-data hero must be one large dash, not digits")
+        self.assertEqual(
+            (min(x for x, _ in hero), max(x for x, _ in hero),
+             min(y for _, y in hero), max(y for _, y in hero), len(hero)),
+            (22, 105, 208, 226, 1596),
+            "no-data hero must remain the deterministic large dash mask",
+        )
         for color, expected_bounds in (
             ((217, 119, 87), (24, 40, 364, 367)),
             ((255, 255, 255), (439, 455, 364, 367)),
