@@ -259,6 +259,23 @@ authorization. The corrected large and small Codex marks plus live/stale/no-data
 quota states must then be inspected on the real AMOLED before the static gate
 can pass or motion work can resume.
 
+## Attention-count truth
+
+The static attention view is an attention signal, not a permanent todo list.
+Claude or Codex `waiting` and `error` records older than two hours become
+`unknown` at the Mac source until a new event refreshes their observation time.
+The existing two-minute working lease remains unchanged.
+
+`N CHATS WAITING` and the equivalent error copy count only jobs from the same
+provider as the attention event. A Claude banner never includes Codex jobs, and
+vice versa. Counting is intentionally not filtered per project in this batch;
+that remains an open product decision.
+
+Quota-page agent context treats `waiting` and `error` as active only while the
+agent-status packet itself is within the existing 120-second lease. A dead
+agent feed therefore cannot claim active chats forever while quota data keeps
+arriving. The wire format does not change.
+
 ## Working-tree boundary
 
 The pre-existing user-owned modification at

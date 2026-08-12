@@ -314,6 +314,38 @@ git add components/app_tokens/tokens.h \
 git commit -m "Render cached VibePulse quotas as stale"
 ```
 
+### Task 3A: Make chat attention counts truthful
+
+**Files:**
+- Modify: `tools/tokenserver/agent_status.py`
+- Modify: `tools/tokenserver/test_agent_status.py`
+- Modify: `components/app_tokens/agent_completion_policy.c`
+- Modify: `components/app_tokens/usage_live_policy.c`
+- Modify: `test/test_agent_completion_policy.c`
+- Modify: `test/test_usage_live_policy.c`
+- Modify deterministic multi-provider simulator fixtures/captures only where
+  their approved semantics change.
+
+- [ ] **Step 1: Write failing lease and provider-isolation tests**
+
+Prove server-side `waiting`/`error` becomes `unknown` after exactly two hours
+while a new event revives it. Prove `same_state_count` includes only the
+triggering provider. Prove quota-header waiting/error context disappears when
+the agent packet exceeds the existing 120-second lease.
+
+- [ ] **Step 2: Implement the narrow static policy**
+
+Add `WAITING_LEASE_S = 2 * 60 * 60` beside the existing working lease. Pass the
+triggering provider into the count helper; do not add per-project filtering.
+Apply agent packet age to waiting/error activity without changing the wire
+format, motion, quota packet stale semantics, or completion queue identity.
+
+- [ ] **Step 3: Verify and commit independently**
+
+Run focused Python/C tests, the exact simulator capture gate, and the complete
+host suite. Update changed deterministic capture semantics deliberately and
+record that `N CHATS WAITING` is now per provider.
+
 ### Task 4: Generate and render one faithful Codex image
 
 **Files:**
