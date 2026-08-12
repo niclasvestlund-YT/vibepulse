@@ -339,6 +339,70 @@ class CodexLimitLogTests(unittest.TestCase):
         self.assertEqual(reset_min, 60)
         self.assertEqual(window_min, 10080)
 
+    def test_app_server_rate_limit_maps_remaining_38_to_used_62(self):
+        response = {
+            "rateLimits": {
+                "limitId": "codex",
+                "limitName": None,
+                "primary": {
+                    "usedPercent": 62,
+                    "windowDurationMins": 10080,
+                    "resetsAt": 1_900_000_000,
+                },
+            },
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "limitId": "codex",
+                    "limitName": None,
+                    "primary": {
+                        "usedPercent": 62,
+                        "windowDurationMins": 10080,
+                        "resetsAt": 1_900_000_000,
+                    },
+                },
+                "codex_bengalfox": {
+                    "limitId": "codex_bengalfox",
+                    "limitName": "GPT-5.3-Codex-Spark",
+                    "primary": {
+                        "usedPercent": 0,
+                        "windowDurationMins": 10080,
+                        "resetsAt": 1_900_100_000,
+                    },
+                },
+            },
+        }
+
+        found = tokenserver._parse_codex_rate_limits_response(
+            response, observed_at=1_800_000_000,
+            now_ts=1_800_000_000)
+
+        self.assertEqual(found["codexWeekPct"], 62.0)
+        self.assertEqual(found["codexWeekResetAt"], 1_900_000_000)
+        self.assertFalse(found["codexWeekStale"])
+
+    def test_refresh_prefers_live_app_server_over_stale_rollout(self):
+        previous = (
+            tokenserver._last_codex_limits,
+            tokenserver._last_codex_read,
+            tokenserver._codex_refreshing,
+        )
+        try:
+            tokenserver._codex_refreshing = True
+            with mock.patch.object(
+                    tokenserver, "_read_codex_app_server_limits",
+                    return_value={"codexWeekPct": 62.0}), \
+                    mock.patch.object(
+                        tokenserver, "_scan_codex_limits",
+                        return_value={"codexWeekPct": 58.0}):
+                tokenserver._refresh_codex_limits()
+
+            self.assertEqual(
+                tokenserver._last_codex_limits["codexWeekPct"], 62.0)
+        finally:
+            (tokenserver._last_codex_limits,
+             tokenserver._last_codex_read,
+             tokenserver._codex_refreshing) = previous
+
     def test_latest_rate_limit_is_read_from_tail_without_read_text(self):
         rate_limits = self._limits(35.0)
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -514,6 +578,8 @@ class CodexLimitLogTests(unittest.TestCase):
             tokenserver._last_codex_read = 0.0
             tokenserver._codex_refreshing = False
             with mock.patch.object(
+                    tokenserver, "_read_codex_app_server_limits",
+                    return_value={}), mock.patch.object(
                     tokenserver, "_scan_codex_limits",
                     side_effect=slow_scan):
                 before = time.perf_counter()

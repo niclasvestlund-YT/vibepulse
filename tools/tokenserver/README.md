@@ -22,11 +22,12 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
    5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
    Tokenen lämnar aldrig Macen — skärmen får bara procenttal.
-3. **Codex tak** — passiv, begränsad läsning av de 20 nyaste
-   `~/.codex/sessions/**/rollout-*.jsonl` (högst den befintliga sista MiB per
-   fil). Bara Codex faktiska `event_msg`/`token_count`-händelse med ett direkt
-   `payload.rate_limits` accepteras; citerade loggobjekt i meddelanden eller
-   verktygsdata ignoreras.
+3. **Codex tak** — tjänsten frågar Codex lokala, skrivskyddade app-server via
+   `account/rateLimits/read`, alltså samma aktuella snapshot som Codex-panelen
+   visar. Om app-servern saknas används en passiv fallback: begränsad läsning
+   av de 20 nyaste `~/.codex/sessions/**/rollout-*.jsonl` (högst den sista MiB
+   per fil). Bara Codex faktiska `event_msg`/`token_count`-händelse med ett
+   direkt `payload.rate_limits` accepteras i fallbacken.
 
 Generella veckotak hålls strikt åtskilda från namngivna modellkvoter. För
 Codex måste `limit_name` saknas, vara null eller vara en tom sträng och
@@ -253,8 +254,10 @@ Loggen hamnar i `/tmp/torget-tokenserver.log`.
   message.id + requestId (återupptagna sessioner dubbelräknas inte).
 - `dayTokensPerHour` är senaste timmens faktiska förbrukning — 0 betyder
   paus, och då låter skärmen bli att ticka. Inga hittade takter.
-- Codex-procenten är den nyaste giltiga, generella observationen bland de
-  begränsade kandidaterna. Ett passerat `resets_at` eller en skanning utan
+- Codex-procenten kommer primärt från Codex egen aktuella
+  `account/rateLimits/read`-snapshot. Den generella `codex`-bucketen hålls
+  åtskild från namngivna modellkvoter som Spark. Rollout-loggar används bara
+  som fallback; ett passerat `resets_at` eller en fallbackskanning utan
   generell observation räknas som källfel och följer stale-kontraktet ovan.
   Claude-proben kostar en tom förfrågan var 120:e sekund — försumbart mot
   fönstren den mäter.

@@ -37,6 +37,8 @@ import json
 import math
 import os
 import re
+import select
+import shutil
 import subprocess
 import threading
 import time
@@ -693,6 +695,130 @@ def _codex_session_observation(rate_limits, observed_at, now_ts):
     return None
 
 
+def _camel_codex_window(window):
+    """Convert app-server camelCase windows to the rollout representation."""
+    if not isinstance(window, dict):
+        return None
+    return {
+        "used_percent": window.get("usedPercent"),
+        "window_minutes": window.get("windowDurationMins"),
+        "resets_at": window.get("resetsAt"),
+    }
+
+
+def _parse_codex_rate_limits_response(body, observed_at, now_ts):
+    """Map account/rateLimits/read, the same snapshot Codex UI displays."""
+    if not isinstance(body, dict):
+        return {}
+    buckets = body.get("rateLimitsByLimitId")
+    rate_limits = (buckets.get("codex") if isinstance(buckets, dict)
+                   else None)
+    if not isinstance(rate_limits, dict):
+        rate_limits = body.get("rateLimits")
+    if not isinstance(rate_limits, dict):
+        return {}
+    normalized = {
+        "limit_id": rate_limits.get("limitId"),
+        "limit_name": rate_limits.get("limitName"),
+        "primary": _camel_codex_window(rate_limits.get("primary")),
+        "secondary": _camel_codex_window(rate_limits.get("secondary")),
+    }
+    weekly = _codex_general_observation(
+        normalized, observed_at=observed_at, now_ts=now_ts)
+    if weekly is None:
+        return {}
+    out = {
+        "codexWeekPct": weekly["pct"],
+        "codexWeekResetAt": weekly["reset_at"],
+        "codexWeekObservedAt": weekly["observed_at"],
+        "codexWeekIdentity": weekly["identity"],
+        "codexWeekStale": False,
+    }
+    session = _codex_session_observation(
+        normalized, observed_at=observed_at, now_ts=now_ts)
+    if session is not None:
+        out.update({
+            "codexSessionPct": session["pct"],
+            "codexSessionResetMin": session["reset_min"],
+        })
+    return out
+
+
+def _codex_app_server_command():
+    executable = shutil.which("codex")
+    if executable:
+        return executable
+    for candidate in (
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        "/Applications/Codex.app/Contents/Resources/codex",
+    ):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _read_codex_app_server_limits(timeout_s=5):
+    """Read Codex's current quota snapshot through its local app protocol."""
+    executable = _codex_app_server_command()
+    if executable is None:
+        return {}
+    process = None
+    try:
+        process = subprocess.Popen(
+            [executable, "app-server", "--listen", "stdio://"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+
+        def send(message):
+            process.stdin.write(json.dumps(message) + "\n")
+            process.stdin.flush()
+
+        send({
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {"name": "vibepulse", "version": "1"},
+                "capabilities": {},
+            },
+        })
+        requested = False
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select(
+                [process.stdout], [], [],
+                min(0.25, max(0, deadline - time.monotonic())))
+            if not ready:
+                if process.poll() is not None:
+                    break
+                continue
+            line = process.stdout.readline()
+            if not line:
+                break
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if message.get("id") == 1 and not requested:
+                send({"method": "initialized", "params": {}})
+                send({"id": 2, "method": "account/rateLimits/read"})
+                requested = True
+            elif message.get("id") == 2:
+                return _parse_codex_rate_limits_response(
+                    message.get("result"), observed_at=int(time.time()),
+                    now_ts=time.time())
+    except (OSError, ValueError, BrokenPipeError):
+        return {}
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1)
+    return {}
+
+
 def _read_latest_rate_limits(path: Path, block_size=64 * 1024,
                              max_bytes=CODEX_LIMIT_SCAN_BYTES):
     """Read a rollout backwards and stop at its newest rate-limit event.
@@ -834,7 +960,9 @@ def _scan_codex_limits():
 def _refresh_codex_limits():
     global _last_codex_limits, _last_codex_read, _codex_refreshing
     try:
-        refreshed = _scan_codex_limits()
+        refreshed = _read_codex_app_server_limits()
+        if not refreshed:
+            refreshed = _scan_codex_limits()
     except Exception:
         refreshed = {}
     with _codex_limits_lock:
