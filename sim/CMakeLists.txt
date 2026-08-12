@@ -24,6 +24,21 @@ target_link_libraries(lvgl PUBLIC SDL2::SDL2)
 # Samma filer som targetet bygger, minus apparnas net.c (simulatorn matar
 # fixtures i stället) och minus main/ (värdlagret är den här filens main.c).
 file(GLOB FONTS "${CMAKE_CURRENT_SOURCE_DIR}/../platform/fonts/*.c")
+
+# Vibbe delas in fran ~/Buddy (inflytten 2026-08-07) - sjal, ansikte och
+# latenas rena karna; ljudnav/wake ar target-only och kompileras inte har.
+# Utan ~/Buddy (farsk klon utifran) byggs simulatorn med tva appar, precis
+# som targetet — registry.c grindas pa TORGET_HAVE_BUDDY.
+if(EXISTS "$ENV{HOME}/Buddy/components/app_buddy")
+  set(BUDDY_SRCS
+    $ENV{HOME}/Buddy/components/app_buddy/app.c
+    $ENV{HOME}/Buddy/components/app_buddy/buddy_soul.c
+    $ENV{HOME}/Buddy/components/app_buddy/buddy_face.c
+    $ENV{HOME}/Buddy/components/app_buddy/vibbe_sounds.c)
+else()
+  set(BUDDY_SRCS "")
+  message(STATUS "torget-sim: ~/Buddy saknas — bygger utan Vibbe/Buddy (app 3)")
+endif()
 add_executable(torget-sim
   main.c
   ../platform/torget_ui.c
@@ -45,12 +60,7 @@ add_executable(torget-sim
   ../components/torget_fmt/fmt_sv.c
   ../components/torget_ticker/ticker.c
   ../third_party/cjson/cJSON.c
-  # Vibbe delas in fran ~/Buddy (inflytten 2026-08-07) - sjal, ansikte och
-  # latenas rena karna; ljudnav/wake ar target-only och kompileras inte har.
-  $ENV{HOME}/Buddy/components/app_buddy/app.c
-  $ENV{HOME}/Buddy/components/app_buddy/buddy_soul.c
-  $ENV{HOME}/Buddy/components/app_buddy/buddy_face.c
-  $ENV{HOME}/Buddy/components/app_buddy/vibbe_sounds.c
+  ${BUDDY_SRCS}
   ${FONTS})
 
 # Simulatorn läser de riktiga fixture-filerna genom de delade parsrarna.
@@ -63,6 +73,10 @@ target_include_directories(torget-sim PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../components/app_solelkollen"
   "${CMAKE_CURRENT_SOURCE_DIR}/../components/app_tokens"
   "${CMAKE_CURRENT_SOURCE_DIR}/../components/torget_fmt"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../components/torget_ticker"
-  "$ENV{HOME}/Buddy/components/app_buddy")
+  "${CMAKE_CURRENT_SOURCE_DIR}/../components/torget_ticker")
+if(BUDDY_SRCS)
+  target_include_directories(torget-sim PRIVATE
+    "$ENV{HOME}/Buddy/components/app_buddy")
+  target_compile_definitions(torget-sim PRIVATE TORGET_HAVE_BUDDY)
+endif()
 target_link_libraries(torget-sim PRIVATE lvgl SDL2::SDL2)

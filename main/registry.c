@@ -1,8 +1,14 @@
 #include "torget_app.h"
 
-#include "app_buddy.h"
 #include "app_solelkollen.h"
 #include "app_tokens.h"
+
+/* Vibbe/Buddy bor i ~/Buddy (companion-repot). Byggena sätter
+ * TORGET_HAVE_BUDDY när det är utcheckat; utan det byggs registret med två
+ * appar så en färsk klon utifrån alltid går att bygga. */
+#ifdef TORGET_HAVE_BUDDY
+#include "app_buddy.h"
+#endif
 
 /*
  * Appregistret: DEN här byggens appar, i launcherordning. Registret är
@@ -18,7 +24,9 @@
 const torget_app_t *const torget_apps[] = {
   &solelkollen_app,
   &tokens_app,
+#ifdef TORGET_HAVE_BUDDY
   &vibbe_app,
+#endif
 };
 
 const int torget_app_count =
