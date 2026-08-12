@@ -394,31 +394,49 @@ class MaxTrackerStore:
     exact same tree :meth:`backfill_step` walks. Without a boundary, both
     channels would independently track their own byte offset into the
     same file and each add the same tokens, silently doubling every
-    current-month day's volume. The split: :meth:`backfill_step` never
-    READS a Claude file whose mtime is in the current month — that file
-    is the live scanner's exclusive territory for as long as it keeps
-    being touched.
+    current-month day's volume.
 
-    LIVE COVERAGE ADVANCES THE BACKFILL WATERMARK: a deferred file's
-    ``_backfill`` bookkeeping entry is still refreshed to ``{offset:
-    current_size, size: current_size, done: True}`` on every single pass
-    (:meth:`_advance_watermark` — a stat-only touch, content is never
-    read). This is the piece that makes the eventual handoff correct, not
-    just an optimization: without it, a deferred file has NO bookkeeping
-    entry at all while live-owned, so the instant it ages into a prior
-    month, backfill would find nothing, start from offset 0, and
-    re-accumulate every token live already counted — a NEW, deterministic
-    double-count firing at every month rollover, worse than not deferring
-    at all, and one Finding B's (correct) authoritative-``lvl`` rule would
-    then lock in permanently. With the watermark kept fresh instead: the
-    moment a file's mtime finally ages out of the current month (exactly
-    when the live scanner's own month filter also drops it), backfill
-    resumes from wherever that watermark left off — reading only the
-    genuinely-uncounted remainder appended after the file went quiet, by
-    construction never overlapping with what live already counted, and
-    with no coverage gap either, since a file that was NEVER live-owned
-    (dormant since before this store even started) has no watermark to
-    resume from and simply backfills whole from 0, exactly as before.
+    THE INVARIANT THAT ACTUALLY DECIDES OWNERSHIP: an event's owner is
+    decided by ITS OWN DATE — current month belongs to the live channel,
+    anything earlier belongs to backfill. :meth:`_handle_claude_event`
+    enforces this directly, per event, regardless of which file it came
+    from or why backfill happened to be reading that file at all
+    (Rule 3). This is the one mechanism that is actually load-bearing for
+    correctness. Everything else below — the file-level mtime deferral in
+    :meth:`_advance_one_file` and the backfill watermark — exists ONLY to
+    spare backfill from needlessly re-reading a whole file it can already
+    tell (cheaply, from a single ``stat()``) is entirely this month's
+    business. If either of those had a bug, event-date filtering alone
+    would still stop a double-count; the reverse is not true, so it is
+    the rule that must never be weakened.
+
+    Built on top of that, two supporting rules keep the IO-efficiency
+    layer itself both starvation-free and non-destructive:
+
+    * A file backfill has already STARTED (its ``_backfill`` entry exists
+      and ``done`` is False — mid-drain or mid-discard) stays
+      backfill-owned no matter what its mtime now reads, until that drain
+      genuinely completes. Deferring it away mid-scan, or blindly
+      stamping its bookkeeping to "done" at the current size, would
+      abandon unfinished progress and silently drop whatever real content
+      sits past wherever the scan had actually gotten to.
+    * LIVE COVERAGE ADVANCES THE BACKFILL WATERMARK: a file that IS
+      correctly deferred still gets its ``_backfill`` bookkeeping entry
+      refreshed to ``{offset: current_size, size: current_size, done:
+      True}`` on every single pass over ``every`` discovered file (never
+      skipped just because an earlier, still-incomplete backlog file
+      happens to be this call's chosen candidate — see
+      :meth:`_advance_one_file`), via :meth:`_advance_watermark`, a
+      stat-only touch that never reads content. This is what makes the
+      eventual month-rollover handoff cheap: once a file's mtime finally
+      ages out of the current month, backfill resumes from wherever that
+      watermark left off instead of from 0, reading only the genuinely
+      new remainder. A file that was NEVER live-owned (dormant since
+      before this store even started) has no watermark to resume from
+      and simply backfills whole from 0, exactly as before. And because
+      ownership is ultimately decided per event by date (not by this
+      watermark), even a stale or wrong watermark could only ever cause
+      wasted re-reading, never a double-count.
 
     Threading contract: this store is shared by design -- a background
     thread drives :meth:`backfill_step`/:meth:`observe_volume`/:meth:`save`,
@@ -576,15 +594,18 @@ class MaxTrackerStore:
         file's backfill. Returns True while there is more work to drain
         (call again); False once both roots are fully caught up.
 
-        Claude files with a mtime in the current calendar month are never
-        read -- see the class docstring's single-writer rule: that is
-        tokenserver.py's live ``/api/tokens`` scanner's exclusive
-        territory, and touching it here would double-count every token it
-        already counted. Every such file's bookkeeping watermark is still
-        refreshed to its current size on every pass, though (a stat-only
-        touch, no content read) -- live coverage advances the backfill
-        watermark, so the month it ages out of that territory, backfill
-        resumes from wherever live left off instead of from 0.
+        Claude files with a mtime in the current calendar month are
+        skipped as an IO-efficiency shortcut -- see the class docstring's
+        single-writer rule -- UNLESS backfill already has unfinished
+        progress on them, in which case they stay backfill-owned until
+        that drain completes. Either way, actual counting is gated a
+        second time, per event, by that event's own date
+        (:meth:`_handle_claude_event`): that is the rule that actually
+        prevents a double-count, not this file-level shortcut. Every
+        skipped file's bookkeeping watermark is still refreshed to its
+        current size on every pass (a stat-only touch, no content read),
+        so the month it ages out of the live channel's territory,
+        backfill resumes from wherever live left off instead of from 0.
         """
         with self._lock:
             codex_more = self._advance_one_file(
@@ -609,9 +630,25 @@ class MaxTrackerStore:
             return False
 
         def deferred_to_live(info) -> bool:
-            return (live_channel_cutoff_ts is not None and
-                    info.st_mtime >= live_channel_cutoff_ts)
+            if (live_channel_cutoff_ts is None or
+                    info.st_mtime < live_channel_cutoff_ts):
+                return False
+            # Rule 2: a file backfill has already started but not
+            # finished (mid-drain OR mid-discard, entry["done"] is
+            # False) stays backfill-owned regardless of mtime -- it is
+            # NEVER deferred out from under an in-progress scan. Only a
+            # file with no entry, or one already fully drained, can be
+            # live-owned territory.
+            existing = bucket.get(info.st_ino)
+            return existing is None or existing.get("done", False)
 
+        # Rule 1: this is a SINGLE pass over every discovered path, never
+        # breaking early. A slow-draining backlog file must not starve
+        # every OTHER file's watermark refresh for however many calls it
+        # takes to finish -- so every path gets examined (and, if
+        # deferred, its watermark refreshed) on every single call,
+        # regardless of where in the list the eventual "chosen" file for
+        # this call sits, or whether one was found at all.
         chosen = None
         for path in paths:
             try:
@@ -621,11 +658,14 @@ class MaxTrackerStore:
             if deferred_to_live(info):
                 self._advance_watermark(bucket, pending, info)
                 continue  # this month's own business -- not backfill's
+            if chosen is not None:
+                continue  # candidate already picked; keep scanning only
+                          # so every remaining deferred file still gets
+                          # its watermark refreshed this call
             entry = bucket.get(info.st_ino)
             if self._is_fully_drained(entry, info):
                 continue  # this inode was already drained at this size
             chosen = (path, info, entry)
-            break
         if chosen is None:
             return False
 
@@ -679,11 +719,13 @@ class MaxTrackerStore:
         pending.pop(info.st_ino, None)  # finished -- nothing left to cache
         # This file just finished -- is any OTHER discovered file still
         # incomplete? (Cheap dict lookups only; re-stat'ing here is fine,
-        # it never reads file content.) A file deferred to the live
-        # channel is not "incomplete work" for backfill -- it's simply
-        # not backfill's to report, or the background thread would mark
-        # itself dirty and save needlessly on every tick for as long as
-        # any file is actively being written this month.
+        # it never reads file content.) Watermarks for every deferred
+        # file were already refreshed above, in the SAME single pass
+        # (Rule 1) -- no need to redo that here. A file deferred to the
+        # live channel is not "incomplete work" for backfill -- it's
+        # simply not backfill's to report, or the background thread would
+        # mark itself dirty and save needlessly on every tick for as long
+        # as any file is actively being written this month.
         for other in paths:
             if other == path:
                 continue
@@ -692,7 +734,6 @@ class MaxTrackerStore:
             except OSError:
                 continue
             if deferred_to_live(other_info):
-                self._advance_watermark(bucket, pending, other_info)
                 continue
             other_entry = bucket.get(other_info.st_ino)
             if not self._is_fully_drained(other_entry, other_info):
@@ -724,7 +765,20 @@ class MaxTrackerStore:
         :meth:`_is_fully_drained` correctly treats it as complete for as
         long as the size doesn't change; any further growth invalidates
         that match and the next pass simply advances the watermark again.
+
+        Rule 2 (defense in depth -- callers should already never reach
+        here for such an entry, since :meth:`_advance_one_file`'s own
+        ``deferred_to_live`` refuses to defer a file with a not-yet-
+        ``done`` entry in the first place): this method must NEVER
+        overwrite an in-progress entry (``done`` is False -- mid-drain or
+        mid-discard). Blindly stamping ``done: True`` at the CURRENT
+        (possibly mid-line) size would abandon the unfinished scan and
+        silently drop whatever valid, real content sat past wherever the
+        drain had actually gotten to -- never counted by anyone, ever.
         """
+        existing = bucket.get(info.st_ino)
+        if existing is not None and not existing.get("done", False):
+            return
         bucket[info.st_ino] = {
             "offset": info.st_size, "size": info.st_size, "done": True,
             "discarding": False}
@@ -932,6 +986,24 @@ class MaxTrackerStore:
         message/request ids: the result only ever becomes a coarse 0-2
         tercile level (:func:`volume_levels`), never a displayed number, so
         an occasional duplicate cannot change what the user sees.
+
+        RULE 3 -- event-date ownership, the actual correctness guarantee
+        behind the single-writer split (file-level mtime deferral and the
+        watermark are an IO-efficiency layer on top, never the thing
+        deciding ownership on their own): an event's owner is decided by
+        its OWN date, current month = the live channel's territory,
+        anything earlier = backfill's. This event is silently skipped
+        (not counted, not an error) whenever its local date falls in the
+        current calendar month -- REGARDLESS of why this handler is even
+        seeing it (the file could be genuinely backfill-owned but a
+        writer appended a fresh, current-month record onto the tail of
+        otherwise-historical content; Rule 2 keeps such a file
+        backfill-owned until its drain completes, and without this check
+        that fresh tail would get counted here even though the live
+        channel already counted it too). Backfill still advances its
+        offset past a skipped event exactly as it would a counted one --
+        forward progress must never stall on this -- it just never calls
+        :meth:`observe_volume` for it.
         """
         if not isinstance(event, dict):
             return
@@ -943,6 +1015,9 @@ class MaxTrackerStore:
             ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
         except ValueError:
             return
+        ts_local = ts.astimezone()
+        if ts_local.timestamp() >= _current_month_start_ts():
+            return  # current month -- the live channel's event to count
         tokens = (
             (usage.get("input_tokens") or 0)
             + (usage.get("output_tokens") or 0)
@@ -950,8 +1025,7 @@ class MaxTrackerStore:
             + (usage.get("cache_read_input_tokens") or 0))
         if not isinstance(tokens, (int, float)) or tokens <= 0:
             return
-        self.observe_volume("claude", ts.astimezone().date().isoformat(),
-                            tokens)
+        self.observe_volume("claude", ts_local.date().isoformat(), tokens)
 
     # -- output ------------------------------------------------------------
 

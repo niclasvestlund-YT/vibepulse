@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import stat
 import tempfile
 import threading
@@ -94,6 +95,24 @@ def _age_into_last_month(path):
     """
     aged = time.time() - 40 * 86400
     os.utime(path, (aged, aged))
+
+
+# Finding C round 3, Rule 3: backfill's event-date filter
+# (_handle_claude_event) skips any Claude event whose OWN date falls in
+# the CURRENT real calendar month -- ownership is decided by the event's
+# date, not by file mtime (see MaxTrackerStore's single-writer class
+# docstring). A fixed-looking historical date string like "2026-08-07"
+# stops being safe the moment the real wall clock itself reaches that
+# month. Anchored 45 days before whatever "today" actually is when the
+# suite runs -- comfortably more than one full month back (the longest
+# month is 31 days) with margin to spare for the small same-test offsets
+# (a couple of days) several tests need for a second or third distinct
+# date.
+_BACKFILL_ANCHOR = date.today() - timedelta(days=45)
+
+
+def _backfill_date(offset_days: int = 0) -> str:
+    return (_BACKFILL_ANCHOR + timedelta(days=offset_days)).isoformat()
 
 
 def _claude_usage_line(message_id, tokens, timestamp):
@@ -296,25 +315,24 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
         # the live channel instead (its own dedicated tests cover that).
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
+            day = _backfill_date()
             path = claude_root / "session.jsonl"
             _write_jsonl(path, [
-                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z")])
+                _claude_usage_line("m1", 100, f"{day}T10:00:00Z")])
             _age_into_last_month(path)
             _drain(store)
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 100)
             inode_before = path.stat().st_ino
 
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(_claude_usage_line(
-                    "m2", 50, "2026-08-07T11:00:00Z")) + "\n")
+                    "m2", 50, f"{day}T11:00:00Z")) + "\n")
             self.assertEqual(path.stat().st_ino, inode_before)
             _age_into_last_month(path)
 
             _drain(store)
 
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 150)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 150)
 
     def test_a_grown_codex_file_resumes_from_its_offset_without_double_counting(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -340,28 +358,28 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
     def test_a_truncated_file_at_the_same_inode_is_rescanned_from_the_start(self):
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
+            day = _backfill_date()
+            day2 = _backfill_date(2)
             path = claude_root / "session.jsonl"
             _write_jsonl(path, [
-                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
-                _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
+                _claude_usage_line("m1", 100, f"{day}T10:00:00Z"),
+                _claude_usage_line("m2", 50, f"{day}T11:00:00Z"),
             ])
             _age_into_last_month(path)  # Finding C: else backfill defers it
             _drain(store)
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 150)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 150)
             inode_before = path.stat().st_ino
 
             # Truncated and rewritten in place (same path, same inode,
             # smaller size) -- simulates a rotated/rewritten log.
             _write_jsonl(path, [
-                _claude_usage_line("m3", 77, "2026-08-09T10:00:00Z")])
+                _claude_usage_line("m3", 77, f"{day2}T10:00:00Z")])
             self.assertEqual(path.stat().st_ino, inode_before)
             _age_into_last_month(path)  # the rewrite also bumped mtime
 
             _drain(store)
 
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-09"]["vol"], 77)
+            self.assertEqual(store._state["claude"]["days"][day2]["vol"], 77)
 
     def test_a_line_wider_than_the_cap_is_skipped_not_starved(self):
         # Regression: a single JSONL line over _MAX_LINE_BYTES used to
@@ -369,22 +387,22 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
         # forever, so the same file was picked again on every call.
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
+            day = _backfill_date()
             path = claude_root / "session.jsonl"
             junk = {"junk": "x" * (MaxTrackerStore._MAX_LINE_BYTES + 5000)}
             junk_line_bytes = len(json.dumps(junk).encode("utf-8")) + 1
             self.assertGreater(
                 junk_line_bytes, MaxTrackerStore._MAX_LINE_BYTES)
             _write_jsonl(path, [
-                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
+                _claude_usage_line("m1", 100, f"{day}T10:00:00Z"),
                 junk,
-                _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
+                _claude_usage_line("m2", 50, f"{day}T11:00:00Z"),
             ])
             _age_into_last_month(path)  # Finding C: else backfill defers it
 
             _drain(store)  # would hit the safety cap and fail if starved
 
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 150)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 150)
             # Genuinely done -- not just "stopped for now" on this line.
             self.assertFalse(store.backfill_step())
 
@@ -410,7 +428,8 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
     def test_a_2mib_line_still_completes_over_many_small_budget_steps(self):
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
-            row = _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z")
+            day = _backfill_date()
+            row = _claude_usage_line("m1", 100, f"{day}T10:00:00Z")
             row["padding"] = "x" * (2 * 1024 * 1024)
             row_bytes = len(json.dumps(row).encode("utf-8")) + 1
             self.assertGreater(row_bytes, 2 * 1024 * 1024)
@@ -425,8 +444,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 self.assertLess(steps, 200)  # sanity bound, not the real cap
 
             self.assertGreater(steps, 1)  # actually spanned multiple calls
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 100)
 
     def test_a_second_file_still_drains_despite_the_first_having_an_oversized_line(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -457,27 +475,29 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
         # everything behind it) starved forever.
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
+            day = _backfill_date()
             path = claude_root / "session.jsonl"
             _write_jsonl(path, [
-                _claude_usage_line(f"m{i}", 1, "2026-08-07T10:00:00Z")
+                _claude_usage_line(f"m{i}", 1, f"{day}T10:00:00Z")
                 for i in range(257)
             ])
             _age_into_last_month(path)  # Finding C: else backfill defers it
 
             _drain(store)  # would hang/starve at 256 of 257 if regressed
 
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 257)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 257)
             self.assertTrue(
                 store._backfill["claude"][path.stat().st_ino]["done"])
 
     def test_unterminated_final_line_marks_done_and_does_not_starve_later_files(self):
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
+            day = _backfill_date()
+            day2 = _backfill_date(1)
             complete_line = json.dumps(_claude_usage_line(
-                "m1", 100, "2026-08-07T10:00:00Z"))
+                "m1", 100, f"{day}T10:00:00Z"))
             dangling = json.dumps(_claude_usage_line(
-                "m2", 999, "2026-08-07T11:00:00Z"))
+                "m2", 999, f"{day}T11:00:00Z"))
             path_a = claude_root / "session-a.jsonl"
             # No trailing newline on the last line -- a writer that
             # crashed or simply hasn't finished this line yet.
@@ -485,16 +505,15 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             _age_into_last_month(path_a)  # Finding C: else deferred to live
             path_b = claude_root / "session-b.jsonl"
             _write_jsonl(path_b, [_claude_usage_line(
-                "m3", 50, "2026-08-08T10:00:00Z")])
+                "m3", 50, f"{day2}T10:00:00Z")])
             _age_into_last_month(path_b)
 
             _drain(store)
 
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 100)
             # The sibling file (sorts after the stuck one) still drained.
             self.assertEqual(
-                store._state["claude"]["days"]["2026-08-08"]["vol"], 50)
+                store._state["claude"]["days"][day2]["vol"], 50)
 
             entry = store._backfill["claude"][path_a.stat().st_ino]
             self.assertTrue(entry["done"])
@@ -511,21 +530,21 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
         # touched (its own dedicated tests cover that).
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
+            day = _backfill_date()
             complete_line = json.dumps(_claude_usage_line(
-                "m1", 100, "2026-08-07T10:00:00Z"))
+                "m1", 100, f"{day}T10:00:00Z"))
             dangling = json.dumps(_claude_usage_line(
-                "m2", 999, "2026-08-07T11:00:00Z"))
+                "m2", 999, f"{day}T11:00:00Z"))
             path = claude_root / "session.jsonl"
             path.write_text(complete_line + "\n" + dangling)
             _age_into_last_month(path)
 
             _drain(store)
-            self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+            self.assertEqual(store._state["claude"]["days"][day]["vol"], 100)
 
             # The writer finishes the dangling line and appends another.
             another_line = json.dumps(_claude_usage_line(
-                "m3", 25, "2026-08-07T12:00:00Z"))
+                "m3", 25, f"{day}T12:00:00Z"))
             with path.open("a", encoding="utf-8") as handle:
                 handle.write("\n" + another_line + "\n")
             _age_into_last_month(path)
@@ -535,7 +554,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             # 100 (first pass, unchanged) + 999 (now-completed dangling
             # line) + 25 (new line) -- each counted exactly once.
             self.assertEqual(
-                store._state["claude"]["days"]["2026-08-07"]["vol"], 1124)
+                store._state["claude"]["days"][day]["vol"], 1124)
 
 
 class MaxTrackerStoreLiveWatermarkTests(unittest.TestCase):
@@ -653,20 +672,326 @@ class MaxTrackerStoreLiveWatermarkTests(unittest.TestCase):
                 store._backfill["claude"][ino]["offset"], path.stat().st_size)
 
 
+class MaxTrackerStoreEventDateOwnershipTests(unittest.TestCase):
+    """Finding C round 3: the round-2 watermark fix above
+    (MaxTrackerStoreLiveWatermarkTests) was re-reviewed against the real
+    files and REJECTED with two new empirical repros -- the watermark
+    alone was not enough. Fixed via four structural rules (see
+    MaxTrackerStore's class docstring for the full reasoning):
+
+    Rule 1 -- watermark advancement lives in the SAME single scan pass
+    that picks a candidate file, and touches EVERY deferred file on
+    EVERY call, never skipped just because an earlier, still-incomplete
+    file happens to be this call's candidate. Kills Bug (a) below.
+
+    Rule 2 -- _advance_watermark (and deferred_to_live) never touch an
+    entry with done=False: a file backfill has already started draining
+    stays backfill-owned regardless of what its mtime now says, until
+    that drain genuinely finishes. Kills Bug (b) below.
+
+    Rule 3 -- the mechanism that actually decides ownership:
+    _handle_claude_event skips any event whose own date falls in the
+    current calendar month, regardless of which file it came from or
+    why backfill happened to be reading it. Rules 1/2/the watermark are
+    an IO-efficiency layer on top of this, never the thing deciding
+    ownership -- see _handle_claude_event's docstring.
+
+    Rule 4 -- this class: the reviewer's two exact repros as named
+    tests, plus a seeded randomized-schedule stress test.
+    """
+
+    def test_backlog_starvation_does_not_prevent_the_watermark_refresh(self):
+        """Reviewer repro (i), Bug (a): before Rule 1, _advance_one_file's
+        scan picked its first not-yet-drained file as THE candidate for
+        the whole call and never looked past it -- so a large,
+        slow-draining backlog file sorting before a small live-owned
+        file could starve that live file's watermark refresh for as
+        many calls as the backlog needed to finish. If the calendar
+        rolled over before the backlog finished, the live file had NO
+        watermark recorded at all, and backfill would replay it whole
+        from offset 0, doubling whatever the live channel had already
+        counted for it.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+
+            # Sorts before b-live.jsonl and is large enough that
+            # draining it needs several backfill_step calls (256-record
+            # cap per call).
+            backlog_path = claude_root / "a-backlog.jsonl"
+            _write_jsonl(backlog_path, [
+                _claude_usage_line(f"m{i}", 1, "2020-01-01T10:00:00Z")
+                for i in range(2000)
+            ])
+            _age_into_last_month(backlog_path)
+
+            live_path = claude_root / "b-live.jsonl"
+            _write_jsonl(live_path, [
+                _claude_usage_line("live1", 100, "2020-01-01T10:00:00Z")])
+            live_mtime = live_path.stat().st_mtime
+
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=live_mtime - 100):
+                # Live channel already counted this file's tokens
+                # directly (mirroring tokenserver.py's own /api/tokens
+                # scanner, which reads a current-month file itself).
+                store.observe_volume("claude", "2026-07-01", 100)
+
+                for _ in range(5):
+                    store.backfill_step()
+
+                # Bug (a): before Rule 1 this stayed None for as long
+                # as the backlog file needed more calls to finish.
+                live_ino = live_path.stat().st_ino
+                watermark = store._backfill["claude"].get(live_ino)
+                self.assertIsNotNone(
+                    watermark,
+                    "a live-owned file's watermark must be refreshed "
+                    "every pass, even while an unrelated backlog file "
+                    "is still mid-drain")
+                self.assertTrue(watermark["done"])
+                self.assertEqual(
+                    watermark["offset"], live_path.stat().st_size)
+
+                _drain(store)  # finish the backlog -- bounded, no starvation
+
+            # Roll into "next month": live_path is no longer deferred.
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=live_mtime + 100):
+                _drain(store)
+
+            # Exactly 100 -- not 200. The watermark meant backfill
+            # found nothing new to (re-)read once it took ownership.
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-07-01"]["vol"], 100)
+
+            # Post-rollover append: a genuinely new event lands after
+            # the watermark -- 150 total across two distinct days,
+            # never 200 (100 doubled), never dropped.
+            with live_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(_claude_usage_line(
+                    "live2", 50, "2020-01-02T10:00:00Z")) + "\n")
+
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=live_mtime + 100):
+                _drain(store)
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-07-01"]["vol"], 100)
+            self.assertEqual(
+                store._state["claude"]["days"]["2020-01-02"]["vol"], 50)
+
+    def test_a_file_mid_discard_when_it_becomes_live_owned_is_not_clobbered(self):
+        """Reviewer repro (ii), Bug (b): before Rule 2, _advance_watermark
+        blindly stamped {done: True, offset: size} onto ANY deferred
+        file's entry -- even one whose entry already existed and was
+        mid-discard (an oversized line still being scanned past,
+        done: False). That would abandon the unfinished discard and
+        mark everything up to the file's CURRENT size as drained,
+        silently dropping whatever real, valid content sat past
+        wherever the scan had actually gotten to -- here, a genuine
+        999-token record right after an oversized junk line.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+
+            # A single line well over _MAX_LINE_BYTES (8 MiB), followed
+            # by a genuine small record -- draining this needs several
+            # calls (1 MiB budget/call) to fully discard the junk
+            # before the real tail is ever reached.
+            junk_line = json.dumps({"junk": "x" * (12 * 1024 * 1024)})
+            real_tail = json.dumps(_claude_usage_line(
+                "tail", 999, "2020-01-15T10:00:00Z"))
+            path.write_text(junk_line + "\n" + real_tail + "\n")
+            _age_into_last_month(path)  # dormant -- backfill-owned from the start
+            file_mtime = path.stat().st_mtime
+            ino = path.stat().st_ino
+
+            # Drive backfill_step (real current-month cutoff -- this
+            # file's mtime is well before it either way) in a bounded
+            # loop until it is confirmed caught mid-discard.
+            for _ in range(10_000):
+                store.backfill_step()
+                entry = store._backfill["claude"].get(ino)
+                if entry and entry.get("discarding") and not entry.get("done"):
+                    break
+            else:
+                self.fail("file never reached the expected mid-discard state")
+
+            # The file "becomes" live-owned: its mtime is untouched,
+            # but the mocked current-month cutoff now sits just below
+            # it -- exactly what a real month rollover would look like
+            # from this file's point of view, while it is still
+            # mid-discard.
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=file_mtime - 100):
+                _drain(store)
+
+            entry = store._backfill["claude"][ino]
+            self.assertTrue(entry["done"])
+            self.assertEqual(entry["offset"], path.stat().st_size)
+            # The 999-token tail was counted exactly once -- not
+            # clobbered away by a premature "done" stamp mid-discard,
+            # not double counted by a second pass either.
+            self.assertEqual(
+                store._state["claude"]["days"]["2020-01-15"]["vol"], 999)
+
+    def test_seeded_randomized_schedule_counts_every_event_exactly_once(self):
+        """Rule 4's class-killer: eight synthetic Claude session files
+        spread across every archetype the rules above have to get right
+        at once -- dormant, a slow multi-call backlog, files that are
+        always live-owned, and a file that is still mid-drain
+        (backfill-owned per Rule 2) at the exact moment a fresh
+        current-month record lands on its tail and is independently
+        reported by the live channel too (the precondition Rule 3
+        exists for) -- driven by a seeded random schedule so token
+        counts and record counts differ on every file. Every token is
+        tallied into a ground-truth dict as it is created, from
+        whichever channel creates it; the only assertion is that the
+        store's final per-day volumes match that ground truth exactly:
+        no token double-counted (a live/backfill race) and none lost
+        (a starved or clobbered file).
+        """
+        rng = random.Random(20260813)
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            expected: dict[str, int] = {}
+
+            def record(day: str, tokens: int) -> None:
+                expected[day] = expected.get(day, 0) + tokens
+
+            def old_day(n: int) -> str:
+                # Comfortably pre-rollover under any real-clock cutoff.
+                return (date(2000, 1, 1) + timedelta(days=n)).isoformat()
+
+            def new_day(n: int) -> str:
+                # Comfortably post-rollover under any real-clock cutoff.
+                return (date(2100, 1, 1) + timedelta(days=n)).isoformat()
+
+            cutoff = time.time()
+            pre_mtime = cutoff - 400 * 86400   # always "last month"
+            post_mtime = cutoff + 400 * 86400  # always "this month"
+
+            def write_old_lines(path, count):
+                lines = []
+                for i in range(count):
+                    day = old_day(rng.randrange(0, 20))
+                    tokens = rng.randrange(1, 50)
+                    lines.append(_claude_usage_line(
+                        f"{path.name}-{i}", tokens,
+                        f"{day}T{rng.randrange(0, 23):02d}:00:00Z"))
+                    record(day, tokens)
+                _write_jsonl(path, lines)
+                os.utime(path, (pre_mtime, pre_mtime))
+
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=cutoff):
+                # -- dormant: small, never touched again after creation.
+                for i in range(3):
+                    write_old_lines(
+                        claude_root / f"c-dormant-{i}.jsonl",
+                        rng.randrange(3, 8))
+
+                # -- slow_backlog: large enough to need several
+                # backfill_step calls each, coexisting with everything
+                # else across the same scan passes (Rule 1's target).
+                for i in range(2):
+                    write_old_lines(
+                        claude_root / f"d-backlog-{i}.jsonl",
+                        rng.randrange(500, 700))
+
+                # -- mid_drain: starts backfill-owned, deliberately left
+                # mid-drain via a handful of tiny-budget steps
+                # (self-verified below), BEFORE anything else gets a
+                # chance to finish draining it in one shot.
+                mid_path = claude_root / "a-mid-drain.jsonl"
+                write_old_lines(mid_path, 40)
+                mid_ino = mid_path.stat().st_ino
+                for _ in range(4):
+                    store.backfill_step(budget_bytes=120)
+                mid_entry = store._backfill["claude"].get(mid_ino)
+                self.assertIsNotNone(mid_entry)
+                self.assertFalse(
+                    mid_entry["done"],
+                    "test setup bug: mid-drain file finished too early "
+                    "-- shrink budget_bytes or grow the file")
+
+                # Rollover, mid-drain: a fresh current-month record
+                # lands on the tail of that still-incomplete file AND
+                # is independently reported by the live channel too --
+                # the exact precondition Rule 3 exists for. If backfill
+                # ever also counted this event once it reaches it,
+                # ground truth would mismatch below.
+                rollover_day = new_day(10)
+                rollover_tokens = rng.randrange(1, 300)
+                with mid_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(_claude_usage_line(
+                        "mid-drain-rollover-tail", rollover_tokens,
+                        f"{rollover_day}T10:00:00Z")) + "\n")
+                os.utime(mid_path, (post_mtime, post_mtime))
+                store.observe_volume("claude", rollover_day, rollover_tokens)
+                record(rollover_day, rollover_tokens)
+
+                # -- fresh_live: only ever exist in the "this month"
+                # world; every event on them comes from the live
+                # channel directly, matching how tokenserver.py's own
+                # scanner reports a currently-open session file's
+                # freshly parsed records.
+                for i in range(2):
+                    live_path = claude_root / f"e-live-{i}.jsonl"
+                    _write_jsonl(live_path, [])
+                    os.utime(live_path, (post_mtime, post_mtime))
+                    for _ in range(rng.randrange(2, 5)):
+                        day = new_day(rng.randrange(0, 5))
+                        tokens = rng.randrange(1, 200)
+                        store.observe_volume("claude", day, tokens)
+                        record(day, tokens)
+
+                # Drain everything else to completion -- backfill picks
+                # whichever incomplete, non-deferred file sorts first
+                # each call, so this naturally interleaves progress
+                # across all the backfill-owned files above (and keeps
+                # refreshing the live files' watermarks throughout,
+                # per Rule 1) until nothing is left.
+                for _ in range(10_000):
+                    if not store.backfill_step():
+                        break
+                else:
+                    self.fail(
+                        "backfill never converged -- possible starvation")
+
+            for day, tokens in expected.items():
+                self.assertEqual(
+                    store._state["claude"]["days"][day]["vol"], tokens,
+                    f"day {day} mismatched ground truth")
+            # No day accumulated volume from nowhere.
+            for day, day_record in store._state["claude"]["days"].items():
+                self.assertEqual(
+                    day_record.get("vol", 0), expected.get(day, 0),
+                    f"day {day} has unexpected volume")
+
+
 class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
     def test_claude_volume_backfill_sets_activity_and_volume_never_pct(self):
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
+            event_day = _backfill_date()
             path = claude_root / "session.jsonl"
             _write_jsonl(path, [
-                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
-                _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
+                _claude_usage_line("m1", 100, f"{event_day}T10:00:00Z"),
+                _claude_usage_line("m2", 50, f"{event_day}T11:00:00Z"),
             ])
             _age_into_last_month(path)  # Finding C: else backfill defers it
 
             _drain(store)
 
-            day = store._state["claude"]["days"]["2026-08-07"]
+            day = store._state["claude"]["days"][event_day]
             self.assertTrue(day["act"])
             self.assertEqual(day["vol"], 150)
             self.assertIsNone(day.get("pct"))
