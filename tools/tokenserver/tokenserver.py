@@ -574,9 +574,10 @@ def _codex_general_observation(rate_limits, observed_at, now_ts):
     """Classify an authoritative unnamed weekly Codex observation."""
     if not isinstance(rate_limits, dict):
         return None
-    if ("limit_name" in rate_limits and
-            rate_limits.get("limit_name") is not None):
-        return None
+    limit_name = rate_limits.get("limit_name")
+    if limit_name is not None:
+        if not isinstance(limit_name, str) or limit_name:
+            return None
     if not isinstance(observed_at, int) or isinstance(observed_at, bool):
         return None
     for key in ("primary", "secondary"):

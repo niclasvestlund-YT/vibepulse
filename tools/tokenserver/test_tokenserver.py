@@ -378,6 +378,22 @@ class CodexLimitLogTests(unittest.TestCase):
                     limits, observed_at=1_800_000_000,
                     now_ts=1_800_000_000))
 
+    def test_empty_limit_name_remains_general_weekly(self):
+        observation = tokenserver._codex_general_observation(
+            self._limits(46.0, name=""), observed_at=1_800_000_000,
+            now_ts=1_800_000_000)
+
+        self.assertEqual(observation["pct"], 46.0)
+
+    def test_non_string_limit_name_is_unclassifiable(self):
+        for value in (False, 0, [], {}):
+            limits = self._limits(46.0)
+            limits["limit_name"] = value
+            with self.subTest(value=value):
+                self.assertIsNone(tokenserver._codex_general_observation(
+                    limits, observed_at=1_800_000_000,
+                    now_ts=1_800_000_000))
+
     def test_newer_named_quota_does_not_hide_older_general_quota(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
