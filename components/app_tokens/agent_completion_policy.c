@@ -271,3 +271,33 @@ void tk_completion_queue_dismiss(tk_completion_queue *queue) {
   queue->count--;
   queue->current_started_ms = queue->last_now_ms;
 }
+
+bool tk_completion_render_key_update(tk_completion_render_key *rendered,
+                                     const tk_completion_event *event,
+                                     bool visible) {
+  if (!rendered) return false;
+  visible = visible && event;
+  bool unchanged = rendered->initialized && rendered->visible == visible;
+  if (unchanged && visible) {
+    unchanged = rendered->provider == event->provider &&
+                rendered->state == event->state &&
+                rendered->same_state_count == event->same_state_count &&
+                strcmp(rendered->event_id, event->event_id) == 0 &&
+                strcmp(rendered->project, event->project) == 0;
+  }
+  if (unchanged) return false;
+
+  memset(rendered, 0, sizeof *rendered);
+  rendered->initialized = true;
+  rendered->visible = visible;
+  if (visible) {
+    rendered->provider = event->provider;
+    rendered->state = event->state;
+    rendered->same_state_count = event->same_state_count;
+    snprintf(rendered->event_id, sizeof rendered->event_id, "%s",
+             event->event_id);
+    snprintf(rendered->project, sizeof rendered->project, "%s",
+             event->project);
+  }
+  return true;
+}

@@ -201,6 +201,17 @@ for interaction in (
 
 assert "tk_agent_monitor_project_label" in monitor
 assert "uppercase_project" not in monitor
+assert "tk_completion_render_key rendered_completion;" in monitor
+assert "tk_completion_render_key_update" in monitor
+phase_check = monitor.index("tk_completion_phase_at")
+cache_guard = monitor.index("tk_completion_render_key_update")
+first_overlay_mutation = monitor.index(
+    "lv_obj_add_flag(mon.completion.root, LV_OBJ_FLAG_HIDDEN)"
+)
+assert phase_check < cache_guard < first_overlay_mutation, (
+    "every tick must advance completion policy before a render-cache guard "
+    "that precedes all overlay LVGL mutation"
+)
 
 assert "lv_obj_set_pos(view->outline, 8, 8);" in monitor
 assert "lv_obj_set_size(view->outline, 464, 464);" in monitor

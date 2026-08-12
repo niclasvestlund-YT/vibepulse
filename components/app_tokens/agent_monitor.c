@@ -37,6 +37,7 @@ static struct {
   completion_view completion;
   tk_agent_snapshot snapshot;
   tk_completion_queue queue;
+  tk_completion_render_key rendered_completion;
   int64_t applied_at_us;
   int64_t rendered_at_us;
   bool has_snapshot;
@@ -86,10 +87,13 @@ static lv_obj_t *create_codex_icon(lv_obj_t *parent,
 }
 
 static void render_completion(uint64_t now_ms) {
+  tk_completion_phase phase = tk_completion_phase_at(&mon.queue, now_ms);
   const tk_completion_event *event =
       tk_completion_queue_current(&mon.queue);
-  tk_completion_phase phase = tk_completion_phase_at(&mon.queue, now_ms);
-  if (!event || phase == TK_COMPLETION_HIDDEN) {
+  bool visible = event && phase != TK_COMPLETION_HIDDEN;
+  if (!tk_completion_render_key_update(&mon.rendered_completion, event,
+                                       visible)) return;
+  if (!visible) {
     lv_obj_add_flag(mon.completion.root, LV_OBJ_FLAG_HIDDEN);
     return;
   }

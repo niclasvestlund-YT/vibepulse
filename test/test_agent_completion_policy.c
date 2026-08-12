@@ -224,6 +224,71 @@ static void test_timed_out_done_advances_to_queued_attention(void) {
         current(&queue) && strcmp(current(&queue)->event_id, "next") == 0);
 }
 
+static void test_render_key_skips_unchanged_overlay(void) {
+  tk_completion_render_key rendered = {0};
+  tk_completion_event event = {
+      .provider = TK_AGENT_PROVIDER_CLAUDE,
+      .state = TK_AGENT_WAITING,
+      .same_state_count = 1,
+  };
+  snprintf(event.event_id, sizeof event.event_id, "wait-one");
+  snprintf(event.project, sizeof event.project, "Raksmorgas");
+
+  check("first visible overlay renders",
+        tk_completion_render_key_update(&rendered, &event, true));
+  check("identical persistent waiting overlay does not rerender",
+        !tk_completion_render_key_update(&rendered, &event, true));
+
+  event.state = TK_AGENT_ERROR;
+  check("state transition rerenders immediately",
+        tk_completion_render_key_update(&rendered, &event, true));
+  check("identical persistent error overlay does not rerender",
+        !tk_completion_render_key_update(&rendered, &event, true));
+
+  snprintf(event.event_id, sizeof event.event_id, "error-two");
+  check("new event generation rerenders immediately",
+        tk_completion_render_key_update(&rendered, &event, true));
+  event.provider = TK_AGENT_PROVIDER_CODEX;
+  check("provider transition rerenders immediately",
+        tk_completion_render_key_update(&rendered, &event, true));
+  snprintf(event.project, sizeof event.project, "Other");
+  check("project transition rerenders immediately",
+        tk_completion_render_key_update(&rendered, &event, true));
+  event.same_state_count = 2;
+  check("visible count and detail transition rerenders immediately",
+        tk_completion_render_key_update(&rendered, &event, true));
+  check("hiding a visible overlay renders once",
+        tk_completion_render_key_update(&rendered, NULL, false));
+  check("unchanged hidden overlay does not rerender",
+        !tk_completion_render_key_update(&rendered, NULL, false));
+}
+
+static void test_render_key_keeps_done_timeout_and_queue_advance(void) {
+  tk_agent_snapshot snapshot = {0};
+  add_job(&snapshot.claude, job(TK_AGENT_DONE, "done", "Done", 1));
+  add_job(&snapshot.codex, job(TK_AGENT_DONE, "next", "Next", 2));
+  tk_completion_queue queue = {0};
+  tk_completion_render_key rendered = {0};
+  tk_completion_queue_apply(&queue, &snapshot, 100);
+
+  tk_completion_phase phase = tk_completion_phase_at(&queue, 100);
+  check("initial done overlay renders",
+        tk_completion_render_key_update(
+            &rendered, current(&queue), phase != TK_COMPLETION_HIDDEN));
+  phase = tk_completion_phase_at(&queue, 200);
+  check("unchanged done overlay does not rerender before timeout",
+        !tk_completion_render_key_update(
+            &rendered, current(&queue), phase != TK_COMPLETION_HIDDEN));
+
+  phase = tk_completion_phase_at(&queue, 10100);
+  check("policy tick still advances timed-out done to next event",
+        phase == TK_COMPLETION_PULSE && current(&queue) &&
+        strcmp(current(&queue)->event_id, "next") == 0);
+  check("queue advance rerenders the next event immediately",
+        tk_completion_render_key_update(
+            &rendered, current(&queue), phase != TK_COMPLETION_HIDDEN));
+}
+
 static void test_seen_rollover_keeps_dismissed_current_snapshot_event(void) {
   tk_agent_snapshot target = {0};
   add_job(&target.claude, job(TK_AGENT_WAITING, "dismissed", "Dismissed", 1));
@@ -286,6 +351,8 @@ int main(void) {
   test_state_transition_restarts_entry_phase();
   test_phases();
   test_timed_out_done_advances_to_queued_attention();
+  test_render_key_skips_unchanged_overlay();
+  test_render_key_keeps_done_timeout_and_queue_advance();
   test_seen_rollover_keeps_dismissed_current_snapshot_event();
   test_hostile_job_count_is_clamped();
   test_full_snapshot_fits_queue_capacity();

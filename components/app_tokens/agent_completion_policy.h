@@ -40,6 +40,18 @@ typedef struct {
   bool initialized;
 } tk_completion_queue;
 
+typedef struct {
+  /* Provider/state/count determine provider, title, detail, icon and accent;
+   * event_id is the generation key and project is the remaining visible copy. */
+  bool initialized;
+  bool visible;
+  int provider;
+  tk_agent_state state;
+  uint8_t same_state_count;
+  char event_id[TK_AGENT_ID_CAP];
+  char project[TK_AGENT_PROJECT_CAP];
+} tk_completion_render_key;
+
 void tk_completion_queue_apply(tk_completion_queue *queue,
                                const tk_agent_snapshot *snapshot,
                                uint64_t now_ms);
@@ -48,5 +60,8 @@ const tk_completion_event *tk_completion_queue_current(
 tk_completion_phase tk_completion_phase_at(tk_completion_queue *queue,
                                             uint64_t now_ms);
 void tk_completion_queue_dismiss(tk_completion_queue *queue);
+bool tk_completion_render_key_update(tk_completion_render_key *rendered,
+                                     const tk_completion_event *event,
+                                     bool visible);
 
 #endif
