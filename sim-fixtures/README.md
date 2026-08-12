@@ -18,3 +18,14 @@ Regler som fixturerna låser:
   enheten visar gammal data.
 - Fältet `at` är serverns klocka och används ALDRIG för tickerns tidsbas;
   enhetens egen monotona klocka gäller (se ticker.h).
+
+## Max Tracker-fixturer
+
+Konstruerade `/api/max-tracker`-svar i dense form (kontraktet ligger i
+`docs/superpowers/specs/2026-08-12-max-tracker-design.md`).
+
+| Fil | Ursprung | Testar |
+|---|---|---|
+| `max-tracker-full.json` | SYNTETISK | Mogen användare: båda providers fullfärgade 140 dagar (inga `-1`), sex `[100,2]`-toppar i de senaste 6 veckorna, `weekMaxed` matchande, Codex har `planLabel`. |
+| `max-tracker-coldstart.json` | SYNTETISK | Ny användare: Claude börjar med 14 dagar utan loggar, sedan gråa aktivitetsdagar (`lvl` utan `pct`), sedan 5 riktiga kvotdagar; Codex som i full. |
+| `max-tracker-empty.json` | SYNTETISK | Innan första hämtningen: alla dagar `[-1,-1]`, alla aggregat `null`/0 — grafen ska rendera helt tom, aldrig påhittade nollor. |
