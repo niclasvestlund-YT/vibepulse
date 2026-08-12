@@ -2,6 +2,7 @@ import json
 import os
 import stat
 import tempfile
+import threading
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -83,9 +84,15 @@ def _new_store(directory, **kwargs):
     return MaxTrackerStore(path, codex_root, claude_root), codex_root, claude_root
 
 
-def _drain(store):
-    while store.backfill_step():
-        pass
+def _drain(store, max_steps=10_000):
+    # A hard cap turns any reintroduced starvation bug into a fast,
+    # readable test failure instead of a hung test run.
+    for _ in range(max_steps):
+        if not store.backfill_step():
+            return
+    raise AssertionError(
+        f"backfill_step() still returned True after {max_steps} calls "
+        "-- looks like starvation")
 
 
 class MaxTrackerStoreCodexBackfillTests(unittest.TestCase):
@@ -316,6 +323,30 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
 
             self.assertEqual(
                 store._state["claude"]["days"]["2026-08-09"]["vol"], 77)
+
+    def test_a_line_wider_than_the_cap_is_skipped_not_starved(self):
+        # Regression: a single JSONL line over _MAX_LINE_BYTES used to
+        # never be consumed -- backfill_step made zero progress on it
+        # forever, so the same file was picked again on every call.
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+            junk = {"junk": "x" * (MaxTrackerStore._MAX_LINE_BYTES + 5000)}
+            junk_line_bytes = len(json.dumps(junk).encode("utf-8")) + 1
+            self.assertGreater(
+                junk_line_bytes, MaxTrackerStore._MAX_LINE_BYTES)
+            _write_jsonl(path, [
+                _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
+                junk,
+                _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
+            ])
+
+            _drain(store)  # would hit the safety cap and fail if starved
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 150)
+            # Genuinely done -- not just "stopped for now" on this line.
+            self.assertFalse(store.backfill_step())
 
 
 class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
@@ -593,7 +624,54 @@ class MaxTrackerStorePrivacySchemaTests(unittest.TestCase):
 
         for key, entry in raw["codex"]["backfill"].items():
             self.assertRegex(key, r"^\d+$")
-            self.assertLessEqual(set(entry), {"offset", "size", "done"})
+            self.assertLessEqual(
+                set(entry), {"offset", "size", "done", "discarding"})
+
+
+class MaxTrackerStoreThreadSafetyTests(unittest.TestCase):
+    def test_concurrent_observe_volume_and_snapshot_never_raise_or_lose_updates(self):
+        # Regression: after Task 6 wires this store up, a background
+        # thread (backfill_step/observe_volume/save), a probe thread
+        # (observe_quota), and the HTTP thread (snapshot) all touch it
+        # concurrently. Without a lock, concurrent dict mutation during
+        # snapshot()'s/save()'s iteration can raise ("dict changed size
+        # during iteration") or silently serialize torn state.
+        iterations = 2_000
+        day = "2026-08-07"
+        errors = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+
+            def hammer_volume():
+                try:
+                    for _ in range(iterations):
+                        store.observe_volume("claude", day, 1)
+                except Exception as exc:  # pragma: no cover - failure path
+                    errors.append(exc)
+
+            def hammer_snapshot():
+                try:
+                    for _ in range(iterations):
+                        store.snapshot("2026-08-07", {})
+                except Exception as exc:  # pragma: no cover - failure path
+                    errors.append(exc)
+
+            threads = [
+                threading.Thread(target=hammer_volume),
+                threading.Thread(target=hammer_volume),
+                threading.Thread(target=hammer_snapshot),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(errors, [])
+            # Not just "no crash" -- the lock must also prevent lost
+            # updates: exactly 2 * iterations increments landed.
+            self.assertEqual(
+                store._state["claude"]["days"][day]["vol"], 2 * iterations)
 
 
 def _load_fixture(name: str) -> dict:

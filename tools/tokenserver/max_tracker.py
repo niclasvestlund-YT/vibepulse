@@ -31,6 +31,7 @@ import json
 import math
 import os
 import tempfile
+import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -312,23 +313,45 @@ class MaxTrackerStore:
     value must never reach this method — it would silently become a
     day's recorded peak with no way to tell it apart from a real one. Task
     6's endpoint wiring owns that filtering.
+
+    Threading contract: this store is shared by design -- a background
+    thread drives :meth:`backfill_step`/:meth:`observe_volume`/:meth:`save`,
+    a probe thread calls :meth:`observe_quota`, and the HTTP thread calls
+    :meth:`snapshot`, all concurrently. Every public method takes an
+    internal re-entrant lock for its whole body (matching the repo's
+    existing pattern of readers only ever touching a locked, internally
+    consistent snapshot -- see agent_status.py/tokenserver.py), so no
+    caller needs its own external locking. The lock is re-entrant because
+    backfill's per-line handlers call the public :meth:`observe_volume`
+    while :meth:`backfill_step` already holds it. :meth:`save` is the one
+    exception to "whole body locked": only pruning + building the
+    to-be-written payload happens under the lock; the actual disk write
+    happens afterwards, unlocked, so a slow fsync never blocks a live
+    probe or an HTTP snapshot.
     """
 
     RETENTION_DAYS = 400
     _GENERAL_WINDOW_MINUTES = 600  # Codex README rule: >600 min = the week
     _BLOCK_BYTES = 64 * 1024
     _MAX_RECORDS_PER_STEP = 256
+    # README rule (shared with the agent-status follower): a JSONL line
+    # wider than 1 MiB is never buffered whole -- it is scanned past and
+    # discarded so it can never permanently stall backfill on that file.
+    _MAX_LINE_BYTES = 1_048_576
     _SCHEMA_VERSION = 1
 
     def __init__(self, path: Path, codex_root: Path, claude_root: Path):
         self.path = Path(path)
         self.codex_root = Path(codex_root)
         self.claude_root = Path(claude_root)
+        self._lock = threading.RLock()
         self._state = {provider: {"days": {}, "weeks": {}}
                        for provider in PROVIDERS}
-        # Keyed by (inode, size) -- NEVER by path: a path under
+        # Keyed by inode alone -- NEVER by path: a path under
         # ~/.claude/projects encodes the project name, which the privacy
-        # contract forbids writing to disk. See _advance_one_file.
+        # contract forbids writing to disk. See _advance_one_file. Each
+        # entry also carries the size/offset/discarding-line state needed
+        # to resume a grown file correctly instead of rescanning it.
         self._backfill = {provider: {} for provider in PROVIDERS}
         self._load()
 
@@ -357,16 +380,17 @@ class MaxTrackerStore:
         if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not math.isfinite(ts):
             return
         date_str = _local_date_str(ts)
-        bucket = self._state[provider]
-        if window_minutes is None:
-            self._bump_day_pct(bucket, date_str, pct)
-        elif _finite_minutes(window_minutes):
-            if window_minutes <= self._GENERAL_WINDOW_MINUTES:
+        with self._lock:
+            bucket = self._state[provider]
+            if window_minutes is None:
                 self._bump_day_pct(bucket, date_str, pct)
-            elif pct >= 100:
-                bucket["weeks"][week_key(date_str)] = True
-        # else: garbage window_minutes -- ignore the observation entirely,
-        # never guess which window it meant.
+            elif _finite_minutes(window_minutes):
+                if window_minutes <= self._GENERAL_WINDOW_MINUTES:
+                    self._bump_day_pct(bucket, date_str, pct)
+                elif pct >= 100:
+                    bucket["weeks"][week_key(date_str)] = True
+            # else: garbage window_minutes -- ignore the observation
+            # entirely, never guess which window it meant.
 
     @staticmethod
     def _bump_day_pct(bucket: dict, date_str: str, pct: float) -> None:
@@ -393,9 +417,10 @@ class MaxTrackerStore:
             date.fromisoformat(date_str)
         except (TypeError, ValueError):
             return
-        day = self._state[provider]["days"].setdefault(date_str, {})
-        day["act"] = True
-        day["vol"] = int(day.get("vol") or 0) + int(tokens)
+        with self._lock:
+            day = self._state[provider]["days"].setdefault(date_str, {})
+            day["act"] = True
+            day["vol"] = int(day.get("vol") or 0) + int(tokens)
 
     # -- backfill --------------------------------------------------------
 
@@ -408,17 +433,21 @@ class MaxTrackerStore:
         already fully drained at its current size is never reopened; one
         that has since GROWN (still being appended to) resumes from the
         offset already recorded for its inode rather than rescanning from
-        the start, so already-counted volume is never double-counted.
-        Returns True while there is more work to drain (call again); False
-        once both roots are fully caught up.
+        the start, so already-counted volume is never double-counted. A
+        single line wider than :data:`_MAX_LINE_BYTES` is skipped rather
+        than buffered whole or endlessly retried, so it can never
+        permanently stall this file's backfill. Returns True while there
+        is more work to drain (call again); False once both roots are
+        fully caught up.
         """
-        codex_more = self._advance_one_file(
-            "codex", self.codex_root, "**/rollout-*.jsonl",
-            budget_bytes, self._handle_codex_event)
-        claude_more = self._advance_one_file(
-            "claude", self.claude_root, "**/*.jsonl",
-            budget_bytes, self._handle_claude_event)
-        return codex_more or claude_more
+        with self._lock:
+            codex_more = self._advance_one_file(
+                "codex", self.codex_root, "**/rollout-*.jsonl",
+                budget_bytes, self._handle_codex_event)
+            claude_more = self._advance_one_file(
+                "claude", self.claude_root, "**/*.jsonl",
+                budget_bytes, self._handle_claude_event)
+            return codex_more or claude_more
 
     def _advance_one_file(self, provider: str, root: Path, pattern: str,
                           budget_bytes: int, handle_event) -> bool:
@@ -453,17 +482,22 @@ class MaxTrackerStore:
             # volume = sum) stays correct under a full replay; only a
             # shrink can make a stored offset point past real content.
             start_offset = 0
+            discarding = False
         else:
             # Same inode, same or LARGER size (the normal "still being
             # appended to" case) -- resume exactly where the last call left
             # off instead of rescanning from 0, which would otherwise
             # double-count every already-drained record on each growth.
+            # ``discarding`` carries forward whether we were still mid-way
+            # through skipping an oversized line when we last stopped.
             start_offset = entry.get("offset", 0)
-        new_offset = self._drain_file(
-            path, start_offset, budget_bytes, handle_event)
+            discarding = bool(entry.get("discarding", False))
+        new_offset, still_discarding = self._drain_file(
+            path, start_offset, budget_bytes, handle_event, discarding)
         done = new_offset >= info.st_size
         bucket[info.st_ino] = {
-            "offset": new_offset, "size": info.st_size, "done": done}
+            "offset": new_offset, "size": info.st_size, "done": done,
+            "discarding": still_discarding}
         if not done:
             return True
 
@@ -488,13 +522,25 @@ class MaxTrackerStore:
                     entry.get("size") == info.st_size)
 
     def _drain_file(self, path: Path, start_offset: int, budget_bytes: int,
-                    handle_event) -> int:
+                    handle_event, discarding: bool = False):
         """Parse complete JSON lines from ``start_offset`` forward, up to
         ``budget_bytes`` (or 256 records), reading in 64 KiB blocks.
 
-        Returns the offset just past the last fully-consumed line -- always
-        a safe resume point, even mid-line, since a straddling trailing
-        fragment is simply left unconsumed for the next call to re-read.
+        Returns ``(new_offset, still_discarding)``. ``new_offset`` is
+        always a safe resume point, even mid-line: an ordinary straddling
+        trailing fragment (under :data:`_MAX_LINE_BYTES`) is simply left
+        unconsumed for the next call to re-read from its start. A line
+        that grows past :data:`_MAX_LINE_BYTES` without a terminating
+        newline is different -- per the repo's established rule (see the
+        tokenserver README / agent_status.py's ``JsonlTailer``), it is
+        never buffered whole. Instead the bytes already read for it are
+        dropped, ``new_offset`` advances past them anyway (so the file is
+        never re-read from the same stuck point), and ``still_discarding``
+        is returned True so a following call -- possibly reading a
+        completely fresh chunk -- knows it is still mid-way through
+        skipping that one giant line rather than mistaking its middle for
+        the start of a new one. Without this, a single line wider than one
+        step's budget would starve the file's backfill forever.
         """
         offset = start_offset
         records_seen = 0
@@ -514,10 +560,23 @@ class MaxTrackerStore:
                     while records_seen < self._MAX_RECORDS_PER_STEP:
                         newline = buf.find(b"\n")
                         if newline < 0:
+                            if discarding or len(buf) >= self._MAX_LINE_BYTES:
+                                # Already mid-skip, or this fragment alone
+                                # has crossed the cap: drop it now rather
+                                # than growing an unbounded in-memory
+                                # buffer, and remember we're still
+                                # skipping so the next read (this call or
+                                # a later one) resumes the skip correctly.
+                                discarding = True
+                                offset += len(buf)
+                                buf = b""
                             break
                         raw_line, buf = buf[:newline], buf[newline + 1:]
                         offset += newline + 1
                         records_seen += 1
+                        if discarding:
+                            discarding = False  # this newline ends the skip
+                            continue
                         if raw_line.strip():
                             try:
                                 event = json.loads(raw_line)
@@ -526,8 +585,8 @@ class MaxTrackerStore:
                             if event is not None:
                                 handle_event(event)
         except OSError:
-            return start_offset
-        return offset
+            return start_offset, discarding
+        return offset, discarding
 
     def _handle_codex_event(self, event) -> None:
         rate_limits = codex_rollout_rate_limits(event)
@@ -620,20 +679,22 @@ class MaxTrackerStore:
         server failed to refresh" to surface, so a future caller that needs
         that must layer it on top of the returned dict.
         """
-        state = {
-            provider: {
-                "days": {
-                    day: {
-                        "pct": record.get("pct"),
-                        "act": bool(record.get("act")),
-                        "vol": record.get("vol") or 0,
-                    }
-                    for day, record in self._state[provider]["days"].items()
-                },
-                "weeks": dict(self._state[provider]["weeks"]),
+        with self._lock:
+            state = {
+                provider: {
+                    "days": {
+                        day: {
+                            "pct": record.get("pct"),
+                            "act": bool(record.get("act")),
+                            "vol": record.get("vol") or 0,
+                        }
+                        for day, record in
+                        self._state[provider]["days"].items()
+                    },
+                    "weeks": dict(self._state[provider]["weeks"]),
+                }
+                for provider in PROVIDERS
             }
-            for provider in PROVIDERS
-        }
         state["stale"] = False
         return build_payload(state, today, plans)
 
@@ -673,10 +734,11 @@ class MaxTrackerStore:
             return
         if not isinstance(payload, dict):
             return
-        for provider in PROVIDERS:
-            section = payload.get(provider)
-            if isinstance(section, dict):
-                self._load_provider(provider, section)
+        with self._lock:
+            for provider in PROVIDERS:
+                section = payload.get(provider)
+                if isinstance(section, dict):
+                    self._load_provider(provider, section)
 
     def _load_provider(self, provider: str, section: dict) -> None:
         days_in = section.get("days")
@@ -716,12 +778,15 @@ class MaxTrackerStore:
                 offset = entry.get("offset")
                 size = entry.get("size")
                 done = entry.get("done")
+                discarding = entry.get("discarding", False)
                 if (isinstance(offset, int) and not isinstance(offset, bool)
                         and offset >= 0 and
                         isinstance(size, int) and not isinstance(size, bool)
-                        and size >= 0 and isinstance(done, bool)):
+                        and size >= 0 and isinstance(done, bool)
+                        and isinstance(discarding, bool)):
                     bucket[inode] = {
-                        "offset": offset, "size": size, "done": done}
+                        "offset": offset, "size": size, "done": done,
+                        "discarding": discarding}
 
     @staticmethod
     def _parse_backfill_key(key):
@@ -739,10 +804,16 @@ class MaxTrackerStore:
         the ``{v, days: {pct, act, lvl}, weeks: bool, backfill}`` allowlist
         per provider -- no prompts, commands, projects, models, file names
         or raw log events, ever.
+
+        Only pruning and building the payload dict happen under the lock;
+        the payload is a plain, independent value at that point, so the
+        actual (potentially slow) disk write runs unlocked and never
+        blocks a concurrent probe or HTTP snapshot.
         """
-        self._prune_retention(today)
-        payload = {provider: self._provider_payload(provider)
-                  for provider in PROVIDERS}
+        with self._lock:
+            self._prune_retention(today)
+            payload = {provider: self._provider_payload(provider)
+                      for provider in PROVIDERS}
         self._atomic_write(payload)
 
     def _provider_payload(self, provider: str) -> dict:
@@ -765,7 +836,8 @@ class MaxTrackerStore:
                     if maxed}
         backfill_out = {
             str(inode): {"offset": entry["offset"], "size": entry["size"],
-                        "done": bool(entry["done"])}
+                        "done": bool(entry["done"]),
+                        "discarding": bool(entry.get("discarding", False))}
             for inode, entry in self._backfill[provider].items()
         }
         return {"v": self._SCHEMA_VERSION, "days": days_out,
