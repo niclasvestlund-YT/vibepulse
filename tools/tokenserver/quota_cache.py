@@ -6,6 +6,7 @@ import json
 import math
 import os
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,11 @@ _PROVIDERS = {"claude", "codex"}
 _SCOPES = {"general_session", "general_weekly", "model_weekly"}
 _MAX_IDENTITY_LENGTH = 128
 _MAX_LABEL_LENGTH = 128
+_PERSIST_ERRORS = (OSError, UnicodeError, TypeError, ValueError)
+
+
+class _PostReplaceError(Exception):
+    """A replacement reached disk but its directory sync did not."""
 
 
 @dataclass(frozen=True)
@@ -30,8 +36,12 @@ class CachedQuota:
 
 
 def _finite_number(value: Any) -> bool:
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value))
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _timestamp(value: Any) -> bool:
@@ -48,6 +58,8 @@ def _label(value: Any) -> bool:
         return True
     if not isinstance(value, str) or len(value) > _MAX_LABEL_LENGTH:
         return False
+    if not value.isprintable():
+        return False
     try:
         value.encode("utf-8")
     except UnicodeError:
@@ -62,6 +74,7 @@ class QuotaCache:
                  now: Callable[[], float] = time.time):
         self.path = Path(path)
         self._now = now
+        self._lock = threading.Lock()
         self._records = self._load()
 
     @staticmethod
@@ -97,10 +110,13 @@ class QuotaCache:
         if (not isinstance(payload, dict) or set(payload) != {"v", "records"}
                 or payload["v"] != 1 or not isinstance(payload["records"], list)):
             return {}
+        current_time = self._now()
+        prune_expired = _finite_number(current_time)
         records = {}
         for value in payload["records"]:
             record = self._from_mapping(value)
-            if record is None:
+            if (record is None or
+                    (prune_expired and record.reset_at <= current_time)):
                 continue
             key = self._key(record)
             previous = records.get(key)
@@ -108,8 +124,9 @@ class QuotaCache:
                 records[key] = record
         return records
 
-    def _payload(self) -> Dict[str, Any]:
-        records = sorted(self._records.values(), key=lambda record: (
+    @staticmethod
+    def _payload(snapshot: Tuple[CachedQuota, ...]) -> Dict[str, Any]:
+        records = sorted(snapshot, key=lambda record: (
             record.provider, record.scope, record.identity))
         return {
             "v": 1,
@@ -124,7 +141,15 @@ class QuotaCache:
             } for record in records],
         }
 
-    def _persist(self) -> None:
+    def _fsync_parent(self) -> None:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        descriptor = os.open(self.path.parent, flags)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _persist(self, snapshot: Tuple[CachedQuota, ...]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
@@ -133,13 +158,41 @@ class QuotaCache:
                     prefix=".%s." % self.path.name, suffix=".tmp",
                     delete=False) as stream:
                 temporary = Path(stream.name)
-                json.dump(self._payload(), stream, ensure_ascii=False,
+                json.dump(self._payload(snapshot), stream, ensure_ascii=False,
                           separators=(",", ":"))
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
             temporary = None
+            try:
+                self._fsync_parent()
+            except OSError as error:
+                raise _PostReplaceError() from error
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
+
+    def _restore_bytes(self, content: bytes) -> None:
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="wb", dir=self.path.parent,
+                    prefix=".%s." % self.path.name, suffix=".tmp",
+                    delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+            temporary = None
+            try:
+                self._fsync_parent()
+            except OSError as error:
+                raise _PostReplaceError() from error
         finally:
             if temporary is not None:
                 try:
@@ -150,20 +203,43 @@ class QuotaCache:
     def put(self, record: CachedQuota) -> bool:
         if not isinstance(record, CachedQuota) or not self._valid(record):
             return False
-        key = self._key(record)
-        old_records = self._records
-        previous = old_records.get(key)
-        if previous is not None and record.observed_at < previous.observed_at:
-            return False
-        updated = dict(old_records)
-        updated[key] = record
-        self._records = updated
-        try:
-            self._persist()
-        except (OSError, UnicodeError, TypeError, ValueError):
-            self._records = old_records
-            return False
-        return True
+        with self._lock:
+            key = self._key(record)
+            old_records = self._records
+            updated = dict(old_records)
+            previous = updated.get(key)
+            if (previous is not None and
+                    record.observed_at < previous.observed_at):
+                return False
+            updated[key] = record
+            snapshot = tuple(updated.values())
+            try:
+                prior_disk = self.path.read_bytes()
+            except FileNotFoundError:
+                prior_disk = None
+            except OSError:
+                return False
+            self._records = updated
+            try:
+                self._persist(snapshot)
+            except _PostReplaceError:
+                self._records = old_records
+                try:
+                    if prior_disk is not None:
+                        self._restore_bytes(prior_disk)
+                    else:
+                        try:
+                            self.path.unlink()
+                        except FileNotFoundError:
+                            pass
+                        self._fsync_parent()
+                except (_PostReplaceError,) + _PERSIST_ERRORS:
+                    pass
+                return False
+            except _PERSIST_ERRORS:
+                self._records = old_records
+                return False
+            return True
 
     def latest(self, provider: str, scope: str,
                now: Optional[float] = None) -> Optional[CachedQuota]:
@@ -172,9 +248,11 @@ class QuotaCache:
         current_time = self._now() if now is None else now
         if not _finite_number(current_time):
             return None
-        candidates = [record for record in self._records.values()
-                      if record.provider == provider and record.scope == scope
-                      and record.reset_at > current_time]
+        with self._lock:
+            candidates = [record for record in self._records.values()
+                          if record.provider == provider and
+                          record.scope == scope and
+                          record.reset_at > current_time]
         if not candidates:
             return None
         return max(candidates, key=lambda record: (
