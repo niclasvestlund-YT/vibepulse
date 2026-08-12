@@ -170,6 +170,24 @@ int main(void) {
   check("negativ max days klampas till 0", strcmp(out[3].value, "0") == 0);
   check("negativ avg klampas till 0", strcmp(out[2].value, "0") == 0);
 
+  /* Defensiv klampning: alltför STORA aggregat (bör aldrig komma från
+   * parsern, som redan begränsar till [0,999] via TK_MT_AGGREGATE_MAX),
+   * men presentatorns EGEN övre klamp i set_int (max_tracker_presenter.c)
+   * måste ändå aldrig skriva ett tal som svämmar över den lilla
+   * tile->value-buffertn om något uppströms bryter kontraktet. */
+  tk_max_tracker oversized;
+  memset(&oversized, 0, sizeof oversized);
+  oversized.coding_streak_days = 5000;
+  oversized.claude.max_weeks_streak = 5000;
+  oversized.claude.max_days = 5000;
+
+  tk_mt_tiles(&oversized, false, out);
+  check("streak över 999 klampas till 999", strcmp(out[0].value, "999") == 0);
+  check("max weeks streak över 999 klampas till 999",
+        strcmp(out[1].value, "999") == 0);
+  check("max days över 999 klampas till 999",
+        strcmp(out[3].value, "999") == 0);
+
   /* Nollpekare kraschar inte. */
   tk_mt_tiles(NULL, false, out);
   tk_mt_tiles(&t, false, NULL);

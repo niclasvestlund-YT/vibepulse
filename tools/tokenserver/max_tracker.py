@@ -18,11 +18,26 @@ någon särskild tidszonskod.
         "stale": False,  # optional, defaults to False
     }
 
-``pct`` är kvot-procent för dagen (``None`` = ingen kvotmätning den dagen).
-``act`` är sant om det fanns någon agentaktivitet den dagen (används för både
-den kombinerade STREAK-räkningen och som förutsättning för att räkna ut
-``lvl`` — se ``_provider_days``). ``vol`` är den råa dagsvolymen (tokens);
-den blir aldrig en del av svaret, bara underlag för tercil-nivån.
+``pct`` är kvot-procent för dagen (``None`` = ingen kvotmätning den dagen);
+alltid ett heltal eller ``None`` — enhetens parser har ett int8_t-fält och
+avvisar HELA svaret om en enda dag bär ett brutet tal, så avrundning sker
+här, inte device-side (se ``_round_day_pct``). ``act`` är sant om det fanns
+någon agentaktivitet den dagen (används för både den kombinerade
+STREAK-räkningen och som förutsättning för att räkna ut ``lvl`` — se
+``_provider_days``).
+
+``lvl`` (tercilnivå 0-2) har TVÅ separata källpopulationer, aldrig blandade:
+en dag med en RÅ ``vol`` (dagsvolym i tokens; blir aldrig en del av svaret,
+bara underlag) rankas via :func:`volume_levels` mot alla andra ``vol``-
+bärande dagar. En dag som istället bär ett explicit ``lvl``-fält direkt
+(så här matar :class:`MaxTrackerStore` in en tidigare SPARAD, redan
+klassificerad tercil efter en omstart) är AUKTORITATIV för sig själv —
+den används verbatim och deltar aldrig i rankningen, varken som kandidat
+eller som underlag för andras trösklar. Utan den uppdelningen skulle en
+sparad tercil (som per designen aldrig kan backa till rå volym igen)
+tyst räknas om varje gång den nya poolen av session-volymer ändras —
+[0,1,2] blir [0,0,1] efter en enda spara/läs-cykel, permanent, eftersom
+avslutade backfill-filer aldrig läses om.
 """
 
 from __future__ import annotations
@@ -119,21 +134,44 @@ def max_weeks_streak(week_maxed: dict[str, bool], this_week: str) -> int:
     return streak
 
 
+def _round_day_pct(pct: float) -> int:
+    """Round a percent to the whole number the device parser requires.
+
+    The wire contract's per-day ``pct`` is an int8_t field: a single
+    fractional value (Claude's utilization arrives as e.g. 15.5 or 99.96
+    "by construction") makes ``tk_max_tracker_parse`` reject the ENTIRE
+    payload, not just that one day — the tracker pages would stay dark
+    forever. Rounds half away from zero (never Python's banker's
+    rounding), but a sub-100 observation is never rounded UP to the exact
+    100 cell: only a truly observed ``100.0`` may ever render there,
+    mirroring the presenter's 99/100 split (pct == 100 is reserved for an
+    exact quota max, never an artifact of rounding 99.6).
+    """
+    if pct >= 100.0:
+        return 100
+    return min(int(math.floor(pct + 0.5)), 99)
+
+
 def dense_window(today: str, weeks: int,
                   per_day: dict[str, dict]) -> list[list[int]]:
     """Render ``weeks`` ISO-Monday-aligned weeks (``weeks * 7`` entries).
 
     Index 0 is the Monday that starts the oldest week; the last index is
-    the Sunday of the CURRENT ISO week (which may be after ``today``). The
-    grid is column-major by ISO week device-side, so day index 0 must fall
-    on a Monday for the columns to line up — the window is therefore
-    anchored to today's ISO week, not to a fixed 140-day lookback from
-    today.
+    the Sunday of the CURRENT ISO week (which may be after ``today`` --
+    today is the last non-padded cell in the grid; any day after it
+    within that same final week is padding, rendered exactly like an
+    absent day). The grid is column-major by ISO week device-side, so day
+    index 0 must fall on a Monday for the columns to line up — the window
+    is therefore anchored to today's ISO week, not to a fixed 140-day
+    lookback from today.
 
     Any day past ``today`` (the unwritten remainder of the current week)
     and any day absent from ``per_day`` both render as ``[-1, -1]``.
     ``per_day`` maps a date string to a dict with optional ``pct``/``lvl``
-    keys; missing or ``None`` values become ``-1``.
+    keys; missing or ``None`` values become ``-1``. ``pct`` is coerced
+    through :func:`_round_day_pct` here too -- a defensive backstop so
+    this function can never emit a fractional pct even if some future
+    caller's ``per_day`` bypasses the store's own rounding.
     """
     today_date = date.fromisoformat(today)
     current_monday = today_date - timedelta(days=today_date.isoweekday() - 1)
@@ -151,7 +189,7 @@ def dense_window(today: str, weeks: int,
             continue
         pct = record.get("pct")
         lvl = record.get("lvl")
-        out.append([pct if pct is not None else -1,
+        out.append([_round_day_pct(pct) if pct is not None else -1,
                     lvl if lvl is not None else -1])
     return out
 
@@ -169,7 +207,7 @@ def _clamp_aggregate(value: int) -> int:
 
 
 def _provider_days(days: dict[str, dict]) -> dict[str, dict]:
-    """Merge stored ``pct``/``act``/``vol`` per day into the honest
+    """Merge stored ``pct``/``act``/``vol``/``lvl`` per day into the honest
     ``pct``/``lvl`` pair the contract needs, over the FULL history handed
     in (aggregates and terciles both need everything the server has ever
     seen, not just the visible window).
@@ -178,18 +216,38 @@ def _provider_days(days: dict[str, dict]) -> dict[str, dict]:
     one that also carries a real ``pct`` (rule: gray backfill and quota
     color are independent fields, not mutually exclusive). ``lvl`` is only
     ``-1`` when the day was not active at all.
+
+    Two separate populations feed ``lvl``, never mixed (see the module
+    docstring): a day carrying a raw ``vol`` is RANKED via
+    :func:`volume_levels` against every other ``vol``-carrying day. A day
+    that instead already carries an explicit ``lvl`` (this is how
+    :class:`MaxTrackerStore` reintroduces a previously-SAVED, already-
+    classified tercile after a restart) is AUTHORITATIVE for itself: used
+    verbatim, and excluded entirely from the ranking pool -- neither as a
+    candidate nor as a threshold input for everyone else's terciles. A day
+    can only ever supply one or the other, never both; ``vol`` wins by
+    construction (:meth:`MaxTrackerStore.observe_volume` clears any
+    inherited ``lvl`` the moment a day starts collecting real session
+    volume again).
     """
-    volumes = {day: (record.get("vol") or 0)
-               for day, record in days.items() if record.get("act")}
-    levels = volume_levels(volumes)
+    rankable = {day: (record.get("vol") or 0)
+               for day, record in days.items()
+               if record.get("act") and "lvl" not in record}
+    levels = volume_levels(rankable)
 
     merged: dict[str, dict] = {}
     for day, record in days.items():
         pct = record.get("pct")
         active = bool(record.get("act"))
+        if not active:
+            lvl = -1
+        elif "lvl" in record:
+            lvl = record["lvl"]
+        else:
+            lvl = levels.get(day, -1)
         merged[day] = {
             "pct": pct if pct is not None else -1,
-            "lvl": levels.get(day, -1) if active else -1,
+            "lvl": lvl,
         }
     return merged
 
@@ -274,6 +332,21 @@ def build_payload(state: dict, today: str,
 # durable ``state`` dict described in the module docstring plus the
 # filesystem scans that fill it in.
 
+def _current_month_start_ts() -> float:
+    """Epoch seconds for the start of the current calendar month, local
+    time -- the exact boundary tokenserver.py's own live volume scanner
+    (``_compute``) already uses to decide which Claude files it owns
+    (files older than this are skipped there without even being opened).
+    ``MaxTrackerStore.backfill_step`` mirrors it exactly for Claude so the
+    two channels -- the live scanner and the backfill thread -- never
+    touch the same file's bytes; see the class docstring's single-writer
+    note.
+    """
+    now = datetime.now().astimezone()
+    return now.replace(day=1, hour=0, minute=0, second=0,
+                       microsecond=0).timestamp()
+
+
 def _local_date_str(ts: float) -> str:
     """Epoch seconds -> the Mac's local calendar date, "YYYY-MM-DD".
 
@@ -313,6 +386,24 @@ class MaxTrackerStore:
     value must never reach this method — it would silently become a
     day's recorded peak with no way to tell it apart from a real one. Task
     6's endpoint wiring owns that filtering.
+
+    Single-writer rule for Claude volume (``observe_volume``): tokenserver
+    .py's own ``/api/tokens`` scanner (``_compute``) ALSO incrementally
+    reads ``claude_root`` and calls ``observe_volume`` for every Claude
+    file whose mtime falls in the current calendar month — that's the
+    exact same tree :meth:`backfill_step` walks. Without a boundary, both
+    channels would independently track their own byte offset into the
+    same file and each add the same tokens, silently doubling every
+    current-month day's volume. The split: :meth:`backfill_step` skips any
+    Claude file whose mtime is in the current month outright (never
+    stats its progress, never opens it) — that file is the live
+    scanner's exclusive territory for as long as it keeps being touched.
+    The moment a file goes quiet into a PRIOR month (its mtime no longer
+    qualifies, exactly when the live scanner's own month filter also
+    drops it), backfill picks it up for the first time and reads it whole
+    in one pass — by construction never overlapping with what live already
+    counted, and with no gap either, since backfill was always going to
+    see it eventually once it stopped being "this month's business".
 
     Threading contract: this store is shared by design -- a background
     thread drives :meth:`backfill_step`/:meth:`observe_volume`/:meth:`save`,
@@ -414,7 +505,7 @@ class MaxTrackerStore:
     @staticmethod
     def _bump_day_pct(bucket: dict, date_str: str, pct: float) -> None:
         day = bucket["days"].setdefault(date_str, {})
-        rounded = round(float(pct), 1)
+        rounded = _round_day_pct(float(pct))
         current = day.get("pct")
         if current is None or rounded > current:
             day["pct"] = rounded
@@ -426,6 +517,14 @@ class MaxTrackerStore:
         add up, matching how usage log records are naturally summed as they
         are parsed. A zero (or invalid) amount is a pure no-op -- it never
         fabricates activity for a day nothing actually happened on.
+
+        A day reloaded from disk carries an AUTHORITATIVE ``lvl`` (see the
+        module docstring) instead of a raw ``vol`` -- the moment this day
+        starts collecting real volume again this session, that loaded
+        tercile is cleared: fresh raw numbers are always more trustworthy
+        than a coarse snapshot from before the last restart, and a day
+        must never carry both an authoritative ``lvl`` and a ``vol`` at
+        the same time (ambiguous which one wins).
         """
         if provider not in self._state:
             return
@@ -440,6 +539,7 @@ class MaxTrackerStore:
             day = self._state[provider]["days"].setdefault(date_str, {})
             day["act"] = True
             day["vol"] = int(day.get("vol") or 0) + int(tokens)
+            day.pop("lvl", None)
 
     # -- backfill --------------------------------------------------------
 
@@ -460,6 +560,12 @@ class MaxTrackerStore:
         the same stuck point, so it can never permanently stall this
         file's backfill. Returns True while there is more work to drain
         (call again); False once both roots are fully caught up.
+
+        Claude files with a mtime in the current calendar month are
+        skipped entirely -- see the class docstring's single-writer rule:
+        that is tokenserver.py's live ``/api/tokens`` scanner's exclusive
+        territory, and touching it here would double-count every token it
+        already counted.
         """
         with self._lock:
             codex_more = self._advance_one_file(
@@ -467,11 +573,13 @@ class MaxTrackerStore:
                 budget_bytes, self._handle_codex_event)
             claude_more = self._advance_one_file(
                 "claude", self.claude_root, "**/*.jsonl",
-                budget_bytes, self._handle_claude_event)
+                budget_bytes, self._handle_claude_event,
+                live_channel_cutoff_ts=_current_month_start_ts())
             return codex_more or claude_more
 
     def _advance_one_file(self, provider: str, root: Path, pattern: str,
-                          budget_bytes: int, handle_event) -> bool:
+                          budget_bytes: int, handle_event,
+                          live_channel_cutoff_ts: float | None = None) -> bool:
         if not root.is_dir():
             return False
         bucket = self._backfill[provider]
@@ -481,12 +589,18 @@ class MaxTrackerStore:
         except OSError:
             return False
 
+        def deferred_to_live(info) -> bool:
+            return (live_channel_cutoff_ts is not None and
+                    info.st_mtime >= live_channel_cutoff_ts)
+
         chosen = None
         for path in paths:
             try:
                 info = path.stat()
             except OSError:
                 continue
+            if deferred_to_live(info):
+                continue  # this month's own business -- not backfill's
             entry = bucket.get(info.st_ino)
             if self._is_fully_drained(entry, info):
                 continue  # this inode was already drained at this size
@@ -545,13 +659,19 @@ class MaxTrackerStore:
         pending.pop(info.st_ino, None)  # finished -- nothing left to cache
         # This file just finished -- is any OTHER discovered file still
         # incomplete? (Cheap dict lookups only; re-stat'ing here is fine,
-        # it never reads file content.)
+        # it never reads file content.) A file deferred to the live
+        # channel is not "incomplete work" for backfill -- it's simply
+        # not backfill's to report, or the background thread would mark
+        # itself dirty and save needlessly on every tick for as long as
+        # any file is actively being written this month.
         for other in paths:
             if other == path:
                 continue
             try:
                 other_info = other.stat()
             except OSError:
+                continue
+            if deferred_to_live(other_info):
                 continue
             other_entry = bucket.get(other_info.st_ino)
             if not self._is_fully_drained(other_entry, other_info):
@@ -741,6 +861,14 @@ class MaxTrackerStore:
         is essentially always long past by the time we read it, and that
         says nothing about whether the historical percent/window it
         recorded was real.
+
+        The returned percent is already rounded through
+        :func:`_round_day_pct` -- both of its consumers in
+        :meth:`_handle_codex_event` need that: the day-peak path stores it
+        as-is, and the week-maxed path's ``pct >= 100`` check relies on
+        the SAME "never rounds a sub-100 observation up to 100" guarantee
+        (a 99.96 reading must never falsely mark a week maxed, exactly as
+        it must never render as the exact-red day cell).
         """
         if not isinstance(window, dict):
             return None
@@ -748,7 +876,7 @@ class MaxTrackerStore:
         window_minutes = window.get("window_minutes")
         if not _finite_pct(pct) or not _finite_minutes(window_minutes):
             return None
-        return round(float(pct), 1), window_minutes
+        return _round_day_pct(float(pct)), window_minutes
 
     def _handle_claude_event(self, event) -> None:
         """Feed one ``~/.claude/projects`` usage record into the day's
@@ -789,6 +917,11 @@ class MaxTrackerStore:
         always reported False here; this store has no notion of "the
         server failed to refresh" to surface, so a future caller that needs
         that must layer it on top of the returned dict.
+
+        Each day forwards EITHER its raw ``vol`` (session-tracked, ranked
+        by :func:`build_payload`) OR its authoritative loaded ``lvl``
+        (verbatim, never ranked) -- never both; see the module docstring's
+        two-population rule.
         """
         with self._lock:
             state = {
@@ -797,7 +930,8 @@ class MaxTrackerStore:
                         day: {
                             "pct": record.get("pct"),
                             "act": bool(record.get("act")),
-                            "vol": record.get("vol") or 0,
+                            **({"lvl": record["lvl"]} if "lvl" in record
+                               else {"vol": record.get("vol") or 0}),
                         }
                         for day, record in
                         self._state[provider]["days"].items()
@@ -852,6 +986,17 @@ class MaxTrackerStore:
                     self._load_provider(provider, section)
 
     def _load_provider(self, provider: str, section: dict) -> None:
+        """Populate ``self._state`` from one provider's persisted section.
+
+        A loaded day's ``lvl`` (if any) becomes its AUTHORITATIVE tercile
+        -- stored as ``lvl``, never reinterpreted as a raw ``vol`` to be
+        re-ranked. Re-ranking a value that has already BEEN ranked once
+        (and can never regain its original raw magnitude, since raw
+        volume is deliberately never persisted -- see the module
+        docstring) would reshuffle it against whatever different pool of
+        in-session volumes happens to exist on this run, silently
+        corrupting it a little more on every save/load cycle.
+        """
         days_in = section.get("days")
         if isinstance(days_in, dict):
             days_out = self._state[provider]["days"]
@@ -867,9 +1012,9 @@ class MaxTrackerStore:
                 lvl = record.get("lvl")
                 out = {"act": act}
                 if _finite_pct(pct):
-                    out["pct"] = round(float(pct), 1)
+                    out["pct"] = _round_day_pct(float(pct))
                 if act and isinstance(lvl, int) and not isinstance(lvl, bool):
-                    out["vol"] = max(0, min(2, lvl))
+                    out["lvl"] = max(0, min(2, lvl))
                 days_out[day] = out
 
         weeks_in = section.get("weeks")
@@ -928,20 +1073,36 @@ class MaxTrackerStore:
         self._atomic_write(payload)
 
     def _provider_payload(self, provider: str) -> dict:
+        """Build one provider's persisted section.
+
+        Same two-population split as :func:`_provider_days` (see the
+        module docstring): only days carrying a raw ``vol`` this session
+        are ranked; a day that already carries an authoritative ``lvl``
+        (loaded from a previous save, never topped up with fresh volume
+        since) is written back VERBATIM, so it stays stable across any
+        number of save/load cycles instead of drifting a little further
+        every time.
+        """
         bucket = self._state[provider]
-        volumes = {day: (record.get("vol") or 0)
-                  for day, record in bucket["days"].items()
-                  if record.get("act")}
-        levels = volume_levels(volumes)
+        rankable = {day: (record.get("vol") or 0)
+                   for day, record in bucket["days"].items()
+                   if record.get("act") and "lvl" not in record}
+        levels = volume_levels(rankable)
 
         days_out = {}
         for day, record in bucket["days"].items():
             act = bool(record.get("act"))
             pct = record.get("pct")
+            if not act:
+                lvl_out = None
+            elif "lvl" in record:
+                lvl_out = record["lvl"]
+            else:
+                lvl_out = levels.get(day, 0)
             days_out[day] = {
-                "pct": pct,
+                "pct": _round_day_pct(float(pct)) if pct is not None else None,
                 "act": act,
-                "lvl": levels.get(day, 0) if act else None,
+                "lvl": lvl_out,
             }
         weeks_out = {week: True for week, maxed in bucket["weeks"].items()
                     if maxed}

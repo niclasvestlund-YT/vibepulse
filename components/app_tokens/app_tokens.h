@@ -10,8 +10,10 @@
 /*
  * VibePulse: Claude/Codex-usage och agentstatus på hyllan.
  * Datat kommer från den lilla Mac-tjänsten i tools/tokenserver/ (platt JSON
- * enligt glance-mönstret, över LAN); appen tickar lokalt mellan hämtningarna
- * med samma tickerkomponent som Solelkollens kronräknare.
+ * enligt glance-mönstret, över LAN). Appen har en egen lokal 100 ms-tickare
+ * mellan hämtningarna (tick_cb i app.c, se usage_screen_tick) — INTE
+ * Solelkollens delade tickerkomponent (ticker.h/sg_ticker); den användningen
+ * satt bara i den borttagna volymvyn och försvann härifrån med den.
  */
 
 extern const torget_app_t tokens_app;

@@ -10,7 +10,10 @@
  * längd (ingen datumsträng på tråden, indexpositionen bär dagen).
  *
  * TK_MT_WEEKS ISO-veckor bakåt, TK_MT_DAYS = TK_MT_WEEKS * 7 dagar, index 0
- * äldsta måndagen, index TK_MT_DAYS-1 idag.
+ * äldsta måndagen, index TK_MT_DAYS-1 innevarande ISO-veckas söndag. Idag
+ * är den sista icke-vadderade cellen, inte alltid index TK_MT_DAYS-1 i sig
+ * — dagar efter idag i samma sista vecka är vaddering, [-1, -1] precis
+ * som en frånvarande dag.
  */
 #define TK_MT_WEEKS 20
 #define TK_MT_DAYS (TK_MT_WEEKS * 7)

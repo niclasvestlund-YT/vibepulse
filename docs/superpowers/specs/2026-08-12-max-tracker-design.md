@@ -79,10 +79,13 @@ date strings on the wire — index position alone carries the day).
 ```
 
 - `days` is fixed-length 140 (20 weeks × 7 days); index 0 is the oldest
-  ISO-Monday, index 139 is today. `pct` ranges −1..100 (−1 = no quota data
-  for that day, honest absence); `lvl` ranges −1..2 (−1 = inactive day,
-  0–2 = server-computed volume tercile for activity-only backfill days).
-  100 is reserved for an exact quota max.
+  ISO-Monday, index 139 is the Sunday of the current ISO week. Today is
+  the last non-padded cell, not always index 139 itself — any day after
+  today within that same final week is padding, rendered exactly like an
+  absent day. `pct` ranges −1..100 (−1 = no quota data for that day,
+  honest absence); `lvl` ranges −1..2 (−1 = inactive day, 0–2 =
+  server-computed volume tercile for activity-only backfill days). 100
+  is reserved for an exact quota max.
 - `weekMaxed` is fixed-length 20, one entry per ISO week aligned to Monday,
   same left-to-right order as `days`; `1` = the general weekly window
   reached 100 % that week, `0` otherwise.

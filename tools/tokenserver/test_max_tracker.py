@@ -3,6 +3,7 @@ import os
 import stat
 import tempfile
 import threading
+import time
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -20,10 +21,20 @@ from tools.tokenserver.max_tracker import (
     max_weeks_streak,
     volume_levels,
     week_key,
+    _round_day_pct,
 )
 
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "sim-fixtures"
+
+
+def _index_for_date(today: str, target_date: str) -> int:
+    """Find ``target_date``'s position in dense_window's grid without
+    reimplementing its ISO-Monday anchoring math: seed a unique marker at
+    that one date and locate it in the rendered output."""
+    marker = {target_date: {"pct": 77, "lvl": 2}}
+    window = dense_window(today, WINDOW_WEEKS, marker)
+    return window.index([77, 2])
 
 
 def _rollout_event(rate_limits, timestamp="2026-08-07T10:00:00Z"):
@@ -64,6 +75,25 @@ def _rollout_limits(primary_pct=None, secondary_pct=None, *,
 def _write_jsonl(path, rows):
     path.write_text("".join(json.dumps(row) + "\n" for row in rows),
                     encoding="utf-8")
+
+
+def _age_into_last_month(path):
+    """Pin a file's mtime safely into a PRIOR calendar month, regardless
+    of the real wall-clock date. Finding C: backfill_step defers any
+    Claude file whose mtime is in the CURRENT month to tokenserver.py's
+    live /api/tokens scanner (see MaxTrackerStore's single-writer class
+    docstring) -- a freshly written test file always looks "this month",
+    so Claude backfill tests must age their fixture past that boundary or
+    backfill_step silently skips them. Call again after appending to a
+    file within the same test to keep testing the OFFSET/pending-buf
+    resume mechanism in isolation from that separate ownership policy
+    (which gets its own dedicated tests) -- a real append always bumps
+    mtime to "now", which would otherwise hand the file to the live
+    channel mid-test. 40 days guarantees crossing at least one month
+    boundary (the longest month is 31 days).
+    """
+    aged = time.time() - 40 * 86400
+    os.utime(path, (aged, aged))
 
 
 def _claude_usage_line(message_id, tokens, timestamp):
@@ -258,12 +288,18 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
     def test_a_grown_claude_file_resumes_from_its_offset_without_double_counting(self):
         # Regression: an actively-written session file is the normal case,
         # not an edge case -- draining it twice must never recount the
-        # portion already drained the first time.
+        # portion already drained the first time. Pins the mtime into a
+        # prior month throughout (see _age_into_last_month) to exercise
+        # the offset/pending-buf resume mechanism in isolation from
+        # Finding C's separate current-month live-channel deferral, which
+        # would otherwise hand a REALLY actively-growing Claude file to
+        # the live channel instead (its own dedicated tests cover that).
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
             path = claude_root / "session.jsonl"
             _write_jsonl(path, [
                 _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z")])
+            _age_into_last_month(path)
             _drain(store)
             self.assertEqual(
                 store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
@@ -273,6 +309,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 handle.write(json.dumps(_claude_usage_line(
                     "m2", 50, "2026-08-07T11:00:00Z")) + "\n")
             self.assertEqual(path.stat().st_ino, inode_before)
+            _age_into_last_month(path)
 
             _drain(store)
 
@@ -308,6 +345,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
                 _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
             ])
+            _age_into_last_month(path)  # Finding C: else backfill defers it
             _drain(store)
             self.assertEqual(
                 store._state["claude"]["days"]["2026-08-07"]["vol"], 150)
@@ -318,6 +356,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             _write_jsonl(path, [
                 _claude_usage_line("m3", 77, "2026-08-09T10:00:00Z")])
             self.assertEqual(path.stat().st_ino, inode_before)
+            _age_into_last_month(path)  # the rewrite also bumped mtime
 
             _drain(store)
 
@@ -340,6 +379,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 junk,
                 _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
             ])
+            _age_into_last_month(path)  # Finding C: else backfill defers it
 
             _drain(store)  # would hit the safety cap and fail if starved
 
@@ -375,7 +415,9 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             row_bytes = len(json.dumps(row).encode("utf-8")) + 1
             self.assertGreater(row_bytes, 2 * 1024 * 1024)
             self.assertLess(row_bytes, MaxTrackerStore._MAX_LINE_BYTES)
-            _write_jsonl(claude_root / "session.jsonl", [row])
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [row])
+            _age_into_last_month(path)  # Finding C: else backfill defers it
 
             steps = 0
             while store.backfill_step(budget_bytes=64 * 1024):
@@ -420,6 +462,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 _claude_usage_line(f"m{i}", 1, "2026-08-07T10:00:00Z")
                 for i in range(257)
             ])
+            _age_into_last_month(path)  # Finding C: else backfill defers it
 
             _drain(store)  # would hang/starve at 256 of 257 if regressed
 
@@ -439,9 +482,11 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             # No trailing newline on the last line -- a writer that
             # crashed or simply hasn't finished this line yet.
             path_a.write_text(complete_line + "\n" + dangling)
+            _age_into_last_month(path_a)  # Finding C: else deferred to live
             path_b = claude_root / "session-b.jsonl"
             _write_jsonl(path_b, [_claude_usage_line(
                 "m3", 50, "2026-08-08T10:00:00Z")])
+            _age_into_last_month(path_b)
 
             _drain(store)
 
@@ -458,6 +503,12 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             self.assertEqual(entry["offset"], len(complete_line) + 1)
 
     def test_unterminated_line_completes_once_the_file_grows(self):
+        # Pins the mtime into a prior month throughout (see
+        # _age_into_last_month) to exercise the dangling-tail-completes
+        # mechanism in isolation from Finding C's separate current-month
+        # live-channel deferral, which would otherwise hand a REALLY
+        # just-resumed Claude file to the live channel instead once
+        # touched (its own dedicated tests cover that).
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
             complete_line = json.dumps(_claude_usage_line(
@@ -466,6 +517,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 "m2", 999, "2026-08-07T11:00:00Z"))
             path = claude_root / "session.jsonl"
             path.write_text(complete_line + "\n" + dangling)
+            _age_into_last_month(path)
 
             _drain(store)
             self.assertEqual(
@@ -476,6 +528,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 "m3", 25, "2026-08-07T12:00:00Z"))
             with path.open("a", encoding="utf-8") as handle:
                 handle.write("\n" + another_line + "\n")
+            _age_into_last_month(path)
 
             _drain(store)
 
@@ -489,10 +542,12 @@ class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
     def test_claude_volume_backfill_sets_activity_and_volume_never_pct(self):
         with tempfile.TemporaryDirectory() as directory:
             store, _, claude_root = _new_store(directory)
-            _write_jsonl(claude_root / "session.jsonl", [
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [
                 _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z"),
                 _claude_usage_line("m2", 50, "2026-08-07T11:00:00Z"),
             ])
+            _age_into_last_month(path)  # Finding C: else backfill defers it
 
             _drain(store)
 
@@ -627,6 +682,148 @@ class MaxTrackerStoreSnapshotTests(unittest.TestCase):
             payload = store.snapshot("2026-08-12", {})
 
             self.assertFalse(payload["stale"])
+
+
+class RoundDayPctTests(unittest.TestCase):
+    """_round_day_pct: the sole rounding point between a probe's fractional
+    percent and the device parser's int8_t day-cell field (a single
+    fractional pct rejects the ENTIRE payload -- see max_tracker_parse.c's
+    parse_days, trunc(pct) != pct)."""
+
+    def test_rounds_half_away_from_zero_not_bankers_rounding(self):
+        self.assertEqual(_round_day_pct(0.5), 1)
+        self.assertEqual(_round_day_pct(15.5), 16)
+        self.assertEqual(_round_day_pct(2.5), 3)  # Python's round(2.5) == 2
+
+    def test_ordinary_values_round_to_the_nearest_int(self):
+        self.assertEqual(_round_day_pct(15.4), 15)
+        self.assertEqual(_round_day_pct(15.6), 16)
+        self.assertEqual(_round_day_pct(0.0), 0)
+
+    def test_never_rounds_a_sub_100_observation_up_to_100(self):
+        self.assertEqual(_round_day_pct(99.5), 99)
+        self.assertEqual(_round_day_pct(99.96), 99)
+        self.assertEqual(_round_day_pct(99.999), 99)
+
+    def test_a_true_100_stays_the_exact_max(self):
+        self.assertEqual(_round_day_pct(100.0), 100)
+
+    def test_result_is_always_a_genuine_int(self):
+        for value in (0.0, 15.5, 99.96, 100.0):
+            self.assertIsInstance(_round_day_pct(value), int)
+
+
+class MaxTrackerStoreIntegerPctTests(unittest.TestCase):
+    """Finding A: real Claude/Codex utilization arrives fractional
+    (15.5-style, by construction) -- every day-cell pct the store ever
+    emits must still be a genuine int, never a float, or the device
+    parser rejects the whole /api/max-tracker payload and the tracker
+    pages stay dark forever."""
+
+    def test_every_emitted_day_pct_is_an_int_never_a_float(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            ts = datetime(2026, 8, 7, 12, 0).timestamp()
+
+            store.observe_quota("claude", 300, 15.5, ts)
+            store.observe_quota("codex", 300, 99.96, ts + 60)
+            store.observe_quota("claude", 10080, 100.0, ts + 120)
+
+            payload = store.snapshot("2026-08-07", {})
+
+            checked_real_values = 0
+            for provider in PROVIDERS:
+                for pct, _lvl in payload[provider]["days"]:
+                    self.assertIsInstance(pct, int)
+                    if pct != -1:
+                        checked_real_values += 1
+            # Sanity: the assertion above must have actually exercised at
+            # least one real (non-absent) day, not just -1 padding.
+            self.assertGreaterEqual(checked_real_values, 2)
+
+    def test_a_sub_100_observation_never_renders_as_the_exact_max_cell(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+            today = "2026-08-07"
+            store.observe_quota(
+                "claude", 300, 99.96, datetime(2026, 8, 7, 12, 0).timestamp())
+
+            payload = store.snapshot(today, {})
+
+            index = _index_for_date(today, today)
+            self.assertEqual(payload["claude"]["days"][index][0], 99)
+
+
+class MaxTrackerStoreGrayLevelStabilityTests(unittest.TestCase):
+    """Finding B: save() writes the already-computed TERCILE (0-2), not
+    raw volume, per the privacy allowlist ({d, pct, act, lvl} -- no raw
+    numbers ever persisted). A loaded lvl must stay authoritative for its
+    day, excluded from re-ranking, or it silently reshuffles ([0,1,2] ->
+    [0,0,1]) on every single save/load cycle, permanently, since a
+    completed backfill file is never reopened to recover the original
+    raw volume."""
+
+    def test_reload_keeps_loaded_lvls_stable_and_ranks_only_new_session_volume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            store.observe_volume("claude", "2026-08-01", 10)   # -> lvl 0
+            store.observe_volume("claude", "2026-08-02", 50)   # -> lvl 1
+            store.observe_volume("claude", "2026-08-03", 90)   # -> lvl 2
+            store.save()
+
+            def levels(target_store, today):
+                payload = target_store.snapshot(today, {})
+                return [
+                    payload["claude"]["days"][_index_for_date(today, day)][1]
+                    for day in ("2026-08-01", "2026-08-02", "2026-08-03")
+                ]
+
+            reloaded = MaxTrackerStore(path, codex_root, claude_root)
+            self.assertEqual(levels(reloaded, "2026-08-03"), [0, 1, 2])
+
+            # A much bigger volume enters the pool THIS session only.
+            reloaded.observe_volume("claude", "2026-08-04", 5000)
+
+            # The three historical (loaded, authoritative) days must be
+            # completely unaffected by the new, vastly larger value now
+            # sharing the in-memory state -- they are excluded from
+            # ranking entirely, not just outranked.
+            self.assertEqual(levels(reloaded, "2026-08-04"), [0, 1, 2])
+            new_day_index = _index_for_date("2026-08-04", "2026-08-04")
+            new_day_lvl = reloaded.snapshot(
+                "2026-08-04", {})["claude"]["days"][new_day_index][1]
+            # A single distinct in-session volume ranks conservatively at
+            # level 0 (volume_levels' own "no second data point" rule) --
+            # it must NOT inherit level 2 just because 5000 > 90.
+            self.assertEqual(new_day_lvl, 0)
+
+            # The exact regression: a SECOND save/load round trip must
+            # still leave the original three untouched -- proving they
+            # never re-enter the ranking pool even after another cycle.
+            reloaded.save()
+            reloaded_again = MaxTrackerStore(path, codex_root, claude_root)
+            self.assertEqual(levels(reloaded_again, "2026-08-04"), [0, 1, 2])
+
+    def test_fresh_volume_this_session_supersedes_a_loaded_lvl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            store.observe_volume("claude", "2026-08-01", 10)
+            store.save()
+
+            reloaded = MaxTrackerStore(path, codex_root, claude_root)
+            self.assertIn("lvl", reloaded._state["claude"]["days"]["2026-08-01"])
+            self.assertNotIn("vol", reloaded._state["claude"]["days"]["2026-08-01"])
+
+            # The SAME day gets fresh real volume this session (e.g. the
+            # backfill thread re-observes it, or -- more realistically --
+            # today's own date rolls over into an already-loaded record).
+            reloaded.observe_volume("claude", "2026-08-01", 500)
+
+            day = reloaded._state["claude"]["days"]["2026-08-01"]
+            self.assertNotIn("lvl", day)
+            self.assertEqual(day["vol"], 500)
 
 
 class MaxTrackerStorePersistenceTests(unittest.TestCase):
@@ -836,6 +1033,12 @@ def _assert_contract_shape(test: unittest.TestCase, payload: dict) -> None:
         for flag in section["weekMaxed"]:
             test.assertIn(flag, (0, 1))
         for pct, lvl in section["days"]:
+            # The device parser's day cell is int8_t on both fields
+            # (parse_days: trunc(pct) != pct / trunc(lvl) != lvl reject
+            # the WHOLE payload) -- a bare value-range check would happily
+            # pass a fractional 15.5 that the real parser rejects.
+            test.assertIsInstance(pct, int)
+            test.assertIsInstance(lvl, int)
             test.assertTrue(-1 <= pct <= 100)
             test.assertTrue(-1 <= lvl <= 2)
         for key in ("maxWeeksStreak", "maxWeeks", "maxDays"):
@@ -1136,9 +1339,50 @@ class BuildPayloadTests(unittest.TestCase):
 
     def test_committed_fixtures_match_the_expected_contract_shape(self):
         for name in ("max-tracker-empty.json", "max-tracker-coldstart.json",
-                     "max-tracker-full.json"):
+                     "max-tracker-full.json", "max-tracker-live-shape.json"):
             with self.subTest(fixture=name):
                 _assert_contract_shape(self, _load_fixture(name))
+
+    def test_live_shape_fixture_matches_a_store_fed_the_same_fractional_inputs(self):
+        """Finding A regression: max-tracker-live-shape.json is committed,
+        generated output (not hand-crafted like the other three) from a
+        real MaxTrackerStore fed the exact fractional percents a live
+        probe naturally produces (Claude/Codex utilization arrives as
+        e.g. 15.5, 99.96 "by construction"). Re-driving the SAME store
+        calls here and comparing must reproduce it byte-for-byte,
+        proving the fixture isn't stale relative to the current rounding
+        rule (and this test regenerating a drifted fixture, rather than
+        silently trusting a checked-in file, is the actual regression
+        gate -- the C-side test only proves the CURRENT fixture parses,
+        not that it still matches today's server logic)."""
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _ = _new_store(directory)
+
+            def ts(day, hour=12):
+                return datetime.fromisoformat(f"{day}T{hour:02d}:00:00").timestamp()
+
+            fractional_days = {
+                "2026-08-01": 15.5, "2026-08-02": 62.3, "2026-08-03": 99.96,
+                "2026-08-04": 47.49, "2026-08-05": 88.51, "2026-08-06": 0.5,
+                "2026-08-07": 100.0,
+            }
+            for day, pct in fractional_days.items():
+                store.observe_quota("claude", 300, pct, ts(day))
+                store.observe_volume("claude", day, 800)
+            codex_fractional_days = {
+                "2026-08-08": 33.34, "2026-08-09": 71.66, "2026-08-10": 100.0,
+            }
+            for day, pct in codex_fractional_days.items():
+                store.observe_quota("codex", 300, pct, ts(day))
+            store.observe_quota("claude", 10080, 100.0, ts("2026-08-07"))
+            store.observe_quota("codex", 10080, 100.0, ts("2026-08-10"))
+            store.observe_volume("claude", "2026-08-11", 120)
+            store.observe_volume("claude", "2026-08-12", 4000)
+
+            payload = store.snapshot(
+                "2026-08-12", {"claude": "max20x", "codex": "pro"})
+
+            self.assertEqual(payload, _load_fixture("max-tracker-live-shape.json"))
 
     def test_built_payloads_round_trip_through_the_same_contract_shape(self):
         cases = [

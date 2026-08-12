@@ -11,6 +11,7 @@ from unittest import mock
 import os
 
 from tools.tokenserver import tokenserver
+from tools.tokenserver.max_tracker import MaxTrackerStore
 from tools.tokenserver.quota_cache import CachedQuota, QuotaCache
 from tools.tokenserver.usage_history import Forecast, UsageHistory
 
@@ -1494,6 +1495,112 @@ class MaxTrackerVolumeHookTests(unittest.TestCase):
             result = tokenserver._compute(projects)  # max_tracker_store=None
 
         self.assertEqual(result["dayTokens"], 5)
+
+
+class MaxTrackerSingleWriterTests(unittest.TestCase):
+    """Finding C: _compute()'s live volume scan and MaxTrackerStore's own
+    backfill_step() both incrementally read ~/.claude/projects/**/*.jsonl.
+    Without a single-writer boundary between them, a current-month Claude
+    file gets its tokens counted twice -- once via each channel's own,
+    independently-tracked byte offset into the exact same file. Drives a
+    REAL store through BOTH channels (unlike MaxTrackerVolumeHookTests
+    above, which only checks _compute's own call arguments in isolation
+    via a mock) to prove the actual end-to-end total is never doubled."""
+
+    def setUp(self):
+        self.previous_cache = tokenserver._file_cache
+        tokenserver._file_cache = {}
+
+    def tearDown(self):
+        tokenserver._file_cache = self.previous_cache
+
+    @staticmethod
+    def _line(message_id, tokens):
+        return json.dumps({
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "sessionId": "session-a",
+            "requestId": f"request-{message_id}",
+            "message": {"id": message_id, "usage": {"input_tokens": tokens}},
+        }) + "\n"
+
+    def test_live_scan_and_backfill_together_count_a_growing_file_once(self):
+        # _compute() marks the store dirty and a REAL background thread
+        # saves it (see _mark_max_tracker_dirty) whenever it observes
+        # volume -- irrelevant to what this test checks (pure in-memory
+        # counting), and left unpatched it can still be mid-write when
+        # the tempdir below gets torn down. Patched out exactly like
+        # MaxTrackerDirtyWriterTests isolates that separate concern.
+        with mock.patch.object(tokenserver, "_mark_max_tracker_dirty"), \
+                tempfile.TemporaryDirectory() as temp_dir:
+            claude_root = Path(temp_dir) / "claude"
+            claude_root.mkdir()
+            codex_root = Path(temp_dir) / "codex"
+            codex_root.mkdir()
+            store = MaxTrackerStore(
+                Path(temp_dir) / "max-tracker.json", codex_root, claude_root)
+
+            path = claude_root / "session.jsonl"
+            # A freshly written file's mtime is "now" -- current month --
+            # the live scanner's exclusive territory per the single-writer
+            # rule; backfill_step must defer to it entirely.
+            path.write_text(self._line("first", 100))
+
+            tokenserver._compute(claude_root, max_tracker_store=store)
+            while store.backfill_step():
+                pass
+
+            today = datetime.now().astimezone().strftime("%Y-%m-%d")
+            self.assertEqual(
+                store._state["claude"]["days"][today]["vol"], 100)
+            # Confirmed via the mechanism, not just the total: backfill
+            # never even started tracking this inode.
+            self.assertEqual(store._backfill["claude"], {})
+
+            # The writer appends more -- both channels get another tick.
+            with path.open("a") as output:
+                output.write(self._line("second", 50))
+
+            tokenserver._compute(claude_root, max_tracker_store=store)
+            while store.backfill_step():
+                pass
+
+            self.assertEqual(
+                store._state["claude"]["days"][today]["vol"], 150)
+            self.assertEqual(store._backfill["claude"], {})
+
+    def test_a_dormant_file_from_last_month_is_backfills_exclusive_territory(self):
+        # See the patch note in the previous test -- same isolation from
+        # the real background save thread _mark_max_tracker_dirty starts.
+        with mock.patch.object(tokenserver, "_mark_max_tracker_dirty"), \
+                tempfile.TemporaryDirectory() as temp_dir:
+            claude_root = Path(temp_dir) / "claude"
+            claude_root.mkdir()
+            codex_root = Path(temp_dir) / "codex"
+            codex_root.mkdir()
+            store = MaxTrackerStore(
+                Path(temp_dir) / "max-tracker.json", codex_root, claude_root)
+
+            path = claude_root / "session.jsonl"
+            old_timestamp = "2020-01-15T10:00:00Z"
+            path.write_text(json.dumps({
+                "timestamp": old_timestamp, "sessionId": "session-a",
+                "requestId": "request-old",
+                "message": {"id": "old", "usage": {"input_tokens": 300}},
+            }) + "\n")
+            aged = time.time() - 40 * 86400
+            os.utime(path, (aged, aged))
+
+            # The live scanner's own month filter excludes it outright
+            # (mtime predates the current month) -- _compute contributes
+            # nothing for this file, by its own pre-existing rule.
+            tokenserver._compute(claude_root, max_tracker_store=store)
+            while store.backfill_step():
+                pass
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2020-01-15"]["vol"], 300)
+            # Backfill is the one that actually touched it.
+            self.assertEqual(len(store._backfill["claude"]), 1)
 
 
 class MaxTrackerDirtyWriterTests(unittest.TestCase):

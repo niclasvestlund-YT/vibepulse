@@ -173,6 +173,59 @@ int main(void) {
     free(json);
   }
 
+  /* Regressionsfixtur (Finding A): server-genererad via en riktig
+   * MaxTrackerStore matad med BRUTNA procent (15.5, 99.96, 0.5, 88.51 --
+   * Claude/Codex-utilization anländer sådär "by construction"), till
+   * skillnad från de tre ovan som är handskrivna och alltid heltal och
+   * därför aldrig råkade ut för buggen. Om servern skulle serialisera ett
+   * enda brutet pct-tal skulle HELA payloaden avvisas här -- se
+   * parse_days/trunc(pct) != pct i max_tracker_parse.c -- och
+   * trackersidorna skulle stå mörka för alltid. index 124-130 är Claudes
+   * sju brutna dagar (2026-08-01..07); 131-133 är Codex tre brutna dagar
+   * (2026-08-08..10); 134 (2026-08-11) och 135 (2026-08-12, "idag") är
+   * gråa volymdagar utan kvot. Index 136-139 är padding EFTER idag inom
+   * samma ISO-vecka -- idag är alltså INTE alltid sista indexet
+   * (TK_MT_DAYS-1), bara den sista icke-vadderade cellen. */
+  json = read_file(FIXTURES_DIR "/max-tracker-live-shape.json", &len);
+  if (json) {
+    check("live-shape: fixturen parsar (heltalsfix fungerar mot riktig parser)",
+          tk_max_tracker_parse(json, len, &t));
+    check("live-shape: coding streak", t.coding_streak_days == 2);
+
+    check("live-shape: claude 08-01 15.5 -> 16 (rundat bort från noll)",
+          t.claude.days[124].pct == 16 && t.claude.days[124].lvl == 1);
+    check("live-shape: claude 08-02 62.3 -> 62",
+          t.claude.days[125].pct == 62);
+    check("live-shape: claude 08-03 99.96 ALDRIG uppåt till 100",
+          t.claude.days[126].pct == 99);
+    check("live-shape: claude 08-04 47.49 -> 47 (nedåt)",
+          t.claude.days[127].pct == 47);
+    check("live-shape: claude 08-05 88.51 -> 89 (uppåt)",
+          t.claude.days[128].pct == 89);
+    check("live-shape: claude 08-06 0.5 -> 1 (bort från noll, inte banker's 0)",
+          t.claude.days[129].pct == 1);
+    check("live-shape: claude 08-07 en äkta 100.0 förblir exakt 100",
+          t.claude.days[130].pct == 100);
+
+    check("live-shape: codex 08-08 33.34 -> 33", t.codex.days[131].pct == 33);
+    check("live-shape: codex 08-09 71.66 -> 72", t.codex.days[132].pct == 72);
+    check("live-shape: codex 08-10 en äkta 100.0 förblir exakt 100",
+          t.codex.days[133].pct == 100);
+
+    check("live-shape: claude 08-11 grå dag utan kvot",
+          t.claude.days[134].pct == -1 && t.claude.days[134].lvl == 0);
+    check("live-shape: claude 08-12 (idag) grå dag, högsta tercilen",
+          t.claude.days[135].pct == -1 && t.claude.days[135].lvl == 2);
+    check("live-shape: idag är index 135, INTE 139",
+          t.claude.days[135].pct != -1 || t.claude.days[135].lvl != -1);
+    check("live-shape: index 136-139 (efter idag, samma vecka) är padding",
+          t.claude.days[136].pct == -1 && t.claude.days[136].lvl == -1 &&
+          t.claude.days[137].pct == -1 && t.claude.days[137].lvl == -1 &&
+          t.claude.days[138].pct == -1 && t.claude.days[138].lvl == -1 &&
+          t.claude.days[139].pct == -1 && t.claude.days[139].lvl == -1);
+    free(json);
+  }
+
   /* --- En frisk minimal dokument-bas för positiva mutationstester --- */
 
   char claude_full[2048];
