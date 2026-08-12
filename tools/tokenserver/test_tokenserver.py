@@ -1553,8 +1553,18 @@ class MaxTrackerSingleWriterTests(unittest.TestCase):
             self.assertEqual(
                 store._state["claude"]["days"][today]["vol"], 100)
             # Confirmed via the mechanism, not just the total: backfill
-            # never even started tracking this inode.
-            self.assertEqual(store._backfill["claude"], {})
+            # never READ this inode's content, but it DID record a
+            # stat-only watermark at the file's current size (the other
+            # half of the single-writer rule -- see the class docstring's
+            # "live coverage advances the backfill watermark" note; a
+            # deferred file with no bookkeeping at all would re-read and
+            # double-count everything live already covered the moment it
+            # ages into a new month).
+            ino = path.stat().st_ino
+            size_after_first = path.stat().st_size
+            self.assertEqual(store._backfill["claude"], {
+                ino: {"offset": size_after_first, "size": size_after_first,
+                     "done": True, "discarding": False}})
 
             # The writer appends more -- both channels get another tick.
             with path.open("a") as output:
@@ -1566,7 +1576,13 @@ class MaxTrackerSingleWriterTests(unittest.TestCase):
 
             self.assertEqual(
                 store._state["claude"]["days"][today]["vol"], 150)
-            self.assertEqual(store._backfill["claude"], {})
+            # The watermark advanced to match -- still deferred (mtime is
+            # "now" either way), still never read.
+            size_after_second = path.stat().st_size
+            self.assertGreater(size_after_second, size_after_first)
+            self.assertEqual(store._backfill["claude"], {
+                ino: {"offset": size_after_second, "size": size_after_second,
+                     "done": True, "discarding": False}})
 
     def test_a_dormant_file_from_last_month_is_backfills_exclusive_territory(self):
         # See the patch note in the previous test -- same isolation from

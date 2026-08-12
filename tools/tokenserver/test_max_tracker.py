@@ -538,6 +538,121 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
                 store._state["claude"]["days"]["2026-08-07"]["vol"], 1124)
 
 
+class MaxTrackerStoreLiveWatermarkTests(unittest.TestCase):
+    """Finding C round 2: the calendar-month single-writer split (round 1)
+    stopped concurrent double-reads but introduced a NEW deterministic
+    double-count at every month rollover -- a deferred file had NO
+    backfill bookkeeping at all, so the instant its mtime aged into a
+    prior month, backfill found nothing (bucket.get(inode) is None),
+    started from offset 0, and re-read -- and re-accumulated, via
+    observe_volume's additive semantics -- the ENTIRE file, including
+    everything the live channel already counted. Fixed: a deferred
+    file's watermark now advances to its current size on every pass (a
+    stat-only touch -- see _advance_watermark), so backfill resumes from
+    wherever live coverage actually left off, not from 0.
+
+    These tests control the month boundary directly by mocking
+    _current_month_start_ts (rather than aging file mtimes), so "month M"
+    and "month M+1" are exact and independent of the real wall clock."""
+
+    def test_live_observation_and_deferred_backfill_then_rollover_does_not_double_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [
+                _claude_usage_line("m1", 100, "2026-07-15T10:00:00Z")])
+            file_mtime = path.stat().st_mtime
+
+            # Month M: the file's mtime is within the current month, so
+            # backfill defers to the live channel (simulated directly via
+            # observe_volume, exactly as tokenserver.py's _compute would
+            # call it).
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=file_mtime - 100):
+                store.observe_volume("claude", "2026-07-15", 100)
+                more = store.backfill_step()
+
+            self.assertFalse(more)  # deferred -- no other work to report
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-07-15"]["vol"], 100)
+            # The watermark was recorded even though deferred (read: not
+            # read -- this is a stat-only bookkeeping entry).
+            ino = path.stat().st_ino
+            watermark = store._backfill["claude"][ino]
+            self.assertTrue(watermark["done"])
+            self.assertEqual(watermark["offset"], path.stat().st_size)
+            self.assertEqual(watermark["size"], path.stat().st_size)
+
+            # Roll into month M+1: the cutoff is now past the file's
+            # (unchanged) mtime, so it is no longer deferred.
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=file_mtime + 100):
+                _drain(store)
+
+            # Exactly 100 -- NOT 200. The watermark meant backfill found
+            # nothing new to read, rather than re-reading the whole file.
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-07-15"]["vol"], 100)
+
+    def test_tokens_appended_after_rollover_are_counted_exactly_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [
+                _claude_usage_line("m1", 100, "2026-07-15T10:00:00Z")])
+            file_mtime = path.stat().st_mtime
+
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=file_mtime - 100):
+                store.observe_volume("claude", "2026-07-15", 100)
+                store.backfill_step()
+
+            # More is appended -- still well within the tiny real-clock
+            # window this test executes in, relative to the +-100 s
+            # cutoffs below (so the mocked "month" boundaries, not the
+            # append's own real mtime, are what actually matter here).
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(_claude_usage_line(
+                    "m2", 50, "2026-08-01T10:00:00Z")) + "\n")
+
+            with mock.patch(
+                    "tools.tokenserver.max_tracker._current_month_start_ts",
+                    return_value=file_mtime + 100):
+                _drain(store)
+
+            # The original 100 (already covered by live, resumed from the
+            # watermark, never re-read) plus exactly the new 50 -- never
+            # 150 counted twice, never 200, never silently dropped.
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-07-15"]["vol"], 100)
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-01"]["vol"], 50)
+
+    def test_a_file_dormant_since_before_the_first_run_still_backfills_fully_from_zero(self):
+        # Existing behavior preserved: a file that was NEVER live-owned
+        # (dormant since before this store even started) has no
+        # watermark to resume from, so it backfills whole from offset 0,
+        # exactly as it always has.
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            path = claude_root / "session.jsonl"
+            _write_jsonl(path, [
+                _claude_usage_line("m1", 300, "2020-01-15T10:00:00Z")])
+            _age_into_last_month(path)
+
+            _drain(store)
+
+            self.assertEqual(
+                store._state["claude"]["days"]["2020-01-15"]["vol"], 300)
+            self.assertEqual(len(store._backfill["claude"]), 1)
+            ino = path.stat().st_ino
+            self.assertEqual(
+                store._backfill["claude"][ino]["offset"], path.stat().st_size)
+
+
 class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
     def test_claude_volume_backfill_sets_activity_and_volume_never_pct(self):
         with tempfile.TemporaryDirectory() as directory:
