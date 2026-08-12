@@ -160,21 +160,45 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                             stale.crop((200, 14, 458, 56)).tobytes())
         self.assertNotEqual(claude_stale.crop(content).tobytes(),
                             no_data.crop(content).tobytes())
+        self.assertEqual(live.getpixel((37, 14)), (111, 120, 255))
+        self.assertEqual(stale.getpixel((37, 14)), (0, 0, 0))
 
         # Missing data keeps the fixed page identity but never paints quota
         # progress, reset or today's delta.
         row = [no_data.getpixel((x, BAR_SOLID_CENTER_Y))
                for x in range(22, 458)]
         self.assertEqual(set(row), {(48, 50, 56)})
-        established_missing = self.image(
-            "torget-vibepulse-claude-missing.bmp"
-        )
-        self.assertEqual(no_data.tobytes(), established_missing.tobytes())
         self.assertEqual(
             no_data.crop((22, 72, 458, 118)).tobytes(),
             claude_stale.crop((22, 72, 458, 118)).tobytes(),
             "no-data must retain the fixed FABLE · WEEK page identity",
         )
+        status = [(x, y) for y in range(18, 56) for x in range(300, 458)
+                  if no_data.getpixel((x, y)) != (0, 0, 0)]
+        self.assertEqual(
+            (min(x for x, _ in status), max(x for x, _ in status),
+             min(y for _, y in status), max(y for _, y in status)),
+            (395, 457, 32, 41),
+            "NO DATA must occupy the one reserved status slot",
+        )
+        hero = [(x, y) for y in range(140, 280) for x in range(22, 458)
+                if no_data.getpixel((x, y)) == (255, 255, 255)]
+        self.assertTrue(hero)
+        self.assertLess(max(x for x, _ in hero) - min(x for x, _ in hero),
+                        90, "no-data hero must be one large dash, not digits")
+        for color, expected_bounds in (
+            ((217, 119, 87), (24, 40, 364, 367)),
+            ((255, 255, 255), (439, 455, 364, 367)),
+        ):
+            glyphs = [(x, y) for y in range(345, 390)
+                      for x in range(22, 458)
+                      if no_data.getpixel((x, y)) == color]
+            self.assertEqual(
+                (min(x for x, _ in glyphs), max(x for x, _ in glyphs),
+                 min(y for _, y in glyphs), max(y for _, y in glyphs)),
+                expected_bounds,
+                "no-data lower values must be dash glyphs, not numbers",
+            )
 
     def test_native_codex_icons_are_transparent_non_rectangular_assets(self):
         quota = self.image("torget-vibepulse-codex-weekly-live-46.bmp")

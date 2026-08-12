@@ -2,8 +2,10 @@
 
 ## Outcome and scope
 
-The static portion of Tasks 1–5 and the static evidence portion of Task 7 are
-implemented through commit `43a21a4`. Studio validation, the complete host
+The original static portion of Tasks 1–5 and the static evidence portion of
+Task 7 were implemented through commit `43a21a4`; the quota-source, parser,
+native Codex-asset and corrected raster-evidence chain continues through
+`eb578fe`. Studio validation, the complete host
 gate, the private exact-size preview, static raster landmarks, and the ESP-IDF
 target build passed for the current source tree.
 
@@ -46,7 +48,7 @@ transparent silhouette. Both render at native 1:1 size.
 
 Latest exact private preview root:
 
-`/var/folders/86/2jzw_gkj3c71ygn1hdvrsnx80000gn/T/vibepulse-preview.bSmruN`
+`/var/folders/86/2jzw_gkj3c71ygn1hdvrsnx80000gn/T/vibepulse-preview.JxtjVs`
 
 The corrected physical AMOLED gate remains pending. No flash or live-service
 mutation was performed while producing this evidence.
@@ -66,10 +68,10 @@ The following are completed observations, not expected results:
 | Gate | Command/evidence | Observed result |
 |---|---|---|
 | Studio contract | `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh` invokes `tools/vibepulse_studio/design.py --check` | PASS; generated layout and Studio design were in sync |
-| Full host gate | `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh` | PASS / exit 0, including pure C policy tests, 11 preview tests, 56 Studio design/server tests, 18 Studio wiring tests, and 16 static visual-landmark tests |
+| Full host gate | `PYTHON_BIN="$PWD/.venv/bin/python" ./test/run.sh` | PASS / exit 0, including pure C policy tests, 11 preview tests, 7 native asset tests, 56 Studio design/server tests, 18 Studio wiring tests, and 18 static visual-landmark tests |
 | Private preview | `PYTHON_BIN="$PWD/.venv/bin/python" ./tools/preview-ui.sh vibepulse` | PASS / exit 0; exact allowlisted matrix generated privately by the shared SDL/LVGL renderer |
-| Static visual landmarks | `test/test_vibepulse_visual_landmarks.py`, as part of the full host gate | 16 tests PASS; complete 32-capture matrix, every image 480 × 480 |
-| Target build | ESP-IDF 5.5.2 `idf.py build` | PASS / exit 0; `/Users/niclasvestlund/Torget/build/torget.bin` is `0x1e9d00` bytes (2,006,272 bytes); the 4 MiB app partition has `0x216300` bytes (2,188,032 bytes), 52%, free |
+| Static visual landmarks | `test/test_vibepulse_visual_landmarks.py`, as part of the full host gate | 18 tests PASS; complete 36-capture matrix, every image 480 × 480 |
+| Target build | ESP-IDF 5.5.2 `idf.py build` | PASS / exit 0; `/Users/niclasvestlund/Torget/build/torget.bin` is `0x1d77f0` bytes; the 4 MiB app partition has `0x228810` bytes, 54%, free |
 
 The target build compiled `agent_completion_policy.c` and `agent_monitor.c`
 into `app_tokens` and linked `torget.elf` before producing `torget.bin`.
@@ -79,9 +81,12 @@ pixel-authoritative simulator.
 
 ## Exact private capture matrix
 
-The latest verified matrix is rooted at:
+The current corrected matrix is rooted at:
 
-`/var/folders/86/2jzw_gkj3c71ygn1hdvrsnx80000gn/T/vibepulse-preview.xMSkn4`
+`/var/folders/86/2jzw_gkj3c71ygn1hdvrsnx80000gn/T/vibepulse-preview.JxtjVs`
+
+The 32-image `vibepulse-preview.xMSkn4` listing below is retained as historical
+pre-correction evidence and is superseded by the 36-image matrix above.
 
 Exact 1:1 PNG paths:
 

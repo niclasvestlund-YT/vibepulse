@@ -509,7 +509,9 @@ static int run_vibepulse_static_qa(void) {
   quota_truth.codex_week.delta_pct = 8;
   quota_truth.codex_week.has_delta = 1;
   tokens_apply(&quota_truth);
-  apply_agent_file("agent-status-idle.json");
+  single = static_working_snapshot(TK_AGENT_PROVIDER_CODEX,
+                                   "GPT-5.6 SOL", "ULTRA");
+  tokens_apply_agent_status(&single);
   tokens_show_view(VIEW_CODEX_WEEKLY);
   dump_frame("vibepulse-codex-weekly-live-46");
 
