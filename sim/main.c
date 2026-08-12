@@ -8,7 +8,8 @@
  * Autocykeln demonstrerar tickande, midnatt och en äkta stale-övergång:
  * felfixturen håller 140 s så apparnas 120 s-tröskel faktiskt slår till,
  * precis som ett routeravbrott. Tangent 1-4 hoppar till en Solelkollen-
- * fixtur; T matar VibePulse igen; S cyklar agentstatus; L öppnar launchern (långtryck med
+ * fixtur; T matar VibePulse igen; S cyklar agentstatus; M cyklar Max
+ * Tracker-fixturerna; L öppnar launchern (långtryck med
  * musen fungerar också — det är enhetens gest).
  */
 #include <SDL.h>
@@ -29,6 +30,7 @@
 #include "agent_monitor_policy.h"
 #include "agent_status_parse.h"
 #include "glance_parse.h"
+#include "max_tracker_parse.h"
 #include "tokens_parse.h"
 #include "torget.h"
 #include "usage_screen.h"
@@ -59,6 +61,13 @@ static const char *const AGENT_FIXTURES[] = {
 };
 static int agent_fixture_idx;
 static int capture_failures;
+
+static const char *const MAX_TRACKER_FIXTURES[] = {
+  "max-tracker-full.json",
+  "max-tracker-coldstart.json",
+  "max-tracker-empty.json",
+};
+static int max_tracker_fixture_idx;
 
 /* ---------------------------------------------- plattforms-API:t (torget.h) */
 
@@ -284,6 +293,28 @@ static void apply_agent_fixture(int idx) {
   apply_agent_file(AGENT_FIXTURES[agent_fixture_idx]);
 }
 
+/* Max Tracker-fixturerna genom samma delade parser som targetet — samma
+ * mönster som apply_agent_file: ett avvisat svar lämnar tidigare värden. */
+static void feed_max_tracker_file(const char *file) {
+  size_t len = 0;
+  char *json = read_fixture(file, &len);
+  tk_max_tracker t;
+  if (json && tk_max_tracker_parse(json, len, &t)) {
+    tokens_apply_max_tracker(&t);
+    printf("max-tracker: %-24s (streak %d)\n", file, t.coding_streak_days);
+  } else {
+    printf("max-tracker: %s avvisad\n", file);
+  }
+  free(json);
+}
+
+static void apply_max_tracker_fixture(int idx) {
+  int count =
+      (int)(sizeof MAX_TRACKER_FIXTURES / sizeof MAX_TRACKER_FIXTURES[0]);
+  max_tracker_fixture_idx = (idx % count + count) % count;
+  feed_max_tracker_file(MAX_TRACKER_FIXTURES[max_tracker_fixture_idx]);
+}
+
 static tk_agent_snapshot static_working_snapshot(tk_agent_provider provider,
                                                  const char *model,
                                                  const char *effort) {
@@ -385,6 +416,16 @@ static void platform_tour_cb(lv_timer_t *t) {
     case 12: dump_frame("vibepulse-claude-missing"); break;
     case 13: feed_tokens(); break;
     case 14: dump_frame("vibepulse-claude-restored"); break;
+    case 15:
+      tokens_show_view(VIEW_TRACKER_CLAUDE);
+      feed_max_tracker_file("max-tracker-coldstart.json");
+      break;
+    case 16: dump_frame("vibepulse-tracker-claude"); break;
+    case 17:
+      tokens_show_view(VIEW_TRACKER_CODEX);
+      feed_max_tracker_file("max-tracker-full.json");
+      break;
+    case 18: dump_frame("vibepulse-tracker-codex"); break;
     default: torget_app_show(0); break;
   }
   lv_timer_set_period(t, 500);
@@ -392,20 +433,21 @@ static void platform_tour_cb(lv_timer_t *t) {
 
 /* Tangent 1-4: Solelkollen-fixtur. T: mata VibePulse. S: nästa agentläge.
  * L: launchern. [ och ] bläddrar VibePulse-sidor; N byter app (KEY3).
- * LVGL:s SDL-drivrutin
+ * M: nästa Max Tracker-fixtur. LVGL:s SDL-drivrutin
  * pumpar eventen, så ren tangentbordspollning räcker — ingen indev-
  * rördragning för ett bänkverktyg. */
 static void poll_keys(lv_timer_t *t) {
   (void)t;
-  static bool held[10];
+  static bool held[11];
   const Uint8 *ks = SDL_GetKeyboardState(NULL);
-  const SDL_Scancode keys[10] = { SDL_SCANCODE_1, SDL_SCANCODE_2,
+  const SDL_Scancode keys[11] = { SDL_SCANCODE_1, SDL_SCANCODE_2,
                                   SDL_SCANCODE_3, SDL_SCANCODE_4,
                                   SDL_SCANCODE_T, SDL_SCANCODE_S,
                                   SDL_SCANCODE_L, SDL_SCANCODE_N,
                                   SDL_SCANCODE_LEFTBRACKET,
-                                  SDL_SCANCODE_RIGHTBRACKET };
-  for (int i = 0; i < 10; i++) {
+                                  SDL_SCANCODE_RIGHTBRACKET,
+                                  SDL_SCANCODE_M };
+  for (int i = 0; i < 11; i++) {
     bool down = ks[keys[i]];
     if (down && !held[i]) {
       if (i < 4) apply_fixture(i);
@@ -416,13 +458,14 @@ static void poll_keys(lv_timer_t *t) {
       }
       else if (i == 6) torget_launcher_open();
       else if (i == 7) torget_app_next();
-      else {
+      else if (i == 8 || i == 9) {
         torget_app_show(1);
         int view = usage_screen_current_view() + (i == 8 ? -1 : 1);
         if (view < 0) view = TK_USAGE_SCREEN_VIEWS - 1;
         if (view >= TK_USAGE_SCREEN_VIEWS) view = 0;
         tokens_show_view(view);
       }
+      else apply_max_tracker_fixture(max_tracker_fixture_idx + 1);
     }
     held[i] = down;
   }
@@ -635,6 +678,15 @@ static int run_vibepulse_static_qa(void) {
   tokens_apply_agent_status(&attention);
   dump_frame("vibepulse-claude-swedish-project");
   tk_agent_monitor_dismiss_current();
+
+  feed_max_tracker_file("max-tracker-coldstart.json");
+  tokens_show_view(VIEW_TRACKER_CLAUDE);
+  dump_frame("vibepulse-tracker-claude");
+
+  feed_max_tracker_file("max-tracker-full.json");
+  tokens_show_view(VIEW_TRACKER_CODEX);
+  dump_frame("vibepulse-tracker-codex");
+
   return capture_failures == 0 ? 0 : 1;
 }
 
@@ -663,7 +715,7 @@ int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IOLBF, 0);
   lv_init();
   lv_display_t *disp = lv_sdl_window_create(480, 480);
-  lv_sdl_window_set_title(disp, "Torget 480x480 — S agentstatus, T VibePulse, [ och ] VibePulse-vy, N nästa app, L launcher");
+  lv_sdl_window_set_title(disp, "Torget 480x480 — S agentstatus, T VibePulse, M Max Tracker, [ och ] VibePulse-vy, N nästa app, L launcher");
   lv_sdl_mouse_create();
 
   torget_ui_create(); /* bygger apparna via registret, går in i app 0 */
@@ -704,7 +756,7 @@ int main(int argc, char **argv) {
    * launchern och VibePulse också — en obevakad körning bevisar hela
    * plattformen, inte bara första appen. */
   lv_timer_t *tour = lv_timer_create(platform_tour_cb, 6500, NULL);
-  lv_timer_set_repeat_count(tour, 23);
+  lv_timer_set_repeat_count(tour, 27);
 
   while (1) {
     uint32_t idle = lv_timer_handler();

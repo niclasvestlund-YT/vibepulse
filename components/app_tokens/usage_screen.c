@@ -6,18 +6,24 @@
 #include "agent_assets.h"
 #include "agent_monitor.h"
 #include "app_tokens.h"
+#include "max_tracker.h"
+#include "max_tracker_presenter.h"
 #include "torget.h"
 #include "usage_live_policy.h"
 #include "usage_presenter.h"
 #include "vibepulse_layout.generated.h"
 
 extern const lv_font_t plex_num_164;
+extern const lv_font_t plex_num_38;
 extern const lv_font_t plex_headline_48;
 extern const lv_font_t plex_stat_35;
 extern const lv_font_t plex_ui_21;
 extern const lv_font_t plex_ui_16;
 extern const lv_font_t plex_ui_14;
 extern const lv_font_t plex_ui_12;
+extern const lv_font_t plex_text_21;
+extern const lv_font_t plex_text_16;
+extern const lv_font_t plex_text_17;
 
 #define COL_BLACK     lv_color_hex(VP_COLOR_BACKGROUND)
 #define COL_HAIRLINE  lv_color_hex(VP_COLOR_HAIRLINE)
@@ -42,6 +48,31 @@ _Static_assert(VP_PERCENT_FONT_PX == 164,
 #define STAT_LABEL_Y 396
 #define RIGHT_STAT_X 240
 #define RIGHT_STAT_W 218
+
+/* Max Tracker geometry — approved 2026-08-12 mocks, matches the studio
+ * design tokens: content safe X 22/width 436, grid indented a further
+ * 9-10 px each side so the heatmap reads as its own object. */
+#define MT_EYEBROW_Y (VP_QUOTA_Y + 4)
+#define MT_GRID_X 31
+#define MT_GRID_Y 112
+#define MT_CELL 18
+#define MT_GAP 3
+#define MT_PITCH (MT_CELL + MT_GAP)
+#define MT_ROWS 7
+#define MT_GRID_W (TK_MT_WEEKS * MT_PITCH - MT_GAP)  /* 417 */
+#define MT_GRID_H (MT_ROWS * MT_PITCH - MT_GAP)      /* 144 */
+#define MT_GRID_RIGHT (MT_GRID_X + MT_GRID_W)         /* 448 */
+#define MT_LEGEND_SWATCH 12
+#define MT_LEGEND_GAP 3
+#define MT_LEGEND_BLOCK_W (5 * MT_LEGEND_SWATCH + 4 * MT_LEGEND_GAP) /* 72 */
+#define MT_LEGEND_LABEL_W 40
+#define MT_LEGEND_LABEL_GAP 8
+#define MT_LEGEND_Y (MT_GRID_Y + MT_GRID_H + 10)      /* 266 */
+#define MT_DRAW_H (MT_LEGEND_Y - MT_GRID_Y + MT_LEGEND_SWATCH) /* 166 */
+#define MT_STAT_LINE_Y (MT_LEGEND_Y + MT_LEGEND_SWATCH + 20)   /* 298 */
+#define MT_STAT_LABEL_Y (MT_STAT_LINE_Y + 16)
+#define MT_STAT_VALUE_Y (MT_STAT_LABEL_Y + 34)
+#define MT_STAT_COL_W (MT_GRID_W / 4)
 
 typedef struct {
   lv_obj_t *tile;
@@ -72,11 +103,32 @@ typedef struct {
   lv_obj_t *detail;
 } forecast_row;
 
+typedef struct {
+  lv_obj_t *tile;
+  lv_obj_t *halo;
+  lv_obj_t *context;
+  lv_obj_t *grid;
+  lv_obj_t *plan_badge;
+  lv_obj_t *stat_value[4];
+  lv_obj_t *stat_unit[4];
+  usage_provider provider;
+  bool codex;
+  bool has_data;
+  int coding_streak_days;
+  tk_mt_provider data;
+  char rendered_context[64];
+  bool context_initialized;
+  bool halo_visible;
+  bool halo_initialized;
+  bool quota_stale;
+} tracker_page;
+
 static struct {
   lv_obj_t *tileview;
   lv_obj_t *tiles[TK_USAGE_SCREEN_VIEWS];
   quota_page quotas[3];
   forecast_row forecast_rows[2];
+  tracker_page trackers[2];
   tk_agent_snapshot agent_snapshot;
   int64_t agent_applied_at_us;
   int64_t last_now_us;
@@ -101,6 +153,20 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font,
   lv_obj_set_pos(object, x, y);
   lv_obj_set_size(object, width, height);
   lv_label_set_long_mode(object, LV_LABEL_LONG_CLIP);
+  lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
+  return object;
+}
+
+/* Självstorlekande etikett — trackerns statvärde/enhet-par behöver sin
+ * riktiga renderade bredd (LV_SIZE_CONTENT) för att kunna placera enheten
+ * direkt efter talet, till skillnad från de fastbredda etiketterna ovan. */
+static lv_obj_t *label_auto(lv_obj_t *parent, const lv_font_t *font,
+                            lv_color_t color, int x, int y) {
+  lv_obj_t *object = lv_label_create(parent);
+  lv_obj_set_style_text_font(object, font, 0);
+  lv_obj_set_style_text_color(object, color, 0);
+  lv_obj_set_pos(object, x, y);
+  lv_obj_set_size(object, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
   return object;
 }
@@ -149,25 +215,38 @@ static void create_provider_identity(lv_obj_t *tile,
                     provider == USAGE_PROVIDER_CLAUDE ? "CLAUDE" : "CODEX");
 }
 
-static void create_quota_header(quota_page *page) {
-  page->halo = bare(page->tile);
-  lv_obj_set_pos(page->halo, 18, 14);
-  lv_obj_set_size(page->halo, 40, 40);
-  lv_obj_set_style_radius(page->halo, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_border_width(page->halo, 2, 0);
-  lv_obj_set_style_border_opa(page->halo, LV_OPA_COVER, 0);
+/* Delad huvudkonstruktion: providerikon + namn, halo (dold tills en aktiv
+ * chatt syns), höger-justerad livsstatus, hårlinje. Kvot- och
+ * trackersidorna bygger EXAKT samma widgetar härifrån — bara vilka fält de
+ * lagrar dem i skiljer sig. */
+static void create_live_header_widgets(lv_obj_t *tile, usage_provider provider,
+                                       lv_obj_t **halo_out,
+                                       lv_obj_t **context_out) {
+  lv_obj_t *halo = bare(tile);
+  lv_obj_set_pos(halo, 18, 14);
+  lv_obj_set_size(halo, 40, 40);
+  lv_obj_set_style_radius(halo, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(halo, 2, 0);
+  lv_obj_set_style_border_opa(halo, LV_OPA_COVER, 0);
   lv_obj_set_style_border_color(
-      page->halo,
-      page->provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX, 0);
-  lv_obj_add_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
-  page->halo_initialized = true;
+      halo, provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX, 0);
+  lv_obj_add_flag(halo, LV_OBJ_FLAG_HIDDEN);
 
-  create_provider_identity(page->tile, page->provider);
-  page->context = label(page->tile, &plex_ui_14, COL_META,
-                        180, VP_PROVIDER_Y + 5, 278, 20);
-  lv_obj_set_style_text_align(page->context, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_style_text_letter_space(page->context, 1, 0);
-  create_hairline(page->tile, HEADER_LINE_Y);
+  create_provider_identity(tile, provider);
+  lv_obj_t *context = label(tile, &plex_ui_14, COL_META,
+                            180, VP_PROVIDER_Y + 5, 278, 20);
+  lv_obj_set_style_text_align(context, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_style_text_letter_space(context, 1, 0);
+  create_hairline(tile, HEADER_LINE_Y);
+
+  *halo_out = halo;
+  *context_out = context;
+}
+
+static void create_quota_header(quota_page *page) {
+  create_live_header_widgets(page->tile, page->provider, &page->halo,
+                             &page->context);
+  page->halo_initialized = true;
 }
 
 static void create_analytics_header(lv_obj_t *tile, const char *title,
@@ -334,31 +413,53 @@ static const tk_agent_provider_status *agent_provider_for(
                                            : &ui.agent_snapshot.codex;
 }
 
-static void refresh_header(quota_page *page, int64_t now_us) {
+/* Delad uppdateringskärna: samma liveheader-logik (halo + statustext) för
+ * kvot- OCH trackersidorna, bara bokföringsfälten skiljer per sida. */
+static void refresh_live_header(lv_obj_t *halo, lv_obj_t *context,
+                                bool *halo_initialized, bool *halo_visible,
+                                bool *context_initialized,
+                                char *rendered_context,
+                                size_t rendered_context_cap,
+                                usage_provider provider, bool has_data,
+                                bool stale, int64_t now_us) {
   usage_live_header_view view = {0};
-  bool stale = ui.stale || page->quota_stale;
-  usage_live_build_header(agent_provider_for(page->provider),
+  usage_live_build_header(agent_provider_for(provider),
                           agent_packet_age_ms(now_us), stale,
-                          ui.has_agent_snapshot && page->has_data, &view);
-  const char *context = usage_presenter_quota_status_text(
-      page->has_data, stale, view.context);
+                          ui.has_agent_snapshot && has_data, &view);
+  const char *context_text =
+      usage_presenter_quota_status_text(has_data, stale, view.context);
 
-  if (!page->context_initialized ||
-      strcmp(page->rendered_context, context) != 0) {
-    lv_label_set_text(page->context, context);
-    snprintf(page->rendered_context, sizeof page->rendered_context, "%s",
-             context);
-    page->context_initialized = true;
+  if (!*context_initialized ||
+      strcmp(rendered_context, context_text) != 0) {
+    lv_label_set_text(context, context_text);
+    snprintf(rendered_context, rendered_context_cap, "%s", context_text);
+    *context_initialized = true;
   }
 
-  if (!page->halo_initialized || page->halo_visible != view.halo_active) {
+  if (!*halo_initialized || *halo_visible != view.halo_active) {
     if (view.halo_active)
-      lv_obj_remove_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(halo, LV_OBJ_FLAG_HIDDEN);
     else
-      lv_obj_add_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
-    page->halo_visible = view.halo_active;
-    page->halo_initialized = true;
+      lv_obj_add_flag(halo, LV_OBJ_FLAG_HIDDEN);
+    *halo_visible = view.halo_active;
+    *halo_initialized = true;
   }
+}
+
+static void refresh_header(quota_page *page, int64_t now_us) {
+  bool stale = ui.stale || page->quota_stale;
+  refresh_live_header(page->halo, page->context, &page->halo_initialized,
+                      &page->halo_visible, &page->context_initialized,
+                      page->rendered_context, sizeof page->rendered_context,
+                      page->provider, page->has_data, stale, now_us);
+}
+
+static void refresh_tracker_header(tracker_page *page, int64_t now_us) {
+  bool stale = ui.stale || page->quota_stale;
+  refresh_live_header(page->halo, page->context, &page->halo_initialized,
+                      &page->halo_visible, &page->context_initialized,
+                      page->rendered_context, sizeof page->rendered_context,
+                      page->provider, page->has_data, stale, now_us);
 }
 
 static bool apply_today_bar(quota_page *page,
@@ -427,6 +528,159 @@ static void apply_forecast_row(forecast_row *widgets,
   lv_label_set_text(widgets->detail, view->detail);
 }
 
+/* Ritkärna för Max Tracker: 140 rutor (20 veckor x 7 ISO-veckodagar, index
+ * = kolumn*7 + rad) plus 5 legend-swatchar i SAMMA lv_obj_t — statiskt,
+ * ingen pixelbuffert, inga per-cell-objekt (AMOLED-minnesinvarianten).
+ * "MAX"-etiketten är en vanlig lv_label, skapad en gång i
+ * create_tracker_page. */
+static void tracker_grid_draw(lv_event_t *e) {
+  const tracker_page *pg = lv_event_get_user_data(e);
+  lv_layer_t *layer = lv_event_get_layer(e);
+  lv_area_t o;
+  lv_obj_get_coords(lv_event_get_target(e), &o);
+
+  for (int i = 0; i < TK_MT_DAYS; i++) {
+    const tk_mt_day *d = &pg->data.days[i];
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.radius = 3;
+    dsc.bg_opa = LV_OPA_COVER;
+    if (d->pct >= 0) {
+      tk_mt_rgb c = tk_mt_cell_rgb(pg->codex, d->pct);
+      dsc.bg_color = lv_color_make(c.r, c.g, c.b);
+    } else if (d->lvl >= 0) {
+      tk_mt_rgb c = tk_mt_gray_rgb(d->lvl);
+      dsc.bg_color = lv_color_make(c.r, c.g, c.b);
+      dsc.border_width = 1;
+      dsc.border_opa = LV_OPA_COVER;
+      dsc.border_color = lv_color_hex(0x3d434d);
+    } else {
+      dsc.bg_color = lv_color_hex(pg->codex ? 0x0c0e13 : 0x0c0e11);
+    }
+    int wx = i / MT_ROWS, wy = i % MT_ROWS;
+    lv_area_t a = { o.x1 + wx * MT_PITCH, o.y1 + wy * MT_PITCH,
+                    o.x1 + wx * MT_PITCH + MT_CELL - 1,
+                    o.y1 + wy * MT_PITCH + MT_CELL - 1 };
+    lv_draw_rect(layer, &dsc, &a);
+  }
+
+  int legend_top = o.y1 + (MT_LEGEND_Y - MT_GRID_Y);
+  int legend_right = o.x1 + MT_GRID_W;
+  int block_x0 = legend_right - MT_LEGEND_LABEL_GAP - MT_LEGEND_LABEL_W -
+                 MT_LEGEND_BLOCK_W;
+  for (int i = 0; i < 5; i++) {
+    tk_mt_rgb c = tk_mt_cell_rgb(pg->codex, TK_MT_LEGEND_PCTS[i]);
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.radius = 3;
+    dsc.bg_opa = LV_OPA_COVER;
+    dsc.bg_color = lv_color_make(c.r, c.g, c.b);
+    int x1 = block_x0 + i * (MT_LEGEND_SWATCH + MT_LEGEND_GAP);
+    lv_area_t a = { x1, legend_top, x1 + MT_LEGEND_SWATCH - 1,
+                    legend_top + MT_LEGEND_SWATCH - 1 };
+    lv_draw_rect(layer, &dsc, &a);
+  }
+}
+
+static void create_tracker_page(tracker_page *page, int index, bool codex) {
+  memset(page, 0, sizeof *page);
+  page->provider = codex ? USAGE_PROVIDER_CODEX : USAGE_PROVIDER_CLAUDE;
+  page->codex = codex;
+  page->coding_streak_days = -1;
+  for (int i = 0; i < TK_MT_DAYS; i++) {
+    page->data.days[i].pct = -1;
+    page->data.days[i].lvl = -1;
+  }
+
+  page->tile = new_tile(index);
+  create_live_header_widgets(page->tile, page->provider, &page->halo,
+                             &page->context);
+  page->halo_initialized = true;
+
+  lv_obj_t *eyebrow = label(page->tile, &plex_text_21, COL_MUTED,
+                            VP_SAFE_X, MT_EYEBROW_Y, 240, 26);
+  lv_obj_set_style_text_letter_space(eyebrow, 2, 0);
+  lv_label_set_text(eyebrow, "MAX TRACKER");
+
+  /* plan_label kan innehålla siffror ("MAX 20X"); plex_text_16 saknar
+   * 0-9 (bara A-Z/mellanslag/ÅÄÖ). plex_ui_16 är SAMMA typsnitt/storlek
+   * (IBM Plex Sans SemiBold 16 px) med bredare glyftäckning. */
+  page->plan_badge = label(page->tile, &plex_ui_16, COL_MUTED,
+                           298, MT_EYEBROW_Y, 160, 20);
+  lv_obj_set_style_text_align(page->plan_badge, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_label_set_text(page->plan_badge, "");
+
+  page->grid = bare(page->tile);
+  lv_obj_set_pos(page->grid, MT_GRID_X, MT_GRID_Y);
+  lv_obj_set_size(page->grid, MT_GRID_W, MT_DRAW_H);
+  lv_obj_add_event_cb(page->grid, tracker_grid_draw, LV_EVENT_DRAW_MAIN,
+                      page);
+
+  lv_obj_t *max_label = label(page->tile, &plex_text_16, COL_MUTED,
+                              MT_GRID_RIGHT - MT_LEGEND_LABEL_W,
+                              MT_LEGEND_Y - 2, MT_LEGEND_LABEL_W, 16);
+  lv_obj_set_style_text_align(max_label, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_label_set_text(max_label, "MAX");
+
+  create_hairline(page->tile, MT_STAT_LINE_Y);
+
+  static const char *const captions[4] = {
+    "STREAK", "MAX WEEKS", "AVG PEAK", "MAX DAYS",
+  };
+  for (int i = 0; i < 4; i++) {
+    int x = MT_GRID_X + (i * MT_GRID_W) / 4;
+    /* -8 px gutter (samma marginal som RIGHT_STAT_X/RIGHT_STAT_W lämnar
+     * mellan kvotsidornas kolumner) så "MAX WEEKS" aldrig rör vid
+     * "AVG PEAK" — fyra jämnbreda kolumner, inte fyra sammanhängande. */
+    lv_obj_t *caption = label(page->tile, &plex_text_16, COL_MUTED,
+                              x, MT_STAT_LABEL_Y, MT_STAT_COL_W - 6, 16);
+    lv_label_set_text(caption, captions[i]);
+
+    page->stat_value[i] = label_auto(page->tile, &plex_num_38, COL_WHITE,
+                                     x, MT_STAT_VALUE_Y);
+    lv_label_set_text(page->stat_value[i], "–");
+    page->stat_unit[i] = label_auto(page->tile, &plex_text_17, COL_MUTED,
+                                    x, MT_STAT_VALUE_Y + 14);
+    lv_label_set_text(page->stat_unit[i], "");
+    lv_obj_add_flag(page->stat_unit[i], LV_OBJ_FLAG_HIDDEN);
+  }
+
+  create_pager(page->tile, index);
+}
+
+static void position_stat_unit(lv_obj_t *value_obj, lv_obj_t *unit_obj) {
+  if (lv_label_get_text(unit_obj)[0] == '\0') {
+    lv_obj_add_flag(unit_obj, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_update_layout(value_obj);
+  lv_obj_set_x(unit_obj, lv_obj_get_x(value_obj) +
+                             lv_obj_get_width(value_obj) + 6);
+  lv_obj_remove_flag(unit_obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void apply_tracker_page(tracker_page *page, const tk_max_tracker *t) {
+  const tk_mt_provider *src = page->codex ? &t->codex : &t->claude;
+  page->data = *src;
+  page->coding_streak_days = t->coding_streak_days;
+  page->has_data = true;
+  page->quota_stale = t->stale;
+
+  lv_label_set_text(page->plan_badge,
+                    src->has_plan ? src->plan_label : "");
+
+  tk_mt_tile tiles[4];
+  tk_mt_tiles(t, page->codex, tiles);
+  for (int i = 0; i < 4; i++) {
+    lv_label_set_text(page->stat_value[i], tiles[i].value);
+    lv_label_set_text(page->stat_unit[i], tiles[i].unit);
+    position_stat_unit(page->stat_value[i], page->stat_unit[i]);
+  }
+
+  refresh_tracker_header(page, ui.last_now_us);
+  lv_obj_invalidate(page->grid);
+}
+
 void usage_screen_create(lv_obj_t *root) {
   memset(&ui, 0, sizeof ui);
   ui.tileview = lv_tileview_create(root);
@@ -442,6 +696,8 @@ void usage_screen_create(lv_obj_t *root) {
   create_quota_page(&ui.quotas[2], VIEW_CODEX_WEEKLY,
                     USAGE_QUOTA_CODEX_WEEK, USAGE_PROVIDER_CODEX);
   create_burn_rate_page();
+  create_tracker_page(&ui.trackers[0], VIEW_TRACKER_CLAUDE, false);
+  create_tracker_page(&ui.trackers[1], VIEW_TRACKER_CODEX, true);
   tk_agent_monitor_create(root);
 }
 
@@ -454,6 +710,11 @@ void usage_screen_apply_tokens(const tk_tokens *tokens) {
     apply_forecast_row(&ui.forecast_rows[i], &forecasts.rows[i]);
 }
 
+void usage_screen_apply_max_tracker(const tk_max_tracker *t) {
+  if (!t) return;
+  for (int i = 0; i < 2; i++) apply_tracker_page(&ui.trackers[i], t);
+}
+
 void usage_screen_apply_agent(const tk_agent_snapshot *snapshot,
                               int64_t now_us) {
   if (!snapshot) return;
@@ -462,12 +723,14 @@ void usage_screen_apply_agent(const tk_agent_snapshot *snapshot,
   ui.last_now_us = now_us;
   ui.has_agent_snapshot = true;
   for (int i = 0; i < 3; i++) refresh_header(&ui.quotas[i], now_us);
+  for (int i = 0; i < 2; i++) refresh_tracker_header(&ui.trackers[i], now_us);
   tk_agent_monitor_apply(snapshot, now_us);
 }
 
 void usage_screen_tick(int64_t now_us) {
   ui.last_now_us = now_us;
   for (int i = 0; i < 3; i++) refresh_header(&ui.quotas[i], now_us);
+  for (int i = 0; i < 2; i++) refresh_tracker_header(&ui.trackers[i], now_us);
   tk_agent_monitor_tick(now_us);
 }
 
@@ -475,6 +738,8 @@ void usage_screen_set_stale(bool stale) {
   ui.stale = stale;
   for (int i = 0; i < 3; i++)
     refresh_header(&ui.quotas[i], ui.last_now_us);
+  for (int i = 0; i < 2; i++)
+    refresh_tracker_header(&ui.trackers[i], ui.last_now_us);
 }
 
 void usage_screen_show_view(int index) {

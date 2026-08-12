@@ -13,12 +13,14 @@ attention_fonts = (
     (root / "platform/fonts/plex_attention_52.c", "plex_attention_52"),
 )
 
-assert "#define TK_USAGE_SCREEN_VIEWS 4" in header
+assert "#define TK_USAGE_SCREEN_VIEWS 6" in header
 for enum_literal in (
     "VIEW_CLAUDE_FABLE = 0",
     "VIEW_CLAUDE_ALL = 1",
     "VIEW_CODEX_WEEKLY = 2",
     "VIEW_BURN_RATE = 3",
+    "VIEW_TRACKER_CLAUDE = 4",
+    "VIEW_TRACKER_CODEX = 5",
 ):
     assert enum_literal in app_header
 assert "VIEW_VOLUME" not in app_header
@@ -67,6 +69,7 @@ create = source[source.index("void usage_screen_create"):]
 create = create[:create.index("void usage_screen_apply_tokens")]
 assert create.count("create_quota_page(") == 3
 assert create.count("create_burn_rate_page(") == 1
+assert create.count("create_tracker_page(") == 2
 assert "tk_agent_monitor_create(root);" in create
 
 quota = source[source.index("static void create_quota_page"):]
@@ -102,21 +105,38 @@ assert "(uint64_t)now_us - (uint64_t)ui.agent_applied_at_us" in source
 assert "lv_obj_set_size(page->track, VP_CONTENT_W, VP_BAR_H);" in quota
 assert "lv_obj_set_size(page->marker, 3, VP_BAR_H + 8);" in quota
 
+refresh_live_header = source[source.index("static void refresh_live_header"):]
+refresh_live_header = refresh_live_header[
+    :refresh_live_header.index("static void refresh_header")
+]
+assert "ui.has_agent_snapshot && has_data" in refresh_live_header
+assert "usage_presenter_quota_status_text" in refresh_live_header
+for renderer_local_status in ('"NO DATA"', '"STALE"', '"LIVE"'):
+    assert renderer_local_status not in refresh_live_header
+assert "strcmp(rendered_context, context_text) != 0" in refresh_live_header
+assert "lv_label_set_text(context, context_text);" in refresh_live_header
+assert "*halo_visible != view.halo_active" in refresh_live_header
+assert "page->has_data && !ui.stale && view.halo_active" not in refresh_live_header
+assert refresh_live_header.count("lv_label_set_text") == 1
+assert "usage_live_build_header" in refresh_live_header
+
+# Kvot- OCH trackersidorna delar EXAKT samma liveheader-kärna — bara
+# stalebokföringen skiljer, ingen egen kopia av byggmotorn.
 refresh_header = source[source.index("static void refresh_header"):]
 refresh_header = refresh_header[
-    :refresh_header.index("static bool apply_today_bar")
+    :refresh_header.index("static void refresh_tracker_header")
 ]
-assert "ui.has_agent_snapshot && page->has_data" in refresh_header
 assert "ui.stale || page->quota_stale" in refresh_header
-assert "usage_presenter_quota_status_text" in refresh_header
-for renderer_local_status in ('"NO DATA"', '"STALE"', '"LIVE"'):
-    assert renderer_local_status not in refresh_header
-assert "strcmp(page->rendered_context, context) != 0" in refresh_header
-assert "lv_label_set_text(page->context, context);" in refresh_header
-assert "page->halo_visible != view.halo_active" in refresh_header
-assert "page->has_data && !ui.stale && view.halo_active" not in refresh_header
-assert refresh_header.count("lv_label_set_text") == 1
-assert "usage_live_build_header" in refresh_header
+assert "refresh_live_header(" in refresh_header
+
+refresh_tracker_header = source[
+    source.index("static void refresh_tracker_header"):
+]
+refresh_tracker_header = refresh_tracker_header[
+    :refresh_tracker_header.index("static bool apply_today_bar")
+]
+assert "ui.stale || page->quota_stale" in refresh_tracker_header
+assert "refresh_live_header(" in refresh_tracker_header
 
 apply_today = source[source.index("static bool apply_today_bar"):]
 apply_today = apply_today[:apply_today.index("static void apply_quota")]
@@ -252,4 +272,4 @@ for anchor in (31, 246, 321, 365, 430):
 assert "int usage_screen_current_view(void);" in header
 assert "usage_screen_current_view()" in sim
 
-print("OK: VibePulse four-page full-screen layout wiring")
+print("OK: VibePulse six-page full-screen layout wiring")

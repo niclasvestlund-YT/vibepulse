@@ -5,6 +5,7 @@
 
 #include "tokens.h"
 #include "agent_status.h"
+#include "max_tracker.h"
 
 /*
  * VibePulse: Claude/Codex-usage och agentstatus på hyllan.
@@ -20,6 +21,8 @@ enum {
   VIEW_CLAUDE_ALL = 1,
   VIEW_CODEX_WEEKLY = 2,
   VIEW_BURN_RATE = 3,
+  VIEW_TRACKER_CLAUDE = 4,
+  VIEW_TRACKER_CODEX = 5,
 };
 
 /* Ett lyckat /api/tokens-svar. Snappar tickern, stämplar färskhet och
@@ -28,6 +31,9 @@ void tokens_apply(const tk_tokens *t);
 
 /* Ett lyckat /api/agent-status-svar, redan parsat och under UI-låset. */
 void tokens_apply_agent_status(const tk_agent_snapshot *snapshot);
+
+/* Ett lyckat /api/max-tracker-svar, redan parsat och under UI-låset. */
+void tokens_apply_max_tracker(const tk_max_tracker *t);
 
 /* Targetets 1 Hz-hämtning. Utan TK_AGENT_STATUS_URL loggas avstängt läge
  * och ingen task eller HTTP-klient skapas. */

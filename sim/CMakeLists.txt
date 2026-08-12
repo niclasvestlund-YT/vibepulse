@@ -57,6 +57,8 @@ add_executable(torget-sim
   ../components/app_tokens/agent_net_policy.c
   ../components/app_tokens/agent_monitor.c
   ../components/app_tokens/agent_assets.c
+  ../components/app_tokens/max_tracker_parse.c
+  ../components/app_tokens/max_tracker_presenter.c
   ../components/torget_fmt/fmt_sv.c
   ../components/torget_ticker/ticker.c
   ../third_party/cjson/cJSON.c

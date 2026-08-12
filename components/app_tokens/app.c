@@ -39,6 +39,11 @@ void tokens_apply_agent_status(const tk_agent_snapshot *snapshot) {
   usage_screen_apply_agent(snapshot, torget_now_us());
 }
 
+void tokens_apply_max_tracker(const tk_max_tracker *t) {
+  if (!t) return;
+  usage_screen_apply_max_tracker(t);
+}
+
 void tokens_show_view(int index) {
   usage_screen_show_view(index);
 }

@@ -7,6 +7,7 @@ idf_component_register(
        "agent_monitor_policy.c" "usage_live_policy.c" "agent_completion_policy.c"
        "agent_monitor.c" "agent_assets.c"
        "agent_net_policy.c" "net.c" "agent_net.c"
+       "max_tracker_parse.c" "max_tracker_presenter.c"
   INCLUDE_DIRS "."
   REQUIRES torget_app torget_fmt cjson
   # secrets.h bor i repytroten (gitignorad), därav "../..".
