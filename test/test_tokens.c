@@ -68,6 +68,16 @@ static void check_rejected_untouched(const char *what, const char *json,
   check(preserved, memcmp(&before, out, sizeof before) == 0);
 }
 
+static void check_rejected_bytes_untouched(const char *what, const char *json,
+                                           size_t length, tk_tokens *out) {
+  tk_tokens before;
+  char preserved[160];
+  memcpy(&before, out, sizeof before);
+  check(what, !tk_tokens_parse(json, length, out));
+  snprintf(preserved, sizeof preserved, "%s preserves output", what);
+  check(preserved, memcmp(&before, out, sizeof before) == 0);
+}
+
 int main(void) {
   size_t len;
   char *json;
@@ -169,6 +179,43 @@ int main(void) {
         t.codex_forecast.has_offset_min &&
         t.codex_forecast.offset_min == -540);
 
+  check("största representerbara säkra int64-epoch accepteras",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"codexForecastState\":\"exhausts\","
+              "\"codexForecastAt\":9223372036854774784,"
+              "\"codexForecastOffsetMin\":2147483647}", &t) &&
+              t.codex_forecast.state == TK_FORECAST_EXHAUSTS &&
+              t.codex_forecast.has_at_epoch &&
+              t.codex_forecast.at_epoch == 9223372036854774784LL &&
+              t.codex_forecast.has_offset_min &&
+              t.codex_forecast.offset_min == 2147483647);
+  check("int64-epoch vid 2^63 gör prognosen otillgänglig",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"codexForecastState\":\"exhausts\","
+              "\"codexForecastAt\":9223372036854775808,"
+              "\"codexForecastOffsetMin\":0}", &t) &&
+              t.day_tokens == 1 &&
+              t.codex_forecast.state == TK_FORECAST_UNAVAILABLE &&
+              !t.codex_forecast.has_at_epoch);
+  check("offset vid INT_MIN accepteras",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"codexForecastState\":\"exhausts\","
+              "\"codexForecastAt\":1,"
+              "\"codexForecastOffsetMin\":-2147483648}", &t) &&
+              t.codex_forecast.state == TK_FORECAST_EXHAUSTS &&
+              t.codex_forecast.offset_min == (-2147483647 - 1));
+  check("offset vid INT_MAX plus ett gör prognosen otillgänglig",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"codexForecastState\":\"exhausts\","
+              "\"codexForecastAt\":1,"
+              "\"codexForecastOffsetMin\":2147483648}", &t) &&
+              t.codex_forecast.state == TK_FORECAST_UNAVAILABLE &&
+              !t.codex_forecast.has_offset_min);
+
   check("null valfria fält accepteras",
         PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
               "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS ","
@@ -223,6 +270,26 @@ int main(void) {
               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
               "\"claudeForecastState\":\"collecting\\\\u0000BAD\"}", &t) &&
               t.claude_forecast.state == TK_FORECAST_UNAVAILABLE);
+  check_rejected_untouched(
+      "NUL-escape i top-level-nyckel avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":null,\"claudeSessionResetMin\":null,"
+      "\"claudeWeekPct\":null,\"claudeWeekResetMin\":null,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":35,\"codexWeekResetMin\":60,"
+      "\"codexWeekStale\\u0000ignored\":true}", &t);
+  check_rejected_untouched(
+      "NUL-escape i nästlad medlemsnyckel avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+      "\"unknown\":{\"nested\\u0000ignored\":1}}", &t);
+  check("literal backslash-u0000 i okänd nyckel tillåts",
+        PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+              "\"codexWeekStale\\\\u0000ignored\":true}", &t) &&
+              t.day_tokens == 1 && !t.codex_week.stale);
   check("Unicode-kontrolltecken i valfri etikett ignoreras",
         PARSE("{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
               "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
@@ -243,12 +310,43 @@ int main(void) {
 
   /* Fientliga indata: allt som inte är hela kontraktet avvisas utan att
    * röra utdata. */
+  static const char raw_nul_payload[] =
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS ","
+      "\"claudeModelWeekLabel\":\"GOOD\0BAD\"}";
+  check_rejected_bytes_untouched(
+      "rå NUL-byte inom explicit längd avvisas", raw_nul_payload,
+      sizeof raw_nul_payload - 1, &t);
   check_rejected_untouched("error-formen avvisas",
                            "{\"error\":\"scan failed\"}", &t);
   check_rejected_untouched(
       "gammal version avvisas",
       "{\"v\":1,\"dayTokens\":1,\"dayTokensPerHour\":0,"
       "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "dubblerad obligatorisk kontraktsnyckel avvisas",
+      "{\"v\":2,\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}", &t);
+  check_rejected_untouched(
+      "dubblerad stale false sedan true avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":null,\"claudeSessionResetMin\":null,"
+      "\"claudeWeekPct\":47,\"claudeWeekResetMin\":60,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null,"
+      "\"claudeWeekStale\":false,\"claudeWeekStale\":true}", &t);
+  check_rejected_untouched(
+      "dubblerad stale true sedan false avvisas",
+      "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+      "\"daySessions\":1,\"monthTokens\":1,"
+      "\"claudeSessionPct\":null,\"claudeSessionResetMin\":null,"
+      "\"claudeWeekPct\":47,\"claudeWeekResetMin\":60,"
+      "\"claudeModelWeekPct\":null,\"claudeModelWeekResetMin\":null,"
+      "\"codexSessionPct\":null,\"codexSessionResetMin\":null,"
+      "\"codexWeekPct\":null,\"codexWeekResetMin\":null,"
+      "\"claudeWeekStale\":true,\"claudeWeekStale\":false}", &t);
   check_rejected_untouched(
       "fraktionell version avvisas",
       "{\"v\":2.9,\"dayTokens\":1,\"dayTokensPerHour\":0,"

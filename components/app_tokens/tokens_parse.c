@@ -135,12 +135,8 @@ static bool valid_utf8_label(const unsigned char *source, size_t capacity,
   return true;
 }
 
-/* cJSON representerar ett avkodat \u0000 som C-strängens terminator. Läs
- * därför rå-JSON innan en avkortad prefixetikett betros. Tokenpayloadens enda
- * betrodda fria text är modellnamnet; en äkta NUL-escape någonstans i den
- * redan giltiga, innehållsfria payloaden gör bara den etiketten otillgänglig.
- * Par av escape-backslash hoppas över, så texten "\\\\u0000" är fortsatt
- * utskrivbar text och inte ett avkodat NUL-tecken. */
+/* cJSON representerar ett avkodat \u0000 som C-strängens terminator. Par av
+ * escape-backslash hoppas över, så texten "\\\\u0000" är fortsatt text. */
 static bool raw_string_has_nul_escape(const char *json, size_t start,
                                       size_t end) {
   for (size_t offset = start; offset < end; offset++) {
@@ -150,6 +146,83 @@ static bool raw_string_has_nul_escape(const char *json, size_t start,
       return true;
     }
     offset++;
+  }
+  return false;
+}
+
+typedef struct {
+  bool nul_key;
+  bool nul_string_value;
+} raw_json_string_scan;
+
+/* Körs först efter att cJSON godkänt grammatiken. Ett strängtoken vars nästa
+ * icke-blanktecken är kolon är då entydigt en medlemsnyckel. */
+static bool scan_raw_json_strings(const char *json, size_t length,
+                                  raw_json_string_scan *out) {
+  memset(out, 0, sizeof *out);
+  for (size_t offset = 0; offset < length; offset++) {
+    if (json[offset] != '"') continue;
+    size_t start = offset + 1;
+    size_t end = start;
+    while (end < length && json[end] != '"') {
+      if (json[end] == '\\') {
+        if (end + 1 >= length) return false;
+        end += 2;
+      } else {
+        end++;
+      }
+    }
+    if (end >= length) return false;
+
+    if (raw_string_has_nul_escape(json, start, end)) {
+      size_t next = end + 1;
+      while (next < length &&
+             (json[next] == ' ' || json[next] == '\t' ||
+              json[next] == '\r' || json[next] == '\n')) {
+        next++;
+      }
+      if (next < length && json[next] == ':')
+        out->nul_key = true;
+      else
+        out->nul_string_value = true;
+    }
+    offset = end;
+  }
+  return true;
+}
+
+static bool known_top_level_key(const char *key) {
+  static const char *const keys[] = {
+      "error", "v", "dayTokens", "dayTokensPerHour", "daySessions",
+      "monthTokens", "claudeSessionPct", "claudeSessionResetMin",
+      "claudeWeekPct", "claudeWeekResetMin", "claudeModelWeekPct",
+      "claudeModelWeekResetMin", "codexSessionPct", "codexSessionResetMin",
+      "codexWeekPct", "codexWeekResetMin", "claudeWeekStale",
+      "claudeModelWeekStale", "codexWeekStale", "claudeModelWeekLabel",
+      "claudeModelWeekTodayDeltaPct", "claudeWeekTodayDeltaPct",
+      "claudeSessionHourDeltaPct", "codexWeekTodayDeltaPct",
+      "claudeForecastState", "claudeForecastPctAtReset",
+      "claudeForecastPaceFactor", "claudeForecastAt",
+      "claudeForecastOffsetMin", "codexForecastState",
+      "codexForecastPctAtReset", "codexForecastPaceFactor",
+      "codexForecastAt", "codexForecastOffsetMin",
+  };
+  for (size_t index = 0; index < sizeof keys / sizeof keys[0]; index++) {
+    if (strcmp(key, keys[index]) == 0) return true;
+  }
+  return false;
+}
+
+static bool has_duplicate_known_top_level_key(const cJSON *root) {
+  if (!cJSON_IsObject(root)) return false;
+  for (const cJSON *item = root->child; item; item = item->next) {
+    if (!item->string || !known_top_level_key(item->string)) continue;
+    for (const cJSON *prior = root->child; prior != item;
+         prior = prior->next) {
+      if (prior->string && strcmp(prior->string, item->string) == 0) {
+        return true;
+      }
+    }
   }
   return false;
 }
@@ -168,11 +241,12 @@ static void optional_label(const cJSON *root, bool trust_strings,
 }
 
 static bool optional_integer(const cJSON *root, const char *key,
-                             double minimum, double maximum,
+                             double minimum, double maximum_exclusive,
                              int64_t *out) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
   if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
-      item->valuedouble < minimum || item->valuedouble > maximum ||
+      item->valuedouble < minimum ||
+      item->valuedouble >= maximum_exclusive ||
       trunc(item->valuedouble) != item->valuedouble) {
     return false;
   }
@@ -218,8 +292,9 @@ static void optional_forecast(const cJSON *root, const char *prefix,
   if (strcmp(state->valuestring, "exhausts") == 0) {
     int64_t at = 0;
     int64_t offset = 0;
-    if (!optional_integer(root, at_key, 0, (double)INT64_MAX, &at) ||
-        !optional_integer(root, offset_key, INT_MIN, INT_MAX, &offset)) {
+    if (!optional_integer(root, at_key, 0.0, 0x1p63, &at) ||
+        !optional_integer(root, offset_key, (double)INT_MIN,
+                          (double)INT_MAX + 1.0, &offset)) {
       return;
     }
     out->state = TK_FORECAST_EXHAUSTS;
@@ -232,13 +307,19 @@ static void optional_forecast(const cJSON *root, const char *prefix,
 
 bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
   if (!json || !out) return false;
+  if (memchr(json, '\0', len)) return false;
   cJSON *root = cJSON_ParseWithLength(json, len);
   if (!root) return false;
 
   bool ok = false;
   tk_tokens t = {0};
   double v = 0, day = 0, per_hour = 0, sessions = 0, month = 0;
-  bool trust_optional_strings = !raw_string_has_nul_escape(json, 0, len);
+  raw_json_string_scan strings = {0};
+  if (!scan_raw_json_strings(json, len, &strings) || strings.nul_key ||
+      has_duplicate_known_top_level_key(root)) {
+    goto done;
+  }
+  bool trust_optional_strings = !strings.nul_string_value;
 
   /* Tjänstens felform ({"error": "..."}) parsar fint som JSON — avvisa den
    * per kontrakt, inte av misstag. */
