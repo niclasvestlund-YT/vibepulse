@@ -104,4 +104,8 @@ cd ..
 "$PYTHON_BIN" test/test_vibepulse_visual_landmarks.py
 "$PYTHON_BIN" test/test_shared_amoled_skill.py
 "$PYTHON_BIN" -m unittest tools.test_hardware_registry -v
-"$PYTHON_BIN" -m unittest tools.tokenserver.test_quota_cache -v
+"$PYTHON_BIN" -m unittest \
+  tools.tokenserver.test_tokenserver \
+  tools.tokenserver.test_agent_status \
+  tools.tokenserver.test_usage_history \
+  tools.tokenserver.test_quota_cache -v

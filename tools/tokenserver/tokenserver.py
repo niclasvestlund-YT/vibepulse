@@ -32,7 +32,9 @@ Autostart: se README.md härintill (launchd-plist medföljer).
 """
 
 import argparse
+import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -45,9 +47,11 @@ from pathlib import Path
 
 if __package__:
     from .agent_status import AgentStatusService
+    from .quota_cache import CachedQuota, QuotaCache
     from .usage_history import Forecast, UsageHistory
 else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from agent_status import AgentStatusService
+    from quota_cache import CachedQuota, QuotaCache
     from usage_history import Forecast, UsageHistory
 
 RECOMPUTE_EVERY_S = 30
@@ -62,6 +66,8 @@ _last_computed = 0.0
 _snapshot_refreshing = False
 _history_lock = threading.Lock()
 _default_usage_history = None
+_quota_cache_lock = threading.Lock()
+_default_quota_cache = None
 
 
 def _get_usage_history(path=None):
@@ -74,6 +80,25 @@ def _get_usage_history(path=None):
                 Path.home() / "Library" / "Application Support" /
                 "VibePulse" / "usage-history.json")
         return _default_usage_history
+
+
+def _get_quota_cache(path=None):
+    global _default_quota_cache
+    if path is not None:
+        return QuotaCache(Path(path))
+    with _quota_cache_lock:
+        if _default_quota_cache is None:
+            _default_quota_cache = QuotaCache(
+                Path.home() / "Library" / "Application Support" /
+                "VibePulse" / "quota-cache.json")
+        return _default_quota_cache
+
+
+def _quota_identity(provider, scope, raw_identity=None):
+    """Return a local opaque identity without retaining its raw input."""
+    stable = "default-v1" if raw_identity is None else str(raw_identity)
+    material = f"{provider}\0{scope}\0{stable}".encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
 
 
 def _parse_file(path: Path, month_start: datetime, start_offset=0):
@@ -227,6 +252,7 @@ _headers_logged = False
 # (nyckelring → HTTP → headrar → mappning) plus de råa headernamnen.
 _probe_status = "not_run"
 _probe_headers = []
+_probe_unknown_buckets = []
 
 
 _CLAUDE_DESKTOP_PROCESS = re.compile(
@@ -315,9 +341,27 @@ def _parse_reset_minutes(value: str, now_ts: float):
         return None
 
 
+def _parse_reset_at(value: str, now_ts: float):
+    """Normalize an epoch, seconds-remaining, or ISO reset to epoch seconds."""
+    try:
+        number = float(value)
+        if not math.isfinite(number) or number < 0:
+            return None
+        absolute = number if number > 1e9 else now_ts + number
+        return int(absolute)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return int(parsed.timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _parse_limit_headers(headers, now_ts):
     """Map Claude's named limit windows without guessing model identity."""
     found = {}
+    unknown = set()
     model_labels = {
         "fable": "FABLE · WEEK",
         "opus": "OPUS · WEEK",
@@ -332,15 +376,18 @@ def _parse_limit_headers(headers, now_ts):
         raw = match.group(1).lower()
         named_model = next(
             (model for model in model_labels if model in raw), None)
-        if "5h" in raw:
+        if raw == "5h":
             window = "session"
         elif named_model is not None or "model" in raw:
             window = "model"
             if named_model is not None:
                 found["modelLabel"] = model_labels[named_model]
-        elif "7d" in raw or "week" in raw:
+        elif raw in {"7d", "week"}:
             window = "week"
         else:
+            sanitized = re.sub(r"[^a-z0-9_-]", "", raw)[:64]
+            if sanitized:
+                unknown.add(sanitized)
             continue
         kind = match.group(2).lower()
         if kind == "utilization":
@@ -351,16 +398,28 @@ def _parse_limit_headers(headers, now_ts):
             except (TypeError, ValueError):
                 pass
         else:
-            mins = _parse_reset_minutes(str(value), now_ts)
-            if mins is not None:
-                found[f"{window}ResetMin"] = mins
+            reset_at = _parse_reset_at(value, now_ts)
+            if reset_at is not None:
+                found[f"{window}ResetAt"] = reset_at
+                found[f"{window}ResetMin"] = max(
+                    0, int(round((reset_at - now_ts) / 60)))
+    if unknown:
+        found["unknownBuckets"] = sorted(unknown)
+    observed_at = int(now_ts)
+    for window, scope in (("week", "general_weekly"),
+                          ("model", "model_weekly")):
+        if (f"{window}Pct" in found and
+                f"{window}ResetAt" in found):
+            found[f"{window}ObservedAt"] = observed_at
+            found[f"{window}Identity"] = _quota_identity(
+                "claude", scope)
     return found
 
 
 def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
-    global _probe_status, _probe_headers
+    global _probe_status, _probe_headers, _probe_unknown_buckets
     token, expires_at = _read_oauth_token()
     if not token:
         _probe_status = "no_claude_oauth_token"
@@ -391,14 +450,7 @@ def _probe_limits():
         with urllib.request.urlopen(req, timeout=15) as resp:
             headers = dict(resp.headers)
     except urllib.error.HTTPError as e:
-        # Felsvar: ta med felkroppens början i diagnosen — 401-orsaken
-        # (utgången token? fel scope?) står där. Headrarna följer ofta
-        # med ändå.
-        try:
-            detail = e.read(200).decode(errors="replace")
-        except Exception:
-            detail = ""
-        _probe_status = f"http_{e.code} {detail}".strip()
+        _probe_status = f"http_{e.code}"
         headers = dict(e.headers) if e.headers else {}
     except Exception as e:
         _probe_status = f"request_failed: {type(e).__name__}"
@@ -412,9 +464,9 @@ def _probe_limits():
     global _headers_logged
     if not _headers_logged:
         _headers_logged = True
-        for name, value in sorted(headers.items()):
+        for name in sorted(headers):
             if "ratelimit" in name.lower():
-                print(f"ratelimit-header: {name}: {value}")
+                print(f"ratelimit-header: {name}")
     # Tre fönster, samma som Claudes egen usage-panel: 5-timmars, veckan
     # (alla modeller) och veckan för tyngsta modellen (Fable/Opus). Fönster-
     # namnet i headern varierar ("5h", "7d", "7d_opus", ...) — mappa på
@@ -422,7 +474,8 @@ def _probe_limits():
     found = _parse_limit_headers(headers, now_ts)
 
     _probe_headers = sorted(
-        f"{n}: {v}" for n, v in headers.items() if "ratelimit" in n.lower())
+        n for n in headers if "ratelimit" in n.lower())
+    _probe_unknown_buckets = found.pop("unknownBuckets", [])
     if "sessionPct" not in found:
         _probe_status += " + no_mapped_headers"
         return None
@@ -437,8 +490,7 @@ def _refresh_limits():
     except Exception:
         refreshed = None
     with _limits_lock:
-        if refreshed is not None:
-            _last_limits = refreshed
+        _last_limits = refreshed
         _last_probed = time.monotonic()
         _limits_refreshing = False
 
@@ -475,22 +527,25 @@ _last_codex_read = 0.0
 _codex_refreshing = False
 
 
-def _find_rate_limits(obj):
-    """Djupsök efter "rate_limits"-objektet i en rolloutrad (formatet har
-    flyttat mellan Codex-versioner — nyckeln är stabil, vägen dit inte)."""
-    if isinstance(obj, dict):
-        if "rate_limits" in obj and isinstance(obj["rate_limits"], dict):
-            return obj["rate_limits"]
-        for v in obj.values():
-            hit = _find_rate_limits(v)
-            if hit:
-                return hit
-    elif isinstance(obj, list):
-        for v in obj:
-            hit = _find_rate_limits(v)
-            if hit:
-                return hit
-    return None
+def _codex_rollout_rate_limits(obj):
+    """Accept only Codex's observed token-count rollout event envelope."""
+    if not isinstance(obj, dict) or obj.get("type") != "event_msg":
+        return None
+    payload = obj.get("payload")
+    if not isinstance(payload, dict) or payload.get("type") != "token_count":
+        return None
+    rate_limits = payload.get("rate_limits")
+    return rate_limits if isinstance(rate_limits, dict) else None
+
+
+def _observation_timestamp(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return int(parsed.timestamp())
+    except (ValueError, OverflowError):
+        return None
 
 
 def _codex_window(win, now_ts):
@@ -499,14 +554,62 @@ def _codex_window(win, now_ts):
         return None
     pct = win.get("used_percent")
     resets_at = win.get("resets_at")
-    if pct is None:
+    window_minutes = win.get("window_minutes")
+    if (not isinstance(pct, (int, float)) or isinstance(pct, bool) or
+            not math.isfinite(pct) or not 0 <= pct <= 100 or
+            not isinstance(window_minutes, (int, float)) or
+            isinstance(window_minutes, bool) or
+            not math.isfinite(window_minutes)):
         return None
-    reset_min = None
-    if isinstance(resets_at, (int, float)):
-        if resets_at < now_ts:
-            return None  # fönstret har nollats sedan snapshoten — siffran ljuger
-        reset_min = max(0, int(round((resets_at - now_ts) / 60)))
-    return round(float(pct), 1), reset_min, win.get("window_minutes")
+    if (not isinstance(resets_at, (int, float)) or
+            isinstance(resets_at, bool) or not math.isfinite(resets_at) or
+            resets_at <= now_ts):
+        return None
+    reset_at = int(resets_at)
+    reset_min = max(0, int(round((reset_at - now_ts) / 60)))
+    return round(float(pct), 1), reset_min, window_minutes
+
+
+def _codex_general_observation(rate_limits, observed_at, now_ts):
+    """Classify an authoritative unnamed weekly Codex observation."""
+    if not isinstance(rate_limits, dict):
+        return None
+    if ("limit_name" in rate_limits and
+            rate_limits.get("limit_name") is not None):
+        return None
+    if not isinstance(observed_at, int) or isinstance(observed_at, bool):
+        return None
+    for key in ("primary", "secondary"):
+        parsed = _codex_window(rate_limits.get(key), now_ts)
+        if parsed is None:
+            continue
+        pct, _reset_min, window_minutes = parsed
+        if window_minutes <= 600:
+            continue
+        reset_at = int(rate_limits[key]["resets_at"])
+        raw_identity = rate_limits.get("limit_id")
+        return {
+            "pct": pct,
+            "reset_at": reset_at,
+            "observed_at": int(observed_at),
+            "identity": _quota_identity(
+                "codex", "general_weekly", raw_identity),
+        }
+    return None
+
+
+def _codex_session_observation(rate_limits, observed_at, now_ts):
+    if not isinstance(rate_limits, dict) or not isinstance(observed_at, int):
+        return None
+    for key in ("primary", "secondary"):
+        parsed = _codex_window(rate_limits.get(key), now_ts)
+        if parsed is None:
+            continue
+        pct, reset_min, window_minutes = parsed
+        if window_minutes <= 600:
+            return {"pct": pct, "reset_min": reset_min,
+                    "observed_at": observed_at}
+    return None
 
 
 def _read_latest_rate_limits(path: Path, block_size=64 * 1024,
@@ -517,6 +620,7 @@ def _read_latest_rate_limits(path: Path, block_size=64 * 1024,
     complete file on every display poll is both slow and memory hungry, while
     the relevant event is normally within the final few kilobytes.
     """
+    max_bytes = min(max_bytes, CODEX_LIMIT_SCAN_BYTES)
     try:
         with path.open("rb") as source:
             source.seek(0, os.SEEK_END)
@@ -534,19 +638,79 @@ def _read_latest_rate_limits(path: Path, block_size=64 * 1024,
                     if b'"rate_limits"' not in raw_line:
                         continue
                     try:
-                        found = _find_rate_limits(json.loads(raw_line))
+                        found = _codex_rollout_rate_limits(
+                            json.loads(raw_line))
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
                     if found:
                         return found
             if position == 0 and b'"rate_limits"' in fragment:
                 try:
-                    return _find_rate_limits(json.loads(fragment))
+                    return _codex_rollout_rate_limits(json.loads(fragment))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     pass
     except OSError:
         pass
     return None
+
+
+def _read_codex_observations(path: Path, now_ts, block_size=64 * 1024,
+                             max_bytes=CODEX_LIMIT_SCAN_BYTES):
+    """Return newest general/session observations within a bounded tail."""
+    max_bytes = min(max_bytes, CODEX_LIMIT_SCAN_BYTES)
+    general = None
+    session = None
+    try:
+        with path.open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            position = source.tell()
+            fragment = b""
+            remaining = max_bytes
+            while position > 0 and remaining > 0:
+                read_size = min(block_size, position, remaining)
+                position -= read_size
+                remaining -= read_size
+                source.seek(position)
+                parts = (source.read(read_size) + fragment).split(b"\n")
+                fragment = parts.pop(0)
+                for raw_line in reversed(parts):
+                    if b'"rate_limits"' not in raw_line:
+                        continue
+                    try:
+                        event = json.loads(raw_line)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    limits = _codex_rollout_rate_limits(event)
+                    observed_at = _observation_timestamp(event.get(
+                        "timestamp")) if isinstance(event, dict) else None
+                    if limits is None or observed_at is None:
+                        continue
+                    if general is None:
+                        general = _codex_general_observation(
+                            limits, observed_at, now_ts)
+                    if session is None:
+                        session = _codex_session_observation(
+                            limits, observed_at, now_ts)
+                    if general is not None and session is not None:
+                        return general, session
+            if position == 0 and b'"rate_limits"' in fragment:
+                try:
+                    event = json.loads(fragment)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    event = None
+                limits = _codex_rollout_rate_limits(event)
+                observed_at = _observation_timestamp(event.get(
+                    "timestamp")) if isinstance(event, dict) else None
+                if limits is not None and observed_at is not None:
+                    if general is None:
+                        general = _codex_general_observation(
+                            limits, observed_at, now_ts)
+                    if session is None:
+                        session = _codex_session_observation(
+                            limits, observed_at, now_ts)
+    except OSError:
+        pass
+    return general, session
 
 
 def _scan_codex_limits():
@@ -555,29 +719,35 @@ def _scan_codex_limits():
         return {}
     try:
         newest = sorted(CODEX_SESSIONS.glob("**/rollout-*.jsonl"),
-                        key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+                        key=lambda p: p.stat().st_mtime, reverse=True)[:20]
     except OSError:
         return {}
     now_ts = time.time()
+    weekly_candidates = []
+    session_candidates = []
     for path in newest:
-        rl = _read_latest_rate_limits(path)
-        if not rl:
-            continue
-        out = {}
-        for key in ("primary", "secondary"):
-            win = _codex_window(rl.get(key), now_ts)
-            if not win:
-                continue
-            pct, reset_min, window_minutes = win
-            # <= 10 h räknas som sessionsfönstret, längre som veckan.
-            bucket = (
-                "codexSession" if (window_minutes or 0) <= 600
-                else "codexWeek"
-            )
-            out.setdefault(f"{bucket}Pct", pct)
-            out.setdefault(f"{bucket}ResetMin", reset_min)
-        return out
-    return {}
+        weekly, session = _read_codex_observations(path, now_ts)
+        if weekly is not None:
+            weekly_candidates.append(weekly)
+        if session is not None:
+            session_candidates.append(session)
+    out = {}
+    if weekly_candidates:
+        weekly = max(weekly_candidates, key=lambda item: item["observed_at"])
+        out.update({
+            "codexWeekPct": weekly["pct"],
+            "codexWeekResetAt": weekly["reset_at"],
+            "codexWeekObservedAt": weekly["observed_at"],
+            "codexWeekIdentity": weekly["identity"],
+            "codexWeekStale": False,
+        })
+    if session_candidates:
+        session = max(session_candidates, key=lambda item: item["observed_at"])
+        out.update({
+            "codexSessionPct": session["pct"],
+            "codexSessionResetMin": session["reset_min"],
+        })
+    return out
 
 
 def _refresh_codex_limits():
@@ -614,6 +784,62 @@ def _reset_at(now_ts, reset_minutes):
     return now_ts + reset_minutes * 60
 
 
+def _reset_minutes(reset_at, now_ts):
+    if (not isinstance(reset_at, (int, float)) or
+            isinstance(reset_at, bool) or reset_at <= now_ts):
+        return None
+    return max(0, int(round((reset_at - now_ts) / 60)))
+
+
+def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
+                          now_ts, label_key=None):
+    """Resolve authoritative live truth, otherwise an unexpired cache row."""
+    pct = source.get(f"{prefix}Pct")
+    reset_at = source.get(f"{prefix}ResetAt")
+    observed_at = source.get(f"{prefix}ObservedAt")
+    identity = source.get(f"{prefix}Identity")
+    live = (
+        isinstance(pct, (int, float)) and not isinstance(pct, bool) and
+        math.isfinite(pct) and 0 <= pct <= 100 and
+        isinstance(reset_at, (int, float)) and
+        not isinstance(reset_at, bool) and math.isfinite(reset_at) and
+        reset_at > now_ts and
+        isinstance(observed_at, (int, float)) and
+        not isinstance(observed_at, bool) and math.isfinite(observed_at) and
+        isinstance(identity, str) and bool(identity)
+    )
+    if live:
+        label = source.get(label_key) if label_key else None
+        record = CachedQuota(
+            provider=provider,
+            scope=scope,
+            identity=identity,
+            pct=float(pct),
+            reset_at=int(reset_at),
+            observed_at=int(observed_at),
+            label=label if isinstance(label, str) else None,
+        )
+        quota_cache.put(record)
+        return {
+            "pct": round(float(pct), 1),
+            "reset_at": int(reset_at),
+            "label": record.label,
+            "stale": False,
+            "live": True,
+        }
+    cached = quota_cache.latest(provider, scope, now=now_ts)
+    if cached is not None:
+        return {
+            "pct": round(float(cached.pct), 1),
+            "reset_at": cached.reset_at,
+            "label": cached.label,
+            "stale": True,
+            "live": False,
+        }
+    return {"pct": None, "reset_at": None, "label": None,
+            "stale": False, "live": False}
+
+
 def _add_forecast(result, prefix, forecast):
     result[f"{prefix}ForecastState"] = forecast.state
     result[f"{prefix}ForecastPctAtReset"] = forecast.pct_at_reset
@@ -635,7 +861,8 @@ def _refresh_usage_totals(projects_dir):
         _snapshot_refreshing = False
 
 
-def get_snapshot(projects_dir: Path, history=None, now_ts=None):
+def get_snapshot(projects_dir: Path, history=None, now_ts=None,
+                 quota_cache=None):
     global _last_result, _last_computed, _snapshot_refreshing
     with _cache_lock:
         if _last_result is None:
@@ -658,26 +885,52 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None):
     codex = _read_codex_limits()
     current_ts = time.time() if now_ts is None else now_ts
     usage_history = _get_usage_history() if history is None else history
-    result["claudeSessionPct"] = claude.get("sessionPct")
-    result["claudeSessionResetMin"] = claude.get("sessionResetMin")
-    result["claudeWeekPct"] = claude.get("weekPct")
-    result["claudeWeekResetMin"] = claude.get("weekResetMin")
-    result["claudeModelWeekPct"] = claude.get("modelPct")
-    result["claudeModelWeekResetMin"] = claude.get("modelResetMin")
-    result["claudeModelWeekLabel"] = claude.get("modelLabel")
+    cache = _get_quota_cache() if quota_cache is None else quota_cache
+
+    session_pct = claude.get("sessionPct")
+    session_reset_at = claude.get("sessionResetAt")
+    session_reset_min = _reset_minutes(session_reset_at, current_ts)
+    if session_pct is None or session_reset_min is None:
+        session_pct = None
+        session_reset_at = None
+        session_reset_min = None
+    result["claudeSessionPct"] = session_pct
+    result["claudeSessionResetMin"] = session_reset_min
+
+    claude_week = _resolve_weekly_quota(
+        claude, "claude", "general_weekly", "week", cache, current_ts)
+    claude_model = _resolve_weekly_quota(
+        claude, "claude", "model_weekly", "model", cache, current_ts,
+        label_key="modelLabel")
+    codex_week = _resolve_weekly_quota(
+        codex, "codex", "general_weekly", "codexWeek", cache, current_ts)
+
+    result["claudeWeekPct"] = claude_week["pct"]
+    result["claudeWeekResetMin"] = _reset_minutes(
+        claude_week["reset_at"], current_ts)
+    result["claudeWeekStale"] = bool(
+        claude_week["pct"] is not None and claude_week["stale"])
+    result["claudeModelWeekPct"] = claude_model["pct"]
+    result["claudeModelWeekResetMin"] = _reset_minutes(
+        claude_model["reset_at"], current_ts)
+    result["claudeModelWeekLabel"] = claude_model["label"]
+    result["claudeModelWeekStale"] = bool(
+        claude_model["pct"] is not None and claude_model["stale"])
     result["codexSessionPct"] = codex.get("codexSessionPct")
     result["codexSessionResetMin"] = codex.get("codexSessionResetMin")
-    result["codexWeekPct"] = codex.get("codexWeekPct")
-    result["codexWeekResetMin"] = codex.get("codexWeekResetMin")
+    result["codexWeekPct"] = codex_week["pct"]
+    result["codexWeekResetMin"] = _reset_minutes(
+        codex_week["reset_at"], current_ts)
+    result["codexWeekStale"] = bool(
+        codex_week["pct"] is not None and codex_week["stale"])
 
-    claude_session_reset = _reset_at(
-        current_ts, result["claudeSessionResetMin"])
-    claude_week_reset = _reset_at(
-        current_ts, result["claudeWeekResetMin"])
-    claude_model_reset = _reset_at(
-        current_ts, result["claudeModelWeekResetMin"])
-    codex_week_reset = _reset_at(
-        current_ts, result["codexWeekResetMin"])
+    claude_session_reset = session_reset_at
+    claude_week_reset = (
+        claude_week["reset_at"] if claude_week["live"] else None)
+    claude_model_reset = (
+        claude_model["reset_at"] if claude_model["live"] else None)
+    codex_week_reset = (
+        codex_week["reset_at"] if codex_week["live"] else None)
     quota_samples = [
         (provider, window, pct, reset_at)
         for provider, window, pct, reset_at in (
@@ -744,8 +997,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/tokens":
             try:
                 self._send(200, get_snapshot(self.projects_dir))
-            except Exception as e:  # skärmen avvisar error-formen per kontrakt
-                self._send(500, {"error": str(e)})
+            except Exception:  # skärmen avvisar error-formen per kontrakt
+                self._send(500, {"error": "internal server error"})
         elif self.path == "/api/agent-status":
             self._send(200, self.agent_status.snapshot())
         elif self.path == "/":
@@ -753,7 +1006,9 @@ class Handler(BaseHTTPRequestHandler):
                              "endpoint": "/api/tokens",
                              "endpoints": ["/api/tokens", "/api/agent-status"],
                              "claudeProbe": _probe_status,
-                             "ratelimitHeaders": _probe_headers})
+                             "ratelimitHeaders": _probe_headers,
+                             "unknownRateLimitBuckets":
+                                 _probe_unknown_buckets})
         else:
             self._send(404, {"error": "not found"})
 

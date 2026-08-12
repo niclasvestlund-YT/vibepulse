@@ -9,6 +9,7 @@ from unittest import mock
 import os
 
 from tools.tokenserver import tokenserver
+from tools.tokenserver.quota_cache import CachedQuota, QuotaCache
 from tools.tokenserver.usage_history import Forecast, UsageHistory
 
 
@@ -158,6 +159,16 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertNotIn("modelPct", parsed)
         self.assertNotIn("modelLabel", parsed)
 
+    def test_unknown_named_week_cannot_overwrite_general_week(self):
+        headers = self._headers("7d_haiku")
+
+        parsed = tokenserver._parse_limit_headers(
+            headers, now_ts=1_800_000_000)
+
+        self.assertEqual(parsed["weekPct"], 47.0)
+        self.assertNotIn("modelPct", parsed)
+        self.assertEqual(parsed["unknownBuckets"], ["7d_haiku"])
+
     def test_snapshot_never_infers_label_from_active_agent_model(self):
         base = {
             "v": 1,
@@ -167,10 +178,15 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             "monthTokens": 0,
             "at": "2026-08-07T10:00:00+02:00",
         }
-        with mock.patch.object(tokenserver, "_compute", return_value=base), \
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(tokenserver, "_compute", return_value=base), \
                 mock.patch.object(tokenserver, "get_limits", return_value={
                     "sessionPct": 12.0,
                     "modelPct": 73.0,
+                    "modelResetAt": 1_800_001_800,
+                    "modelObservedAt": 1_800_000_000,
+                    "modelIdentity": tokenserver._quota_identity(
+                        "claude", "model_weekly"),
                 }), \
                 mock.patch.object(tokenserver, "_read_codex_limits",
                                   return_value={}):
@@ -178,7 +194,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             tokenserver._last_computed = 0.0
             snapshot = tokenserver.get_snapshot(
                 Path("/unused"), history=StubHistory(),
-                now_ts=1_800_000_000)
+                now_ts=1_800_000_000,
+                quota_cache=QuotaCache(Path(temp_dir) / "quota.json"))
 
         self.assertEqual(snapshot["claudeModelWeekPct"], 73.0)
         self.assertIsNone(snapshot["claudeModelWeekLabel"])
@@ -222,7 +239,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
              tokenserver._last_probed,
              tokenserver._limits_refreshing) = previous
 
-    def test_failed_background_refresh_keeps_last_good_limits(self):
+    def test_failed_background_refresh_marks_latest_attempt_failed(self):
         previous = (
             tokenserver._last_limits,
             tokenserver._last_probed,
@@ -240,7 +257,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                     if not tokenserver._limits_refreshing:
                         break
                     time.sleep(0.01)
-            self.assertEqual(tokenserver._last_limits, {"weekPct": 47.0})
+            self.assertIsNone(tokenserver._last_limits)
         finally:
             (tokenserver._last_limits,
              tokenserver._last_probed,
@@ -248,6 +265,33 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
 
 
 class CodexLimitLogTests(unittest.TestCase):
+    @staticmethod
+    def _event(rate_limits, timestamp="2026-08-07T10:00:00Z"):
+        return {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": None,
+                "rate_limits": rate_limits,
+            },
+        }
+
+    @staticmethod
+    def _limits(pct, reset_at=1_900_000_000, *, name=None,
+                window_minutes=10080, limit_id="synthetic-general"):
+        result = {
+            "limit_id": limit_id,
+            "primary": {
+                "used_percent": pct,
+                "window_minutes": window_minutes,
+                "resets_at": reset_at,
+            },
+        }
+        if name is not None:
+            result["limit_name"] = name
+        return result
+
     def test_codex_window_value_preserves_used_percent(self):
         window = {
             "used_percent": 57.0,
@@ -261,18 +305,12 @@ class CodexLimitLogTests(unittest.TestCase):
         self.assertEqual(window_min, 10080)
 
     def test_latest_rate_limit_is_read_from_tail_without_read_text(self):
-        rate_limits = {
-            "primary": {
-                "used_percent": 35.0,
-                "window_minutes": 10080,
-                "resets_at": 1_900_000_000,
-            },
-        }
+        rate_limits = self._limits(35.0)
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "rollout-large.jsonl"
             path.write_bytes(
                 b'{"type":"noise"}\n' * 100_000 +
-                json.dumps({"rate_limits": rate_limits}).encode() + b"\n")
+                json.dumps(self._event(rate_limits)).encode() + b"\n")
 
             with mock.patch.object(
                     Path, "read_text",
@@ -282,17 +320,129 @@ class CodexLimitLogTests(unittest.TestCase):
         self.assertEqual(found, rate_limits)
 
     def test_reverse_scan_stops_at_configured_byte_limit(self):
-        rate_limits = {"primary": {"used_percent": 35.0}}
+        rate_limits = self._limits(35.0)
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "rollout-no-recent-limit.jsonl"
             path.write_bytes(
-                json.dumps({"rate_limits": rate_limits}).encode() + b"\n" +
+                json.dumps(self._event(rate_limits)).encode() + b"\n" +
                 b'{"type":"noise"}\n' * 10_000)
 
             found = tokenserver._read_latest_rate_limits(
                 path, block_size=4096, max_bytes=64 * 1024)
 
         self.assertIsNone(found)
+
+    def test_reverse_scan_never_reads_more_than_one_mebibyte(self):
+        rate_limits = self._limits(35.0)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout-bounded.jsonl"
+            path.write_bytes(
+                json.dumps(self._event(rate_limits)).encode() + b"\n" +
+                b'{"type":"noise"}\n' * 80_000)
+
+            found = tokenserver._read_latest_rate_limits(
+                path, max_bytes=2 * tokenserver.CODEX_LIMIT_SCAN_BYTES)
+
+        self.assertIsNone(found)
+
+    def test_only_expected_rollout_event_envelope_is_accepted(self):
+        limits = self._limits(46.0)
+        impostors = [
+            {"rate_limits": limits},
+            {"type": "message", "payload": {"rate_limits": limits}},
+            {"type": "event_msg", "payload": {
+                "type": "message", "rate_limits": limits}},
+            {"type": "event_msg", "payload": {
+                "type": "token_count", "message": {
+                    "rate_limits": limits}}},
+            {"type": "event_msg", "payload": {
+                "type": "token_count", "content": json.dumps({
+                    "rate_limits": limits})}},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout.jsonl"
+            path.write_text("".join(json.dumps(row) + "\n"
+                                    for row in impostors))
+
+            found = tokenserver._read_latest_rate_limits(path)
+
+        self.assertIsNone(found)
+
+    def test_missing_or_non_numeric_window_is_never_classified(self):
+        for value in (None, "10080", True):
+            limits = self._limits(46.0, window_minutes=value)
+            if value is None:
+                del limits["primary"]["window_minutes"]
+            with self.subTest(value=value):
+                self.assertIsNone(tokenserver._codex_general_observation(
+                    limits, observed_at=1_800_000_000,
+                    now_ts=1_800_000_000))
+
+    def test_newer_named_quota_does_not_hide_older_general_quota(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            older = root / "rollout-older.jsonl"
+            newer = root / "rollout-newer.jsonl"
+            older.write_text(json.dumps(self._event(
+                self._limits(46.0), "2026-08-07T10:00:00Z")) + "\n")
+            newer.write_text(json.dumps(self._event(self._limits(
+                0.0, name="GPT-5.3-Codex-Spark", limit_id="spark"),
+                "2026-08-07T11:00:00Z")) + "\n")
+            os.utime(older, (100, 100))
+            os.utime(newer, (200, 200))
+            with mock.patch.object(tokenserver, "CODEX_SESSIONS", root), \
+                    mock.patch.object(tokenserver.time, "time",
+                                      return_value=1_800_000_000):
+                found = tokenserver._scan_codex_limits()
+
+        self.assertEqual(found["codexWeekPct"], 46.0)
+        self.assertFalse(found["codexWeekStale"])
+
+    def test_scan_searches_twenty_files_and_selects_newest_general(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for index in range(21):
+                path = root / f"rollout-{index:02d}.jsonl"
+                limits = self._limits(
+                    61.0 if index == 18 else 0.0,
+                    name=None if index == 18 else "named",
+                    limit_id=f"id-{index}")
+                path.write_text(json.dumps(self._event(
+                    limits, f"2026-08-07T10:{index:02d}:00Z")) + "\n")
+                os.utime(path, (index, index))
+            with mock.patch.object(tokenserver, "CODEX_SESSIONS", root), \
+                    mock.patch.object(tokenserver.time, "time",
+                                      return_value=1_800_000_000), \
+                    mock.patch.object(
+                        tokenserver, "_read_codex_observations",
+                        wraps=tokenserver._read_codex_observations) as read:
+                found = tokenserver._scan_codex_limits()
+
+        self.assertEqual(read.call_count, 20)
+        self.assertEqual(found["codexWeekPct"], 61.0)
+
+    def test_identity_is_hashed_and_raw_limit_id_is_not_returned(self):
+        raw_identity = "synthetic-raw-limit-id"
+        observation = tokenserver._codex_general_observation(
+            self._limits(46.0, limit_id=raw_identity),
+            observed_at=1_800_000_000, now_ts=1_800_000_000)
+
+        serialized = json.dumps(observation)
+        self.assertNotIn(raw_identity, serialized)
+        self.assertRegex(observation["identity"], r"^[0-9a-f]{64}$")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / "quota.json"
+            cache = QuotaCache(cache_path, now=lambda: 1_800_000_000)
+            cache.put(CachedQuota(
+                provider="codex", scope="general_weekly",
+                identity=observation["identity"], pct=observation["pct"],
+                reset_at=observation["reset_at"],
+                observed_at=observation["observed_at"]))
+            persisted = cache_path.read_text()
+
+        self.assertNotIn(raw_identity, persisted)
+        self.assertIn(observation["identity"], persisted)
 
     def test_codex_scan_refreshes_in_background_without_blocking(self):
         started = threading.Event()
@@ -423,7 +573,14 @@ class UsageSnapshotTests(unittest.TestCase):
             "at": "2026-08-07T12:00:00+02:00",
         }
 
-    def _snapshot(self, history, now_ts, claude=None, codex=None):
+    def _snapshot(self, history, now_ts, claude=None, codex=None,
+                  quota_cache=None):
+        if quota_cache is None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                return self._snapshot(
+                    history, now_ts, claude=claude, codex=codex,
+                    quota_cache=QuotaCache(Path(temp_dir) / "quota.json",
+                                           now=lambda: now_ts))
         with mock.patch.object(tokenserver, "_compute",
                                return_value=self._base()), \
                 mock.patch.object(tokenserver, "get_limits",
@@ -433,7 +590,28 @@ class UsageSnapshotTests(unittest.TestCase):
             tokenserver._last_result = None
             tokenserver._last_computed = 0.0
             return tokenserver.get_snapshot(
-                Path("/unused"), history=history, now_ts=now_ts)
+                Path("/unused"), history=history, now_ts=now_ts,
+                quota_cache=quota_cache)
+
+    @staticmethod
+    def _live_claude(now_ts, pct=47.0):
+        return {
+            "weekPct": pct,
+            "weekResetAt": int(now_ts + 300 * 60),
+            "weekObservedAt": int(now_ts),
+            "weekIdentity": tokenserver._quota_identity(
+                "claude", "general_weekly"),
+        }
+
+    @staticmethod
+    def _live_codex(now_ts, pct=35.0):
+        return {
+            "codexWeekPct": pct,
+            "codexWeekResetAt": int(now_ts + 300 * 60),
+            "codexWeekObservedAt": int(now_ts),
+            "codexWeekIdentity": tokenserver._quota_identity(
+                "codex", "general_weekly", "synthetic"),
+        }
 
     def test_stale_usage_totals_refresh_in_background(self):
         started = threading.Event()
@@ -461,11 +639,14 @@ class UsageSnapshotTests(unittest.TestCase):
                     mock.patch.object(tokenserver, "get_limits",
                                       return_value={}), \
                     mock.patch.object(tokenserver, "_read_codex_limits",
-                                      return_value={}):
+                                      return_value={}), \
+                    tempfile.TemporaryDirectory() as temp_dir:
                 before = time.perf_counter()
                 snapshot = tokenserver.get_snapshot(
                     Path("/unused"), history=StubHistory(),
-                    now_ts=1_800_000_000)
+                    now_ts=1_800_000_000,
+                    quota_cache=QuotaCache(
+                        Path(temp_dir) / "quota.json"))
                 elapsed = time.perf_counter() - before
                 self.assertTrue(started.wait(timeout=0.2))
                 self.assertLess(elapsed, 0.1)
@@ -505,16 +686,20 @@ class UsageSnapshotTests(unittest.TestCase):
                 claude={
                     "sessionPct": 21.0,
                     "sessionResetMin": 180,
+                    "sessionResetAt": int(session_reset),
                     "weekPct": 47.0,
-                    "weekResetMin": 300,
+                    "weekResetAt": int(week_reset),
+                    "weekObservedAt": int(now_ts),
+                    "weekIdentity": tokenserver._quota_identity(
+                        "claude", "general_weekly"),
                     "modelPct": 73.0,
-                    "modelResetMin": 300,
+                    "modelResetAt": int(week_reset),
+                    "modelObservedAt": int(now_ts),
+                    "modelIdentity": tokenserver._quota_identity(
+                        "claude", "model_weekly"),
                     "modelLabel": "FABLE · WEEK",
                 },
-                codex={
-                    "codexWeekPct": 35.0,
-                    "codexWeekResetMin": 300,
-                })
+                codex=self._live_codex(now_ts))
 
         self.assertEqual(snapshot["v"], 2)
         self.assertEqual(snapshot["dayTokens"], 123)
@@ -537,8 +722,8 @@ class UsageSnapshotTests(unittest.TestCase):
 
         snapshot = self._snapshot(
             history, now_ts,
-            claude={"weekPct": 47.0, "weekResetMin": 1080},
-            codex={"codexWeekPct": 35.0, "codexWeekResetMin": 1080})
+            claude=self._live_claude(now_ts),
+            codex=self._live_codex(now_ts))
 
         self.assertEqual(snapshot["claudeForecastState"], "collecting")
         self.assertIsNone(snapshot["claudeForecastPctAtReset"])
@@ -560,20 +745,29 @@ class UsageSnapshotTests(unittest.TestCase):
         now_ts = 1_800_000_000
         with tempfile.TemporaryDirectory() as temp_dir:
             history = UsageHistory(Path(temp_dir) / "history.json")
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
             with mock.patch(
                     "tools.tokenserver.usage_history.os.replace",
-                    wraps=os.replace) as replace:
+                    wraps=os.replace) as replace, \
+                    mock.patch.object(cache, "put", return_value=True):
                 self._snapshot(
                     history, now_ts,
                     claude={
-                        "sessionPct": 21.0, "sessionResetMin": 180,
-                        "weekPct": 47.0, "weekResetMin": 300,
-                        "modelPct": 73.0, "modelResetMin": 300,
+                        "sessionPct": 21.0,
+                        "sessionResetAt": int(now_ts + 180 * 60),
+                        "weekPct": 47.0,
+                        "weekResetAt": int(now_ts + 300 * 60),
+                        "weekObservedAt": int(now_ts),
+                        "weekIdentity": tokenserver._quota_identity(
+                            "claude", "general_weekly"),
+                        "modelPct": 73.0,
+                        "modelResetAt": int(now_ts + 300 * 60),
+                        "modelObservedAt": int(now_ts),
+                        "modelIdentity": tokenserver._quota_identity(
+                            "claude", "model_weekly"),
                     },
-                    codex={
-                        "codexWeekPct": 35.0,
-                        "codexWeekResetMin": 300,
-                    })
+                    codex=self._live_codex(now_ts), quota_cache=cache)
 
             replace.assert_called_once()
             self.assertEqual(len(history.records), 4)
@@ -590,6 +784,149 @@ class UsageSnapshotTests(unittest.TestCase):
             Path(temp_dir) / "Library" / "Application Support" /
             "VibePulse" / "usage-history.json")
         tokenserver._default_usage_history = None
+
+    def test_default_quota_cache_path_is_under_vibepulse_support(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(Path, "home", return_value=Path(temp_dir)):
+            tokenserver._default_quota_cache = None
+            cache = tokenserver._get_quota_cache()
+
+        self.assertEqual(
+            cache.path,
+            Path(temp_dir) / "Library" / "Application Support" /
+            "VibePulse" / "quota-cache.json")
+        tokenserver._default_quota_cache = None
+
+    def test_named_only_codex_uses_cache_stale_and_without_cache_is_null(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            cache.put(CachedQuota(
+                provider="codex", scope="general_weekly",
+                identity=tokenserver._quota_identity(
+                    "codex", "general_weekly", "general"),
+                pct=46.0, reset_at=now_ts + 3600,
+                observed_at=now_ts - 60))
+            stale = self._snapshot(
+                StubHistory(), now_ts,
+                codex={"codexNamedOnly": True}, quota_cache=cache)
+            empty = self._snapshot(
+                StubHistory(), now_ts,
+                codex={"codexNamedOnly": True},
+                quota_cache=QuotaCache(Path(temp_dir) / "empty.json",
+                                       now=lambda: now_ts))
+
+        self.assertEqual(stale["codexWeekPct"], 46.0)
+        self.assertTrue(stale["codexWeekStale"])
+        self.assertIsNone(empty["codexWeekPct"])
+        self.assertFalse(empty["codexWeekStale"])
+
+    def test_success_then_failed_attempt_resolves_only_through_stale_cache(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            fresh = self._snapshot(
+                StubHistory(), now_ts,
+                claude=self._live_claude(now_ts),
+                codex=self._live_codex(now_ts), quota_cache=cache)
+            stale = self._snapshot(
+                StubHistory(), now_ts + 60,
+                claude={}, codex={}, quota_cache=cache)
+
+        self.assertFalse(fresh["claudeWeekStale"])
+        self.assertFalse(fresh["codexWeekStale"])
+        self.assertTrue(stale["claudeWeekStale"])
+        self.assertTrue(stale["codexWeekStale"])
+
+    def test_restart_cache_expires_exactly_and_reset_minutes_decrease(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "quota.json"
+            first_cache = QuotaCache(path, now=lambda: now_ts)
+            first_cache.put(CachedQuota(
+                provider="claude", scope="general_weekly",
+                identity=tokenserver._quota_identity(
+                    "claude", "general_weekly"), pct=47.0,
+                reset_at=now_ts + 120, observed_at=now_ts))
+            restarted = QuotaCache(path, now=lambda: now_ts)
+            first = self._snapshot(
+                StubHistory(), now_ts, quota_cache=restarted)
+            later = self._snapshot(
+                StubHistory(), now_ts + 60, quota_cache=restarted)
+            expired = self._snapshot(
+                StubHistory(), now_ts + 120, quota_cache=restarted)
+
+        self.assertEqual(first["claudeWeekResetMin"], 2)
+        self.assertEqual(later["claudeWeekResetMin"], 1)
+        self.assertIsNone(expired["claudeWeekPct"])
+        self.assertIsNone(expired["claudeWeekResetMin"])
+        self.assertFalse(expired["claudeWeekStale"])
+
+    def test_stale_cache_is_not_recorded_or_used_for_forecast(self):
+        now_ts = 1_800_000_000
+        history = StubHistory()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            cache.put(CachedQuota(
+                provider="claude", scope="general_weekly",
+                identity=tokenserver._quota_identity(
+                    "claude", "general_weekly"), pct=47.0,
+                reset_at=now_ts + 3600, observed_at=now_ts - 60))
+            snapshot = self._snapshot(
+                history, now_ts, claude={}, codex={}, quota_cache=cache)
+
+        self.assertEqual(history.record_calls, [])
+        self.assertIsNone(snapshot["claudeWeekTodayDeltaPct"])
+        self.assertEqual(snapshot["claudeForecastState"], "unavailable")
+
+    def test_optional_stale_flags_are_false_when_percent_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot = self._snapshot(
+                StubHistory(), 1_800_000_000,
+                quota_cache=QuotaCache(Path(temp_dir) / "quota.json"))
+
+        self.assertFalse(snapshot["claudeWeekStale"])
+        self.assertFalse(snapshot["claudeModelWeekStale"])
+        self.assertFalse(snapshot["codexWeekStale"])
+
+
+class HandlerPrivacyTests(unittest.TestCase):
+    def _handler(self, path):
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        handler.path = path
+        handler.projects_dir = Path("/private/source/path")
+        handler.agent_status = mock.Mock()
+        handler._send = mock.Mock()
+        return handler
+
+    def test_tokens_error_is_sanitized(self):
+        handler = self._handler("/api/tokens")
+        with mock.patch.object(
+                tokenserver, "get_snapshot",
+                side_effect=RuntimeError("/private/source/path secret")):
+            handler.do_GET()
+
+        handler._send.assert_called_once_with(
+            500, {"error": "internal server error"})
+
+    def test_root_diagnostics_contain_names_but_no_header_values_or_body(self):
+        handler = self._handler("/")
+        with mock.patch.object(tokenserver, "_probe_status", "http_401"), \
+                mock.patch.object(tokenserver, "_probe_headers", [
+                    "anthropic-ratelimit-unified-7d-utilization"]), \
+                mock.patch.object(tokenserver, "_probe_unknown_buckets", [
+                    "7d_haiku"]):
+            handler.do_GET()
+
+        payload = handler._send.call_args.args[1]
+        serialized = json.dumps(payload)
+        self.assertNotIn("response body", serialized)
+        self.assertEqual(payload["ratelimitHeaders"], [
+            "anthropic-ratelimit-unified-7d-utilization"])
+        self.assertEqual(payload["unknownRateLimitBuckets"], ["7d_haiku"])
 
 
 if __name__ == "__main__":

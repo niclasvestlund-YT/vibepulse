@@ -13,9 +13,19 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
    5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
    Tokenen lämnar aldrig Macen — skärmen får bara procenttal.
-3. **Codex tak** — passiv läsning av `~/.codex/sessions/**/rollout-*.jsonl`
-   (Codex CLI skriver used_percent + resets_at där själv). Har fönstret
-   hunnit nollas sedan senaste snapshoten serveras null, inte gamla procent.
+3. **Codex tak** — passiv, begränsad läsning av de 20 nyaste
+   `~/.codex/sessions/**/rollout-*.jsonl` (högst den befintliga sista MiB per
+   fil). Bara Codex faktiska `event_msg`/`token_count`-händelse med ett direkt
+   `payload.rate_limits` accepteras; citerade loggobjekt i meddelanden eller
+   verktygsdata ignoreras.
+
+Generella veckotak hålls strikt åtskilda från namngivna modellkvoter. För
+Codex måste `limit_name` saknas eller vara null och `window_minutes` vara ett
+tal större än 600 (det normala veckofönstret är 10080). Spark och andra
+namngivna kvoter kan därför aldrig ersätta WEEK. För Claude är exakt `7d` eller
+`week` den generella veckan; Fable, Opus, Sonnet och explicit `model` är
+modellveckan. Ett okänt namn som `7d_haiku` blir endast ett sanerat namn i
+rotendpointens diagnostik, aldrig ett kvotvärde.
 
 ## Prova
 
@@ -144,13 +154,16 @@ null = ärlig frånvaro, skärmen visar streck):
  "daySessions": 4, "monthTokens": 612480233,
  "claudeSessionPct": 21.0, "claudeSessionResetMin": 80,
  "claudeWeekPct": 47.0, "claudeWeekResetMin": 850,
+ "claudeWeekStale": false,
  "claudeModelWeekPct": 73.0, "claudeModelWeekResetMin": 850,
  "claudeModelWeekLabel": "FABLE · WEEK",
+ "claudeModelWeekStale": false,
  "claudeWeekTodayDeltaPct": 6.0,
  "claudeModelWeekTodayDeltaPct": 3.0,
  "claudeSessionHourDeltaPct": 4.0,
  "codexSessionPct": null, "codexSessionResetMin": null,
  "codexWeekPct": 35.0, "codexWeekResetMin": 2210,
+ "codexWeekStale": false,
  "codexWeekTodayDeltaPct": 2.0,
  "claudeForecastState": "at_reset",
  "claudeForecastPctAtReset": 85,
@@ -165,6 +178,31 @@ null = ärlig frånvaro, skärmen visar streck):
 De nya delta- och prognosfälten är frivilliga för äldre skärmkod och `null`
 när underlaget saknas. Prognosen blir först aktiv efter minst tre punkter,
 90 minuters spann och en procents faktisk rörelse i samma resetcykel.
+
+## Kvotcache och stale-kontrakt
+
+Senaste auktoritativa Claude- och Codex-värden för generell vecka och
+modellvecka sparas atomiskt i
+`~/Library/Application Support/VibePulse/quota-cache.json`. Identiteterna i
+filen är lokala SHA-256-värden; råa leverantörs-id:n, sessionssökvägar,
+projekt, chattar och innehåll sparas inte. Sessions-/5h-fönstret cachelagras
+inte.
+
+- En lyckad aktuell observation har procent och absolut reset, skrivs till
+  cachen och serveras med `*Stale: false`.
+- När nästa schemalagda probe eller skanning har misslyckats (även när Codex
+  bara gav en namngiven modellkvot) får det förra minnesvärdet inte fortsätta
+  se live ut. En matchande, ännu ej utgången cachepost kan då serveras med
+  `*Stale: true`.
+- Vid exakt reset-tid är posten utgången. Då, eller utan cacheträff, är
+  procent, reset och eventuell etikett `null` och `*Stale` är `false`.
+- `ResetMin` räknas om från absolut reset vid varje svar, så ett cachevärdes
+  återstående minuter fortsätter minska. Stale-värden skrivs inte till
+  usagehistoriken och används inte för delta eller prognos.
+
+Booleska `claudeWeekStale`, `claudeModelWeekStale` och `codexWeekStale` är
+frivilliga tillägg i v2-kontraktet. Om procenten saknas är motsvarande stale
+alltid `false`.
 
 ## Lokal usagehistorik
 
@@ -205,8 +243,10 @@ Loggen hamnar i `/tmp/torget-tokenserver.log`.
   message.id + requestId (återupptagna sessioner dubbelräknas inte).
 - `dayTokensPerHour` är senaste timmens faktiska förbrukning — 0 betyder
   paus, och då låter skärmen bli att ticka. Inga hittade takter.
-- Codex-procenten är senast kända snapshot (Codex loggar bara när den kör);
-  passerad resets_at ⇒ null. Claude-proben kostar en tom förfrågan var
-  120:e sekund — försumbart mot fönstren den mäter.
+- Codex-procenten är den nyaste giltiga, generella observationen bland de
+  begränsade kandidaterna. Ett passerat `resets_at` eller en skanning utan
+  generell observation räknas som källfel och följer stale-kontraktet ovan.
+  Claude-proben kostar en tom förfrågan var 120:e sekund — försumbart mot
+  fönstren den mäter.
 - Är Macen av visar skärmen streck efter två minuter (stale), inte gamla
   siffror som låtsas vara färska. Det är rätt beteende, inte ett fel.
