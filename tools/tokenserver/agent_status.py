@@ -367,6 +367,9 @@ class AgentStatusStore:
         ordered_at = seen_at if order_at is None else order_at
         if not math.isfinite(ordered_at):
             ordered_at = seen_at
+        effective_at = self._now()
+        if not math.isfinite(effective_at):
+            effective_at = seen_at
         task_id = _bounded_task_id(event.task_id)
         replacement = {
             "task_id": task_id,
@@ -400,7 +403,8 @@ class AgentStatusStore:
                 records[task_id] = replacement
                 if len(records) > TRACKED_JOB_LIMIT:
                     evicted = min(records.values(), key=lambda record: (
-                        STATE_PRIORITY[record["state"]],
+                        STATE_PRIORITY[
+                            self._effective(record, effective_at)["state"]],
                         record["order_at"],
                         record["task_id"],
                     ))

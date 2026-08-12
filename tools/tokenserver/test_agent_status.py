@@ -454,6 +454,28 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(provider["active_count"], 6)
         self.assertEqual(len(provider["jobs"]), 4)
 
+    def test_capacity_evicts_expired_attention_before_fresh_work(self):
+        now = agent_status.WAITING_LEASE_S + 1.0
+        store = AgentStatusStore(now=lambda: now)
+        for index in range(agent_status.TRACKED_JOB_LIMIT):
+            store.apply("claude", Event(
+                "waiting", "waiting_input", f"expired-{index}",
+                f"source-{index}", None), observed_at=0.0,
+                order_at=float(index))
+
+        store.apply("claude", Event(
+            "working", "thinking", "fresh", "fresh-source", None),
+            observed_at=now, order_at=now)
+        snapshot = store.snapshot()
+        tracked = store._agents["claude"]
+
+        self.assertEqual(len(tracked), agent_status.TRACKED_JOB_LIMIT)
+        self.assertIn("fresh", tracked)
+        self.assertNotIn("expired-0", tracked)
+        self.assertEqual([job["task_id"] for job in
+                          provider_jobs(snapshot, "claude")], ["fresh"])
+        self.assertEqual(snapshot["seq"], agent_status.TRACKED_JOB_LIMIT + 1)
+
     def test_two_done_jobs_survive_as_distinct_events(self):
         store = AgentStatusStore(now=lambda: 10.0)
         store.apply("codex", Event(
