@@ -53,8 +53,10 @@ EXPECTED_BMPS = {
     "torget-vibepulse-claude-done-static.bmp",
     "torget-vibepulse-codex-done-static.bmp",
     "torget-vibepulse-claude-swedish-project.bmp",
-    "torget-vibepulse-tracker-claude.bmp",
-    "torget-vibepulse-tracker-codex.bmp",
+    "torget-vibepulse-tracker-claude-coldstart.bmp",
+    "torget-vibepulse-tracker-codex-full.bmp",
+    "torget-vibepulse-tracker-empty.bmp",
+    "torget-vibepulse-tracker-stale.bmp",
 }
 EXPECTED_PNGS = {
     f"{Path(name).stem.removeprefix('torget-')}.png"

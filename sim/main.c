@@ -679,13 +679,27 @@ static int run_vibepulse_static_qa(void) {
   dump_frame("vibepulse-claude-swedish-project");
   tk_agent_monitor_dismiss_current();
 
+  /* Tourens två tracker-dumpar (case 15-18 i platform_tour_cb) återanvänder
+   * NAMNEN "vibepulse-tracker-claude"/"-codex" för en berättande
+   * coldstart→full-övergång; static-QA:n här bevisar istället FYRA skilda
+   * tillstånd (coldstart, full, tom, stale) under egna namn så varje
+   * rastersökväg får oberoende täckning — stänger Task 8:s uppskjutna
+   * anmärkning om att stale/tom/no-data-trackerlägen hörde till Task 9. */
   feed_max_tracker_file("max-tracker-coldstart.json");
   tokens_show_view(VIEW_TRACKER_CLAUDE);
-  dump_frame("vibepulse-tracker-claude");
+  dump_frame("vibepulse-tracker-claude-coldstart");
 
   feed_max_tracker_file("max-tracker-full.json");
   tokens_show_view(VIEW_TRACKER_CODEX);
-  dump_frame("vibepulse-tracker-codex");
+  dump_frame("vibepulse-tracker-codex-full");
+
+  feed_max_tracker_file("max-tracker-empty.json");
+  dump_frame("vibepulse-tracker-empty");
+
+  feed_max_tracker_file("max-tracker-full.json");
+  usage_screen_set_stale(true);
+  dump_frame("vibepulse-tracker-stale");
+  usage_screen_set_stale(false);
 
   return capture_failures == 0 ? 0 : 1;
 }
