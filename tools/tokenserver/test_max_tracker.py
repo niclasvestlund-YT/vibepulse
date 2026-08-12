@@ -348,6 +348,64 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             # Genuinely done -- not just "stopped for now" on this line.
             self.assertFalse(store.backfill_step())
 
+    def test_a_line_between_one_and_eight_mib_is_parsed_and_counted(self):
+        # A real Codex quota peak can live in a line this size (verified
+        # on real rollout files) -- backfill must not drop it just
+        # because it happens to be a couple of megabytes.
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            event = _rollout_event(
+                _rollout_limits(primary_pct=71.0), "2026-08-07T10:00:00Z")
+            event["payload"]["info"] = {"padding": "x" * (2 * 1024 * 1024)}
+            line_bytes = len(json.dumps(event).encode("utf-8")) + 1
+            self.assertGreater(line_bytes, 1024 * 1024)
+            self.assertLess(line_bytes, MaxTrackerStore._MAX_LINE_BYTES)
+            _write_jsonl(codex_root / "rollout-a.jsonl", [event])
+
+            _drain(store)
+
+            self.assertEqual(
+                store.snapshot("2026-08-07", {})["codex"]["avgPeakPct"], 71.0)
+
+    def test_a_2mib_line_still_completes_over_many_small_budget_steps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, claude_root = _new_store(directory)
+            row = _claude_usage_line("m1", 100, "2026-08-07T10:00:00Z")
+            row["padding"] = "x" * (2 * 1024 * 1024)
+            row_bytes = len(json.dumps(row).encode("utf-8")) + 1
+            self.assertGreater(row_bytes, 2 * 1024 * 1024)
+            self.assertLess(row_bytes, MaxTrackerStore._MAX_LINE_BYTES)
+            _write_jsonl(claude_root / "session.jsonl", [row])
+
+            steps = 0
+            while store.backfill_step(budget_bytes=64 * 1024):
+                steps += 1
+                self.assertLess(steps, 200)  # sanity bound, not the real cap
+
+            self.assertGreater(steps, 1)  # actually spanned multiple calls
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-07"]["vol"], 100)
+
+    def test_a_second_file_still_drains_despite_the_first_having_an_oversized_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, codex_root, _ = _new_store(directory)
+            junk = {"junk": "x" * (MaxTrackerStore._MAX_LINE_BYTES + 5000)}
+            _write_jsonl(codex_root / "rollout-a-first.jsonl", [junk])
+            _write_jsonl(codex_root / "rollout-b-second.jsonl", [
+                _rollout_event(_rollout_limits(primary_pct=33.0),
+                               "2026-08-07T10:00:00Z"),
+            ])
+            # sorted() must pick the oversized file first for this to be a
+            # meaningful test of "doesn't block the sibling forever".
+            self.assertEqual(
+                sorted(codex_root.glob("**/rollout-*.jsonl"))[0].name,
+                "rollout-a-first.jsonl")
+
+            _drain(store)
+
+            self.assertEqual(
+                store.snapshot("2026-08-07", {})["codex"]["avgPeakPct"], 33.0)
+
 
 class MaxTrackerStoreClaudeBackfillTests(unittest.TestCase):
     def test_claude_volume_backfill_sets_activity_and_volume_never_pct(self):

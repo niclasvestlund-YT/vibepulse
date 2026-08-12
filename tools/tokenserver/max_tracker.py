@@ -334,10 +334,18 @@ class MaxTrackerStore:
     _GENERAL_WINDOW_MINUTES = 600  # Codex README rule: >600 min = the week
     _BLOCK_BYTES = 64 * 1024
     _MAX_RECORDS_PER_STEP = 256
-    # README rule (shared with the agent-status follower): a JSONL line
-    # wider than 1 MiB is never buffered whole -- it is scanned past and
-    # discarded so it can never permanently stall backfill on that file.
-    _MAX_LINE_BYTES = 1_048_576
+    # The agent-status follower's 1 MiB line cap exists for its 0.5 s live
+    # polling latency budget. Backfill is a different animal: a Mac-side
+    # batch path with no latency deadline, reading real Codex/Claude
+    # session files that have been observed with genuine, wanted lines up
+    # to ~2 MiB (a real quota peak can live in one). Dropping those would
+    # be worse than buffering a bounded amount more, so backfill gets its
+    # own, larger ceiling: lines up to this size are parsed and counted in
+    # full; only a line wider than this is skipped -- scanned past in
+    # bounded 64 KiB blocks and discarded without ever being buffered
+    # whole -- so a single line can never permanently stall a file's
+    # backfill (see _drain_file).
+    _MAX_LINE_BYTES = 8 * 1024 * 1024
     _SCHEMA_VERSION = 1
 
     def __init__(self, path: Path, codex_root: Path, claude_root: Path):
@@ -353,6 +361,17 @@ class MaxTrackerStore:
         # entry also carries the size/offset/discarding-line state needed
         # to resume a grown file correctly instead of rescanning it.
         self._backfill = {provider: {} for provider in PROVIDERS}
+        # In-memory ONLY (never persisted -- raw log content must not
+        # touch disk state): the not-yet-terminated bytes of whatever
+        # line is currently being collected for a given inode, so a small
+        # ``budget_bytes`` still makes guaranteed progress on a large line
+        # over several backfill_step calls instead of re-reading the same
+        # stuck bytes from disk every time. Lost on restart with zero risk
+        # of data loss or double-counting -- the persisted offset in
+        # ``_backfill`` only ever advances past a line once it has fully
+        # resolved (parsed or discarded), so losing this cache just means
+        # re-reading that one line's bytes from disk again.
+        self._pending = {provider: {} for provider in PROVIDERS}
         self._load()
 
     # -- live rollup ---------------------------------------------------
@@ -434,11 +453,13 @@ class MaxTrackerStore:
         that has since GROWN (still being appended to) resumes from the
         offset already recorded for its inode rather than rescanning from
         the start, so already-counted volume is never double-counted. A
-        single line wider than :data:`_MAX_LINE_BYTES` is skipped rather
-        than buffered whole or endlessly retried, so it can never
-        permanently stall this file's backfill. Returns True while there
-        is more work to drain (call again); False once both roots are
-        fully caught up.
+        line up to :data:`_MAX_LINE_BYTES` is always fully parsed and
+        counted, even across several calls if ``budget_bytes`` is smaller
+        than it; only a line wider than that cap is skipped -- scanned
+        past without ever being buffered whole or endlessly retried from
+        the same stuck point, so it can never permanently stall this
+        file's backfill. Returns True while there is more work to drain
+        (call again); False once both roots are fully caught up.
         """
         with self._lock:
             codex_more = self._advance_one_file(
@@ -454,6 +475,7 @@ class MaxTrackerStore:
         if not root.is_dir():
             return False
         bucket = self._backfill[provider]
+        pending = self._pending[provider]
         try:
             paths = sorted(root.glob(pattern))
         except OSError:
@@ -483,6 +505,7 @@ class MaxTrackerStore:
             # shrink can make a stored offset point past real content.
             start_offset = 0
             discarding = False
+            pending.pop(info.st_ino, None)  # stale -- drop any cached bytes
         else:
             # Same inode, same or LARGER size (the normal "still being
             # appended to" case) -- resume exactly where the last call left
@@ -492,15 +515,22 @@ class MaxTrackerStore:
             # through skipping an oversized line when we last stopped.
             start_offset = entry.get("offset", 0)
             discarding = bool(entry.get("discarding", False))
-        new_offset, still_discarding = self._drain_file(
-            path, start_offset, budget_bytes, handle_event, discarding)
+        pending_buf = pending.get(info.st_ino, b"")
+        new_offset, new_pending_buf, still_discarding = self._drain_file(
+            path, start_offset, budget_bytes, handle_event, pending_buf,
+            discarding)
         done = new_offset >= info.st_size
         bucket[info.st_ino] = {
             "offset": new_offset, "size": info.st_size, "done": done,
             "discarding": still_discarding}
+        if new_pending_buf:
+            pending[info.st_ino] = new_pending_buf
+        else:
+            pending.pop(info.st_ino, None)
         if not done:
             return True
 
+        pending.pop(info.st_ino, None)  # finished -- nothing left to cache
         # This file just finished -- is any OTHER discovered file still
         # incomplete? (Cheap dict lookups only; re-stat'ing here is fine,
         # it never reads file content.)
@@ -522,33 +552,48 @@ class MaxTrackerStore:
                     entry.get("size") == info.st_size)
 
     def _drain_file(self, path: Path, start_offset: int, budget_bytes: int,
-                    handle_event, discarding: bool = False):
+                    handle_event, pending_buf: bytes = b"",
+                    discarding: bool = False):
         """Parse complete JSON lines from ``start_offset`` forward, up to
         ``budget_bytes`` (or 256 records), reading in 64 KiB blocks.
 
-        Returns ``(new_offset, still_discarding)``. ``new_offset`` is
-        always a safe resume point, even mid-line: an ordinary straddling
-        trailing fragment (under :data:`_MAX_LINE_BYTES`) is simply left
-        unconsumed for the next call to re-read from its start. A line
-        that grows past :data:`_MAX_LINE_BYTES` without a terminating
-        newline is different -- per the repo's established rule (see the
-        tokenserver README / agent_status.py's ``JsonlTailer``), it is
-        never buffered whole. Instead the bytes already read for it are
-        dropped, ``new_offset`` advances past them anyway (so the file is
-        never re-read from the same stuck point), and ``still_discarding``
-        is returned True so a following call -- possibly reading a
-        completely fresh chunk -- knows it is still mid-way through
-        skipping that one giant line rather than mistaking its middle for
-        the start of a new one. Without this, a single line wider than one
-        step's budget would starve the file's backfill forever.
+        ``start_offset`` is always a SAFE, already-resolved boundary --
+        right after the last line that was fully parsed or fully
+        discarded -- and it only ever moves forward from there once
+        another line resolves; it is not touched by mere in-progress
+        reading. ``pending_buf`` is the in-memory-only cache (see
+        ``self._pending`` in :meth:`__init__`) of bytes already read past
+        ``start_offset`` for the line currently being collected but not
+        yet resolved -- reading resumes right after it, so those bytes
+        are never re-fetched from disk within one process's lifetime, but
+        losing it (a restart) costs at most a redundant re-read up to
+        :data:`_MAX_LINE_BYTES`, never data loss or a double count, since
+        ``start_offset`` itself never advanced past it.
+
+        A line up to :data:`_MAX_LINE_BYTES` is buffered whole and, once
+        its terminator is found, parsed and counted normally -- backfill
+        must not drop real quota/volume data just because a line happens
+        to be a couple of megabytes. Only past that cap does a line get
+        SKIPPED rather than buffered: bytes are scanned forward in 64 KiB
+        blocks looking only for the next newline, nothing is held in
+        memory for it, and -- because that content is being thrown away
+        regardless of what happens next -- ``start_offset`` advances
+        immediately as each block is confirmed garbage, not just once the
+        terminator is finally found. That is what guarantees a line wider
+        than even a single step's entire budget still finishes over
+        several calls instead of restarting the same failed scan from
+        the same stuck point every time.
+
+        Returns ``(new_offset, new_pending_buf, still_discarding)``.
         """
         offset = start_offset
+        seek_position = start_offset + (0 if discarding else len(pending_buf))
         records_seen = 0
         bytes_read = 0
-        buf = b""
+        buf = b"" if discarding else pending_buf
         try:
             with path.open("rb") as source:
-                source.seek(start_offset)
+                source.seek(seek_position)
                 while (bytes_read < budget_bytes and
                        records_seen < self._MAX_RECORDS_PER_STEP):
                     chunk = source.read(
@@ -556,17 +601,32 @@ class MaxTrackerStore:
                     if not chunk:
                         break
                     bytes_read += len(chunk)
-                    buf += chunk
+
+                    if discarding:
+                        newline = chunk.find(b"\n")
+                        if newline < 0:
+                            # Pure garbage we're throwing away regardless
+                            # -- safe to advance the persisted offset past
+                            # it right now, not just once the terminator
+                            # eventually turns up.
+                            offset += len(chunk)
+                            continue
+                        discarding = False
+                        records_seen += 1
+                        offset += newline + 1
+                        buf = chunk[newline + 1:]
+                    else:
+                        buf += chunk
+
                     while records_seen < self._MAX_RECORDS_PER_STEP:
                         newline = buf.find(b"\n")
                         if newline < 0:
-                            if discarding or len(buf) >= self._MAX_LINE_BYTES:
-                                # Already mid-skip, or this fragment alone
-                                # has crossed the cap: drop it now rather
-                                # than growing an unbounded in-memory
-                                # buffer, and remember we're still
-                                # skipping so the next read (this call or
-                                # a later one) resumes the skip correctly.
+                            if len(buf) > self._MAX_LINE_BYTES:
+                                # Only now, having crossed the cap, do we
+                                # commit to discarding -- everything
+                                # collected so far is unrecoverable
+                                # garbage either way, so it's safe to mark
+                                # it as consumed.
                                 discarding = True
                                 offset += len(buf)
                                 buf = b""
@@ -574,9 +634,6 @@ class MaxTrackerStore:
                         raw_line, buf = buf[:newline], buf[newline + 1:]
                         offset += newline + 1
                         records_seen += 1
-                        if discarding:
-                            discarding = False  # this newline ends the skip
-                            continue
                         if raw_line.strip():
                             try:
                                 event = json.loads(raw_line)
@@ -585,8 +642,8 @@ class MaxTrackerStore:
                             if event is not None:
                                 handle_event(event)
         except OSError:
-            return start_offset, discarding
-        return offset, discarding
+            return start_offset, pending_buf, discarding
+        return offset, (b"" if discarding else buf), discarding
 
     def _handle_codex_event(self, event) -> None:
         rate_limits = codex_rollout_rate_limits(event)
