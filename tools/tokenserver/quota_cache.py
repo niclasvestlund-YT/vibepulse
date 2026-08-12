@@ -76,6 +76,10 @@ class QuotaCache:
         self._now = now
         self._lock = threading.Lock()
         self._records = self._load()
+        # Readers consume an immutable, atomically replaced view containing
+        # only fully persisted records. A writer may hold ``_lock`` across
+        # fsync without delaying HTTP snapshots.
+        self._read_records = tuple(self._records.values())
 
     @staticmethod
     def _valid(record: CachedQuota) -> bool:
@@ -239,6 +243,7 @@ class QuotaCache:
             except _PERSIST_ERRORS:
                 self._records = old_records
                 return False
+            self._read_records = snapshot
             return True
 
     def latest(self, provider: str, scope: str,
@@ -248,11 +253,11 @@ class QuotaCache:
         current_time = self._now() if now is None else now
         if not _finite_number(current_time):
             return None
-        with self._lock:
-            candidates = [record for record in self._records.values()
-                          if record.provider == provider and
-                          record.scope == scope and
-                          record.reset_at > current_time]
+        snapshot = self._read_records
+        candidates = [record for record in snapshot
+                      if record.provider == provider and
+                      record.scope == scope and
+                      record.reset_at > current_time]
         if not candidates:
             return None
         return max(candidates, key=lambda record: (

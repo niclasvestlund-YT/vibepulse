@@ -1089,6 +1089,69 @@ class UsageSnapshotTests(unittest.TestCase):
                 worker.join(timeout=1)
             self.assertTrue(returned_without_cache_lock)
 
+    def test_missing_snapshot_reads_stale_while_cache_lock_is_held(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            cache.put(CachedQuota(
+                provider="claude", scope="general_weekly",
+                identity=tokenserver._quota_identity(
+                    "claude", "general_weekly"), pct=47.0,
+                reset_at=now_ts + 3600, observed_at=now_ts - 60))
+            returned = threading.Event()
+            result = []
+
+            def serve_missing():
+                result.append(self._snapshot(
+                    StubHistory(), now_ts, claude={}, codex={},
+                    quota_cache=cache))
+                returned.set()
+
+            with cache._lock:
+                caller = threading.Thread(target=serve_missing)
+                caller.start()
+                returned_without_writer_lock = returned.wait(timeout=0.2)
+            caller.join(timeout=1)
+
+        self.assertTrue(returned_without_writer_lock)
+        self.assertEqual(result[0]["claudeWeekPct"], 47.0)
+        self.assertTrue(result[0]["claudeWeekStale"])
+
+    def test_mixed_snapshot_reads_stale_while_cache_lock_is_held(self):
+        now_ts = 1_800_000_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = QuotaCache(Path(temp_dir) / "quota.json",
+                               now=lambda: now_ts)
+            cache.put(CachedQuota(
+                provider="codex", scope="general_weekly",
+                identity=tokenserver._quota_identity(
+                    "codex", "general_weekly", "synthetic"), pct=35.0,
+                reset_at=now_ts + 3600, observed_at=now_ts - 60))
+            returned = threading.Event()
+            result = []
+
+            def serve_mixed():
+                result.append(self._snapshot(
+                    StubHistory(), now_ts,
+                    claude=self._live_claude(now_ts), codex={},
+                    quota_cache=cache))
+                returned.set()
+
+            with mock.patch.object(
+                    tokenserver, "_persist_quota_records_async"):
+                with cache._lock:
+                    caller = threading.Thread(target=serve_mixed)
+                    caller.start()
+                    returned_without_writer_lock = returned.wait(timeout=0.2)
+                caller.join(timeout=1)
+
+        self.assertTrue(returned_without_writer_lock)
+        self.assertEqual(result[0]["claudeWeekPct"], 47.0)
+        self.assertFalse(result[0]["claudeWeekStale"])
+        self.assertEqual(result[0]["codexWeekPct"], 35.0)
+        self.assertTrue(result[0]["codexWeekStale"])
+
     def test_restart_cache_expires_exactly_and_reset_minutes_decrease(self):
         now_ts = 1_800_000_000
         with tempfile.TemporaryDirectory() as temp_dir:

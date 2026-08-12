@@ -77,6 +77,59 @@ class QuotaCacheTests(unittest.TestCase):
 
             self.assertIsNone(cache.latest("codex", "general_weekly", now=1_000))
 
+    def test_latest_reads_committed_snapshot_while_writer_lock_is_held(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = QuotaCache(Path(directory) / "quota.json")
+            record = self.record()
+            self.assertTrue(cache.put(record))
+            returned = threading.Event()
+            result = []
+
+            def read_latest():
+                result.append(cache.latest(
+                    "codex", "general_weekly", now=1_100))
+                returned.set()
+
+            with cache._lock:
+                reader = threading.Thread(target=read_latest)
+                reader.start()
+                returned_without_writer_lock = returned.wait(timeout=0.2)
+            reader.join(timeout=1)
+
+        self.assertTrue(returned_without_writer_lock)
+        self.assertEqual(result, [record])
+
+    def test_latest_sees_only_committed_truth_during_concurrent_put(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = QuotaCache(Path(directory) / "quota.json")
+            old = self.record(pct=40, observed_at=100)
+            new = self.record(pct=46, observed_at=200)
+            self.assertTrue(cache.put(old))
+            persist_started = threading.Event()
+            release_persist = threading.Event()
+            real_persist = cache._persist
+
+            def paused_persist(snapshot):
+                persist_started.set()
+                release_persist.wait(timeout=2)
+                return real_persist(snapshot)
+
+            with mock.patch.object(cache, "_persist",
+                                   side_effect=paused_persist):
+                writer = threading.Thread(target=cache.put, args=(new,))
+                writer.start()
+                self.assertTrue(persist_started.wait(timeout=1))
+                before_commit = cache.latest(
+                    "codex", "general_weekly", now=300)
+                release_persist.set()
+                writer.join(timeout=1)
+
+            after_commit = cache.latest(
+                "codex", "general_weekly", now=300)
+
+        self.assertEqual(before_commit, old)
+        self.assertEqual(after_commit, new)
+
     def test_fresh_decrease_replaces_same_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = QuotaCache(Path(directory) / "quota.json")
