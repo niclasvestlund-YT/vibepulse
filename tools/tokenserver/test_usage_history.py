@@ -1,11 +1,14 @@
 import json
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.tokenserver.usage_history import Forecast, UsageHistory
+import tools.tokenserver.usage_history as usage_history_module
+from tools.tokenserver.usage_history import (
+    RESET_QUANTUM_S, Forecast, UsageHistory)
 
 
 HOUR = 60 * 60
@@ -232,6 +235,145 @@ class UsageHistoryDeltaTests(unittest.TestCase):
             self.assertIsNone(history.delta_since(
                 "codex", "week", since=HOUR,
                 reset_at=reset_at, now=2 * HOUR))
+
+
+class UsageHistoryConcurrencyTests(unittest.TestCase):
+    """ThreadingHTTPServer serves requests on concurrent threads that share
+    one UsageHistory; these tests pin the required thread-safety contract."""
+
+    def _history(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        path = Path(temp_dir.name) / "usage-history.json"
+        return UsageHistory(path), path
+
+    def test_interleaved_writers_keep_both_batches_in_memory_and_on_disk(self):
+        history, path = self._history()
+        first_dump_replaced = threading.Event()
+        second_writer_done = threading.Event()
+        real_replace = os.replace
+        first_thread_name = "writer-claude"
+
+        def ordered_replace(src, dst):
+            if threading.current_thread().name == first_thread_name:
+                first_dump_replaced.set()
+                # Event-driven pre-fix: the second writer finishes within
+                # microseconds and sets the event. The timeout exists only so
+                # a serialized (locked) implementation, where the second
+                # writer must wait for us, cannot deadlock the test.
+                second_writer_done.wait(timeout=2.0)
+            return real_replace(src, dst)
+
+        # Recent wall-clock timestamps keep the reload below inside the
+        # eight-day retention window.
+        now = int(usage_history_module.time.time())
+
+        def first_writer():
+            history.record("claude", "week", 10.0,
+                           reset_at=now + 7 * DAY, at=now)
+
+        def second_writer():
+            history.record("codex", "week", 20.0,
+                           reset_at=now + 7 * DAY, at=now)
+            second_writer_done.set()
+
+        with mock.patch.object(usage_history_module.os, "replace",
+                               ordered_replace):
+            first = threading.Thread(target=first_writer,
+                                     name=first_thread_name)
+            first.start()
+            self.assertTrue(first_dump_replaced.wait(timeout=5.0))
+            second = threading.Thread(target=second_writer,
+                                      name="writer-codex")
+            second.start()
+            first.join(timeout=10.0)
+            second.join(timeout=10.0)
+            self.assertFalse(first.is_alive())
+            self.assertFalse(second.is_alive())
+
+        surviving = {record["provider"] for record in history.records}
+        self.assertEqual(surviving, {"claude", "codex"})
+        reloaded = UsageHistory(path)
+        self.assertEqual(
+            {record["provider"] for record in reloaded.records},
+            {"claude", "codex"})
+
+    def test_barrier_stress_writers_never_drop_each_others_samples(self):
+        history, path = self._history()
+        thread_count = 4
+        samples_per_thread = 120
+        barrier = threading.Barrier(thread_count)
+        added_counts = [0] * thread_count
+
+        now = int(usage_history_module.time.time())
+
+        def writer(index):
+            provider = "claude" if index % 2 == 0 else "codex"
+            window = ("session", "week", "model_week")[index % 3]
+            barrier.wait()
+            for i in range(samples_per_thread):
+                # Unique reset cycle per sample defeats the 15-minute
+                # rate limit, so every write must be accepted and kept.
+                reset_at = now + DAY + (index * samples_per_thread + i) * \
+                    2 * RESET_QUANTUM_S
+                added_counts[index] += history.record_many(
+                    ((provider, window, 50.0, reset_at),), at=now + i)
+
+        threads = [threading.Thread(target=writer, args=(index,))
+                   for index in range(thread_count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60.0)
+            self.assertFalse(thread.is_alive())
+
+        expected = thread_count * samples_per_thread
+        self.assertEqual(sum(added_counts), expected)
+        self.assertEqual(len(history.records), expected)
+        self.assertEqual(len(UsageHistory(path).records), expected)
+
+    def test_reader_only_sees_complete_sorted_snapshots(self):
+        history, _ = self._history()
+        barrier = threading.Barrier(2)
+        writes = 200
+        failures = []
+
+        def writer():
+            barrier.wait()
+            # Decreasing timestamps force a real in-place re-sort per write,
+            # which an unlocked reader could observe mid-permutation.
+            for i in range(writes):
+                history.record_many(
+                    (("claude", "week", 50.0,
+                      DAY + i * 2 * RESET_QUANTUM_S),),
+                    at=10_000_000 - i)
+
+        def reader():
+            barrier.wait()
+            for _ in range(writes):
+                snapshot = history.records
+                timestamps = [record["at"] for record in snapshot]
+                if timestamps != sorted(timestamps):
+                    failures.append("unsorted snapshot")
+                    return
+                for record in snapshot:
+                    if set(record) != {
+                            "at", "provider", "window", "pct", "reset"}:
+                        failures.append("partial record")
+                        return
+                history.delta_since("claude", "week", since=0,
+                                    reset_at=DAY, now=10_000_000)
+                history.forecast("claude", "week", reset_at=DAY,
+                                 now=10_000_000)
+
+        threads = [threading.Thread(target=writer),
+                   threading.Thread(target=reader)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60.0)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":

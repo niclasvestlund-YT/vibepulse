@@ -6,6 +6,7 @@ import json
 import math
 import os
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,11 +50,16 @@ class UsageHistory:
                  now: Callable[[], float] = time.time):
         self.path = Path(path)
         self._now = now
+        # Reentrant: record() enters record_many() and HTTP threads share
+        # one instance; every state read/mutation plus its persist happens
+        # under this lock so a batch stays atomic in memory and on disk.
+        self._lock = threading.RLock()
         self._records = self._load()
 
     @property
     def records(self) -> tuple:
-        return tuple(dict(record) for record in self._records)
+        with self._lock:
+            return tuple(dict(record) for record in self._records)
 
     @staticmethod
     def _valid_record(record: Any) -> bool:
@@ -112,48 +118,49 @@ class UsageHistory:
             ((provider, window, pct, reset_at),), at=at))
 
     def record_many(self, samples, at: Optional[float] = None) -> int:
-        timestamp = self._now() if at is None else at
-        if not _finite_number(timestamp):
-            return 0
-        timestamp = int(round(timestamp))
+        with self._lock:
+            timestamp = self._now() if at is None else at
+            if not _finite_number(timestamp):
+                return 0
+            timestamp = int(round(timestamp))
 
-        old_records = self._records
-        cutoff = timestamp - RETENTION_S
-        self._records = [record for record in self._records
-                         if record["at"] >= cutoff]
-        added = 0
-        for provider, window, pct, reset_at in samples:
-            if (provider not in _PROVIDERS or window not in _WINDOWS or
-                    not _finite_number(pct) or not 0 <= pct <= 100 or
-                    not _finite_number(reset_at)):
-                continue
-            cycle = _reset_cycle(reset_at)
-            previous = next(
-                (record for record in reversed(self._records)
-                 if record["provider"] == provider and
-                 record["window"] == window and
-                 record["reset"] == cycle), None)
-            if (previous is not None and
-                    timestamp - previous["at"] < SAMPLE_INTERVAL_S):
-                continue
-            self._records.append({
-                "at": timestamp,
-                "provider": provider,
-                "window": window,
-                "pct": float(pct),
-                "reset": cycle,
-            })
-            added += 1
-        if not added:
-            self._records = old_records
-            return 0
-        self._records.sort(key=lambda record: record["at"])
-        try:
-            self._persist()
-        except OSError:
-            self._records = old_records
-            return 0
-        return added
+            old_records = self._records
+            cutoff = timestamp - RETENTION_S
+            self._records = [record for record in self._records
+                             if record["at"] >= cutoff]
+            added = 0
+            for provider, window, pct, reset_at in samples:
+                if (provider not in _PROVIDERS or window not in _WINDOWS or
+                        not _finite_number(pct) or not 0 <= pct <= 100 or
+                        not _finite_number(reset_at)):
+                    continue
+                cycle = _reset_cycle(reset_at)
+                previous = next(
+                    (record for record in reversed(self._records)
+                     if record["provider"] == provider and
+                     record["window"] == window and
+                     record["reset"] == cycle), None)
+                if (previous is not None and
+                        timestamp - previous["at"] < SAMPLE_INTERVAL_S):
+                    continue
+                self._records.append({
+                    "at": timestamp,
+                    "provider": provider,
+                    "window": window,
+                    "pct": float(pct),
+                    "reset": cycle,
+                })
+                added += 1
+            if not added:
+                self._records = old_records
+                return 0
+            self._records.sort(key=lambda record: record["at"])
+            try:
+                self._persist()
+            except OSError:
+                self._records = old_records
+                return 0
+            return added
 
     def forecast(self, provider: str, window: str, reset_at: float,
                  now: Optional[float] = None) -> Forecast:
@@ -166,11 +173,12 @@ class UsageHistory:
 
         cycle = _reset_cycle(reset_at)
         cutoff = current_time - FORECAST_WINDOW_S
-        samples = [record for record in self._records
-                   if record["provider"] == provider and
-                   record["window"] == window and
-                   record["reset"] == cycle and
-                   cutoff <= record["at"] <= current_time]
+        with self._lock:
+            samples = [dict(record) for record in self._records
+                       if record["provider"] == provider and
+                       record["window"] == window and
+                       record["reset"] == cycle and
+                       cutoff <= record["at"] <= current_time]
         if not samples:
             return Forecast(state="unavailable")
         samples.sort(key=lambda record: record["at"])
@@ -229,13 +237,14 @@ class UsageHistory:
             return None
 
         cycle = _reset_cycle(reset_at)
-        samples = sorted(
-            (record for record in self._records
-             if record["provider"] == provider and
-             record["window"] == window and
-             record["reset"] == cycle and
-             record["at"] <= current_time),
-            key=lambda record: record["at"])
+        with self._lock:
+            samples = sorted(
+                (dict(record) for record in self._records
+                 if record["provider"] == provider and
+                 record["window"] == window and
+                 record["reset"] == cycle and
+                 record["at"] <= current_time),
+                key=lambda record: record["at"])
         if len(samples) < 2:
             return None
         earlier = [record for record in samples if record["at"] <= since]
