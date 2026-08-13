@@ -400,6 +400,19 @@ load. Platform-dependent test assumptions are an established theme
 **Fix:** drive the eviction deterministically in the test (injected clock
 or forced verify schedule) instead of relying on wall-clock behavior.
 
+### OBS-30 · Smoke test should flag repeated agent-status diagnostics
+`server · S · open`
+The smoke test's log check counts tracebacks and boot lines but not the
+sanitized `agent-status <context>: <ErrorName>` diagnostics — so a
+persistently failing agent-status poller (one throttled line per 30 s,
+forever) can smoke clean even though comb step 3's manual
+`grep -c 'agent-status'` exists precisely to catch it. Flagged by
+Codex review on PR #6 and deferred out of that PR as
+diagnostics-coverage rather than a runtime bug.
+**Fix:** count `agent-status ` lines across both log tails (live +
+`.old`) in `check_log_file` and warn above a small threshold, mirroring
+the traceback/respawn logic.
+
 ### OBS-28 · Pin logging config on purpose
 `firmware · S · open`
 `sdkconfig.defaults` deliberately pins flash, PSRAM, LVGL, and mbedTLS
