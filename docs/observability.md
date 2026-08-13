@@ -265,6 +265,40 @@ the manual detail below is for interpreting what it flags — and steps
    Update the `Last combed:` line at the top of the backlog. A comb that
    files nothing and updates the date is a legitimate result.
 
+## Scheduling the comb
+
+The comb can only run where the evidence lives — on the Mac (the log
+file, the state files and `localhost:8737` are unreachable from
+anywhere else). `tools/comb.sh` packages it for launchd:
+
+```
+cp tools/se.torget.comb.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/se.torget.comb.plist
+```
+
+Mondays 09:30 (edit `StartCalendarInterval` in the plist to change; a
+sleeping Mac runs it at next wake), it:
+
+1. runs the **smoke test** — deterministic, free, always; a FAIL sends
+   a macOS notification immediately;
+2. runs the **agent comb** via `claude -p`, which follows this doc's
+   routine, files genuinely new findings into
+   [observability-backlog.md](observability-backlog.md) (uncommitted —
+   you review and commit), and ends with a `VERDICT:` line. Findings,
+   failures, or a missing verdict notify; a clean week is silent.
+
+Reports land in `~/Library/Logs/torget-comb/` (12 kept). If the
+`claude` CLI is missing from PATH the smoke half still runs — the
+report says so. The repo's `.claude/settings.json` allowlists the
+comb's read-only commands so the headless run doesn't stall on
+permission prompts; if a report shows the agent being denied a
+command, extend that allowlist. Run on demand any time:
+`sh tools/comb.sh`.
+
+The screen itself and the serial console stay out of scope for the
+scheduled run (no hardware handling unattended) — the agent notes the
+skipped steps, and those remain part of the occasional manual comb.
+
 ## How findings flow
 
 ```

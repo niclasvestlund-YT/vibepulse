@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 tools/tokenserver/smoke.py)",
+      "Bash(python3 tools/tokenserver/smoke.py:*)",
+      "Bash(curl -s http://localhost:8737:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(python3 -m json.tool:*)"
+    ]
+  }
+}

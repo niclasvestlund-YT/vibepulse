@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Veckokamningen av loggarna (docs/observability.md) som launchd-agent:
+     kör tools/comb.sh måndagar 09:30. Sover Macen då körs jobbet vid
+     nästa uppvakning. Antar repot i ~/Torget och användaren
+     niclasvestlund — redigera sökvägarna annars. Ändra kadensen i
+     StartCalendarInterval (Weekday 1 = måndag). Rapporterna hamnar i
+     ~/Library/Logs/torget-comb/. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>se.torget.comb</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/niclasvestlund/Torget/tools/comb.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/niclasvestlund/Torget</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/niclasvestlund/Library/Logs/torget-comb/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/niclasvestlund/Library/Logs/torget-comb/launchd.log</string>
+</dict>
+</plist>
