@@ -44,4 +44,8 @@ void torget_ota_ui_set_version(const char *version);
  * aldrig själv röra tjänstelogik). Returnerar true en gång per tryck. */
 bool torget_ota_ui_take_tap(void);
 
+/* JA-pillrets tryck: det ENDA trycket som betyder "uppdatera nu" — allt
+ * annat glas snoozar. Konsumeras av vakten precis som take_tap. */
+bool torget_ota_ui_take_update_tap(void);
+
 #endif

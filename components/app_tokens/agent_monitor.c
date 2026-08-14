@@ -71,8 +71,9 @@ static lv_obj_t *create_codex_icon(lv_obj_t *parent, int x, int y) {
 
 /* Pulsen: accentkonturen och ikonringen andas i opacitet under larmets
  * PULSE-fas. Rörelse i befintliga element, aldrig nya ytor; texten står
- * still för läsbarhet. 4 cykler à 1200 ms fyller exakt
- * TK_COMPLETION_PULSE_MS, sedan vilar allt på full opacitet i STATIC. */
+ * still för läsbarhet. Cyklerna à 1200 ms fyller TK_COMPLETION_PULSE_MS
+ * (45 s sedan 2026-08-14 — 4,8 s missades i praktiken), sedan vilar allt
+ * på full opacitet i STATIC. */
 #define COMPLETION_PULSE_CYCLE_MS 1200U
 #define COMPLETION_PULSE_MIN_OPA 100
 

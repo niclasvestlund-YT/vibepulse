@@ -181,32 +181,32 @@ static void test_state_transition_restarts_entry_phase(void) {
           job(TK_AGENT_WAITING, "same-id", "Waiting", 1));
   tk_completion_queue error_queue = {0};
   tk_completion_queue_apply(&error_queue, &waiting, 100);
-  check("old waiting event becomes static",
-        tk_completion_phase_at(&error_queue, 10100) == TK_COMPLETION_STATIC);
+  check("old waiting event becomes static after the long pulse",
+        tk_completion_phase_at(&error_queue, 45200) == TK_COMPLETION_STATIC);
 
   tk_agent_snapshot error = {0};
   add_job(&error.claude, job(TK_AGENT_ERROR, "same-id", "Error", 1));
-  tk_completion_queue_apply(&error_queue, &error, 10101);
+  tk_completion_queue_apply(&error_queue, &error, 45201);
   check("waiting-to-error transition starts a fresh pulse",
-        tk_completion_phase_at(&error_queue, 10101) == TK_COMPLETION_PULSE);
-  check("error transition pulse lasts through 4799ms",
-        tk_completion_phase_at(&error_queue, 14900) == TK_COMPLETION_PULSE);
-  check("error transition becomes static at 4800ms",
-        tk_completion_phase_at(&error_queue, 14901) == TK_COMPLETION_STATIC);
+        tk_completion_phase_at(&error_queue, 45201) == TK_COMPLETION_PULSE);
+  check("error transition pulse lasts through 44999ms",
+        tk_completion_phase_at(&error_queue, 90200) == TK_COMPLETION_PULSE);
+  check("error transition becomes static at 45000ms",
+        tk_completion_phase_at(&error_queue, 90202) == TK_COMPLETION_STATIC);
 
   tk_completion_queue done_queue = {0};
   tk_completion_queue_apply(&done_queue, &waiting, 100);
   check("second old waiting event becomes static",
-        tk_completion_phase_at(&done_queue, 10100) == TK_COMPLETION_STATIC);
+        tk_completion_phase_at(&done_queue, 45200) == TK_COMPLETION_STATIC);
   tk_agent_snapshot done = {0};
   add_job(&done.claude, job(TK_AGENT_DONE, "same-id", "Done", 1));
-  tk_completion_queue_apply(&done_queue, &done, 10101);
+  tk_completion_queue_apply(&done_queue, &done, 45201);
   check("waiting-to-done transition starts a fresh pulse",
-        tk_completion_phase_at(&done_queue, 10101) == TK_COMPLETION_PULSE);
-  check("transitioned done becomes static after fresh pulse",
-        tk_completion_phase_at(&done_queue, 14901) == TK_COMPLETION_STATIC);
+        tk_completion_phase_at(&done_queue, 45201) == TK_COMPLETION_PULSE);
+  check("transitioned done pulses its whole visible window",
+        tk_completion_phase_at(&done_queue, 55200) == TK_COMPLETION_PULSE);
   check("transitioned done hides from its new start",
-        tk_completion_phase_at(&done_queue, 20101) == TK_COMPLETION_HIDDEN);
+        tk_completion_phase_at(&done_queue, 55201) == TK_COMPLETION_HIDDEN);
 }
 
 static void test_phases(void) {
@@ -214,12 +214,14 @@ static void test_phases(void) {
   add_job(&waiting.claude, job(TK_AGENT_WAITING, "wait", "Wait", 1));
   tk_completion_queue queue = {0};
   tk_completion_queue_apply(&queue, &waiting, 100);
-  check("pulse lasts through 4799ms", tk_completion_phase_at(&queue, 4899) ==
+  /* 45 s puls (2026-08-14): den som tittar bort en halvminut ska motas av
+   * ett ANDANDES larm — 4,8 s missades i praktiken. */
+  check("pulse lasts through 44999ms", tk_completion_phase_at(&queue, 45099) ==
         TK_COMPLETION_PULSE);
-  check("pulse becomes static at 4800ms", tk_completion_phase_at(&queue, 4900) ==
+  check("pulse becomes static at 45000ms", tk_completion_phase_at(&queue, 45101) ==
         TK_COMPLETION_STATIC);
-  check("waiting remains static after ten seconds",
-        tk_completion_phase_at(&queue, 10100) == TK_COMPLETION_STATIC);
+  check("waiting remains static after a minute",
+        tk_completion_phase_at(&queue, 60100) == TK_COMPLETION_STATIC);
   check("waiting stays static when time moves backward",
         tk_completion_phase_at(&queue, 200) == TK_COMPLETION_STATIC);
 
@@ -227,8 +229,8 @@ static void test_phases(void) {
   add_job(&error.claude, job(TK_AGENT_ERROR, "error", "Error", 1));
   tk_completion_queue error_queue = {0};
   tk_completion_queue_apply(&error_queue, &error, 100);
-  check("error remains static after ten seconds",
-        tk_completion_phase_at(&error_queue, 10100) == TK_COMPLETION_STATIC);
+  check("error remains static after the pulse window",
+        tk_completion_phase_at(&error_queue, 45101) == TK_COMPLETION_STATIC);
   check("error stays static when time moves backward",
         tk_completion_phase_at(&error_queue, 200) == TK_COMPLETION_STATIC);
 
@@ -236,6 +238,8 @@ static void test_phases(void) {
   add_job(&done.claude, job(TK_AGENT_DONE, "done", "Done", 1));
   tk_completion_queue done_queue = {0};
   tk_completion_queue_apply(&done_queue, &done, 100);
+  check("done pulses its whole visible window",
+        tk_completion_phase_at(&done_queue, 10099) == TK_COMPLETION_PULSE);
   check("done has bounded visibility", tk_completion_phase_at(&done_queue, 10100) ==
         TK_COMPLETION_HIDDEN);
   check("done stays hidden when time moves backward",

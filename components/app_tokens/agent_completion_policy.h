@@ -8,7 +8,10 @@
 
 #define TK_COMPLETION_QUEUE_CAP 8
 #define TK_COMPLETION_SEEN_CAP 16
-#define TK_COMPLETION_PULSE_MS 4800ULL
+/* 45 s puls (beslut 2026-08-14): 4,8 s missades i praktiken — den som
+ * tittar bort en halvminut ska fortfarande motas av ett ANDANDES larm.
+ * DONE-kort begransas av VISIBLE_MS och pulserar hela sin livstid. */
+#define TK_COMPLETION_PULSE_MS 45000ULL
 #define TK_COMPLETION_VISIBLE_MS 10000ULL
 #define TK_COMPLETION_INITIAL_MAX_AGE_MS 15000U
 /* Ett larm är en händelse man kan agera på i stunden. Äldre tillstånd än så
