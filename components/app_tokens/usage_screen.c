@@ -138,6 +138,7 @@ typedef struct {
   lv_obj_t *tile;
   lv_obj_t *evidence;
   lv_obj_t *hero;
+  lv_obj_t *verdict;
   lv_obj_t *rule;
   lv_obj_t *rule_label;
   /* One-provider layout: the identity moves to the top slot, mark and all. */
@@ -452,7 +453,7 @@ static void create_burn_rate_page(void) {
  * and the same shape here with the opposite meaning made the two pages
  * indistinguishable at a glance. */
 #define VALUE_HERO_X 18
-#define VALUE_HERO_Y 124
+#define VALUE_HERO_Y 150
 #define VALUE_MONEY_HERO_X 19
 #define VALUE_MONEY_HERO_Y 132
 #define VALUE_WORD_HERO_X 19
@@ -552,11 +553,15 @@ static void create_value_page(void) {
   for (int i = 0; i < 2; i++)
     lv_obj_add_flag(page->solo_icon[i], LV_OBJ_FLAG_HIDDEN);
 
-  page->evidence = label(page->tile, &plex_ui_21, COL_LABEL,
-                         VP_SAFE_X, VALUE_EVIDENCE_Y, VP_CONTENT_W, 25);
+  page->evidence = label(page->tile, &plex_ui_16, COL_MUTED,
+                         VP_SAFE_X, 300, VP_CONTENT_W, 22);
   lv_obj_set_style_text_letter_space(page->evidence, 2, 0);
 
-  page->hero = label_auto(page->tile, &plex_money_118, COL_MONEY,
+  page->verdict = label(page->tile, &plex_ui_21, COL_LABEL,
+                        VP_SAFE_X, VALUE_EVIDENCE_Y, VP_CONTENT_W, 26);
+  lv_obj_set_style_text_letter_space(page->verdict, 2, 0);
+
+  page->hero = label_auto(page->tile, &plex_money_118, COL_WHITE,
                           VALUE_HERO_X, VALUE_HERO_Y);
   lv_obj_set_style_text_letter_space(page->hero, -3, 0);
   lv_label_set_text(page->hero, "–");
@@ -581,6 +586,10 @@ static void create_value_page(void) {
                     VP_SAFE_X, false, "VIA API");
   create_value_stat(page->tile, &page->stat_paid, &page->cap_paid,
                     258, true, "YOU PAID");
+  lv_obj_set_pos(page->stat_api, VP_SAFE_X, STAT_VALUE_Y);
+  lv_obj_set_pos(page->cap_api, VP_SAFE_X, STAT_LABEL_Y);
+  lv_obj_set_pos(page->stat_paid, 258, STAT_VALUE_Y);
+  lv_obj_set_pos(page->cap_paid, 258, STAT_LABEL_Y);
   create_pager(page->tile, VIEW_VALUE);
 }
 
@@ -641,7 +650,7 @@ static void apply_value_hero(value_page *page,
      * the palette and none is needed: white plus bars short of the rule says
      * it without inventing a colour. */
     lv_obj_set_style_text_color(
-        page->hero, view->hero_ahead ? COL_MONEY : COL_WHITE, 0);
+        page->hero, COL_WHITE, 0);
     lv_obj_set_style_text_letter_space(page->hero, -3, 0);
     /* The '$' ink envelope is taller than the digits', so the money hero
      * sits lower to keep its ink top where the multiple's is. */
@@ -658,59 +667,32 @@ static void apply_value(const tk_tokens *tokens) {
   usage_value_page_view view;
   usage_presenter_build_value(tokens, &view);
 
-  /* With one provider the earned/paid pair lives in the stat footer, so the
-   * top slot carries the provider's name instead of repeating them. */
-  const bool named = view.row_count == 1 && view.rows[0].name[0];
-  lv_obj_set_style_text_color(
-      page->evidence,
-      named ? (view.rows[0].provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE
-                                                              : COL_CODEX)
-            : COL_LABEL, 0);
-  lv_label_set_text(page->evidence,
-                    named ? view.rows[0].name : view.evidence);
-  /* Indent the text past the mark in the one-provider layout, exactly as the
-   * quota header does, and show only the provider that is actually there. */
-  lv_obj_set_pos(page->evidence,
-                 named ? VP_SAFE_X + VALUE_ROW_NAME_X : VP_SAFE_X,
-                 VALUE_EVIDENCE_Y);
-  for (int i = 0; i < 2; i++) {
-    const bool show = named &&
-        (view.rows[0].provider == USAGE_PROVIDER_CLAUDE) == (i == 0);
-    if (show) lv_obj_remove_flag(page->solo_icon[i], LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(page->solo_icon[i], LV_OBJ_FLAG_HIDDEN);
-  }
+  lv_label_set_text(page->verdict, view.verdict);
   apply_value_hero(page, &view);
 
-  /* One provider gets the house shape instead of a centred stub: taller bar
-   * carrying the middle of the page, and the combined pair moved down into a
-   * stat footer where the second row would otherwise have been. */
-  const bool solo = view.row_count == 1;
-  const int bar_h = solo ? 40 : VP_BAR_H;
-  const int row_y = solo ? 236 : VALUE_ROW_MONEY_Y;
+  /* No bars, no rule: the page is two numbers and their ratio. Everything
+   * the bars used to carry is either in those numbers or was explaining the
+   * bars themselves. */
   for (int i = 0; i < 2; i++)
-    apply_value_row(&page->rows[i],
-                    i < view.row_count ? &view.rows[i] : NULL,
-                    row_y + i * VALUE_ROW_PITCH, bar_h, solo);
+    lv_obj_add_flag(page->rows[i].root, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(page->rule, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(page->rule_label, LV_OBJ_FLAG_HIDDEN);
+  for (int i = 0; i < 2; i++)
+    lv_obj_add_flag(page->solo_icon[i], LV_OBJ_FLAG_HIDDEN);
 
-  if (view.show_rule) {
-    lv_obj_set_pos(page->rule, VALUE_RULE_X,
-                   solo ? row_y + VALUE_ROW_BAR_DY - 10 : VALUE_RULE_Y);
-    lv_obj_set_size(page->rule, 3, solo ? bar_h + 20 : VALUE_RULE_H);
-    lv_obj_remove_flag(page->rule, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(page->rule);
-    lv_obj_set_pos(page->rule_label, VP_SAFE_X,
-                   solo ? row_y + VALUE_ROW_BAR_DY + bar_h + 16
-                        : VALUE_RULE_LABEL_Y);
-    lv_obj_remove_flag(page->rule_label, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_add_flag(page->rule, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(page->rule_label, LV_OBJ_FLAG_HIDDEN);
+  /* Attribution as one quiet line rather than two bars. */
+  char attribution[80];
+  attribution[0] = '\0';
+  for (int i = 0; i < view.row_count; i++) {
+    char piece[40];
+    snprintf(piece, sizeof piece, "%s%s %s", i ? "  ·  " : "",
+             view.rows[i].name, view.rows[i].money);
+    strncat(attribution, piece,
+            sizeof attribution - strlen(attribution) - 1);
   }
+  lv_label_set_text(page->evidence, attribution);
 
-  /* The stat footer exists only in the one-provider layout: with two rows the
-   * combined pair is already the evidence line, and repeating it is what made
-   * the old page read as five competing zones. */
-  const bool stats = solo && view.api_cost[0] && view.paid[0];
+  const bool stats = view.api_cost[0] && view.paid[0];
   lv_obj_t *const footer[] = {page->stat_api, page->stat_paid,
                               page->cap_api, page->cap_paid};
   for (size_t i = 0; i < sizeof footer / sizeof footer[0]; i++) {

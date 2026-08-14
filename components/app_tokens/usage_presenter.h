@@ -128,6 +128,7 @@ typedef struct {
    * the gap between it and the subscription. Saying "earned" would claim
    * income that does not exist. */
   char evidence[56];
+  char verdict[40];
   char hero_text[USAGE_CARD_PCT_CAP];
   /* 1 when the hero is a WORD and must render in the 48 px headline font. An
    * en dash at hero size is a bare white rectangle -- it reads as a

@@ -360,6 +360,11 @@ void usage_presenter_build_value(const tk_tokens *tokens,
        * the same tokens been bought at list API rates. */
       snprintf(out->evidence, sizeof out->evidence, "%s VIA API · %s PAID",
                out->api_cost, out->paid);
+      /* Without a break-even bar nothing says that 1x is the threshold, so
+       * the page says it in words: which way round the two costs came out. */
+      snprintf(out->verdict, sizeof out->verdict, "%s",
+               value->multiple >= 1.0 ? "YOUR PLAN IS CHEAPER"
+                                      : "THE API WOULD BE CHEAPER");
       out->show_rule = 1;
       out->break_even_fraction = 1.0 / USAGE_VALUE_BAR_SCALE;
       break;
