@@ -23,17 +23,9 @@ HOST=${1:-$(cat .ota-device 2>/dev/null || true)}
   echo "       (eller skriv enhetens IP i .ota-device i repytroten)" >&2
   exit 1
 }
-# Nyaste torget.bin bland byggkatalogerna ar default — en hardkodad
-# "build" skickade nastan en overgiven diagnosbinar 2026-08-14. Den som
-# vill nagot annat pekar ut katalogen explicit.
-BUILD=${2:-$(ls -t build*/torget.bin 2>/dev/null | head -1 | xargs dirname 2>/dev/null)}
-[ -n "$BUILD" ] || { echo "ingen build*/torget.bin — bygg forst" >&2; exit 1; }
-BIN="$BUILD/torget.bin"
-[ -f "$BIN" ] || { echo "hittar inte $BIN — bygg först (idf.py build)" >&2; exit 1; }
-
 TOKEN=$(sed -n 's/.*TG_OTA_TOKEN[^"]*"\([0-9a-f]\{64\}\)".*/\1/p' secrets.h | head -1)
 [ -n "$TOKEN" ] || { echo "inget TG_OTA_TOKEN i secrets.h — uppladdning avstängd" >&2; exit 1; }
-SHA=$(shasum -a 256 "$BIN" | cut -d' ' -f1)
+BUILD_ARG=${2:-}
 
 echo "väntar på underhållsfönstret på $HOST — håll KEY3 ~3 s..."
 while ! curl -s --max-time 2 "http://$HOST/api/ota/status" 2>/dev/null \
@@ -41,7 +33,35 @@ while ! curl -s --max-time 2 "http://$HOST/api/ota/status" 2>/dev/null \
   sleep 1
 done
 
-echo "fönstret öppet — laddar upp $(wc -c < "$BIN" | tr -d ' ') byte:"
+# Filvalet sker HÄR, i uppladdningsögonblicket: en hårdkodad "build" (och
+# ett val vid skriptstart, medan ett bygge ännu inte skrivit sin bin)
+# sköt morgonens frysspöke till glaset 2026-08-14. Nyaste build*/torget.bin
+# NU vinner, och namnet skrivs ut så avsändaren ser vad som faktiskt går.
+BUILD=${BUILD_ARG:-$(ls -t build*/torget.bin 2>/dev/null | head -1 | xargs dirname 2>/dev/null)}
+[ -n "$BUILD" ] || { echo "ingen build*/torget.bin — bygg först" >&2; exit 1; }
+BIN="$BUILD/torget.bin"
+[ -f "$BIN" ] || { echo "hittar inte $BIN — bygg först (idf.py build)" >&2; exit 1; }
+SHA=$(shasum -a 256 "$BIN" | cut -d' ' -f1)
+
+# Avsändargrinden (läxan 2026-08-14, då ett arkiverat -dirty-diagnosbygge
+# gick till glaset och frös det): versionen läses ur BINÄRENS egen
+# appbeskrivning och visas ALLTID; ett -dirty-bygge vägras utan uttryckligt
+# TG_OTA_ALLOW_DIRTY=1. Enhetens grindar ser bara "en giltig avbild" —
+# att den är RÄTT avbild är avsändarens ansvar, och nu även skriptets.
+BIN_VERSION=$(dd if="$BIN" bs=1 skip=48 count=32 2>/dev/null | tr -d '\0')
+echo "avbildens version: ${BIN_VERSION:-okänd}"
+case "$BIN_VERSION" in
+  *-dirty*)
+    if [ "${TG_OTA_ALLOW_DIRTY:-0}" != "1" ]; then
+      echo "VÄGRAR: $BIN_VERSION är ett -dirty-bygge." >&2
+      echo "Committa först, eller kör TG_OTA_ALLOW_DIRTY=1 om du menar det." >&2
+      exit 1
+    fi
+    echo "(-dirty släppt igenom av TG_OTA_ALLOW_DIRTY=1)"
+    ;;
+esac
+
+echo "fönstret öppet — laddar upp $BIN ($(wc -c < "$BIN" | tr -d ' ') byte):"
 curl -s --max-time 300 -X POST "http://$HOST/api/ota/firmware" \
   -H "Authorization: Bearer $TOKEN" \
   -H "X-VibePulse-Project: torget" \
