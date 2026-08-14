@@ -10,6 +10,14 @@ units:
     battery: not_fitted
     microsd: unknown
     antenna: onboard
-    installed_firmware: unknown-after-next-flash
-    last_physical_verification: "2026-08-06"
+    installed_firmware: v0.2.1-37-gd933d30
+    firmware_delivery: ota
+    last_physical_verification: "2026-08-14"
     secrets: false
+    note: >-
+      installed_firmware is the last build confirmed running on the glass
+      (OTA #9, monitored boot, 2026-08-14). The unit updates itself over
+      Wi-Fi, so this value goes stale the moment a new build is accepted
+      and is not a substitute for asking the device: GET /api/ota/status
+      returns running_version and running_partition. Never record secrets
+      here.

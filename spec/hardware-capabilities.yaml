@@ -501,16 +501,19 @@ capabilities:
       board_wired: "yes"
       bsp_support: "yes"
       firmware_enabled: "yes"
-      unit_verified: unknown
-    confidence: source_inspected
+      unit_verified: "yes"
+    confidence: measured
     resources: ["GPIO18", "internal pull-up"]
-    constraints: ["active low; a press shorts the input to ground"]
+    constraints:
+      - "active low; a press shorts the input to ground"
+      - "a 3 s hold opens the OTA maintenance window; a short press closes it"
     conflicts: ["locked BSP advertises no generic button capability; Torget handles GPIO18 directly"]
     opportunities: ["app switching", "navigation", "dismissal", "maintenance entry"]
     sources:
       - waveshare-schematic-2026-08-10
       - waveshare-bsp-2.0.1
       - torget-main-1fad449
+      - torget-physical-ota-2026-08-14
       - waveshare-board-docs-2026-08-10
       - esp32s3-datasheet-2026-08-10
     evidence:
@@ -518,7 +521,11 @@ capabilities:
       - {field: board_wired, value: "yes", source: waveshare-schematic-2026-08-10}
       - {field: bsp_support, value: "yes", source: torget-main-1fad449}
       - {field: firmware_enabled, value: "yes", source: torget-main-1fad449}
-    last_verified: "2026-08-10"
+      - {field: unit_verified, value: "yes", source: torget-physical-ota-2026-08-14}
+    last_verified: "2026-08-14"
+    verification:
+      unit: torget-home-01
+      test: key3-hold-opens-maintenance-window-2026-08-14
 
   - id: input.boot-button
     name: BOOT and reset control area
@@ -679,23 +686,34 @@ capabilities:
       soc_capable: "yes"
       board_wired: not_applicable
       bsp_support: "yes"
-      firmware_enabled: "no"
-      unit_verified: unknown
-    confidence: source_inspected
+      firmware_enabled: "yes"
+      unit_verified: "yes"
+    confidence: measured
     resources: ["otadata", "ota_0", "ota_1", "bootloader rollback state", "Wi-Fi"]
     constraints:
-      - "current partition table has one factory app and no OTA slots"
-      - "first enablement requires a full USB flash of bootloader, partition table, and application"
-      - "success requires post-reboot identity and health confirmation"
+      - "an update writes only the inactive slot; bootloader, partition table and NVS layout stay USB operations"
+      - "a build must fit the 5 MB slot; test_ota_partition.py holds the ceiling in CI"
+      - "upload is refused unless someone at the device opened the ten-minute window: a KEY3 hold or an UPDATE tap, never a script"
+      - "the boot-health gate must pass within 15 s or the bootloader reverts"
+      - "the rollback net arms only on a bootloader built with CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE: seven earlier installs booted UNDEFINED with the gate resting"
+      - "the revert path itself is unexercised: no install has yet failed the gate"
     conflicts: ["partition-table migration is not a normal application-only OTA operation"]
     opportunities: ["authenticated wireless development installs", "automatic rollback"]
-    sources: [torget-main-1fad449, esp-idf-5.5-ota, esp32s3-datasheet-2026-08-10]
+    sources:
+      - torget-v0.4.0
+      - torget-physical-ota-2026-08-14
+      - esp-idf-5.5-ota
+      - esp32s3-datasheet-2026-08-10
     evidence:
       - {field: soc_capable, value: "yes", source: esp32s3-datasheet-2026-08-10}
       - {field: board_wired, value: not_applicable, source: esp32s3-datasheet-2026-08-10}
       - {field: bsp_support, value: "yes", source: esp-idf-5.5-ota}
-      - {field: firmware_enabled, value: "no", source: torget-main-1fad449}
-    last_verified: "2026-08-10"
+      - {field: firmware_enabled, value: "yes", source: torget-v0.4.0}
+      - {field: unit_verified, value: "yes", source: torget-physical-ota-2026-08-14}
+    last_verified: "2026-08-14"
+    verification:
+      unit: torget-home-01
+      test: ota-ab-install-and-health-gate-2026-08-14
 
   - id: soc.ulp
     name: Ultra-low-power coprocessors

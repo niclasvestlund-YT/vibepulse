@@ -168,7 +168,13 @@ def load_registry(root):
         for key, value in states.items():
             if not isinstance(value, str) or value not in STATE_VALUES:
                 raise RegistryError(f"{capability_id}: invalid {key}={value}")
-        if states["unit_verified"] == "yes" and states["board_wired"] != "yes":
+        # A verified claim must not rest on hardware the board lacks. But
+        # "not_applicable" means the wiring question does not apply at all
+        # (A/B OTA is firmware, not a pin), and such a capability is still
+        # physically verifiable on a named unit. Only "no" and "unknown"
+        # board wiring may block a verification claim.
+        if (states["unit_verified"] == "yes"
+                and states["board_wired"] not in {"yes", "not_applicable"}):
             raise RegistryError(
                 f"{capability_id}: verified capability must be board_wired",
             )

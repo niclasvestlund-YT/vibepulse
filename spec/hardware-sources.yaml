@@ -14,6 +14,26 @@ sources:
       - display-lock-gdb-and-panel-operation-2026-08-06
       - wifi-channel-13-scan-and-connect-2026-08-06
 
+  - id: torget-physical-ota-2026-08-14
+    kind: physical-test
+    rank: 1
+    title: OTA chain verified end to end on torget-home-01 (monitored boot)
+    publisher: Torget
+    locator: docs/superpowers/reviews/2026-08-14-ota-chain-verified.md
+    revision: OTA#9; unit=torget-home-01; build=v0.2.1-37-gd933d30
+    accessed: "2026-08-14"
+    board_revision: unknown
+    unit: torget-home-01
+    tests:
+      - ota-ab-install-and-health-gate-2026-08-14
+      - key3-hold-opens-maintenance-window-2026-08-14
+    note: >-
+      Console log of the ninth wireless install: PENDING_VERIFY boot on
+      ota_1, all five boot-health proofs within 3 s, window auto-reopen at
+      3.1 s, approval via esp_ota_mark_app_valid_cancel_rollback at 9.1 s.
+      The rollback net is armed from that boot on. The revert itself is
+      still unexercised: no install has yet failed the gate.
+
   - id: waveshare-schematic-2026-08-10
     kind: schematic
     rank: 2
@@ -57,6 +77,20 @@ sources:
         locator: ../Buddy
         revision: b7002f0101ef220a2b77eb12957e62ce536aa11a
     note: CMake includes Buddy/components in the Torget firmware build.
+
+  - id: torget-v0.4.0
+    kind: source-code
+    rank: 3
+    title: Torget firmware build inputs at the OTA release
+    publisher: Torget
+    revision: v0.4.0
+    locator: .
+    accessed: "2026-08-14"
+    note: >-
+      The release that shipped self-updating firmware. partitions.csv
+      carries otadata + ota_0/ota_1 from here; earlier revisions,
+      torget-main-1fad449 included, are factory-only and must never be
+      cited for an OTA claim.
 
   - id: waveshare-board-docs-2026-08-10
     kind: vendor-doc

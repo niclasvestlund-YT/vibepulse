@@ -272,17 +272,43 @@ class RegistryValidationTests(unittest.TestCase):
                     self.load(sources=[source])
 
     def test_verified_capability_must_be_board_wired(self):
+        for board_wired in ("unknown", "no"):
+            with self.subTest(board_wired=board_wired):
+                value = dict(VALID_CAPABILITY)
+                value["states"] = dict(
+                    VALID_CAPABILITY["states"], board_wired=board_wired,
+                )
+                value["evidence"] = [
+                    dict(finding) for finding in VALID_CAPABILITY["evidence"]
+                    if finding["field"] != "board_wired"
+                ]
+                with self.assertRaisesRegex(
+                        RegistryError,
+                        "verified capability must be board_wired"):
+                    self.load(capability=value)
+
+    def test_not_applicable_wiring_can_still_be_unit_verified(self):
+        """Firmware capabilities have no pin to wire, yet are verifiable.
+
+        A/B OTA is the real case: board_wired is not_applicable, but the
+        install was exercised on a named unit. Rejecting that would force
+        the registry to understate a capability it had actually proven.
+        """
         value = dict(VALID_CAPABILITY)
         value["states"] = dict(
-            VALID_CAPABILITY["states"], board_wired="unknown",
+            VALID_CAPABILITY["states"], board_wired="not_applicable",
         )
         value["evidence"] = [
-            dict(finding) for finding in VALID_CAPABILITY["evidence"]
-            if finding["field"] != "board_wired"
+            dict(finding, value="not_applicable")
+            if finding["field"] == "board_wired" else dict(finding)
+            for finding in VALID_CAPABILITY["evidence"]
         ]
-        with self.assertRaisesRegex(
-                RegistryError, "verified capability must be board_wired"):
-            self.load(capability=value)
+        registry = self.load(capability=value)
+        self.assertEqual(
+            registry.capabilities[VALID_CAPABILITY["id"]]
+            ["states"]["unit_verified"],
+            "yes",
+        )
 
     def test_enabled_capability_must_have_software_support(self):
         value = dict(VALID_CAPABILITY)
@@ -888,7 +914,12 @@ class RepositoryRegistryTests(unittest.TestCase):
         }
         self.assertEqual(
             verified_ids,
-            {"display.amoled", "radio.wifi-24"},
+            {
+                "display.amoled",
+                "radio.wifi-24",
+                "input.key3",
+                "update.ota-ab-rollback",
+            },
         )
         for capability_id in verified_ids:
             with self.subTest(capability=capability_id):
@@ -902,7 +933,11 @@ class RepositoryRegistryTests(unittest.TestCase):
                     finding["source"] for finding in capability["evidence"]
                     if finding["field"] == "unit_verified"
                 }
-                self.assertEqual(sources, {"torget-physical-2026-08-06"})
+                self.assertTrue(sources)
+                self.assertLessEqual(sources, {
+                    "torget-physical-2026-08-06",
+                    "torget-physical-ota-2026-08-14",
+                })
 
     def test_repository_required_truth_distinctions(self):
         registry = self.load_repository_registry()
@@ -957,10 +992,11 @@ class RepositoryRegistryTests(unittest.TestCase):
             for constraint in ipex["constraints"]
         ))
 
+        # Still genuinely off, and irreversible to switch on: these must
+        # never drift to "yes" without a separately reviewed eFuse workflow.
         for capability_id in (
                 "security.secure-boot-v2",
-                "security.flash-encryption",
-                "update.ota-ab-rollback"):
+                "security.flash-encryption"):
             with self.subTest(capability=capability_id):
                 self.assertEqual(
                     registry.capabilities[capability_id]["states"][
@@ -968,6 +1004,20 @@ class RepositoryRegistryTests(unittest.TestCase):
                     ],
                     "no",
                 )
+
+        # A/B OTA shipped in v0.4.0 and was proven end to end on the unit.
+        # This assertion is the registry's answer to the failure it already
+        # caused once: an agent read a factory-only tree and told its user
+        # the feature did not exist.
+        ota = registry.capabilities["update.ota-ab-rollback"]
+        self.assertEqual(ota["states"]["firmware_enabled"], "yes")
+        self.assertEqual(ota["states"]["unit_verified"], "yes")
+        ota_constraints = " ".join(ota["constraints"]).lower()
+        self.assertIn("inactive slot", ota_constraints)
+        self.assertIn("key3", ota_constraints)
+        # The revert path is NOT proven on hardware. The registry must keep
+        # saying so until an install actually fails the gate.
+        self.assertIn("unexercised", ota_constraints)
 
         die_temperature = registry.capabilities["soc.die-temperature"]
         self.assertTrue(any(
@@ -1014,7 +1064,7 @@ class RepositoryRegistryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout,
-            "OK: 30 capabilities, 9 sources, 1 units\n",
+            "OK: 30 capabilities, 11 sources, 1 units\n",
         )
 
     def test_repository_registry_loads(self):
@@ -1093,7 +1143,12 @@ class RepositoryRegistryTests(unittest.TestCase):
             "waveshare-cst9217-driver-1.0.0": (
                 "source-code", 3, "2.0.0",
             ),
+            "torget-physical-ota-2026-08-14": (
+                "physical-test", 1,
+                "OTA#9; unit=torget-home-01; build=v0.2.1-37-gd933d30",
+            ),
             "torget-main-1fad449": ("source-code", 3, "1fad449"),
+            "torget-v0.4.0": ("source-code", 3, "v0.4.0"),
             "waveshare-board-docs-2026-08-10": (
                 "vendor-doc", 4, "accessed-2026-08-10",
             ),
@@ -1172,7 +1227,17 @@ class RepositoryRegistryTests(unittest.TestCase):
             "battery": "not_fitted",
             "microsd": "unknown",
             "antenna": "onboard",
-            "installed_firmware": "unknown-after-next-flash",
-            "last_physical_verification": "2026-08-06",
+            "installed_firmware": "v0.2.1-37-gd933d30",
+            "firmware_delivery": "ota",
+            "last_physical_verification": "2026-08-14",
             "secrets": False,
+            "note": (
+                "installed_firmware is the last build confirmed running on "
+                "the glass (OTA #9, monitored boot, 2026-08-14). The unit "
+                "updates itself over Wi-Fi, so this value goes stale the "
+                "moment a new build is accepted and is not a substitute for "
+                "asking the device: GET /api/ota/status returns "
+                "running_version and running_partition. Never record "
+                "secrets here."
+            ),
         })
