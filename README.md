@@ -10,8 +10,9 @@ for you.**
 
 Claude Code and Codex usage, live agent activity, and a full-screen
 **NEEDS YOU** alert. A ~$30 ESP32-S3 panel plus a pure-stdlib Python service
-on your Mac. No cloud, no accounts, no API keys on the device. Nothing
-leaves your LAN.
+on your Mac. No cloud, no accounts, and no AI credentials on the device —
+your OAuth token stays on the Mac and the screen only ever receives numbers.
+Nothing leaves your LAN. ([What the device *does* store](#keys-and-privacy).)
 
 ## The problem
 
@@ -246,16 +247,50 @@ reviewed against them ([review](docs/superpowers/reviews/2026-08-13-max-tracker-
 Keys: `[` / `]` change VibePulse page, `S` cycles agent status, `M` cycles
 Max Tracker fixtures, `T` re-feeds tokens, `L` opens the launcher.
 
-## Privacy
+## Keys and privacy
+
+**Does the device store keys?** Two, and neither is an AI credential.
+
+Your Claude/Codex OAuth token **never reaches the screen**. The tokenserver
+reads it on your Mac — from Claude Code's own process or the macOS keychain —
+calls the API there, and serves the screen plain numbers. A device that never
+holds the credential cannot leak it.
+
+What *is* compiled into the firmware, from a gitignored `secrets.h`:
+
+| Secret | Why it's there | Worst case if the board is stolen |
+| --- | --- | --- |
+| `TG_WIFI_SSID` / `TG_WIFI_PASS` (and the hotspot fallback pair) | it has to join your network | your WiFi password, which you rotate yourself |
+| `TG_OTA_TOKEN` — 64 hex chars, optional | authenticates firmware uploads | someone on your LAN could install firmware *during a window you opened yourself* |
+
+The OTA token is a gate, not the only one. `ota_policy.c` rejects in the order
+CLOSED → AUTH → PROJECT → CHIP → SIZE, so the window is checked **before** the
+token: a stolen token alone opens nothing, because only someone standing at
+the device can open the window. The comparison is constant-time, the token is
+never logged and never returned by `/api/ota/status`, and leaving the macro
+undefined compiles the upload endpoint out of the binary entirely — flashing
+over USB-C forever is a perfectly good way to run this.
+
+**The honest caveat:** secure boot and flash encryption are *off*. Enabling
+them burns eFuses, which is irreversible and can disable the USB recovery
+path, so it stays a deliberate later decision — `security.secure-boot-v2` and
+`security.flash-encryption` both read `firmware_enabled: "no"` in the
+registry. Anyone holding the board and a USB cable can therefore read both
+compiled-in values. That is the trade this project makes: a personal device
+on a home LAN, where the blast radius is a WiFi password you can change in a
+minute — not an account, not a cloud, nothing that touches your AI provider.
+
+And the rest:
 
 - Everything stays on your LAN; the screen only ever receives percentages,
   counts and coarse status — a project name, a model, an effort level.
 - No prompts, no code, no commands, no file contents are stored or served.
   The service keeps only content-free quota points (at most one per 15
   minutes, kept 8 days) for the trends.
-- Your OAuth token never leaves the Mac.
-- A lost or stolen screen leaks your WiFi credentials and the LAN hostname
-  of your Mac — both of which you rotate yourself, not in any cloud.
+- `/api/ota/status` answers unauthenticated on port 80 by design: it returns
+  only facts the device owns anyway — project, chip, running version and
+  partition, whether the window is open — so a screen with a broken token is
+  still inspectable.
 
 ## Tweak it
 
@@ -286,9 +321,10 @@ test/                host tests, run with ./test/run.sh (no ESP-IDF needed)
 spec/                hardware truth + UI design system
 ```
 
-The deeper docs (architecture, writing an app, hardware traps) are in
-[README.sv.md](README.sv.md), in Swedish, because this started as a Swedish
-hobby project. Your agent reads Swedish just fine.
+The deeper docs are [AGENTS.md](AGENTS.md) (architecture, the app contract,
+hardware traps and the rules an agent must follow) and `spec/`. Much of it
+is in Swedish, because this started as a Swedish hobby project. Your agent
+reads Swedish just fine.
 
 ## Hardware knowledge
 
@@ -311,6 +347,33 @@ python -m pip install -r requirements-dev.txt
 Python 3.11+ is required. The script uses the activated environment's Python
 by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
 
+## When something looks wrong
+
+One command is the fastest health check — it walks the same first steps you
+would:
+
+```sh
+python3 tools/tokenserver/smoke.py
+```
+
+It fails loudly on what actually goes wrong: a foreign service holding port
+8737, an endpoint answering with the wrong contract version or shape, a probe
+stuck on a dead token, a respawn loop in the log.
+
+Three surfaces carry the truth, and you will need all of them:
+`idf.py -p /dev/cu.usbmodem101 monitor` for the firmware log (the only place
+boot, WiFi and OTA decisions appear), `curl localhost:8737/` for the
+service's own diagnostics, and the screen itself.
+
+- [`docs/observability.md`](docs/observability.md) maps every log the system
+  produces and holds the comb routine to follow when investigating.
+- [`docs/lessons.md`](docs/lessons.md) is the root-cause log. Read it before
+  touching pollers, parsers, staleness logic or the launchd setup — most
+  sharp edges here have a story, and the story is usually a lost evening.
+
+The service log lives at `~/Library/Logs/torget-tokenserver.log` and records
+transitions rather than states, so a healthy week is a few lines.
+
 ## FAQ
 
 - **Windows or Linux for the Mac service?** Not yet — the log paths and
@@ -327,6 +390,13 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
 - **Just Claude, no Codex (or vice versa)?** Works. The other half shows
   dashes.
 - **Does it need internet?** No. The board talks to one host on your LAN.
+- **Do you store keys on the device?** No AI credentials — those stay on the
+  Mac. The firmware does hold your WiFi credentials and, if you enable
+  wireless updates, a 64-hex OTA token that is useless unless someone
+  standing at the device opens the update window first. Full answer in
+  [Keys and privacy](#keys-and-privacy).
+- **Can I skip OTA entirely?** Yes. Leave `TG_OTA_TOKEN` undefined and the
+  upload endpoint is compiled out; flash over USB-C forever.
 
 ## License
 

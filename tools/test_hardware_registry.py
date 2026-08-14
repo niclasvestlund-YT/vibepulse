@@ -611,8 +611,8 @@ class RepositoryRegistryTests(unittest.TestCase):
 
         # The companion wording is Swedish governance prose. The root
         # README.md is now an English quickstart; that prose lives in
-        # README.sv.md instead, alongside AGENTS.md.
-        for name in ("AGENTS.md", "README.sv.md"):
+        # AGENTS.md alone; README.sv.md is gone (one README, English).
+        for name in ("AGENTS.md",):
             with self.subTest(document=name):
                 text = (repo / name).read_text(encoding="utf-8")
                 self.assertRegex(text, r"(?i)\bcompanion")
@@ -623,9 +623,9 @@ class RepositoryRegistryTests(unittest.TestCase):
     def test_root_docs_reject_stale_app_and_imu_claims(self):
         repo = Path(__file__).resolve().parents[1]
         # These stale-claim checks (and the Swedish-only "Medvetet SENARE"
-        # section) apply to the Swedish governance document. The root
-        # README.md is now an English quickstart with no such section.
-        for name in ("AGENTS.md", "README.sv.md"):
+        # section) apply to the Swedish governance document, which is
+        # AGENTS.md alone now that README.sv.md is gone.
+        for name in ("AGENTS.md",):
             with self.subTest(document=name):
                 text = (repo / name).read_text(encoding="utf-8")
                 self.assertNotRegex(text, r"(?i)\btvå appar\b")
@@ -653,9 +653,8 @@ class RepositoryRegistryTests(unittest.TestCase):
     def test_root_docs_preserve_imu_api_and_verification_boundaries(self):
         repo = Path(__file__).resolve().parents[1]
         # IMU API/verification boundary prose is Swedish governance prose;
-        # it lives in README.sv.md now that README.md is an English
-        # quickstart.
-        for name in ("AGENTS.md", "README.sv.md"):
+        # AGENTS.md carries it now that README.sv.md is gone.
+        for name in ("AGENTS.md",):
             with self.subTest(document=name):
                 text = (repo / name).read_text(encoding="utf-8")
                 normalized = " ".join(text.split())
@@ -671,9 +670,8 @@ class RepositoryRegistryTests(unittest.TestCase):
     def test_root_docs_keep_existing_buddy_voice_work_non_authorized(self):
         repo = Path(__file__).resolve().parents[1]
         # The Buddy voice non-authorization sentence is Swedish governance
-        # prose; it lives in README.sv.md now that README.md is an English
-        # quickstart.
-        for name in ("AGENTS.md", "README.sv.md"):
+        # prose; AGENTS.md carries it now that README.sv.md is gone.
+        for name in ("AGENTS.md",):
             with self.subTest(document=name):
                 text = (repo / name).read_text(encoding="utf-8")
                 normalized = " ".join(text.split())

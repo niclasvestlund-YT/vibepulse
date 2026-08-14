@@ -10,7 +10,7 @@ there.
 
 ## What is not part of this repo
 
-`AGENTS.md`, `README.sv.md` and some code comments refer to things the
+`AGENTS.md` and some code comments refer to things the
 maintainer has locally and you almost certainly do not have. None of them
 are required, and the build gates on their absence:
 
@@ -87,6 +87,31 @@ will look for a host that does not exist and every page will stay on dashes.
 
 Ask the user for the WiFi password. Do not guess it, and do not commit
 `secrets.h` — it is gitignored, keep it that way.
+
+### Optional: `TG_OTA_TOKEN`
+
+Leave it commented out unless the user wants wireless updates. Undefined
+means the upload endpoint is compiled out of the binary entirely, and they
+flash over USB-C forever — a perfectly good way to run this.
+
+If they do want it, generate 32 random bytes, and never echo the value back
+in a summary, a commit or a screenshot:
+
+```sh
+openssl rand -hex 32              # exactly 64 lowercase hex characters
+```
+
+The firmware asserts that length at compile time and validates the character
+set once at boot, so a malformed token is a startup log line rather than a
+mysterious 401 at midnight. Be straight with the user about what it is: a
+shared secret compiled into a flash image on a board without flash
+encryption. It gates firmware uploads only, it is checked *after* the window
+someone opened at the device, and it is never logged or returned by any
+endpoint.
+
+Wireless updates also need one more USB flash first, on a tree whose
+`partitions.csv` still has a single `factory` partition: moving to A/B slots
+rewrites the partition table, which OTA itself is not allowed to do.
 
 ## Step 2 — build
 
@@ -230,4 +255,5 @@ It runs the C core tests, the Python suites, and exact-raster landmark checks
 that rebuild the simulator and compare real captures. No ESP-IDF needed.
 
 Architecture, the app contract, and the full list of hardware traps are in
-[../README.sv.md](../README.sv.md) (Swedish) and `spec/`.
+[../AGENTS.md](../AGENTS.md) (largely Swedish) and `spec/`. The
+over-the-air update lifecycle has its own reference in [ota.md](ota.md).

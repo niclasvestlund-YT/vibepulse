@@ -336,8 +336,8 @@ symptom table depends on `claudeProbe`. (b)
 `anthropic-ratelimit-*` headers on first probe — but that print sits in
 the *fallback* path (`tokenserver.py:656`) and never fires on a healthy
 server. (c) `idf.py monitor` — the only way to see the only firmware log
-— is mentioned in `README.sv.md` only, not in the English runbook that
-repeatedly says "check the serial log".
+— was mentioned in `README.sv.md` only, and that file is gone now that
+the project keeps one English README.
 **Fix:** add a "reading the logs" section to `docs/agent-setup.md`
 pointing at [observability.md](observability.md); correct the README
 claim; mention the monitor command + power caveat.
