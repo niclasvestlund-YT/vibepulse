@@ -24,6 +24,7 @@ static struct {
 } app;
 
 void tokens_apply(const tk_tokens *tokens) {
+  torget_data_alive(); /* forsta riktiga datan tar ner bootskarment */
   if (!tokens) return;
   int64_t now_us = torget_now_us();
   usage_screen_apply_tokens(tokens);

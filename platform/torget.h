@@ -42,6 +42,11 @@ void torget_net_wait(void);
  * UPDATE READY-notisen. NULL = ingen annons i senaste svaret. */
 void torget_update_available(const char *version);
 
+/* Forsta LYCKADE hamtningen: apparna kvitterar att riktig data natt
+ * glaset, bootskarment kliver av. Billig att kalla ofta — plattformen
+ * bryr sig bara om forsta gangen. */
+void torget_data_alive(void);
+
 /* Appens sätt att hålla skärmen vaken: "något händer hos mig". Solelkollen
  * kallar den när solen producerar, Tokenmätaren när tokens brinner. Utan
  * anrop på 15 min (och utan touch på 30 s) rampar plattformen ner till

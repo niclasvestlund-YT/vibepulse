@@ -29,6 +29,7 @@
 #include "agent_monitor_policy.h"
 #include "agent_status_parse.h"
 #include "max_tracker_parse.h"
+#include "boot_screen.h"
 #include "ota_ui.h"
 #include "tokens_parse.h"
 #include "torget.h"
@@ -90,6 +91,7 @@ void torget_ui_unlock(void) {}
 bool torget_ui_try_lock(uint32_t timeout_ms) { (void)timeout_ms; return true; }
 void torget_net_wait(void)  {}
 void torget_keep_awake(void) {} /* ljusrampen finns bara på panelen */
+void torget_data_alive(void) {}  /* bootskärmen drivs manuellt i QA:n */
 
 int64_t torget_now_us(void) { return (int64_t)lv_tick_get() * 1000; }
 
@@ -734,6 +736,16 @@ static int run_vibepulse_static_qa(void) {
   usage_screen_set_stale(true);
   dump_frame("vibepulse-tracker-stale");
   usage_screen_set_stale(false);
+
+  /* Bootskärmen: tre stadier innan den river sig själv. Skapas HÄR (inte
+   * vid simstart) så övriga QA-dumpar slipper lagret ovanpå sig. */
+  torget_boot_screen_create();
+  dump_overlay_frame("boot-cold");
+  torget_boot_screen_stage(TG_BOOT_WIFI_UP);
+  dump_overlay_frame("boot-wifi");
+  torget_boot_screen_stage(TG_BOOT_TIME_OK);
+  dump_overlay_frame("boot-time");
+  torget_boot_screen_stage(TG_BOOT_DATA_OK); /* river lagret */
 
   /* OTA-ringen (riktning A, 2026-08-14): fyra ärliga lägen — lucktid,
    * mottagen andel, verifiering och omstart. Versionsraden byter från

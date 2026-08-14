@@ -9,6 +9,7 @@
  * apptask sker under torget_ui_lock() — det är LVGL:s egen mutex, så det
  * behövs inte en till.
  */
+#include <stdatomic.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -34,6 +35,7 @@
 #include "lvgl.h"
 
 #include "boot_health.h"
+#include "boot_screen.h"
 #include "button_policy.h"
 #include "ota_service.h"
 #include "ota_ui.h"
@@ -102,6 +104,12 @@ void torget_keep_awake(void) { s_last_activity_us = esp_timer_get_time(); }
 void torget_update_available(const char *version) {
   torget_ota_service_update_available(version);
 }
+
+/* Bootskärmens datasignal: första lyckade hämtningen tar ner skärmen.
+ * Atomär flagga — tokens_apply kallar under UI-låset och stage() tar
+ * låset självt, så själva nedtagningen skjuts till nästa tick. */
+static _Atomic bool s_data_alive;
+void torget_data_alive(void) { atomic_store(&s_data_alive, true); }
 
 /* ------------------------------------------------------------------- wifi */
 
@@ -177,6 +185,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     esp_wifi_connect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     ESP_LOGI(TAG, "WiFi uppe (\"%s\")", s_ssid[s_nat]);
+    torget_boot_screen_stage(TG_BOOT_WIFI_UP);
     s_nat_missar = 0;
     xEventGroupSetBits(s_net_events, WIFI_GOT_IP);
   }
@@ -220,6 +229,7 @@ static void net_task(void *arg) {
   esp_wifi_connect();
   xEventGroupWaitBits(s_net_events, WIFI_GOT_IP, pdFALSE, pdTRUE, portMAX_DELAY);
   time_sync();
+  torget_boot_screen_stage(TG_BOOT_TIME_OK);
   xEventGroupSetBits(s_net_events, NET_READY);
   vTaskDelete(NULL);
 }
@@ -265,6 +275,21 @@ static void tick_cb(lv_timer_t *t) {
    * 10 Hz-ticken pollar vidare medan knappen är nere så hållet avfyras
    * utan släpp. Körs i LVGL-tasken — därför bara atomära tjänsteanrop här,
    * aldrig torget_ota_ui_set (som tar UI-låset). */
+  /* Bootskärmen tas ner av första datalivet — eller ge-upp-taket när
+   * nätet aldrig kommer (45 s: två hämtcykler + marginal; bakom står
+   * apparnas ärliga NO DATA). Låset är rekursivt, så stage() från
+   * LVGL-tasken är säkert. */
+  static bool boot_screen_done;
+  if (!boot_screen_done) {
+    if (atomic_load(&s_data_alive)) {
+      boot_screen_done = true;
+      torget_boot_screen_stage(TG_BOOT_DATA_OK);
+    } else if (now > 45LL * 1000000LL) {
+      boot_screen_done = true;
+      torget_boot_screen_stage(TG_BOOT_GIVE_UP);
+    }
+  }
+
   static tg_button_policy key3;
   bool key3_down = gpio_get_level(GPIO_NUM_18) == 0;
   tg_button_action key3_action = tg_button_update(&key3, key3_down, now);
@@ -450,6 +475,10 @@ void app_main(void) {
   s_last_activity_us = esp_timer_get_time();
 
   torget_ui_lock();
+  /* Bootskärmen FÖRE apparna och FÖRE OTA-overlayn: apparnas halvbyggda
+   * NO DATA-vyer göms bakom den, och READY-ringen vinner alltid över den
+   * i lagerordningen. */
+  torget_boot_screen_create();
   torget_ui_create(); /* bygger apparna via registret + launchern */
   /* UI-beviset: registret, apparnas create() och launchern överlevde. */
   torget_boot_health_mark(TG_HEALTH_UI);

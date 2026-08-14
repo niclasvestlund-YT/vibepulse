@@ -180,6 +180,9 @@ EXPECTED = {
     "torget-vibepulse-value-no-plan-cost.bmp",
     "torget-vibepulse-value-partial.bmp",
     "torget-vibepulse-value-no-data.bmp",
+    "torget-boot-cold.bmp",
+    "torget-boot-wifi.bmp",
+    "torget-boot-time.bmp",
     "torget-vibepulse-value-both.bmp",
     "torget-vibepulse-value-uneven.bmp",
     "torget-vibepulse-value-solo.bmp",
@@ -273,6 +276,33 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                 codex = (111, 120, 255)
                 self.assertNotIn(claude, center_row)
                 self.assertNotIn(codex, center_row)
+
+    def test_boot_screen_stages_light_up_honestly(self):
+        """Bootskärmen (2026-08-14): wordmärket vitt, stegen tänds av sina
+        riktiga signaler — kallt är alla tre muted, WIFI_UP tänder första,
+        TIME_OK två. Raden bor på y≈268 med stegen kring x 100/240/380."""
+        white = (255, 255, 255)
+        muted = (146, 152, 162)
+        cases = (
+            ("torget-boot-cold.bmp", muted, muted),
+            ("torget-boot-wifi.bmp", white, muted),
+            ("torget-boot-time.bmp", white, white),
+        )
+        for name, wifi_color, time_color in cases:
+            with self.subTest(name=name):
+                image = self.image(name)
+                self.assertEqual(image.getpixel((5, 5)), (0, 0, 0))
+                word_row = [image.getpixel((x, 185)) for x in range(90, 390)]
+                self.assertIn(white, word_row)
+                wifi_row = [image.getpixel((x, 276)) for x in range(60, 140)]
+                time_row = [image.getpixel((x, 276)) for x in range(205, 275)]
+                data_row = [image.getpixel((x, 276)) for x in range(345, 425)]
+                self.assertIn(wifi_color, wifi_row)
+                self.assertNotIn(
+                    white if wifi_color == muted else muted, wifi_row)
+                self.assertIn(time_color, time_row)
+                self.assertIn(muted, data_row)
+                self.assertNotIn(white, data_row)
 
     def test_ota_notice_is_message_and_two_big_buttons(self):
         """Fysisk granskning 2026-08-14: ingen ring har — rubrik, vantande

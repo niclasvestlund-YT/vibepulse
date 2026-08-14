@@ -27,6 +27,7 @@ idf_component_register(
        "rotation.c"
        "registry.c"
        "../platform/torget_ui.c"
+       "../platform/boot_screen.c"
   # ".." ger `#include "secrets.h"` (gitignorad, kopieras ur secrets.h.example)
   INCLUDE_DIRS "." ".." "../platform"
   REQUIRES ${TORGET_MAIN_REQUIRES}
