@@ -437,9 +437,23 @@ static void maintenance_ui_task(void *arg) {
     bool differs = has_announced &&
         strncmp(announced, esp_app_get_description()->version,
                 sizeof announced) != 0;
-    bool busy = until != 0 && (until - now_us) > 0;
-    if (notice.showing && torget_ota_ui_take_tap())
+    /* Trycken draneras VARJE varv (overlayn ar klickbar i alla lagen och
+     * en kvarliggande flagga fran t.ex. OPEN skulle sjalvsnooza nasta
+     * notis), men de betyder nagot bara nar notisen visas. */
+    bool tap_yes = torget_ota_ui_take_update_tap();
+    bool tap_snooze = torget_ota_ui_take_tap();
+    if (notice.showing && tap_yes) {
+      /* JA pa glaset = samma fysiska samtycke som KEY3-hallet: oppna
+       * fonstret sa pusharen pa Macen far leverera. Tokenet vaktar
+       * fortfarande sjalva uppladdningen. */
+      ESP_LOGI(TAG, "notisen besvarad med JA — fönstret öppnas");
       tg_notice_dismiss(&notice, now_us);
+      torget_ota_service_open_maintenance();
+      until = atomic_load(&s_maintenance_until_us);
+    } else if (notice.showing && tap_snooze) {
+      tg_notice_dismiss(&notice, now_us);
+    }
+    bool busy = until != 0 && (until - now_us) > 0;
     switch (tg_notice_update(&notice, differs, busy, now_us)) {
       case TG_NOTICE_SHOW:
         ESP_LOGI(TAG, "uppdatering annonserad (%s) — notisen tar glaset",

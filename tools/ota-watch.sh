@@ -1,14 +1,17 @@
 #!/bin/sh
 # Bygg och skjut varje ändring över luften, utan att röra tangentbordet.
 #
-#   tools/ota-watch.sh <enhetens-ip>   [byggkatalog]
+#   tools/ota-watch.sh                 [enhetens-ip] [byggkatalog]
 #
-# Håll KEY3 ~3 s EN gång. Därefter sköter sig resten själv: varje sparad
-# källfil bygger om, och varje bygge som faktiskt blev en ny avbild laddas
-# upp. Enheten startar om, bootar PENDING_VERIFY och återöppnar fönstret
-# åt sig själv (ota_service.c), så nästa varv behöver inget nytt håll.
-# Ett kort KEY3-tryck stänger fönstret när passet är slut — då står den här
-# loopen och väntar tills du öppnar igen.
+# IP:t löser ota-flash.sh själv ur .ota-device; ge det bara som argument om
+# du kör mot en annan enhet än den vanliga.
+#
+# Samtyck EN gång per pass — håll KEY3 ~3 s, eller svara UPDATE på
+# takeovern. Därefter sköter sig resten själv: varje sparad källfil bygger
+# om, och varje bygge som faktiskt blev en ny avbild laddas upp. Enheten
+# startar om, bootar PENDING_VERIFY och återöppnar fönstret åt sig själv
+# (ota_service.c), så nästa varv behöver inget nytt samtycke. Ett kort
+# KEY3-tryck stänger när passet är slut — då står loopen och väntar.
 #
 # Varför det här inte kringgår samtyckeskedjan: loopen kan lika lite som
 # ota-flash.sh öppna fönstret. Den väntar bara ut det. Det fysiska hållet
@@ -18,7 +21,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-HOST=${1:?usage: tools/ota-watch.sh <device-ip> [build-dir]}
+# Tom sträng är giltigt: ota-flash.sh läser då .ota-device själv, och äger
+# felmeddelandet om ingendera finns. En kopia av den regeln här skulle bara
+# hinna bli osann.
+HOST=${1:-}
 BUILD=${2:-build}
 BIN="$BUILD/torget.bin"
 INTERVAL=${OTA_WATCH_INTERVAL:-2}
@@ -43,7 +49,8 @@ fingerprint() {
     | xargs -0 $HASH 2>/dev/null | $HASH
 }
 
-printf 'bevakar källträdet, mål %s — håll KEY3 ~3 s en gång\n' "$HOST"
+printf 'bevakar källträdet, mål %s — samtyck en gång: KEY3 ~3 s eller UPDATE\n' \
+  "${HOST:-$(cat .ota-device 2>/dev/null || echo '.ota-device')}"
 last_src=""
 last_bin=""
 [ -f "$BIN" ] && last_bin=$(sha_of "$BIN")

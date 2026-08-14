@@ -258,13 +258,17 @@ tk_completion_phase tk_completion_phase_at(tk_completion_queue *queue,
   queue->last_now_ms = effective_now;
   uint64_t elapsed = effective_now >= queue->current_started_ms
                          ? effective_now - queue->current_started_ms : 0;
-  if (elapsed < TK_COMPLETION_PULSE_MS) return TK_COMPLETION_PULSE;
-  if (queue->events[0].state != TK_AGENT_DONE ||
-      elapsed < TK_COMPLETION_VISIBLE_MS) {
-    return TK_COMPLETION_STATIC;
+  /* DONE-korten doms av sitt synlighetsfonster FORE pulskollen: pulsen
+   * (45 s) ar numera langre an fonstret (10 s), och ett klart-kort ska
+   * pulsera hela sin livstid — inte overvista pa glaset for att pulsen
+   * blivit generosare (beslut 2026-08-14). */
+  if (queue->events[0].state == TK_AGENT_DONE &&
+      elapsed >= TK_COMPLETION_VISIBLE_MS) {
+    tk_completion_queue_dismiss(queue);
+    return queue->count ? TK_COMPLETION_PULSE : TK_COMPLETION_HIDDEN;
   }
-  tk_completion_queue_dismiss(queue);
-  return queue->count ? TK_COMPLETION_PULSE : TK_COMPLETION_HIDDEN;
+  if (elapsed < TK_COMPLETION_PULSE_MS) return TK_COMPLETION_PULSE;
+  return TK_COMPLETION_STATIC;
 }
 
 void tk_completion_queue_dismiss(tk_completion_queue *queue) {

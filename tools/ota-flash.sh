@@ -15,7 +15,14 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-HOST=${1:?usage: tools/ota-flash.sh <device-ip> [build-dir]}
+# IP:t kan bo i gitignorade .ota-device (repytroten) — då räcker
+# `tools/ota-flash.sh` utan argument, från vilken agent-session som helst.
+HOST=${1:-$(cat .ota-device 2>/dev/null || true)}
+[ -n "$HOST" ] || {
+  echo "usage: tools/ota-flash.sh <device-ip> [build-dir]" >&2
+  echo "       (eller skriv enhetens IP i .ota-device i repytroten)" >&2
+  exit 1
+}
 BUILD=${2:-build}
 BIN="$BUILD/torget.bin"
 [ -f "$BIN" ] || { echo "hittar inte $BIN — bygg först (idf.py build)" >&2; exit 1; }

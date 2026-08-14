@@ -14,14 +14,16 @@
  *  - Första upptäckten tar över glaset direkt.
  *  - Ett tryck avfärdar, men notisen ÅTERKOMMER efter TG_NOTICE_NAG_US
  *    så länge uppdateringen inte är installerad — lagom tjat, omöjlig
- *    att glömma.
+ *    att glömma. En timme är utvecklingstakten (beslut 2026-08-14:
+ *    "fixar man massor" ska påminnelsen hinna med); skruva upp den när
+ *    plattformen går in i lugnare förvaltning.
  *  - Aldrig takeover medan enheten är upptagen (öppet underhållsfönster
  *    eller pågående överföring) — den som redan uppdaterar ska inte
  *    störas av påminnelsen om samma sak.
  *  - Försvinner själv när annonsen slocknar (versionerna matchar).
  */
 
-#define TG_NOTICE_NAG_US (4LL * 60LL * 60LL * 1000000LL)
+#define TG_NOTICE_NAG_US (60LL * 60LL * 1000000LL)
 
 typedef enum {
   TG_NOTICE_NONE,  /* ingen förändring — rör inte overlayn  */

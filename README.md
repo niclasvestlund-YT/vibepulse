@@ -209,6 +209,43 @@ understand how the pieces fit together.
 
    Autostart on login: see [tools/tokenserver/README.md](tools/tokenserver/README.md).
 
+## Over-the-air updates
+
+After the first USB flash, the screen updates itself over WiFi. The consent
+chain is deliberate and three-factor: a **physical 3-second hold on KEY3**
+opens a ten-minute maintenance window (the glass shows an UPDATES ON ring
+with the lease draining clockwise), a **64-hex token** from `secrets.h`
+authenticates the upload, and the window **closes itself** — a short KEY3
+press closes it early. No button, no update; a script can never open the
+window for you.
+
+```
+idf.py build
+tools/ota-flash.sh <device-ip>     # waits for your KEY3 hold, then uploads
+```
+
+The device verifies the image (magic, chip, project, SHA-256), writes it to
+the **inactive A/B slot** (`ota_0`/`ota_1`, 5 MB each — see
+`partitions.csv`), reboots into it, and a **boot-health gate** must approve
+the new image within 15 seconds — display, UI, scheduler, NVS and memory
+proofs — or the bootloader rolls back to the previous slot automatically.
+USB-C remains the rescue path and is never written by an OTA. After an OTA
+reboot the window re-arms itself once, so a build-test-build session needs
+one hold, not one per build.
+
+The tokenserver announces the newest build on your Mac
+(`otaAvailableVersion` on `/api/tokens`); when the screen runs an older
+version it takes the glass with an **UPDATE READY** notice — hold KEY3 to
+receive — or answer the on-glass LATER/UPDATE pills by touch; tapping
+UPDATE opens the window just like the hold does. A snooze returns every
+hour until installed. Full lifecycle reference: [docs/ota.md](docs/ota.md).
+
+**If someone tells you "this project has no OTA":** they are reading a tree
+where `partitions.csv` still has a single `factory` partition. The OTA
+foundation replaced that table (A/B slots + `otadata`) — check the branch
+you are on before concluding anything, and never assume the flash layout
+without reading `partitions.csv` in the checkout you are actually building.
+
 ## No hardware? Run the simulator
 
 ```

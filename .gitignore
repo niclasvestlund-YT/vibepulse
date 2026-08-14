@@ -18,3 +18,5 @@ sdkconfig.old
 # Font-TTF:erna hämtas av platform/fonts/fetch-and-convert.sh; bara de
 # genererade .c-filerna committas så bygget aldrig behöver node eller nät.
 platform/fonts/src/
+# Enhetens LAN-IP for tools/ota-flash.sh — miljospecifik, aldrig delad.
+.ota-device
