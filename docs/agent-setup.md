@@ -175,6 +175,9 @@ confirm with the user that real numbers replaced the dashes.
 
 ## When it does not work
 
+After the first USB flash, day-to-day updates go over the air — the full
+workflow, consent model and troubleshooting live in [ota.md](ota.md).
+
 | Symptom | Cause | Fix |
 |---|---|---|
 | Screen boots, everything is dashes, forever | `DIN-MAC` never replaced in `secrets.h`, or the `TK_*` defines were removed | Set the real Bonjour name, rebuild, reflash |

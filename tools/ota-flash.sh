@@ -23,7 +23,11 @@ HOST=${1:-$(cat .ota-device 2>/dev/null || true)}
   echo "       (eller skriv enhetens IP i .ota-device i repytroten)" >&2
   exit 1
 }
-BUILD=${2:-build}
+# Nyaste torget.bin bland byggkatalogerna ar default — en hardkodad
+# "build" skickade nastan en overgiven diagnosbinar 2026-08-14. Den som
+# vill nagot annat pekar ut katalogen explicit.
+BUILD=${2:-$(ls -t build*/torget.bin 2>/dev/null | head -1 | xargs dirname 2>/dev/null)}
+[ -n "$BUILD" ] || { echo "ingen build*/torget.bin — bygg forst" >&2; exit 1; }
 BIN="$BUILD/torget.bin"
 [ -f "$BIN" ] || { echo "hittar inte $BIN — bygg först (idf.py build)" >&2; exit 1; }
 

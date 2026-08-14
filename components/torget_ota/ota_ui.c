@@ -161,9 +161,9 @@ void torget_ota_ui_create(void) {
    * bubblar INTE — allt annat glas ar snooze. */
   ui.later = lv_obj_create(ui.overlay);
   lv_obj_remove_style_all(ui.later);
-  lv_obj_set_size(ui.later, 170, 44);
-  lv_obj_set_pos(ui.later, 240 - 170 - 10, 414);
-  lv_obj_set_style_radius(ui.later, 22, 0);
+  lv_obj_set_size(ui.later, 340, 88);
+  lv_obj_set_pos(ui.later, 240 - 170, 322);
+  lv_obj_set_style_radius(ui.later, 44, 0);
   lv_obj_set_style_border_width(ui.later, 2, 0);
   lv_obj_set_style_border_color(ui.later, COL_TRACK, 0);
   lv_obj_add_flag(ui.later, LV_OBJ_FLAG_HIDDEN);
@@ -176,9 +176,9 @@ void torget_ota_ui_create(void) {
 
   ui.update = lv_obj_create(ui.overlay);
   lv_obj_remove_style_all(ui.update);
-  lv_obj_set_size(ui.update, 170, 44);
-  lv_obj_set_pos(ui.update, 240 + 10, 414);
-  lv_obj_set_style_radius(ui.update, 22, 0);
+  lv_obj_set_size(ui.update, 340, 88);
+  lv_obj_set_pos(ui.update, 240 - 170, 210);
+  lv_obj_set_style_radius(ui.update, 44, 0);
   lv_obj_set_style_border_width(ui.update, 2, 0);
   lv_obj_set_style_border_color(ui.update, lv_color_white(), 0);
   lv_obj_add_flag(ui.update, LV_OBJ_FLAG_CLICKABLE);
@@ -187,7 +187,7 @@ void torget_ota_ui_create(void) {
   lv_obj_set_style_text_font(update_label, &plex_ui_21, 0);
   lv_obj_set_style_text_color(update_label, lv_color_white(), 0);
   lv_obj_set_style_text_letter_space(update_label, 2, 0);
-  lv_label_set_text(update_label, "UPDATE");
+  lv_label_set_text(update_label, "UPDATE NOW");
   lv_obj_center(update_label);
   lv_obj_add_event_cb(ui.update, yes_clicked_cb, LV_EVENT_CLICKED, NULL);
 
@@ -197,11 +197,11 @@ void torget_ota_ui_create(void) {
 
 static const char *state_word(tg_ota_ui_state state) {
   switch (state) {
-    case TG_OTA_UI_OPEN:       return "UPDATES ON";
-    case TG_OTA_UI_RECEIVING:  return "RECEIVING";
+    case TG_OTA_UI_OPEN:       return "READY";
+    case TG_OTA_UI_RECEIVING:  return "INSTALLING";
     case TG_OTA_UI_VERIFYING:  return "VERIFYING";
     case TG_OTA_UI_RESTARTING: return "RESTARTING";
-    case TG_OTA_UI_NOTICE:     return "UPDATE";
+    case TG_OTA_UI_NOTICE:     return "UPDATE READY";
     default:                   return "";
   }
 }
@@ -259,16 +259,14 @@ void torget_ota_ui_set(tg_ota_ui_state state, unsigned percent,
   } else {
     lv_obj_add_flag(ui.later, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ui.update, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(ui.arc, LV_OBJ_FLAG_HIDDEN);
   }
   if (state == TG_OTA_UI_NOTICE) {
-    /* Takeovern: UPDATE overst, READY stort i ringen, versionen som
-     * vantar pa versionsraden (tjansten pushar den fore SHOW) och
-     * utgangarna i detaljraden. Bagen vilar som spar — pulsen ar en
-     * framtida rorelsegrind, inte en smygpremiar. */
-    lv_arc_set_mode(ui.arc, LV_ARC_MODE_NORMAL);
-    lv_arc_set_value(ui.arc, 0);
-    lv_obj_set_style_text_font(ui.center, &plex_attention_52, 0);
-    lv_label_set_text(ui.center, "READY");
+    /* Takeovern ar budskap + tva STORA knappar, ingen ring (fysisk
+     * granskning 2026-08-14: ringen tillforde inget har och knapparna
+     * var for sma). Versionen som vantar star under rubriken. */
+    lv_obj_add_flag(ui.arc, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(ui.center, "");
     lv_obj_add_flag(ui.pctsign, LV_OBJ_FLAG_HIDDEN);
   } else if (state == TG_OTA_UI_OPEN) {
     /* Bågen är kvarvarande lucktid: full vid nytt håll, dränerad vid 0.
@@ -314,7 +312,7 @@ void torget_ota_ui_set(tg_ota_ui_state state, unsigned percent,
   /* I NOTICE bor versionen INNE i ringen (under READY) — pillren äger
    * ytan under ringen. Övriga lägen behåller raden under ringen. */
   if (state == TG_OTA_UI_NOTICE)
-    lv_obj_align(ui.version, LV_ALIGN_CENTER, 0, 268 - 240 + 52);
+    lv_obj_align(ui.version, LV_ALIGN_TOP_MID, 0, 130);
   else
     lv_obj_align(ui.version, LV_ALIGN_TOP_MID, 0, 268 + ARC_SIZE / 2 + 10);
 

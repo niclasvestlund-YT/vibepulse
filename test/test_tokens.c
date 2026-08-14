@@ -113,6 +113,18 @@ int main(void) {
     free(json);
   }
 
+  /* OTA-annonsen: git describe-strängar är längre än kvotlabelns 16 tecken
+   * — 18-teckensversionen klipptes TYST av labelkapaciteten och notisen
+   * blev aldrig av (hittat live 2026-08-14). Fältet bär appbeskrivningens
+   * fulla 31+NUL. */
+  memset(&t, 0, sizeof t);
+  check("ota-annons med lång version parsar",
+        PARSE("{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+              "\"daySessions\":0,\"monthTokens\":0," BASE_NULLS
+              ",\"otaAvailableVersion\":\"v0.2.1-36-g911b2bf\"}", &t)
+        && t.has_ota_available_version
+        && strcmp(t.ota_available_version, "v0.2.1-36-g911b2bf") == 0);
+
   /* En vilande dag med alla limits null är giltig: nollor och streck är
    * ärliga när inget brunnit och inga källor svarar. */
   check("nollor + null ok",

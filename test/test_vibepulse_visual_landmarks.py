@@ -251,9 +251,6 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             ("torget-ota-ring-receiving.bmp", top, white, track),
             ("torget-ota-ring-verifying.bmp", top, white, white),
             ("torget-ota-ring-restarting.bmp", top, white, white),
-            # NOTICE: bagen vilar som rent spar — takeovern bar ordet,
-            # READY i mitten och versionen som vantar.
-            ("torget-ota-ring-notice.bmp", top, track, track),
         )
         muted = (146, 152, 162)
         for name, probe, probe_color, upper_left_color in cases:
@@ -276,6 +273,28 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                 codex = (111, 120, 255)
                 self.assertNotIn(claude, center_row)
                 self.assertNotIn(codex, center_row)
+
+    def test_ota_notice_is_message_and_two_big_buttons(self):
+        """Fysisk granskning 2026-08-14: ingen ring har — rubrik, vantande
+        version och tva stora knappar. UPDATE NOW (vit kant, y 210-298)
+        ovanfor LATER (sparkant, y 322-410); ringytan ar slackt."""
+        image = self.image("torget-ota-ring-notice.bmp")
+        white = (255, 255, 255)
+        muted = (146, 152, 162)
+        self.assertEqual(image.getpixel((5, 5)), (0, 0, 0))
+        # Dar ringens band lag ar det svart nu.
+        self.assertEqual(image.getpixel((141, 169)), (0, 0, 0))
+        # Rubrikraden bar vitt (UPDATE READY i attention-fonten).
+        header_row = [image.getpixel((x, 78)) for x in range(60, 420)]
+        self.assertIn(white, header_row)
+        # Versionsraden under rubriken ar muted.
+        version_row = [image.getpixel((x, 140)) for x in range(100, 380)]
+        self.assertIn(muted, version_row)
+        # UPDATE NOW-knappens inre bar vit text; LATER-knappens muted.
+        update_row = [image.getpixel((x, 254)) for x in range(120, 360)]
+        self.assertIn(white, update_row)
+        later_row = [image.getpixel((x, 366)) for x in range(120, 360)]
+        self.assertIn(muted, later_row)
 
     def test_provider_bars_are_segmented_with_locked_colors_and_marker(self):
         cases = (

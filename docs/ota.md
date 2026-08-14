@@ -95,9 +95,11 @@ directory is not), the OTA work is on the `claude/ota-foundation` branch,
 and this file plus `docs/agent-setup.md` are the runbooks.
 
 Hold KEY3 (or answer the takeover with UPDATE) when you're ready. After
-the OTA reboot the window is designed to re-arm itself once
-(PENDING_VERIFY boot), so an iterate-flash-iterate session needs one
-consent, not one per build.
+the OTA reboot the window re-arms itself once (PENDING_VERIFY boot), so
+an iterate-flash-iterate session needs one consent, not one per build —
+observed live 2026-08-14: with the pusher armed, a new build delivered
+itself straight into the re-armed window with no touch at all. Chained
+updates are the intended dev rhythm; a short KEY3 press ends the chain.
 
 Everything the transfer shows on the glass is honest device-owned data:
 the ring fills clockwise with the received share, VERIFYING counts the

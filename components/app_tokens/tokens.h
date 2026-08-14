@@ -104,8 +104,10 @@ typedef struct {
   char claude_model_week_label[TK_QUOTA_LABEL_CAP];
   int has_claude_model_week_label;
   /* OTA-annonsen: senaste byggets version pa Macen. Enheten jamfor sjalv
-   * mot sin korande version — servern pastas aldrig veta vad som kor. */
-  char ota_available_version[TK_QUOTA_LABEL_CAP];
+   * mot sin korande version — servern pastas aldrig veta vad som kor.
+   * 32 = esp_app_desc_t:s versionsfalt; kvotlabelns 17 klippte git
+   * describe-strangar tyst (18 tecken, hittat live 2026-08-14). */
+  char ota_available_version[32];
   int has_ota_available_version;
   tk_forecast claude_forecast, codex_forecast;
   tk_value value;
