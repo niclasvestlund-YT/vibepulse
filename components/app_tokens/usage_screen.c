@@ -14,6 +14,8 @@
 #include "vibepulse_layout.generated.h"
 
 extern const lv_font_t plex_num_164;
+extern const lv_font_t plex_money_118;
+extern const lv_font_t plex_money_35;
 extern const lv_font_t plex_num_38;
 extern const lv_font_t plex_headline_48;
 extern const lv_font_t plex_stat_35;
@@ -123,12 +125,36 @@ typedef struct {
   bool quota_stale;
 } tracker_page;
 
+typedef struct {
+  lv_obj_t *root;
+  lv_obj_t *icon;
+  lv_obj_t *name;
+  lv_obj_t *money;
+  lv_obj_t *track;
+  lv_obj_t *fill;
+} value_row;
+
+typedef struct {
+  lv_obj_t *tile;
+  lv_obj_t *evidence;
+  lv_obj_t *hero;
+  lv_obj_t *rule;
+  lv_obj_t *rule_label;
+  /* One-provider layout: the identity moves to the top slot, mark and all. */
+  lv_obj_t *solo_icon[2];
+  value_row rows[2];
+  /* One-provider layout only: the combined pair moves into a stat footer. */
+  lv_obj_t *stat_api, *stat_paid, *cap_api, *cap_paid;
+} value_page;
+
 static struct {
   lv_obj_t *tileview;
   lv_obj_t *tiles[TK_USAGE_SCREEN_VIEWS];
   quota_page quotas[3];
   forecast_row forecast_rows[2];
   tracker_page trackers[2];
+  value_page value;
+  tk_tokens last_tokens;
   tk_agent_snapshot agent_snapshot;
   int64_t agent_applied_at_us;
   int64_t last_now_us;
@@ -268,17 +294,26 @@ static void create_analytics_header(lv_obj_t *tile, const char *title,
   create_hairline(tile, HEADER_LINE_Y);
 }
 
+/* Centred from the dot geometry rather than a hard-coded origin: the row
+ * grows every time a view is added, and a fixed origin walks it off centre. */
+#define PAGER_DOT 6
+#define PAGER_DOT_ACTIVE 18
+#define PAGER_GAP 5
+#define PAGER_W ((TK_USAGE_SCREEN_VIEWS - 1) * (PAGER_DOT + PAGER_GAP) + \
+                 PAGER_DOT_ACTIVE)
+#define PAGER_X ((VP_SCREEN_W - PAGER_W) / 2)
+
 static void create_pager(lv_obj_t *tile, int active) {
-  int x = 209;
+  int x = PAGER_X;
   for (int i = 0; i < TK_USAGE_SCREEN_VIEWS; i++) {
-    int width = i == active ? 18 : 6;
+    int width = i == active ? PAGER_DOT_ACTIVE : PAGER_DOT;
     lv_obj_t *dot = bare(tile);
     lv_obj_set_pos(dot, x, PAGER_Y);
-    lv_obj_set_size(dot, width, 6);
+    lv_obj_set_size(dot, width, PAGER_DOT);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(dot, i == active ? COL_DOT_ON : COL_DOT, 0);
-    x += width + 5;
+    x += width + PAGER_GAP;
   }
 }
 
@@ -398,6 +433,294 @@ static void create_burn_rate_page(void) {
   create_forecast_row(tile, &ui.forecast_rows[1], 270,
                       USAGE_PROVIDER_CODEX);
   create_pager(tile, VIEW_BURN_RATE);
+}
+
+/* Value page.
+ *
+ * The whole page reduces to one question: past the line or not. Every
+ * provider's bar is normalised to its OWN plan cost, so break-even lands at
+ * the same fraction on all of them -- which is what lets a single white rule
+ * down the centre of the screen mean the same thing for every row, said once
+ * and labelled once.
+ *
+ * The hero is the multiple, not the money. A giant dollar figure on a page
+ * titled VALUE is ambiguous between what you spent and what you got; a
+ * multiple can only read as a verdict. The dollars stay directly above it as
+ * the evidence line, where a caption disambiguates them.
+ *
+ * Square bar ends, deliberately: the quota pages' pill means "running out",
+ * and the same shape here with the opposite meaning made the two pages
+ * indistinguishable at a glance. */
+#define VALUE_HERO_X 18
+#define VALUE_HERO_Y 124
+#define VALUE_MONEY_HERO_X 19
+#define VALUE_MONEY_HERO_Y 132
+#define VALUE_WORD_HERO_X 19
+#define VALUE_WORD_HERO_Y 213
+#define VALUE_EVIDENCE_Y 72
+/* Break-even is at half scale, and half of the 436 px content width lands on
+ * the screen's own centre line. A 3 px rule at 239 is centred on 240. */
+#define VALUE_RULE_X (VP_SAFE_X + VP_CONTENT_W / 2 - 1)
+#define VALUE_ROW_MONEY_Y 252
+#define VALUE_ROW_PITCH 84
+/* Optical centring, measured off the raster rather than derived from the
+ * boxes: the 32 px mark's INK sits high inside its box, so a name aligned to
+ * the box centre lands 6 px low and reads as dropped -- next to a 35 px money
+ * figure on the same row, which IS centred, the mismatch is obvious. */
+#define VALUE_ROW_NAME_DY 8
+/* Icon x=0/name x=42 mirrors the quota header's 22/64 pair exactly. */
+#define VALUE_ROW_NAME_X 42
+/* The two marks are different artwork and their ink sits at different
+ * heights inside the same 32 px box -- Codex's 2 px lower than Claude's. The
+ * offsets differ so the RENDERED marks line up with their rows, which is
+ * what the eye judges; measured off the rasters, not derived. */
+#define VALUE_ROW_ICON_DY 2
+#define VALUE_ROW_CODEX_ICON_DY 0
+#define VALUE_ROW_BAR_DY 40
+#define VALUE_RULE_Y 284
+#define VALUE_RULE_H 124
+#define VALUE_RULE_LABEL_Y 412
+/* Already a platform colour (spec/ui-spec.md's cheap-electricity dot):
+ * desaturated to match, and far from both provider accents. */
+#define COL_MONEY lv_color_hex(0x6FC795)
+
+static void create_value_row(lv_obj_t *tile, value_row *row,
+                             usage_provider provider) {
+  row->root = bare(tile);
+  lv_obj_set_pos(row->root, VP_SAFE_X, VALUE_ROW_MONEY_Y);
+  lv_obj_set_size(row->root, VP_CONTENT_W, VALUE_ROW_BAR_DY + VP_BAR_H);
+
+  /* Same 32 px asset and same 42 px name offset the quota pages use for
+   * their header identity, so a provider is recognised the same way on every
+   * screen -- by its mark first, its name second. */
+  if (provider == USAGE_PROVIDER_CLAUDE) {
+    create_claude_icon(row->root, 0, VALUE_ROW_ICON_DY);
+    row->icon = lv_obj_get_child(row->root, -1);
+  } else {
+    row->icon = create_codex_icon(row->root, 0, VALUE_ROW_CODEX_ICON_DY);
+  }
+
+  /* The provider accent on the name is the only thing separating the two
+   * rows at two metres, and it marks that provider's own data. */
+  row->name = label(row->root, &plex_ui_16,
+                    provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX,
+                    VALUE_ROW_NAME_X, VALUE_ROW_NAME_DY, 200, 18);
+  lv_obj_set_style_text_letter_space(row->name, 2, 0);
+  row->money = label(row->root, &plex_money_35, COL_WHITE,
+                     VP_CONTENT_W - 240, 0, 240, 35);
+  lv_obj_set_style_text_align(row->money, LV_TEXT_ALIGN_RIGHT, 0);
+
+  row->track = bare(row->root);
+  lv_obj_set_pos(row->track, 0, VALUE_ROW_BAR_DY);
+  lv_obj_set_size(row->track, VP_CONTENT_W, VP_BAR_H);
+  lv_obj_set_style_bg_opa(row->track, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(row->track, COL_TRACK, 0);
+
+  row->fill = bare(row->track);
+  lv_obj_set_pos(row->fill, 0, 0);
+  lv_obj_set_size(row->fill, 0, VP_BAR_H);
+  lv_obj_set_style_bg_opa(row->fill, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(
+      row->fill,
+      provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX, 0);
+}
+
+static void create_value_stat(lv_obj_t *tile, lv_obj_t **value_out,
+                              lv_obj_t **caption_out, int x, bool right,
+                              const char *caption) {
+  *value_out = label(tile, &plex_money_35, COL_WHITE, x, 380, 200, 35);
+  *caption_out = label(tile, &plex_ui_14, COL_MUTED, x, 417, 200, 18);
+  lv_obj_set_style_text_letter_space(*caption_out, 1, 0);
+  lv_label_set_text(*caption_out, caption);
+  if (right) {
+    lv_obj_set_style_text_align(*value_out, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(*caption_out, LV_TEXT_ALIGN_RIGHT, 0);
+  }
+}
+
+static void create_value_page(void) {
+  value_page *page = &ui.value;
+  memset(page, 0, sizeof *page);
+  page->tile = new_tile(VIEW_VALUE);
+  create_analytics_header(page->tile, "VALUE", "MONTH TO DATE",
+                          "AT LIST API PRICES");
+
+  create_claude_icon(page->tile, VP_SAFE_X, VALUE_EVIDENCE_Y - 6);
+  page->solo_icon[0] = lv_obj_get_child(page->tile, -1);
+  page->solo_icon[1] = create_codex_icon(page->tile, VP_SAFE_X,
+                                         VALUE_EVIDENCE_Y - 6);
+  for (int i = 0; i < 2; i++)
+    lv_obj_add_flag(page->solo_icon[i], LV_OBJ_FLAG_HIDDEN);
+
+  page->evidence = label(page->tile, &plex_ui_21, COL_LABEL,
+                         VP_SAFE_X, VALUE_EVIDENCE_Y, VP_CONTENT_W, 25);
+  lv_obj_set_style_text_letter_space(page->evidence, 2, 0);
+
+  page->hero = label_auto(page->tile, &plex_money_118, COL_MONEY,
+                          VALUE_HERO_X, VALUE_HERO_Y);
+  lv_obj_set_style_text_letter_space(page->hero, -3, 0);
+  lv_label_set_text(page->hero, "–");
+
+  create_value_row(page->tile, &page->rows[0], USAGE_PROVIDER_CLAUDE);
+  create_value_row(page->tile, &page->rows[1], USAGE_PROVIDER_CODEX);
+
+  /* Created after the rows so it draws on top of every fill. */
+  page->rule = bare(page->tile);
+  lv_obj_set_pos(page->rule, VALUE_RULE_X, VALUE_RULE_Y);
+  lv_obj_set_size(page->rule, 3, VALUE_RULE_H);
+  lv_obj_set_style_bg_opa(page->rule, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(page->rule, COL_WHITE, 0);
+
+  page->rule_label = label(page->tile, &plex_ui_12, COL_MUTED,
+                           VP_SAFE_X, VALUE_RULE_LABEL_Y, VP_CONTENT_W, 16);
+  lv_obj_set_style_text_align(page->rule_label, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(page->rule_label, 2, 0);
+  lv_label_set_text(page->rule_label, "BREAK EVEN");
+
+  create_value_stat(page->tile, &page->stat_api, &page->cap_api,
+                    VP_SAFE_X, false, "VIA API");
+  create_value_stat(page->tile, &page->stat_paid, &page->cap_paid,
+                    258, true, "YOU PAID");
+  create_pager(page->tile, VIEW_VALUE);
+}
+
+static void apply_value_row(value_row *row, const usage_value_row *view,
+                            int y, int bar_h, bool solo) {
+  if (!view) {
+    lv_obj_add_flag(row->root, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_remove_flag(row->root, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_pos(row->root, VP_SAFE_X, y);
+  /* The root must grow with the bar: LVGL clips children to the parent, so a
+   * root still sized for the 24 px two-row bar silently crops the 40 px one. */
+  lv_obj_set_size(row->root, VP_CONTENT_W, VALUE_ROW_BAR_DY + bar_h);
+  lv_obj_set_size(row->track, VP_CONTENT_W, bar_h);
+  lv_label_set_text(row->name, view->name);
+  lv_label_set_text(row->money, view->money);
+  /* In the one-provider layout the name is already the top slot and the
+   * money is already the footer, so the row carries neither. */
+  if (solo) {
+    lv_obj_add_flag(row->name, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(row->money, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(row->icon, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_remove_flag(row->name, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(row->money, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(row->icon, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  if (!view->has_bar) {
+    lv_obj_add_flag(row->track, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_remove_flag(row->track, LV_OBJ_FLAG_HIDDEN);
+  int width = (int)(view->bar_fraction * VP_CONTENT_W + 0.5);
+  if (width > VP_CONTENT_W) width = VP_CONTENT_W;
+  /* A near-zero provider still gets a visible stub: 2 px of fill reads as a
+   * rendering fault rather than as "earned almost nothing". */
+  if (width < 6) width = 6;
+  lv_obj_set_size(row->fill, width, bar_h);
+}
+
+/* The value page owns its hero font. The shared numeral fonts must never
+ * carry "$": the glyph is taller than every digit, so adding it grows
+ * line_height (164 px: 119 -> 153) and pushes every already-reviewed quota
+ * page down 12 px. A dedicated font keeps every approved raster identical. */
+static void apply_value_hero(value_page *page,
+                             const usage_value_page_view *view) {
+  if (view->hero_is_word) {
+    lv_obj_set_style_text_font(page->hero, &plex_headline_48, 0);
+    lv_obj_set_style_text_color(page->hero, COL_WHITE, 0);
+    lv_obj_set_style_text_letter_space(page->hero, -1, 0);
+    lv_obj_set_pos(page->hero, VALUE_WORD_HERO_X, VALUE_WORD_HERO_Y);
+  } else {
+    const bool money = view->state == USAGE_VALUE_NO_PLAN_COST;
+    lv_obj_set_style_text_font(page->hero, &plex_money_118, 0);
+    /* Money accent only when the month is actually ahead. There is no red in
+     * the palette and none is needed: white plus bars short of the rule says
+     * it without inventing a colour. */
+    lv_obj_set_style_text_color(
+        page->hero, view->hero_ahead ? COL_MONEY : COL_WHITE, 0);
+    lv_obj_set_style_text_letter_space(page->hero, -3, 0);
+    /* The '$' ink envelope is taller than the digits', so the money hero
+     * sits lower to keep its ink top where the multiple's is. */
+    lv_obj_set_pos(page->hero,
+                   money ? VALUE_MONEY_HERO_X : VALUE_HERO_X,
+                   money ? VALUE_MONEY_HERO_Y : VALUE_HERO_Y);
+  }
+  lv_label_set_text(page->hero, view->hero_text);
+}
+
+static void apply_value(const tk_tokens *tokens) {
+  value_page *page = &ui.value;
+  if (!page->tile) return;
+  usage_value_page_view view;
+  usage_presenter_build_value(tokens, &view);
+
+  /* With one provider the earned/paid pair lives in the stat footer, so the
+   * top slot carries the provider's name instead of repeating them. */
+  const bool named = view.row_count == 1 && view.rows[0].name[0];
+  lv_obj_set_style_text_color(
+      page->evidence,
+      named ? (view.rows[0].provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE
+                                                              : COL_CODEX)
+            : COL_LABEL, 0);
+  lv_label_set_text(page->evidence,
+                    named ? view.rows[0].name : view.evidence);
+  /* Indent the text past the mark in the one-provider layout, exactly as the
+   * quota header does, and show only the provider that is actually there. */
+  lv_obj_set_pos(page->evidence,
+                 named ? VP_SAFE_X + VALUE_ROW_NAME_X : VP_SAFE_X,
+                 VALUE_EVIDENCE_Y);
+  for (int i = 0; i < 2; i++) {
+    const bool show = named &&
+        (view.rows[0].provider == USAGE_PROVIDER_CLAUDE) == (i == 0);
+    if (show) lv_obj_remove_flag(page->solo_icon[i], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(page->solo_icon[i], LV_OBJ_FLAG_HIDDEN);
+  }
+  apply_value_hero(page, &view);
+
+  /* One provider gets the house shape instead of a centred stub: taller bar
+   * carrying the middle of the page, and the combined pair moved down into a
+   * stat footer where the second row would otherwise have been. */
+  const bool solo = view.row_count == 1;
+  const int bar_h = solo ? 40 : VP_BAR_H;
+  const int row_y = solo ? 236 : VALUE_ROW_MONEY_Y;
+  for (int i = 0; i < 2; i++)
+    apply_value_row(&page->rows[i],
+                    i < view.row_count ? &view.rows[i] : NULL,
+                    row_y + i * VALUE_ROW_PITCH, bar_h, solo);
+
+  if (view.show_rule) {
+    lv_obj_set_pos(page->rule, VALUE_RULE_X,
+                   solo ? row_y + VALUE_ROW_BAR_DY - 10 : VALUE_RULE_Y);
+    lv_obj_set_size(page->rule, 3, solo ? bar_h + 20 : VALUE_RULE_H);
+    lv_obj_remove_flag(page->rule, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(page->rule);
+    lv_obj_set_pos(page->rule_label, VP_SAFE_X,
+                   solo ? row_y + VALUE_ROW_BAR_DY + bar_h + 16
+                        : VALUE_RULE_LABEL_Y);
+    lv_obj_remove_flag(page->rule_label, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(page->rule, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(page->rule_label, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  /* The stat footer exists only in the one-provider layout: with two rows the
+   * combined pair is already the evidence line, and repeating it is what made
+   * the old page read as five competing zones. */
+  const bool stats = solo && view.api_cost[0] && view.paid[0];
+  lv_obj_t *const footer[] = {page->stat_api, page->stat_paid,
+                              page->cap_api, page->cap_paid};
+  for (size_t i = 0; i < sizeof footer / sizeof footer[0]; i++) {
+    if (stats) lv_obj_remove_flag(footer[i], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(footer[i], LV_OBJ_FLAG_HIDDEN);
+  }
+  if (stats) {
+    lv_label_set_text(page->stat_api, view.api_cost);
+    lv_label_set_text(page->stat_paid, view.paid);
+  }
 }
 
 static uint64_t agent_packet_age_ms(int64_t now_us) {
@@ -698,16 +1021,19 @@ void usage_screen_create(lv_obj_t *root) {
   create_burn_rate_page();
   create_tracker_page(&ui.trackers[0], VIEW_TRACKER_CLAUDE, false);
   create_tracker_page(&ui.trackers[1], VIEW_TRACKER_CODEX, true);
+  create_value_page();
   tk_agent_monitor_create(root);
 }
 
 void usage_screen_apply_tokens(const tk_tokens *tokens) {
   if (!tokens) return;
+  ui.last_tokens = *tokens;
   for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], tokens);
   usage_forecast_page_view forecasts = {0};
   usage_presenter_build_forecasts(tokens, &forecasts);
   for (int i = 0; i < 2; i++)
     apply_forecast_row(&ui.forecast_rows[i], &forecasts.rows[i]);
+  apply_value(tokens);
 }
 
 void usage_screen_apply_max_tracker(const tk_max_tracker *t) {

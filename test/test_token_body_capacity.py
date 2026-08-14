@@ -80,6 +80,23 @@ def worst_case_payload() -> dict:
         payload[f"{prefix}ForecastPaceFactor"] = 9999.9
         payload[f"{prefix}ForecastAt"] = 9_999_999_999
         payload[f"{prefix}ForecastOffsetMin"] = -999_999
+    # Value multiple (value_meter.build_payload). Field-wise maxima: the
+    # longest string per key and the widest number serialization.
+    payload["value"] = {
+        "value_usd": 999_999.99,
+        "plan_usd": 9999.0,
+        "cost_source": "configured",     # längre än "default"/"unknown"
+        "basis": "list API prices",
+        "prices_as_of": "2026-12-31",
+        "unpriced_token_share": 0.9999,  # fyra decimaler, som round(x, 4)
+        # Per-provider breakdown: both providers present is the widest case.
+        "claude_usd": 999_999.99,
+        "claude_plan_usd": 9999.0,
+        "codex_usd": 999_999.99,
+        "codex_plan_usd": 9999.0,
+        "state": "no_plan_cost",         # längre än "ok"/"partial"
+        "multiple": 9999.99,
+    }
     return payload
 
 

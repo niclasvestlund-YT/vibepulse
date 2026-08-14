@@ -37,6 +37,13 @@ conv Bold      84 "0x30-0x39,0x20,0x3A"                  plex_num_84
 # 118 bär kolon sedan 2026-08-14 (kvar för ev. framtida stora klockor).
 conv Bold     118 "0x30-0x39,0x20,0x25,0x2E,0xA0,0x2013,0x3A" plex_num_118
 conv Bold      50 "0x30-0x39,0x25,0x2C,0x2013"           plex_num_50
+# Värdesidans EGNA pengafonter. De delade sifferfonterna får INTE bära "$":
+# dollartecknet är högre än varje siffra, så det växer fontens line_height
+# (164: 119 -> 153 px) och trycker ner varje redan granskad kvotsida med 12 px.
+# Egna fonter i stället för utökade delade — ~40 KB flash för att lämna alla
+# godkända rastrar bitidentiska, och för att Solelkollens 118 inte ska flytta.
+conv Bold     118 "0x30-0x39,0x24,0x2C,0x2E,0x2013,0xD7" plex_money_118
+conv Bold      35 "0x20,0x24,0x2C,0x2E,0x30-0x39,0x41-0x5A,0xD7,0x2013" plex_money_35
 # VibePulse Burn Rate outcomes: uppercase action words plus compact durations.
 conv Bold      48 "0x20,0x30-0x39,0x41-0x5A"             plex_headline_48
 conv Bold      35 "0x20,0x25,0x2B,0x2E,0x30-0x39,0x41-0x5A,0x2013" plex_stat_35

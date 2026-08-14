@@ -107,6 +107,26 @@ Run Claude only, or Codex only, and the other half simply shows dashes.
 
 <br clear="all">
 
+### Are you getting your money's worth?
+
+The usage pages answer *how much have I spent?*. The
+[**value multiple**](docs/value-multiple.md) answers the question you
+actually have every month: it prices the tokens your agents already logged
+at list API rates and divides by what you pay.
+
+```
+python3 tools/tokenserver/tokenserver.py --claude-plan max5x --plan-cost-usd 100
+```
+
+It counts cache tokens, which is the whole point — a real record here reads
+2 input and 4 output against 23 655 cache-read, so pricing only input and
+output understates it by 577x.
+
+Rates are not hand-maintained: they are generated from a public price
+catalogue by `tools/tokenserver/update_prices.py` and committed, so the
+server stays offline and refreshing is one command. An unknown model degrades
+the figure to a dash rather than being silently free.
+
 ## How it works
 
 ```

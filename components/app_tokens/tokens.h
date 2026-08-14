@@ -49,6 +49,47 @@ typedef struct {
   int has_offset_min;
 } tk_forecast;
 
+/*
+ * The value multiple: what this month's usage would cost at list API prices,
+ * over what the subscription costs. Served under the additive "value" key.
+ *
+ * state is what the view branches on, because a wrong figure here is worse
+ * than no figure. Anything the service could not stand behind arrives as
+ * PARTIAL or NO_PLAN_COST rather than as a number, and an absent or
+ * unrecognised block is UNAVAILABLE -- dashes, never an invented multiple.
+ */
+typedef enum {
+  TK_VALUE_UNAVAILABLE,  /* key absent, malformed, or state unrecognised */
+  TK_VALUE_PARTIAL,      /* too many unpriced tokens; dash everything */
+  TK_VALUE_NO_PLAN_COST, /* dollars are real, denominator unknown */
+  TK_VALUE_OK,
+} tk_value_state;
+
+typedef struct {
+  tk_value_state state;
+  double value_usd;  /* list-price value of the month's tokens */
+  double plan_usd;   /* what the subscription costs per month */
+  double multiple;   /* value_usd / plan_usd */
+  int has_value_usd, has_plan_usd, has_multiple;
+  /* 0 when the plan cost is this build's default rather than a figure the
+   * operator stated. The view must not present a default as a precise
+   * figure. Rates themselves need no such flag: they are generated from a
+   * dated price catalogue, and their age travels as prices_as_of. */
+  int cost_configured;
+  /* Per-provider breakdown of the same month. Optional: a Claude-only
+   * machine reports only the Claude pair, and a payload that omits them
+   * entirely still renders the combined figure. Used to attribute the total
+   * on screen -- the one honest way to paint a combined page in the reserved
+   * provider accents. */
+  double claude_usd, codex_usd;
+  int has_claude_usd, has_codex_usd;
+  /* What each subscription costs, separately. Each one pays for itself or
+   * does not on its own, so each earns its own bar and its own break-even
+   * point; a blended bar would hide a provider that is not earning its keep. */
+  double claude_plan_usd, codex_plan_usd;
+  int has_claude_plan_usd, has_codex_plan_usd;
+} tk_value;
+
 typedef struct {
   /* volymen (alltid närvarande) */
   double day_tokens;          /* idag, lokal Mac-tid */
@@ -67,6 +108,7 @@ typedef struct {
   char ota_available_version[TK_QUOTA_LABEL_CAP];
   int has_ota_available_version;
   tk_forecast claude_forecast, codex_forecast;
+  tk_value value;
 } tk_tokens;
 
 #endif

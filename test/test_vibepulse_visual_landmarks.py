@@ -54,6 +54,14 @@ MT_STAT_VALUE_Y = MT_STAT_LABEL_Y + 34  # 348
 MT_STAT_COL_X = [MT_GRID_X + (i * MT_GRID_W) // 4 for i in range(4)]
 MT_STAT_COL_W = MT_GRID_W // 4  # 104
 PAGER_ROW_Y = 458  # PAGER_Y (456) + 2: inside the 6px-tall dot row
+SCREEN_VIEWS = int(
+    re.search(
+        r"^#define TK_USAGE_SCREEN_VIEWS (\d+)$",
+        (ROOT / "components/app_tokens/usage_screen.h").read_text(
+            encoding="utf-8"),
+        re.MULTILINE,
+    ).group(1)
+)
 
 MAX_RED = (255, 45, 31)  # 0xFF2D1F — exact-max special case, both providers
 CODEX_85_FAMILY = (111, 120, 255)  # 0x6F78FF — the codex 85%-stop itself
@@ -166,6 +174,15 @@ EXPECTED = {
     "torget-ota-ring-verifying.bmp",
     "torget-ota-ring-restarting.bmp",
     "torget-ota-ring-notice.bmp",
+    "torget-vibepulse-value-ahead.bmp",
+    "torget-vibepulse-value-early.bmp",
+    "torget-vibepulse-value-wide.bmp",
+    "torget-vibepulse-value-no-plan-cost.bmp",
+    "torget-vibepulse-value-partial.bmp",
+    "torget-vibepulse-value-no-data.bmp",
+    "torget-vibepulse-value-both.bmp",
+    "torget-vibepulse-value-uneven.bmp",
+    "torget-vibepulse-value-solo.bmp",
 }
 
 
@@ -746,27 +763,39 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                 self.assertNotEqual(image.getpixel((rect[2] + 1, mid_y)),
                                     MAX_RED)
 
-    def test_tracker_pager_shows_six_dots(self):
-        # TK_USAGE_SCREEN_VIEWS == 6: create_pager draws one dot per view,
-        # the active one 18px wide and the rest 6px, all on one pixel row
-        # with nothing else sharing it — so counting horizontal runs of
-        # non-black pixels on that row is an exact dot count and pattern.
+    def test_pager_shows_one_dot_per_view(self):
+        # create_pager draws one dot per view, the active one 18px wide and
+        # the rest 6px, all on one pixel row with nothing else sharing it —
+        # so counting horizontal runs of non-black pixels on that row is an
+        # exact dot count and pattern. The expected count is read from the
+        # header rather than written here, so adding a view updates this
+        # test's expectation but never lets the row silently go uncounted.
         cases = (
             ("torget-vibepulse-tracker-claude-coldstart.bmp", 4),  # VIEW_TRACKER_CLAUDE
             ("torget-vibepulse-tracker-codex-full.bmp", 5),        # VIEW_TRACKER_CODEX
             ("torget-vibepulse-tracker-empty.bmp", 5),             # view unchanged
             ("torget-vibepulse-tracker-stale.bmp", 5),             # view unchanged
+            ("torget-vibepulse-value-both.bmp", 6),               # VIEW_VALUE
         )
         for name, active_index in cases:
             with self.subTest(name=name):
                 image = self.image(name)
                 runs = dot_runs(image, PAGER_ROW_Y)
-                self.assertEqual(len(runs), 6)
+                self.assertEqual(len(runs), SCREEN_VIEWS)
                 widths = [end - start + 1 for start, end in runs]
                 self.assertEqual(widths[active_index], 18)
                 for i, width in enumerate(widths):
                     if i != active_index:
                         self.assertEqual(width, 6)
+
+    def test_pager_row_is_centred(self):
+        # A hard-coded origin walked the row off centre every time a view was
+        # added; create_pager now derives it. Assert the drawn row really is
+        # centred, not just that the arithmetic in the header looks right.
+        runs = dot_runs(self.image("torget-vibepulse-value-both.bmp"),
+                        PAGER_ROW_Y)
+        left, right = runs[0][0], runs[-1][1]
+        self.assertLessEqual(abs((left + right + 1) - 480), 2)
 
 
 if __name__ == "__main__":

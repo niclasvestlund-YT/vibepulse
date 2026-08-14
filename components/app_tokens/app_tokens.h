@@ -25,6 +25,7 @@ enum {
   VIEW_BURN_RATE = 3,
   VIEW_TRACKER_CLAUDE = 4,
   VIEW_TRACKER_CODEX = 5,
+  VIEW_VALUE = 6,
 };
 
 /* Ett lyckat /api/tokens-svar. Snappar tickern, stämplar färskhet och

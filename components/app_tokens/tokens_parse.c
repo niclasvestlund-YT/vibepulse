@@ -206,6 +206,7 @@ static bool known_top_level_key(const char *key) {
       "claudeForecastOffsetMin", "codexForecastState",
       "codexForecastPctAtReset", "codexForecastPaceFactor",
       "codexForecastAt", "codexForecastOffsetMin", "otaAvailableVersion",
+      "value",
   };
   for (size_t index = 0; index < sizeof keys / sizeof keys[0]; index++) {
     if (strcmp(key, keys[index]) == 0) return true;
@@ -252,6 +253,82 @@ static bool optional_integer(const cJSON *root, const char *key,
   }
   *out = (int64_t)item->valuedouble;
   return true;
+}
+
+/*
+ * The "value" block is the contract's only nested object. It is parsed
+ * whole-or-not-at-all: any field that fails validation leaves the state
+ * lower than the service claimed, so the view degrades to dashes instead of
+ * rendering half a figure. A screen that shows "3.1x" derived from a
+ * malformed payload is worse than one that shows nothing.
+ */
+static void optional_value(const cJSON *root, bool trust_strings,
+                           tk_value *out) {
+  const cJSON *block = cJSON_GetObjectItemCaseSensitive(root, "value");
+  if (!cJSON_IsObject(block)) return;
+
+  const cJSON *state = cJSON_GetObjectItemCaseSensitive(block, "state");
+  if (!trust_strings || !cJSON_IsString(state) || !state->valuestring) return;
+
+  double usd = 0, plan = 0, multiple = 0;
+  int has_usd = 0, has_plan = 0, has_multiple = 0;
+  /* Ceilings are sanity bounds, not business rules: a month cannot plausibly
+   * be worth a million dollars of tokens, and a payload claiming so is
+   * corrupt rather than impressive. */
+  optional_nonnegative_number(block, "value_usd", 1000000, &usd, &has_usd);
+  optional_nonnegative_number(block, "plan_usd", 100000, &plan, &has_plan);
+  optional_nonnegative_number(block, "multiple", 10000, &multiple,
+                              &has_multiple);
+
+  const cJSON *source = cJSON_GetObjectItemCaseSensitive(block, "cost_source");
+  int configured = cJSON_IsString(source) && source->valuestring &&
+                   strcmp(source->valuestring, "configured") == 0;
+
+  tk_value_state claimed;
+  if (strcmp(state->valuestring, "ok") == 0) {
+    claimed = TK_VALUE_OK;
+  } else if (strcmp(state->valuestring, "no_plan_cost") == 0) {
+    claimed = TK_VALUE_NO_PLAN_COST;
+  } else if (strcmp(state->valuestring, "partial") == 0) {
+    claimed = TK_VALUE_PARTIAL;
+  } else {
+    return;  /* a state this firmware does not know: show nothing */
+  }
+
+  /* Demote when the numbers cannot carry the claimed state. A plan cost of
+   * zero would divide to infinity, so it fails the OK bar too. */
+  if (claimed == TK_VALUE_OK &&
+      (!has_usd || !has_plan || !has_multiple || plan <= 0)) {
+    claimed = has_usd ? TK_VALUE_NO_PLAN_COST : TK_VALUE_UNAVAILABLE;
+  }
+  if (claimed == TK_VALUE_NO_PLAN_COST && !has_usd) {
+    claimed = TK_VALUE_UNAVAILABLE;
+  }
+  if (claimed == TK_VALUE_UNAVAILABLE) return;
+
+  out->state = claimed;
+  out->cost_configured = configured;
+  /* Per-provider breakdown. Optional and independent of the combined
+   * figure: a payload that omits them still renders, and a provider that
+   * spent nothing is absent rather than zero, so the page can tell "not
+   * installed" from "earned nothing". */
+  optional_nonnegative_number(block, "claude_usd", 1000000,
+                              &out->claude_usd, &out->has_claude_usd);
+  optional_nonnegative_number(block, "codex_usd", 1000000,
+                              &out->codex_usd, &out->has_codex_usd);
+  optional_nonnegative_number(block, "claude_plan_usd", 100000,
+                              &out->claude_plan_usd,
+                              &out->has_claude_plan_usd);
+  optional_nonnegative_number(block, "codex_plan_usd", 100000,
+                              &out->codex_plan_usd,
+                              &out->has_codex_plan_usd);
+  if (has_usd) { out->value_usd = usd; out->has_value_usd = 1; }
+  if (claimed == TK_VALUE_OK) {
+    out->plan_usd = plan;
+    out->has_plan_usd = 1;
+    out->multiple = multiple;
+    out->has_multiple = 1;
+  }
 }
 
 static void optional_forecast(const cJSON *root, const char *prefix,
@@ -369,6 +446,7 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
       &t.codex_week.delta_pct, &t.codex_week.has_delta);
   optional_forecast(root, "claude", trust_optional_strings,
                     &t.claude_forecast);
+  optional_value(root, trust_optional_strings, &t.value);
   optional_forecast(root, "codex", trust_optional_strings,
                     &t.codex_forecast);
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 import os
 
-from tools.tokenserver import tokenserver
+from tools.tokenserver import codex_usage, tokenserver
 from tools.tokenserver.max_tracker import MaxTrackerStore
 from tools.tokenserver.quota_cache import CachedQuota, QuotaCache
 from tools.tokenserver.usage_history import Forecast, UsageHistory
@@ -2226,6 +2226,111 @@ class ArgumentParsingTests(unittest.TestCase):
         args = parser.parse_args([])
         self.assertIsNone(args.claude_plan)
         self.assertIsNone(args.codex_plan)
+
+
+class ValueMultipleIntegrationTests(unittest.TestCase):
+    """The value block, end to end through the transcript scanner."""
+
+    def setUp(self):
+        self.previous_cache = tokenserver._file_cache
+        tokenserver._file_cache = {}
+        self.previous_plan = tokenserver._claude_plan
+        self.previous_codex_plan = tokenserver._codex_plan
+        self.previous_override = tokenserver._plan_costs
+        tokenserver._claude_plan = "max5x"
+        tokenserver._codex_plan = None
+        tokenserver._plan_costs = {"claude": 100.0}
+        # Point the Codex scan at an empty tree so a developer machine that
+        # happens to have ~/.codex cannot leak real usage into these figures.
+        self.codex_dir = tempfile.TemporaryDirectory()
+        self.previous_codex_root = codex_usage.DEFAULT_SESSIONS_DIR
+        codex_usage.DEFAULT_SESSIONS_DIR = Path(self.codex_dir.name)
+        codex_usage.reset_cache()
+
+    def tearDown(self):
+        tokenserver._file_cache = self.previous_cache
+        tokenserver._claude_plan = self.previous_plan
+        tokenserver._codex_plan = self.previous_codex_plan
+        tokenserver._plan_costs = self.previous_override
+        codex_usage.DEFAULT_SESSIONS_DIR = self.previous_codex_root
+        codex_usage.reset_cache()
+        self.codex_dir.cleanup()
+
+    @staticmethod
+    def _line(message_id, model="claude-opus-5", cache_read=1_000_000):
+        return json.dumps({
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "sessionId": "session-a",
+            "requestId": f"request-{message_id}",
+            "message": {
+                "id": message_id,
+                "model": model,
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": cache_read,
+                },
+            },
+        }) + "\n"
+
+    def test_payload_carries_a_priced_value_block(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            (projects / "a.jsonl").write_text(self._line("one"))
+            value = tokenserver._compute(projects)["value"]
+        # 1M Opus 5 cache-read tokens: 5.00 x 0.10 = $0.50
+        self.assertEqual(value["value_usd"], 0.5)
+        self.assertEqual(value["state"], "ok")
+        self.assertEqual(value["plan_usd"], 100.0)
+        self.assertEqual(value["cost_source"], "configured")
+
+    def test_duplicate_records_are_deduplicated_in_dollars_too(self):
+        """The reason price rides on the record, not on a per-file sum.
+
+        Claude Code writes the same assistant record into more than one
+        transcript (a session and its subagent log). _compute already
+        deduplicates tokens by (message id, requestId); value has to ride the
+        very same dedup or the multiple silently inflates with every
+        duplicated record.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            line = self._line("shared")
+            (projects / "a.jsonl").write_text(line)
+            (projects / "b.jsonl").write_text(line)
+            snapshot = tokenserver._compute(projects)
+        self.assertEqual(snapshot["monthTokens"], 1_000_000)
+        self.assertEqual(snapshot["value"]["value_usd"], 0.5)
+
+    def test_distinct_records_accumulate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            (projects / "a.jsonl").write_text(
+                self._line("one") + self._line("two"))
+            value = tokenserver._compute(projects)["value"]
+        self.assertEqual(value["value_usd"], 1.0)
+
+    def test_unpriceable_model_suppresses_the_multiple(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            (projects / "a.jsonl").write_text(
+                self._line("future", model="claude-something-6"))
+            value = tokenserver._compute(projects)["value"]
+        self.assertEqual(value["state"], "partial")
+        self.assertIsNone(value["multiple"])
+        self.assertEqual(value["unpriced_token_share"], 1.0)
+
+    def test_value_is_absent_from_the_firmware_contract_when_unknown(self):
+        """An unset plan cost must dash the multiple, not invent one."""
+        tokenserver._claude_plan = None
+        tokenserver._plan_costs = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            projects = Path(temp_dir)
+            (projects / "a.jsonl").write_text(self._line("one"))
+            value = tokenserver._compute(projects)["value"]
+        self.assertEqual(value["state"], "no_plan_cost")
+        self.assertIsNone(value["multiple"])
+        self.assertEqual(value["value_usd"], 0.5)
 
 
 if __name__ == "__main__":

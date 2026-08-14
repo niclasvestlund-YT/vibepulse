@@ -756,6 +756,92 @@ static int run_vibepulse_static_qa(void) {
   dump_overlay_frame("ota-ring-notice");
   torget_ota_ui_set(TG_OTA_UI_HIDDEN, 0, 0);
 
+  /* Value multiple. Every state the parser can hand the page gets its own
+   * raster, because the whole design premise is that a wrong figure here is
+   * worse than no figure — the dashes need proving as much as the number. */
+  tk_tokens value_truth = {0};
+  value_truth.value.state = TK_VALUE_OK;
+  value_truth.value.has_value_usd = 1;
+  value_truth.value.value_usd = 312.0;
+  value_truth.value.has_plan_usd = 1;
+  value_truth.value.plan_usd = 100.0;
+  value_truth.value.has_multiple = 1;
+  value_truth.value.multiple = 3.12;
+  value_truth.value.cost_configured = 1;
+  tokens_apply(&value_truth);
+  tokens_show_view(VIEW_VALUE);
+  dump_frame("vibepulse-value-ahead");
+
+  /* Early in the month: below break-even, so the bar is partial and the
+   * hero keeps two decimals rather than rounding up to a false 1.0. */
+  tk_tokens value_early = value_truth;
+  value_early.value.value_usd = 97.0;
+  value_early.value.multiple = 0.97;
+  tokens_apply(&value_early);
+  dump_frame("vibepulse-value-early");
+
+  /* Widest realistic copy: four-figure value, two-digit multiple, and the
+   * estimated-plan caption that runs longest. */
+  tk_tokens value_wide = value_truth;
+  value_wide.value.value_usd = 2480.0;
+  value_wide.value.plan_usd = 200.0;
+  value_wide.value.multiple = 12.4;
+  value_wide.value.cost_configured = 0;
+  tokens_apply(&value_wide);
+  dump_frame("vibepulse-value-wide");
+
+  tk_tokens value_no_plan = {0};
+  value_no_plan.value.state = TK_VALUE_NO_PLAN_COST;
+  value_no_plan.value.has_value_usd = 1;
+  value_no_plan.value.value_usd = 312.0;
+  tokens_apply(&value_no_plan);
+  dump_frame("vibepulse-value-no-plan-cost");
+
+  tk_tokens value_partial = {0};
+  value_partial.value.state = TK_VALUE_PARTIAL;
+  tokens_apply(&value_partial);
+  dump_frame("vibepulse-value-partial");
+
+  tk_tokens value_none = {0};
+  tokens_apply(&value_none);
+  dump_frame("vibepulse-value-no-data");
+
+  /* Both providers, each with its own plan cost and its own break-even. */
+  tk_tokens value_both = value_truth;
+  value_both.value.value_usd = 312.0;
+  value_both.value.plan_usd = 220.0;
+  value_both.value.multiple = 1.42;
+  value_both.value.has_claude_usd = 1;
+  value_both.value.claude_usd = 280.0;
+  value_both.value.has_claude_plan_usd = 1;
+  value_both.value.claude_plan_usd = 200.0;
+  value_both.value.has_codex_usd = 1;
+  value_both.value.codex_usd = 32.0;
+  value_both.value.has_codex_plan_usd = 1;
+  value_both.value.codex_plan_usd = 20.0;
+  tokens_apply(&value_both);
+  dump_frame("vibepulse-value-both");
+
+  /* Codex below its own break-even while Claude is well past: the whole
+   * reason the bars are separate rather than blended. */
+  tk_tokens value_uneven = value_both;
+  value_uneven.value.codex_usd = 6.0;
+  value_uneven.value.value_usd = 286.0;
+  value_uneven.value.multiple = 1.30;
+  tokens_apply(&value_uneven);
+  dump_frame("vibepulse-value-uneven");
+
+  /* One subscription: one bar, and no empty second block. */
+  tk_tokens value_solo = value_both;
+  value_solo.value.has_codex_usd = 0;
+  value_solo.value.codex_usd = 0;
+  value_solo.value.has_codex_plan_usd = 0;
+  value_solo.value.value_usd = 280.0;
+  value_solo.value.plan_usd = 200.0;
+  value_solo.value.multiple = 1.40;
+  tokens_apply(&value_solo);
+  dump_frame("vibepulse-value-solo");
+
   return capture_failures == 0 ? 0 : 1;
 }
 

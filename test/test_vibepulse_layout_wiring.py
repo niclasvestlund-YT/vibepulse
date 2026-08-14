@@ -13,7 +13,7 @@ attention_fonts = (
     (root / "platform/fonts/plex_attention_52.c", "plex_attention_52"),
 )
 
-assert "#define TK_USAGE_SCREEN_VIEWS 6" in header
+assert "#define TK_USAGE_SCREEN_VIEWS 7" in header
 for enum_literal in (
     "VIEW_CLAUDE_FABLE = 0",
     "VIEW_CLAUDE_ALL = 1",
@@ -21,6 +21,7 @@ for enum_literal in (
     "VIEW_BURN_RATE = 3",
     "VIEW_TRACKER_CLAUDE = 4",
     "VIEW_TRACKER_CODEX = 5",
+    "VIEW_VALUE = 6",
 ):
     assert enum_literal in app_header
 assert "VIEW_VOLUME" not in app_header
@@ -70,6 +71,7 @@ create = create[:create.index("void usage_screen_apply_tokens")]
 assert create.count("create_quota_page(") == 3
 assert create.count("create_burn_rate_page(") == 1
 assert create.count("create_tracker_page(") == 2
+assert create.count("create_value_page(") == 1
 assert "tk_agent_monitor_create(root);" in create
 
 quota = source[source.index("static void create_quota_page"):]
@@ -154,11 +156,105 @@ assert "lv_label_set_text(page->percent, quota->pct_text);" in apply_quota
 assert 'quota->has_pct ? quota->pct_text : ""' not in apply_quota
 
 burn = source[source.index("static void create_burn_rate_page"):]
-burn = burn[:burn.index("static uint64_t agent_packet_age_ms")]
+burn = burn[:burn.index("static void create_value_page")]
 for copy in ("BURN RATE", "WEEKLY", "FORECAST"):
     assert f'"{copy}"' in burn
 assert "251" in burn, "Burn Rate rows need the approved separator"
 assert "COL_CARD" not in burn
+
+# Value page. Every provider bar is normalised to its OWN plan cost, so
+# break-even lands at the same fraction on all of them -- which is what lets
+# one shared white rule down the centre mean "past the line or not" for the
+# whole page, drawn once and labelled once.
+value = source[source.index("static void create_value_row"):]
+value = value[:value.index("static uint64_t agent_packet_age_ms")]
+for copy in ("VALUE", "MONTH TO DATE", "AT LIST API PRICES", "VIA API",
+             "YOU PAID", "BREAK EVEN"):
+    assert f'"{copy}"' in value, f"missing value page copy: {copy}"
+# Nothing on this page is EARNED: the figure is what the month WOULD have
+# cost at API rates, and the saving is the gap to the subscription.
+assert "EARNED" not in source, "the page must not claim money was earned"
+assert "VALUE_HERO_Y" in value and "plex_money_118" in value
+# Three each, and every one marks that provider's own data: its name, its bar
+# fill, and the name in the top slot of the one-provider layout.
+assert value.count("COL_CLAUDE") == 3 and value.count("COL_CODEX") == 3, \
+    "provider accents must mark provider data and nothing else"
+assert "COL_MONEY" in value, "the combined hero wears the money accent"
+# A provider is recognised the same way on every screen: mark first, name
+# second, at the quota header's own icon/name offsets.
+assert value.count("create_claude_icon(") == 2 and \
+       value.count("create_codex_icon(") == 2, \
+    "both layouts carry the provider mark, not just the two-row one"
+assert "#define VALUE_ROW_NAME_X 42" in source, \
+    "name offset must mirror the quota header's 22/64 pair"
+# The two marks are different artwork whose ink sits at different heights in
+# the same box, so their y offsets differ ON PURPOSE. Collapsing them to one
+# constant looks like a tidy-up and silently re-breaks the alignment.
+assert "#define VALUE_ROW_ICON_DY 2" in source and \
+       "#define VALUE_ROW_CODEX_ICON_DY 0" in source, \
+    "each mark carries its own optical offset"
+assert "lv_obj_move_foreground(page->rule);" in value, \
+    "the rule must draw over the fills it crosses"
+assert "#define VALUE_RULE_X (VP_SAFE_X + VP_CONTENT_W / 2 - 1)" in source, \
+    "break-even is at half scale, which is the screen's own centre line"
+assert "VALUE_RULE_X" in value, "the rule must be positioned from that token"
+assert "LV_RADIUS_CIRCLE" not in value, \
+    "square bar ends: the pill is the quota pages' running-out shape"
+
+value_page_struct = source[source.index("} value_row;"):]
+value_page_struct = value_page_struct[:value_page_struct.index("} value_page;")]
+for member in ("tile", "evidence", "hero", "rule", "rule_label"):
+    assert f"*{member};" in value_page_struct, f"value_page must own {member}"
+assert "value_row rows[2];" in value_page_struct
+
+value_row_struct = source[source.index("typedef struct {\n  lv_obj_t *root;\n  lv_obj_t *icon;"):]
+value_row_struct = value_row_struct[:value_row_struct.index("} value_row;")]
+for member in ("root", "icon", "name", "money", "track", "fill"):
+    assert f"*{member};" in value_row_struct, f"value_row must own {member}"
+assert "*marker;" not in value_row_struct, \
+    "per-row ticks are replaced by one shared rule"
+
+apply_hero = source[source.index("static void apply_value_hero"):]
+apply_hero = apply_hero[:apply_hero.index("static void apply_value(")]
+assert "COL_CLAUDE" not in apply_hero and "COL_CODEX" not in apply_hero, \
+    "a combined figure must never wear a provider accent"
+
+apply_value = source[source.index("static void apply_value(const tk_tokens"):]
+apply_value = apply_value[:apply_value.index("static uint64_t agent_packet_age_ms")]
+assert "usage_presenter_build_value(tokens, &view);" in apply_value, \
+    "the page must render the presenter's view, never tk_value directly"
+assert "i < view.row_count ? &view.rows[i] : NULL" in apply_value, \
+    "a provider that contributed nothing must not be drawn as an empty bar"
+
+apply_row = source[source.index("static void apply_value_row"):]
+apply_row = apply_row[:apply_row.index("/* The value page owns its hero font")]
+assert "if (width < 6) width = 6;" in apply_row, \
+    "a near-zero provider needs a visible stub, not a 2 px rendering fault"
+assert "VALUE_ROW_BAR_DY + bar_h" in apply_row, \
+    "the row root must grow with the bar or LVGL clips the taller one"
+
+apply_row = source[source.index("static void apply_value_row"):]
+apply_row = apply_row[:apply_row.index("/* The value page owns its hero font")]
+assert "LV_OBJ_FLAG_HIDDEN" in apply_row
+
+# The value page has its OWN money fonts. A "$" is taller than every digit,
+# so putting it in a shared numeral font grows line_height and shifts every
+# already-reviewed page that uses it. Pin both the new recipes and the
+# absence of "$" from the shared ones.
+for recipe, glyph in (("conv Bold     118 \"0x30-0x39,0x24", "plex_money_118"),
+                      ("conv Bold      35 \"0x20,0x24", "plex_money_35")):
+    line = next((line for line in font_script.splitlines()
+                 if line.startswith(recipe)), "")
+    assert line.endswith(glyph), f"missing money font recipe: {glyph}"
+for shared in ("conv Bold     164", "conv Bold     146", "conv Bold      50"):
+    line = next(line for line in font_script.splitlines()
+                if line.startswith(shared))
+    assert "0x24" not in line, \
+        f"{shared} must not carry '$': it would shift approved pages"
+for path in ("plex_money_118", "plex_money_35"):
+    generated = root / f"platform/fonts/{path}.c"
+    assert generated.is_file(), f"missing generated money font: {path}"
+    assert f"const lv_font_t {path}" in generated.read_text()
 
 for removed_volume in (
     "rendered_volume_value", "rendered_volume_sessions",
@@ -286,4 +382,4 @@ for anchor in (31, 246, 321, 365, 430):
 assert "int usage_screen_current_view(void);" in header
 assert "usage_screen_current_view()" in sim
 
-print("OK: VibePulse six-page full-screen layout wiring")
+print("OK: VibePulse seven-page full-screen layout wiring")

@@ -55,12 +55,15 @@ if __package__:
     from .max_tracker import MaxTrackerStore
     from .quota_cache import CachedQuota, QuotaCache
     from .usage_history import Forecast, UsageHistory
+    from . import codex_usage, value_meter
 else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from agent_status import AgentStatusService
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from max_tracker import MaxTrackerStore
     from quota_cache import CachedQuota, QuotaCache
     from usage_history import Forecast, UsageHistory
+    import codex_usage
+    import value_meter
 
 RECOMPUTE_EVERY_S = 30
 LIMITS_EVERY_S = 240  # rate-limit-proben: 15 anrop/h — kontots bucket delas
@@ -92,10 +95,27 @@ MAX_TRACKER_BACKFILL_TICK_S = 0.5  # samma kadens som agent_status.POLL_S
 MAX_TRACKER_CLAUDE_SESSION_MINUTES = 300   # 5 timmar
 MAX_TRACKER_CLAUDE_WEEK_MINUTES = 10080    # 7 dygn
 
-# (day, ts, tokens, session, key) per loggrad med usage — det minsta som
-# behövs för dag-, månads-, takt- och sessionsaggregaten.
+# (day, ts, tokens, session, key, usd, unpriced) per usage-bearing log row.
+# The first five are the minimum the day/month/rate/session aggregates need.
+# The last two are the row's list-price value, carried PER ROW rather than as
+# a per-file sum, so the (message id, requestId) dedup in _compute covers
+# dollars exactly as it covers tokens -- Claude Code writes the same record
+# into more than one transcript, and a duplicate must not be counted twice in
+# either currency.
 _cache_lock = threading.Lock()
 _file_cache = {}   # path -> stat, parsed offset, month and compact records
+
+# The value multiple's denominator and price table. Subscription prices are
+# not in any API price list and no API reports which plan you are on, so the
+# operator states what they pay, per provider: --plan claude=200 --plan
+# codex=20. No allowlist of plan names -- Team, Enterprise, annual billing,
+# EDU and VAT-inclusive pricing all exist and none of them fit a fixed table.
+# --claude-plan/--codex-plan still select the Max Tracker badge, and their
+# list prices remain the fallback when nothing is declared.
+_claude_plan = None
+_codex_plan = None
+_plan_costs = {}
+_price_table = None
 _last_result = None
 _last_computed = 0.0
 _snapshot_refreshing = False
@@ -182,12 +202,18 @@ def _parse_file(path: Path, month_start: datetime, start_offset=0):
                 msg_id = (entry.get("message") or {}).get("id")
                 req_id = entry.get("requestId")
                 key = f"{msg_id}:{req_id}" if msg_id and req_id else None
+                day = ts.strftime("%Y-%m-%d")
+                usd, unpriced = value_meter.price_usage(
+                    (entry.get("message") or {}).get("model"), usage,
+                    table=_price_table)
                 records.append((
-                    ts.strftime("%Y-%m-%d"),
+                    day,
                     ts.timestamp(),
                     tokens,
                     entry.get("sessionId") or str(path),
                     key,
+                    usd,
+                    unpriced,
                 ))
     except OSError:
         pass  # borttagen under läsning — nästa skanning ser det
@@ -195,7 +221,7 @@ def _parse_file(path: Path, month_start: datetime, start_offset=0):
 
 
 def _observe_claude_volume(store, records):
-    for day, _ts, tokens, _session, _key in records:
+    for day, _ts, tokens, _session, _key, _usd, _unpriced in records:
         store.observe_volume("claude", day, tokens)
 
 
@@ -260,20 +286,34 @@ def _compute(projects_dir: Path, max_tracker_store=None):
     day_tokens = 0
     month_tokens = 0
     hour_tokens = 0
+    month_value_usd = 0.0
+    month_priced_tokens = 0
+    month_unpriced_tokens = 0
     day_sessions = set()
     seen = set()
     for entry in _file_cache.values():
-        for day, ts, tokens, session, key in entry["records"]:
+        for day, ts, tokens, session, key, usd, unpriced in entry["records"]:
             if key is not None:
                 if key in seen:
                     continue
                 seen.add(key)
             month_tokens += tokens
+            month_value_usd += usd
+            if unpriced:
+                month_unpriced_tokens += unpriced
+            else:
+                month_priced_tokens += tokens
             if day == today:
                 day_tokens += tokens
                 day_sessions.add(session)
             if ts >= hour_ago:
                 hour_tokens += tokens
+
+    # Codex contributes to the same month total. Its rollout logs are a
+    # separate tree with a separate scan; a machine without ~/.codex simply
+    # returns zeros.
+    codex_usd, codex_priced, codex_unpriced = codex_usage.month_value(
+        now=now, table=_price_table)
 
     return {
         "v": 1,
@@ -281,6 +321,15 @@ def _compute(projects_dir: Path, max_tracker_store=None):
         "dayTokensPerHour": hour_tokens,  # senaste timmen = takt per timme
         "daySessions": len(day_sessions),
         "monthTokens": month_tokens,
+        # Additive key: tokens_parse.c:219 skips unknown top-level keys, so
+        # already-flashed screens ignore it instead of failing to parse.
+        "value": value_meter.build_payload(
+            month_value_usd + codex_usd,
+            month_unpriced_tokens + codex_unpriced,
+            month_priced_tokens + codex_priced,
+            claude_plan=_claude_plan, codex_plan=_codex_plan,
+            plan_costs=_plan_costs, table=_price_table,
+            claude_usd=month_value_usd, codex_usd=codex_usd),
         "at": now.isoformat(timespec="seconds"),
     }
 
@@ -1692,6 +1741,23 @@ def _build_arg_parser():
         help="Claude-planen för Max Trackers badge (frivillig, allowlistad "
              "i max_tracker.PLAN_LABELS)")
     ap.add_argument(
+        "--plan", action="append", metavar="PROVIDER=USD", default=[],
+        help="what a subscription actually costs per month, in USD: "
+             "--plan claude=200 --plan codex=20. Repeatable, one per "
+             "provider, no allowlist of plan names. USD because the API list "
+             "prices it is compared against are USD -- convert once if you "
+             "pay in something else. Without it the provider's public list "
+             "price is used and the payload marks the figure as a default")
+    ap.add_argument(
+        "--plan-cost-usd", type=float, default=None,
+        help="deprecated alias for --plan claude=USD")
+    ap.add_argument(
+        "--prices", default=None,
+        help="path to a JSON file merged over tools/tokenserver/prices.json "
+             "(which is generated by update_prices.py). State only what "
+             "differs: a corrected rate, or a model the catalogue does not "
+             "carry yet. No code change needed")
+    ap.add_argument(
         "--codex-plan", choices=["plus", "pro"], default=None,
         help="Codex-planen för Max Trackers badge (frivillig, allowlistad "
              "i max_tracker.PLAN_LABELS)")
@@ -1723,6 +1789,16 @@ def _run_max_tracker_backfill(store, stop_event):
 def main():
     ap = _build_arg_parser()
     args = ap.parse_args()
+
+    global _claude_plan, _codex_plan, _plan_costs, _price_table
+    _claude_plan = args.claude_plan
+    _codex_plan = args.codex_plan
+    _plan_costs = value_meter.parse_plan_costs(
+        args.plan, legacy_claude=args.plan_cost_usd)
+    # A bad --prices file is a hard startup failure, never a silent fallback:
+    # pricing against rates the operator believes they replaced is exactly the
+    # failure the value multiple exists to avoid.
+    _price_table = value_meter.load_prices(args.prices)
 
     Handler.projects_dir = Path(args.dir)
     if not Handler.projects_dir.is_dir():

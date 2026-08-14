@@ -157,4 +157,7 @@ cd ..
   tools.tokenserver.test_agent_status \
   tools.tokenserver.test_usage_history \
   tools.tokenserver.test_quota_cache \
-  tools.tokenserver.test_max_tracker -v
+  tools.tokenserver.test_max_tracker \
+  tools.tokenserver.test_value_meter \
+  tools.tokenserver.test_update_prices \
+  tools.tokenserver.test_codex_usage -v

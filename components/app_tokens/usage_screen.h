@@ -10,7 +10,7 @@
 #include "max_tracker.h"
 #include "tokens.h"
 
-#define TK_USAGE_SCREEN_VIEWS 6
+#define TK_USAGE_SCREEN_VIEWS 7
 
 void usage_screen_create(lv_obj_t *root);
 void usage_screen_apply_tokens(const tk_tokens *tokens);
