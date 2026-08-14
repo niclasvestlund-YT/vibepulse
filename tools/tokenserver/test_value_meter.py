@@ -347,6 +347,38 @@ class PlanCostFlagTest(unittest.TestCase):
         self.assertEqual(payload["codex_plan_usd"], 20.0)
         self.assertEqual(payload["cost_source"], "configured")
 
+    def test_value_is_never_credited_against_another_plan(self):
+        """The panel bug, as a test.
+
+        Codex usage with no declared Codex plan turned a $100 subscription
+        into 110x on the glass: both providers in the numerator, one cost in
+        the denominator. Undeclared value is reported separately and left
+        out of the ratio entirely.
+        """
+        payload = value_meter.build_payload(
+            11014.0, 0, 1000, plan_costs={"claude": 100.0},
+            claude_usd=2717.0, codex_usd=8296.0)
+        self.assertEqual(payload["multiple"], 27.17)
+        self.assertEqual(payload["value_usd"], 2717.0)
+        self.assertEqual(payload["plan_usd"], 100.0)
+        self.assertEqual(payload["undeclared_usd"], 8296.0)
+        self.assertNotIn("codex_plan_usd", payload)
+
+    def test_declaring_the_second_plan_brings_it_into_the_ratio(self):
+        payload = value_meter.build_payload(
+            11014.0, 0, 1000, plan_costs={"claude": 100.0, "codex": 20.0},
+            claude_usd=2717.0, codex_usd=8296.0)
+        self.assertEqual(payload["plan_usd"], 120.0)
+        self.assertEqual(payload["value_usd"], 11013.0)
+        self.assertNotIn("undeclared_usd", payload)
+
+    def test_a_caller_with_only_a_total_keeps_its_ratio(self):
+        """The strict pairing applies only where a breakdown exists."""
+        payload = value_meter.build_payload(
+            312.0, 0, 1000, plan_costs={"claude": 100.0})
+        self.assertEqual(payload["state"], "ok")
+        self.assertEqual(payload["multiple"], 3.12)
+
     def test_a_provider_that_spent_nothing_is_absent_not_zero(self):
         """An empty bar for an agent that is not installed is a lie."""
         payload = value_meter.build_payload(

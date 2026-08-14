@@ -384,10 +384,42 @@ def build_payload(value_usd: float, unpriced_tokens: int, priced_tokens: int,
     codex_cost, codex_src = prices.plan_cost(
         "codex", codex_plan, plan_costs.get("codex"))
 
-    costs = [c for c in (claude_cost, codex_cost) if c is not None]
-    plan_usd = sum(costs) if costs else None
-    # "configured" only when nothing in the denominator was guessed.
-    sources = [s for s in (claude_src, codex_src) if s != "unknown"]
+    # A provider counts toward the ratio only when BOTH sides of its own
+    # division are known. Crediting a provider's value against another
+    # provider's subscription is how a $100 plan came to read 110x on the
+    # panel: Codex usage was in the numerator while only Claude's cost was in
+    # the denominator. Value whose cost is undeclared is reported separately
+    # and left out of the ratio entirely.
+    counted = [(spent, cost) for spent, cost in
+               ((claude_usd, claude_cost), (codex_usd, codex_cost))
+               if spent is not None and spent > 0 and cost is not None]
+    uncounted_usd = sum(
+        spent for spent, cost in
+        ((claude_usd, claude_cost), (codex_usd, codex_cost))
+        if spent is not None and spent > 0 and cost is None)
+
+    known_split = claude_usd is not None or codex_usd is not None
+    if not known_split:
+        # No per-provider breakdown to reason about: the caller's total is
+        # all there is, so pair it with whatever costs are declared. This is
+        # the pre-breakdown behaviour and stays for callers that only have a
+        # total.
+        costs = [c for c in (claude_cost, codex_cost) if c is not None]
+        plan_usd = sum(costs) if costs else None
+        sources = [s for s in (claude_src, codex_src) if s != "unknown"]
+    elif counted:
+        value_usd = sum(spent for spent, _ in counted)
+        plan_usd = sum(cost for _, cost in counted)
+    else:
+        # A breakdown exists and nothing in it can be paired with a cost.
+        # Keep the dollars, refuse the ratio.
+        plan_usd = None
+
+    if known_split:
+        sources = [src for src, spent, cost in
+                   ((claude_src, claude_usd, claude_cost),
+                    (codex_src, codex_usd, codex_cost))
+                   if spent is not None and spent > 0 and cost is not None]
     cost_source = ("configured" if sources and all(s == "configured" for s in sources)
                    else "default" if sources else "unknown")
 
@@ -399,6 +431,10 @@ def build_payload(value_usd: float, unpriced_tokens: int, priced_tokens: int,
         "prices_as_of": prices.as_of(),
         "unpriced_token_share": round(unpriced_share, 4),
     }
+    if uncounted_usd > 0:
+        # Surfaced so the display can say a subscription is missing rather
+        # than silently under-reporting the month.
+        payload["undeclared_usd"] = round(uncounted_usd, 2)
 
     # Per-provider breakdown, so the display can show which subscription is
     # earning its keep. Emitted only for a provider that actually spent

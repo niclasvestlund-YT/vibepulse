@@ -296,23 +296,18 @@ static void format_multiple(double multiple, char *out, size_t capacity) {
   }
 }
 
-/* One provider's row. Normalised to its OWN plan cost, so break-even lands
- * at the same fraction on every row. Returns 0 when the provider contributed
- * nothing, so it is not drawn at all -- an empty bar for an agent that is
- * not installed claims "earned nothing", which is a different statement. */
+/* A provider's contribution. counted == 1 only when its OWN plan cost is
+ * known: crediting one provider's value against another's subscription is
+ * exactly how a $100 plan came to read 110x on the panel. */
 static int build_value_row(usage_value_row *row, usage_provider provider,
                            const char *name, int has_value, double value_usd,
                            int has_plan, double plan_usd) {
   if (!has_value || value_usd <= 0) return 0;
   memset(row, 0, sizeof *row);
   row->provider = provider;
+  row->counted = has_plan && plan_usd > 0;
   snprintf(row->name, sizeof row->name, "%s", name);
   format_usd(value_usd, row->money, sizeof row->money);
-  if (has_plan && plan_usd > 0) {
-    row->has_bar = 1;
-    double fraction = value_usd / plan_usd / USAGE_VALUE_BAR_SCALE;
-    row->bar_fraction = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction;
-  }
   return 1;
 }
 
@@ -322,8 +317,7 @@ void usage_presenter_build_value(const tk_tokens *tokens,
   memset(out, 0, sizeof *out);
   out->state = USAGE_VALUE_UNAVAILABLE;
   snprintf(out->hero_text, sizeof out->hero_text, "NO DATA");
-  snprintf(out->evidence, sizeof out->evidence,
-           "NO PRICED USAGE THIS MONTH");
+  snprintf(out->verdict, sizeof out->verdict, "NO PRICED USAGE THIS MONTH");
   out->hero_is_word = 1;
   if (!tokens) return;
 
@@ -331,18 +325,15 @@ void usage_presenter_build_value(const tk_tokens *tokens,
 
   switch (value->state) {
     case TK_VALUE_PARTIAL:
-      /* Not "NO DATA": there IS usage, too much of it just ran on models the
-       * price table does not know. */
       out->state = USAGE_VALUE_PARTIAL;
       snprintf(out->hero_text, sizeof out->hero_text, "UNPRICED");
-      snprintf(out->evidence, sizeof out->evidence,
+      snprintf(out->verdict, sizeof out->verdict,
                "SOME MODELS ARE NOT PRICED");
       return;
     case TK_VALUE_NO_PLAN_COST:
-      /* The one state where money belongs in the hero: there is no ratio to
-       * draw, so nothing else can go there. */
+      /* No denominator anywhere: the money is the only honest hero. */
       out->state = USAGE_VALUE_NO_PLAN_COST;
-      snprintf(out->evidence, sizeof out->evidence, "SET YOUR PLAN COST");
+      snprintf(out->verdict, sizeof out->verdict, "SET YOUR PLAN COST");
       if (value->has_value_usd) {
         format_usd(value->value_usd, out->hero_text, sizeof out->hero_text);
         out->hero_is_word = 0;
@@ -351,17 +342,20 @@ void usage_presenter_build_value(const tk_tokens *tokens,
     case TK_VALUE_OK:
       out->state = USAGE_VALUE_OK;
       out->hero_is_word = 0;
-      out->hero_ahead = value->multiple >= 1.0;
       format_multiple(value->multiple, out->hero_text,
                       sizeof out->hero_text);
       format_usd(value->value_usd, out->api_cost, sizeof out->api_cost);
       format_usd(value->plan_usd, out->paid, sizeof out->paid);
-      /* "VIA API", not "EARNED": this is what the month would have cost had
-       * the same tokens been bought at list API rates. */
-      snprintf(out->evidence, sizeof out->evidence, "%s VIA API · %s PAID",
-               out->api_cost, out->paid);
-      out->show_rule = 1;
+      /* The page's whole question, answered in words. */
+      snprintf(out->verdict, sizeof out->verdict, "%s",
+               value->multiple >= 1.0 ? "YOUR PLAN IS CHEAPER"
+                                      : "THE API WOULD BE CHEAPER");
+      out->show_bar = 1;
       out->break_even_fraction = 1.0 / USAGE_VALUE_BAR_SCALE;
+      {
+        double fraction = value->multiple / USAGE_VALUE_BAR_SCALE;
+        out->bar_fraction = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction;
+      }
       break;
     case TK_VALUE_UNAVAILABLE:
     default:
@@ -378,11 +372,26 @@ void usage_presenter_build_value(const tk_tokens *tokens,
       value->has_codex_usd, value->codex_usd,
       value->has_codex_plan_usd, value->codex_plan_usd);
 
-  /* Nothing to normalise against means nothing to draw a rule through. */
-  if (out->show_rule) {
-    int any_bar = 0;
-    for (int i = 0; i < out->row_count; i++) any_bar |= out->rows[i].has_bar;
-    out->show_rule = any_bar;
+  /* Segment the drawn fill by the COUNTED providers only -- a provider left
+   * out of the ratio must not colour a bar that represents it. */
+  double counted_total = 0;
+  if (value->has_claude_usd && value->has_claude_plan_usd)
+    counted_total += value->claude_usd;
+  if (value->has_codex_usd && value->has_codex_plan_usd)
+    counted_total += value->codex_usd;
+  for (int i = 0; i < out->row_count; i++) {
+    if (!out->rows[i].counted || counted_total <= 0) continue;
+    double own = out->rows[i].provider == USAGE_PROVIDER_CLAUDE
+                     ? value->claude_usd : value->codex_usd;
+    out->rows[i].share = own / counted_total;
+  }
+
+  for (int i = 0; i < out->row_count; i++) {
+    char piece[40];
+    snprintf(piece, sizeof piece, "%s%s %s", i ? "  ·  " : "",
+             out->rows[i].name, out->rows[i].money);
+    strncat(out->attribution, piece,
+            sizeof out->attribution - strlen(out->attribution) - 1);
   }
 }
 

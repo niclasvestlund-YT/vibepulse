@@ -162,57 +162,36 @@ for copy in ("BURN RATE", "WEEKLY", "FORECAST"):
 assert "251" in burn, "Burn Rate rows need the approved separator"
 assert "COL_CARD" not in burn
 
-# Value page. Every provider bar is normalised to its OWN plan cost, so
-# break-even lands at the same fraction on all of them -- which is what lets
-# one shared white rule down the centre mean "past the line or not" for the
-# whole page, drawn once and labelled once.
-value = source[source.index("static void create_value_row"):]
+# Value page. It borrows the quota pages' furniture on purpose -- bar on the
+# y=304 token at 24 px with the shared pill radius, the same 3x32 marker, the
+# stats on the family's rows -- because that is what makes it read as this
+# product. Only the hero font differs, and only because the 164 px numerals
+# carry no "$" or "x".
+value = source[source.index("static void create_value_page"):]
 value = value[:value.index("static uint64_t agent_packet_age_ms")]
 for copy in ("VALUE", "MONTH TO DATE", "AT LIST API PRICES", "VIA API",
              "YOU PAID", "BREAK EVEN"):
     assert f'"{copy}"' in value, f"missing value page copy: {copy}"
-# Nothing on this page is EARNED: the figure is what the month WOULD have
-# cost at API rates, and the saving is the gap to the subscription.
-assert "EARNED" not in source, "the page must not claim money was earned"
-assert "VALUE_HERO_Y" in value and "plex_money_118" in value
-# Three each, and every one marks that provider's own data: its name, its bar
-# fill, and the name in the top slot of the one-provider layout.
-assert value.count("COL_CLAUDE") == 3 and value.count("COL_CODEX") == 3, \
-    "provider accents must mark provider data and nothing else"
-assert "COL_MONEY" in value, "the combined hero wears the money accent"
-# A provider is recognised the same way on every screen: mark first, name
-# second, at the quota header's own icon/name offsets.
-assert value.count("create_claude_icon(") == 2 and \
-       value.count("create_codex_icon(") == 2, \
-    "both layouts carry the provider mark, not just the two-row one"
-assert "#define VALUE_ROW_NAME_X 42" in source, \
-    "name offset must mirror the quota header's 22/64 pair"
-# The two marks are different artwork whose ink sits at different heights in
-# the same box, so their y offsets differ ON PURPOSE. Collapsing them to one
-# constant looks like a tidy-up and silently re-breaks the alignment.
-assert "#define VALUE_ROW_ICON_DY 2" in source and \
-       "#define VALUE_ROW_CODEX_ICON_DY 0" in source, \
-    "each mark carries its own optical offset"
-assert "lv_obj_move_foreground(page->rule);" in value, \
-    "the rule must draw over the fills it crosses"
-assert "#define VALUE_RULE_X (VP_SAFE_X + VP_CONTENT_W / 2 - 1)" in source, \
-    "break-even is at half scale, which is the screen's own centre line"
-assert "VALUE_RULE_X" in value, "the rule must be positioned from that token"
-assert "LV_RADIUS_CIRCLE" not in value, \
-    "square bar ends: the pill is the quota pages' running-out shape"
+assert "lv_obj_set_pos(page->track, VP_SAFE_X, VP_BAR_Y);" in value, \
+    "the bar must sit on the family's own y token"
+assert "lv_obj_set_size(page->track, VP_CONTENT_W, VP_BAR_H);" in value
+assert "LV_RADIUS_CIRCLE" in value, \
+    "the pill radius is what makes a bar read as this product's bar"
+assert "lv_obj_set_size(page->marker, 3, VP_BAR_H + 8);" in value, \
+    "reuse the family's 3x32 break-even mark, not a bespoke one"
+assert "plex_money_118" in value and "VALUE_HERO_Y" in value
+# Provider accents may only colour a segment, which IS that provider's money.
+assert value.count("COL_CLAUDE") == 2 and value.count("COL_CODEX") == 1, \
+    "provider accents belong on bar segments and nowhere else"
+assert "COL_MONEY" not in source, \
+    "the money accent is retired: every hero in the family is white"
 
-value_page_struct = source[source.index("} value_row;"):]
+value_page_struct = source[source.index("typedef struct {\n  lv_obj_t *tile;\n  lv_obj_t *verdict;"):]
 value_page_struct = value_page_struct[:value_page_struct.index("} value_page;")]
-for member in ("tile", "evidence", "hero", "rule", "rule_label"):
-    assert f"*{member};" in value_page_struct, f"value_page must own {member}"
-assert "value_row rows[2];" in value_page_struct
-
-value_row_struct = source[source.index("typedef struct {\n  lv_obj_t *root;\n  lv_obj_t *icon;"):]
-value_row_struct = value_row_struct[:value_row_struct.index("} value_row;")]
-for member in ("root", "icon", "name", "money", "track", "fill"):
-    assert f"*{member};" in value_row_struct, f"value_row must own {member}"
-assert "*marker;" not in value_row_struct, \
-    "per-row ticks are replaced by one shared rule"
+for member in ("tile", "verdict", "hero", "attribution", "track", "marker",
+               "stat_api", "stat_paid", "cap_api", "cap_break", "cap_paid"):
+    assert f"*{member};" in value_page_struct or f"*{member}," in value_page_struct, \
+        f"value_page must own {member}"
 
 apply_hero = source[source.index("static void apply_value_hero"):]
 apply_hero = apply_hero[:apply_hero.index("static void apply_value(")]
@@ -223,19 +202,9 @@ apply_value = source[source.index("static void apply_value(const tk_tokens"):]
 apply_value = apply_value[:apply_value.index("static uint64_t agent_packet_age_ms")]
 assert "usage_presenter_build_value(tokens, &view);" in apply_value, \
     "the page must render the presenter's view, never tk_value directly"
-assert "i < view.row_count ? &view.rows[i] : NULL" in apply_value, \
-    "a provider that contributed nothing must not be drawn as an empty bar"
-
-apply_row = source[source.index("static void apply_value_row"):]
-apply_row = apply_row[:apply_row.index("/* The value page owns its hero font")]
-assert "if (width < 6) width = 6;" in apply_row, \
-    "a near-zero provider needs a visible stub, not a 2 px rendering fault"
-assert "VALUE_ROW_BAR_DY + bar_h" in apply_row, \
-    "the row root must grow with the bar or LVGL clips the taller one"
-
-apply_row = source[source.index("static void apply_value_row"):]
-apply_row = apply_row[:apply_row.index("/* The value page owns its hero font")]
-assert "LV_OBJ_FLAG_HIDDEN" in apply_row
+assert "view.rows[i].counted" in apply_value, \
+    "a provider left out of the ratio must not colour a segment"
+assert "lv_obj_move_foreground(page->marker);" in apply_value
 
 # The value page has its OWN money fonts. A "$" is taller than every digit,
 # so putting it in a shared numeral font grows line_height and shifts every

@@ -104,47 +104,37 @@ typedef enum {
   USAGE_VALUE_OK,
 } usage_value_state;
 
-/* One subscription's own answer. Each provider is normalised to its OWN plan
- * cost, so break-even lands at the same fraction for every row -- which is
- * what lets a single shared rule down the page mean "past the line or not"
- * for all of them at once. */
+/* One subscription's contribution. Only providers whose OWN cost is declared
+ * reach the ratio; the rest are reported but never divided against someone
+ * else's subscription. */
 typedef struct {
   usage_provider provider;
   char name[12];
-  char money[USAGE_CARD_PCT_CAP];   /* "$280" -- the row's only figure */
-  double bar_fraction;
-  int has_bar;
+  char money[USAGE_CARD_PCT_CAP];
+  double share;      /* of the drawn fill, 0..1 */
+  int counted;       /* in the ratio, i.e. its plan cost is known */
 } usage_value_row;
 
 typedef struct {
   usage_value_state state;
-  /* The argument, stated in full above the hero: "$312 VIA API · $220 PAID".
-   * The hero is the verdict; this is the evidence it rests on. Without it a
-   * multiple has no referent, and a lone dollar figure on a page titled
-   * VALUE is ambiguous between what you spent and what you got.
-   *
-   * Nothing here is EARNED. The figure is what this month's tokens would
-   * have cost at API list rates had you bought them that way; the saving is
-   * the gap between it and the subscription. Saying "earned" would claim
-   * income that does not exist. */
-  char evidence[56];
+  /* The verdict, in words, because the page's whole question is which of the
+   * two costs came out larger. The bar's marker says it visually; this says
+   * it for anyone who does not read the bar. */
+  char verdict[40];
   char hero_text[USAGE_CARD_PCT_CAP];
   /* 1 when the hero is a WORD and must render in the 48 px headline font. An
-   * en dash at hero size is a bare white rectangle -- it reads as a
-   * rendering fault rather than as "unknown". */
+   * en dash at hero size is a bare white rectangle -- a rendering fault, not
+   * a value. */
   int hero_is_word;
-  /* 0 below break-even. There is no red in the palette and none is needed:
-   * the absence of the money accent, plus bars short of the rule, says it. */
-  int hero_ahead;
-  /* Where break-even sits on every bar. Identical for all rows by
-   * construction, so one rule can be drawn once and labelled once. */
+  /* "CLAUDE $280 · CODEX $32" -- the split, one quiet line. */
+  char attribution[80];
+  /* Fill on a fixed 0..2x scale so break-even is always the halfway mark and
+   * one marker can be drawn once and labelled once. */
+  double bar_fraction;
   double break_even_fraction;
-  int show_rule;
-  /* Only providers that actually spent. One provider means one row, and a
-   * different layout -- not a centred stub with the other half missing. */
+  int show_bar;
   int row_count;
   usage_value_row rows[2];
-  /* One-provider layout only: the combined pair moves into a stat footer. */
   char api_cost[USAGE_CARD_PCT_CAP];
   char paid[USAGE_CARD_PCT_CAP];
 } usage_value_page_view;
