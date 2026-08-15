@@ -34,9 +34,10 @@ the room, no window to switch to, no menu bar to squint at.
 
 ## What's on screen
 
-Six core pages, swipe or auto-rotate, plus two optional pages: a GitHub
-project pulse and a value-multiple page. Every image below is an exact
-480×480 frame — the simulator renders the same pixels as the panel.
+Six core pages, swipe or auto-rotate, plus the always-present value-multiple
+page (it shows dashes until you tell the tokenserver what you pay) and an
+optional, compile-time-gated GitHub project pulse. Every image below is an
+exact 480×480 frame — the simulator renders the same pixels as the panel.
 
 <table>
 <tr>
