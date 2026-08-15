@@ -34,9 +34,9 @@ the room, no window to switch to, no menu bar to squint at.
 
 ## What's on screen
 
-Six core pages, swipe or auto-rotate, plus an optional seventh GitHub project
-page. Every image below is an exact 480×480 frame — the simulator renders
-the same pixels as the panel.
+Six core pages, swipe or auto-rotate, plus two optional pages: a GitHub
+project pulse and a value-multiple page. Every image below is an exact
+480×480 frame — the simulator renders the same pixels as the panel.
 
 <table>
 <tr>
@@ -100,12 +100,21 @@ accent colour:
 
 One public `owner/repository` can add a deliberately sparse seventh page:
 the current star count is the hero and forks are the only secondary metric.
+The same raster covers every data provenance, so the glass never lies about
+freshness:
+
+| Live | Cached / stale | Waiting (no data) |
+|---|---|---|
+| ![GitHub tile showing a live star and fork count](docs/img/github/sim-live.png) | ![GitHub tile showing a cached star and fork count](docs/img/github/sim-cached.png) | ![GitHub tile waiting on its first fetch](docs/img/github/sim-missing.png) |
+
 The page and star moments are independent switches. A new star can therefore
 briefly take over the current VibePulse view even when the GitHub page is not
 in rotation. It covers the previous page with a quiet black stage, shows a
 large filled star, the repository, the stargazer when GitHub supplies one,
 the new total, and `TAP TO DISMISS`; otherwise it returns to the exact
 previous page after two minutes.
+
+<img src="docs/img/github/sim-star-popup.png" alt="Full-screen popup celebrating a new GitHub star" width="320">
 
 The Mac service polls GitHub's public API and republishes a small, validated
 LAN payload. The ESP32 never talks to GitHub, and a GitHub timeout or rate
@@ -143,7 +152,8 @@ Run Claude only, or Codex only, and the other half simply shows dashes.
 The usage pages answer *how much have I spent?*. The
 [**value multiple**](docs/value-multiple.md) answers the question you
 actually have every month: it prices the tokens your agents already logged
-at list API rates and divides by what you pay.
+at list API rates and divides by what you pay. It's its own page on the
+swipeable strip, alongside GitHub — neither replaces the other.
 
 ```
 python3 tools/tokenserver/tokenserver.py --claude-plan max5x --plan-cost-usd 100
