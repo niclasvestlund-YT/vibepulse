@@ -92,9 +92,17 @@ maxed out.
 Both providers get equal treatment — same pages, same alert, their own
 accent colour:
 
-| | | |
-|---|---|---|
-| ![Codex weekly quota](docs/img/vibepulse-codex-week.png) | ![Codex NEEDS YOU alert](docs/img/vibepulse-codex-needs-you.png) | ![Claude Max Tracker](docs/img/vibepulse-max-tracker-claude.png) |
+**Codex weekly quota**
+
+![Codex weekly quota](docs/img/vibepulse-codex-week.png)
+
+**Codex NEEDS YOU alert**
+
+![Codex NEEDS YOU alert](docs/img/vibepulse-codex-needs-you.png)
+
+**Claude Max Tracker**
+
+![Claude Max Tracker](docs/img/vibepulse-max-tracker-claude.png)
 
 ### Optional GitHub project pulse
 
@@ -103,9 +111,17 @@ the current star count is the hero and forks are the only secondary metric.
 The same raster covers every data provenance, so the glass never lies about
 freshness:
 
-| Live | Cached / stale | Waiting (no data) |
-|---|---|---|
-| ![GitHub tile showing a live star and fork count](docs/img/github/sim-live.png) | ![GitHub tile showing a cached star and fork count](docs/img/github/sim-cached.png) | ![GitHub tile waiting on its first fetch](docs/img/github/sim-missing.png) |
+**Live**
+
+![GitHub tile showing a live star and fork count](docs/img/github/sim-live.png)
+
+**Cached / stale**
+
+![GitHub tile showing a cached star and fork count](docs/img/github/sim-cached.png)
+
+**Waiting (no data)**
+
+![GitHub tile waiting on its first fetch](docs/img/github/sim-missing.png)
 
 The page and star moments are independent switches. A new star can therefore
 briefly take over the current VibePulse view even when the GitHub page is not
@@ -136,7 +152,10 @@ missing or failed sound backend never delays the popup or any network path.
 
 ### It never makes numbers up
 
-<img src="docs/img/vibepulse-no-data.png" alt="No-data state showing dashes instead of zeros" width="320" align="right">
+<table>
+<tr>
+<td width="35%"><img src="docs/img/vibepulse-no-data.png" alt="No-data state showing dashes instead of zeros" width="100%"></td>
+<td valign="top">
 
 Before the first successful fetch, and whenever a source is missing, you get
 dashes — never a placeholder `0%` that you might believe. If the service
@@ -145,11 +164,16 @@ than silently drifting.
 
 Run Claude only, or Codex only, and the other half simply shows dashes.
 
-<br clear="all">
+</td>
+</tr>
+</table>
 
 ### Are you getting your money's worth?
 
-<img src="docs/img/vibepulse-value-ahead.png" alt="Value multiple showing 3.12x — $312 via API against a $100 plan" width="320" align="right">
+<table>
+<tr>
+<td width="35%"><img src="docs/img/vibepulse-value-ahead.png" alt="Value multiple showing 3.12x — $312 via API against a $100 plan" width="100%"></td>
+<td valign="top">
 
 The usage pages answer *how much have I spent?*. The
 [**value multiple**](docs/value-multiple.md) answers the question you
@@ -157,7 +181,9 @@ actually have every month: it prices the tokens your agents already logged
 at list API rates and divides by what you pay. It's its own page on the
 swipeable strip, alongside GitHub — neither replaces the other.
 
-<br clear="all">
+</td>
+</tr>
+</table>
 
 ```
 python3 tools/tokenserver/tokenserver.py --claude-plan max5x --plan-cost-usd 100
@@ -329,7 +355,10 @@ Max Tracker fixtures, `T` re-feeds tokens, `G` simulates a new GitHub star,
 
 ## Tweak it
 
-<img src="docs/img/launcher.png" alt="The Torget launcher showing VibePulse" width="300" align="right">
+<table>
+<tr>
+<td width="30%"><img src="docs/img/launcher.png" alt="The Torget launcher showing VibePulse" width="100%"></td>
+<td valign="top">
 
 VibePulse is an app on **Torget**, a deliberately small LVGL 9 app platform
 for this panel. An app is one component exporting
@@ -341,10 +370,12 @@ binary, one thing, nothing to wonder about. The platform can hold several
 apps at once (that's what the launcher is for), but any others live in their
 own repos and are only built in if you check them out.
 
+</td>
+</tr>
+</table>
+
 Design rules: true black background, IBM Plex, dashes instead of invented
 zeros, and provider accents locked to Claude `#D97757` and Codex `#6F78FF`.
-
-<br clear="all">
 
 ```
 platform/            app contract + launcher + fonts (IBM Plex)
