@@ -149,11 +149,15 @@ Run Claude only, or Codex only, and the other half simply shows dashes.
 
 ### Are you getting your money's worth?
 
+<img src="docs/img/vibepulse-value-ahead.png" alt="Value multiple showing 3.12x — $312 via API against a $100 plan" width="320" align="right">
+
 The usage pages answer *how much have I spent?*. The
 [**value multiple**](docs/value-multiple.md) answers the question you
 actually have every month: it prices the tokens your agents already logged
 at list API rates and divides by what you pay. It's its own page on the
 swipeable strip, alongside GitHub — neither replaces the other.
+
+<br clear="all">
 
 ```
 python3 tools/tokenserver/tokenserver.py --claude-plan max5x --plan-cost-usd 100
