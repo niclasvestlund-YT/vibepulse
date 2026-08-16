@@ -28,7 +28,7 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    (`max_tokens: 0` — prefill utan output, i praktiken gratis) var 120:e
    sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
    5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
-   Tokenen lämnar aldrig Macen — skärmen får bara procenttal.
+   Tokenen lämnar aldrig värddatorn — skärmen får bara procenttal.
 3. **Codex tak** — tjänsten frågar Codex lokala, skrivskyddade app-server via
    `account/rateLimits/read`, alltså samma aktuella snapshot som Codex-panelen
    visar. Om app-servern saknas används en passiv fallback: begränsad läsning
@@ -236,11 +236,18 @@ någonsin behöver justeras.
 
 Claude Code har ingen nyckelringsintegration på Windows: `claude login`
 skriver i stället exakt samma `{"claudeAiOauth": {...}}`-post till en vanlig
-fil, `%USERPROFILE%\.claude\.credentials.json`. Kör tjänsten på Windows och
-den läser den filen — ingen dialog, ingen konfiguration, samma
-förtroendegräns som nyckelringsläsningen på Macen. Nyckelringen och Claude
-Desktops processtoken frågas inte alls där; `security` och `pgrep` finns
-ändå inte.
+fil, `%USERPROFILE%\.claude\.credentials.json` — eller, när
+`CLAUDE_CONFIG_DIR` är satt, `%CLAUDE_CONFIG_DIR%\.credentials.json` (hela
+konfigkatalogen flyttar, så filen ligger då direkt i den katalogen).
+Tjänsten följer variabeln precis som `claude login` gör. Kör tjänsten på
+Windows och den läser den filen — ingen dialog, ingen konfiguration.
+
+Var ärlig med vad det innebär: filen är klartext, skyddad av kontots
+filrättigheter men utan nyckelringens kryptering i vila. Det är Claude
+Codes egen avvägning på Windows och Linux, inte tjänstens — men den som
+byter från macOS ska veta att skyddsnivån inte är nyckelringens.
+Nyckelringen och Claude Desktops processtoken frågas inte alls där;
+`security` och `pgrep` finns ändå inte.
 
 Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
 finns kvar på Windows: `fcntl` saknas där, så låset tas med

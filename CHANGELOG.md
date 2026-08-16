@@ -16,7 +16,19 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   Elfström's T-Display-S3 fork. The wider fallthrough — ~110 priced models,
   six named ones, and dated ids that truncate mid-string — is written up as
   OBS-30 rather than fixed here.
-
+- The tokenserver reads Claude's OAuth token on Windows, where `claude
+  login` writes `%USERPROFILE%\.claude\.credentials.json` instead of using
+  a keychain — or `%CLAUDE_CONFIG_DIR%\.credentials.json` when that
+  variable relocates Claude Code's config directory, which the reader now
+  honors the same way `claude login` does. Honest caveat, documented in
+  the tokenserver README: the file is plaintext, protected by the user
+  account's filesystem permissions but without keychain-equivalent at-rest
+  protection — Claude Code's own trade-off on Windows and Linux, not the
+  service's. State files and logs live under `%LOCALAPPDATA%\VibePulse\`,
+  the Codex app-server read works without `select.select` (which never
+  worked on pipes on Windows), and its subprocess tests run the fixture
+  through `[sys.executable, script]` so they need neither a shebang nor an
+  execute bit. Autostart on Windows remains open, tracked in #3.
 ### Added
 
 - The tokenserver reads Claude's OAuth token on Windows. Claude Code has no
