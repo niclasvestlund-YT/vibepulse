@@ -34,12 +34,27 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   same non-blocking gate, different syscall — so the 429 guard survives the
   port instead of quietly disappearing with it.
 
-  This is the token half of
-  [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3) only — log
-  paths, state paths and the launchd setup are still macOS-shaped, and the
-  Codex half reads its app-server through `select.select` on a pipe, which
-  Windows does not support. Reported by Erik Elfström, who found it porting
-  a fork to a LilyGO T-Display-S3.
+  The Codex half works there too. Its quota read spawns `codex app-server`
+  and polled stdout with `select.select`, which on Windows accepts sockets
+  and never pipes; it now reads through a queue fed by a daemon thread, the
+  same code on every platform. That path had no test at all — every existing
+  test mocked the reader out and exercised only the parser — so it now has
+  three, driving a real subprocess through the real pipe for the reply,
+  timeout and immediate-death cases. Writing them turned up a leak worth
+  fixing on its own: the pipes were never closed, leaving three descriptors
+  per poll to the garbage collector in a service that polls every 30 s and
+  never restarts.
+
+  State and logs moved off the hardcoded `~/Library` paths to a per-platform
+  directory — `%LOCALAPPDATA%\VibePulse\` on Windows, unchanged on macOS.
+  The old paths worked literally on Windows but planted a `Library` tree in
+  the user profile that nothing else on the machine recognises.
+
+  What remains for [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)
+  is autostart: the launchd plist has no Windows equivalent, and `smoke.py`
+  now finds the right state directory but still tells you to run `launchctl`.
+  Reported by Erik Elfström, who found it porting a fork to a LilyGO
+  T-Display-S3.
 - The completion alert finally pulses. The accent outline and icon ring
   breathe (full → 39 % → full, ease-in-out, four 1200 ms cycles filling the
   PULSE phase exactly) and then rest; text and the provider icon stay solid

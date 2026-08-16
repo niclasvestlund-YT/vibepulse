@@ -23,14 +23,16 @@ import urllib.request
 from pathlib import Path
 
 if __package__:
-    from .tokenserver import (DEFAULT_LOG_PATH, _LOG_CAP_BYTES,
+    from .tokenserver import (DEFAULT_LOG_PATH, _LOG_CAP_BYTES, _state_dir,
                               _read_source_fingerprint)
 else:  # direktkörning: python3 tools/tokenserver/smoke.py
-    from tokenserver import (DEFAULT_LOG_PATH, _LOG_CAP_BYTES,
+    from tokenserver import (DEFAULT_LOG_PATH, _LOG_CAP_BYTES, _state_dir,
                              _read_source_fingerprint)
 
 DEFAULT_BASE_URL = "http://localhost:8737"
-STATE_DIR = Path.home() / "Library" / "Application Support" / "VibePulse"
+# Samma katalog tjänsten faktiskt skriver till, inte en andra gissning på
+# den: röktestet ska inte kunna leta i fel träd på en Windows-maskin.
+STATE_DIR = _state_dir()
 STATE_FILES = ("usage-history.json", "quota-cache.json", "max-tracker.json")
 # Versionsskev-snubbeltråd, inte en andra parser: skärmens parsrar är
 # kontraktsstränga och avvisar HELA svaret vid fel version, saknade

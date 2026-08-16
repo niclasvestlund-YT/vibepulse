@@ -418,14 +418,17 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
 
 ## FAQ
 
-- **Windows or Linux for the Mac service?** Not yet — the log paths, lock
-  paths and launchd setup are macOS-specific. One piece is portable: Claude
-  Code has no keychain on Windows, so `claude login` writes the same
+- **Windows for the Mac service?** The data half works. Claude Code has no
+  keychain there, so `claude login` writes the same
   `{"claudeAiOauth": {...}}` record to
-  `%USERPROFILE%\.claude\.credentials.json`, and the service reads it there
-  instead. Tracked in
-  [#3 (Windows)](https://github.com/niclasvestlund-YT/vibepulse/issues/3)
-  and [#2 (Linux)](https://github.com/niclasvestlund-YT/vibepulse/issues/2);
+  `%USERPROFILE%\.claude\.credentials.json` and the service reads it; the
+  Codex app-server read and the single-probe lock no longer depend on
+  macOS-only syscalls; state and logs live under `%LOCALAPPDATA%\VibePulse\`.
+  What is missing is **autostart** — the launchd plist has no Windows
+  equivalent, so you start it by hand or wire up Task Scheduler yourself.
+  [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3).
+- **Linux for the Mac service?** Not yet —
+  [#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2);
   contributions very welcome.
 - **Other boards or panel sizes?** Not yet. The platform is pinned to this
   exact panel so one pixel-perfect build stays pixel-perfect, but a port is

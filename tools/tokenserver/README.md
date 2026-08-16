@@ -246,12 +246,22 @@ Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta �
 finns kvar på Windows: `fcntl` saknas där, så låset tas med
 `msvcrt.locking` i stället. Samma icke-blockerande grind, annat systemanrop.
 
-Resten av tjänsten är fortfarande macOS-formad — loggsökvägar,
-tillståndsfiler och launchd-uppsättningen — och Codex-halvan läser sin
-app-server med `select.select` på en pipe, vilket Windows inte stöder. Detta
-löser alltså Claude-tokendelen av
-[#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3), inte hela
-Windows-stödet.
+Codex-halvan fungerar också. Kvotläsningen startar `codex app-server` och
+läser dess stdout; det gjordes förut med `select.select`, som på Windows
+bara tar sockets — aldrig pipes. Läsningen sker nu i en läsartråd med kö,
+samma kod på alla plattformar.
+
+Tillståndsfilerna (lås, probestatus, kvotcache, historik, max-spårare) och
+loggen bor under `%LOCALAPPDATA%\VibePulse\` i stället för macOS
+`~/Library/Application Support/VibePulse`. Sökvägarna fungerade bokstavligt
+även förut — `Path.home()` löser ut — men lade ett `Library`-träd i
+användarprofilen som ingenting annat på maskinen känner igen.
+
+Kvar på Windows: **autostart**. launchd-plisten härintill har ingen
+motsvarighet; tjänsten måste startas för hand eller läggas i Task
+Scheduler. `smoke.py` känner till tillståndskatalogen men dess råd pratar
+fortfarande om `launchctl`. Se
+[#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3).
 
 Svar (kontraktet appen parsar, `components/app_tokens/tokens_parse.c`;
 null = ärlig frånvaro, skärmen visar streck):

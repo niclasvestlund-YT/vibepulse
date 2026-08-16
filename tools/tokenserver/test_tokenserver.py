@@ -389,6 +389,37 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(found["sessionPct"], 12.0)
         self.assertEqual(found["weekPct"], 47.0)
 
+    def test_state_dir_is_local_app_data_on_windows(self):
+        with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"LOCALAPPDATA": r"C:\Users\erik\AppData\Local"}):
+            self.assertEqual(
+                tokenserver._state_dir(),
+                Path(r"C:\Users\erik\AppData\Local") / "VibePulse")
+
+    def test_state_dir_falls_back_when_localappdata_is_unset(self):
+        """En tjänst som startas utan användarmiljö (Task Scheduler under
+        SYSTEM) saknar LOCALAPPDATA — sökvägen ska ändå bli den rätta."""
+        env = dict(tokenserver.os.environ)
+        env.pop("LOCALAPPDATA", None)
+        with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+                mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/tester")):
+            self.assertEqual(
+                tokenserver._state_dir(),
+                Path("/home/tester/AppData/Local/VibePulse"))
+
+    def test_state_dir_is_unchanged_on_macos(self):
+        with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/Users/niclas")):
+            self.assertEqual(
+                tokenserver._state_dir(),
+                Path("/Users/niclas/Library/Application Support/VibePulse"))
+            self.assertEqual(
+                tokenserver._log_dir(), Path("/Users/niclas/Library/Logs"))
+
     def test_credentials_file_path_sits_under_home(self):
         with mock.patch.object(tokenserver.Path, "home",
                                return_value=Path("/home/tester")):
@@ -908,6 +939,90 @@ class CodexLimitLogTests(unittest.TestCase):
         self.assertEqual(pct, 57.0)
         self.assertEqual(reset_min, 60)
         self.assertEqual(window_min, 10080)
+
+    def _fake_app_server(self, temp_dir, body):
+        """Ett körbart som talar app-server-protokollet på stdin/stdout.
+
+        Läsvägen mockades bort i varje befintligt test — bara parsern var
+        täckt — så select-bytet hade kunnat gå sönder tyst. Det här kör den
+        på riktigt: process, pipe, tråd, kö.
+        """
+        script = Path(temp_dir) / "codex"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "for line in sys.stdin:\n"
+            "    try:\n"
+            "        msg = json.loads(line)\n"
+            "    except ValueError:\n"
+            "        continue\n"
+            "    got = msg.get('id')\n"
+            "    if got == 1:\n"
+            "        print(json.dumps({'id': 1, 'result': {}}), flush=True)\n"
+            "    elif got == 2:\n"
+            f"        print(json.dumps({body!r}), flush=True)\n",
+            encoding="utf-8")
+        script.chmod(0o755)
+        return str(script)
+
+    def test_app_server_read_talks_to_a_real_process(self):
+        response = {"id": 2, "result": {"rateLimits": {
+            "limitId": "codex",
+            "limitName": None,
+            "primary": {"usedPercent": 62, "windowDurationMins": 10080,
+                        "resetsAt": 1_900_000_000},
+        }}}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            executable = self._fake_app_server(temp_dir, response)
+            with mock.patch.object(tokenserver, "_codex_app_server_command",
+                                   return_value=executable):
+                found = tokenserver._read_codex_app_server_limits(
+                    timeout_s=20)
+
+        self.assertEqual(found["codexWeekPct"], 62.0)
+        self.assertEqual(found["codexWeekResetAt"], 1_900_000_000)
+
+    def test_app_server_read_gives_up_when_the_process_says_nothing(self):
+        """Deadlinen måste hålla utan select: en app-server som svarar
+        aldrig får inte hänga probecykeln."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script = Path(temp_dir) / "codex"
+            script.write_text(
+                "#!/usr/bin/env python3\n"
+                "import time\n"
+                "time.sleep(30)\n", encoding="utf-8")
+            script.chmod(0o755)
+
+            with mock.patch.object(tokenserver, "_codex_app_server_command",
+                                   return_value=str(script)):
+                started = time.monotonic()
+                found = tokenserver._read_codex_app_server_limits(
+                    timeout_s=1)
+                elapsed = time.monotonic() - started
+
+        self.assertEqual(found, {})
+        self.assertLess(elapsed, 10)
+
+    def test_app_server_read_returns_when_the_process_dies_at_once(self):
+        """EOF-vakten: strömmen stängs direkt, och läsaren ska returnera på
+        en gång i stället för att vänta ut hela sin deadline."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script = Path(temp_dir) / "codex"
+            script.write_text(
+                "#!/usr/bin/env python3\n"
+                "raise SystemExit(1)\n", encoding="utf-8")
+            script.chmod(0o755)
+
+            with mock.patch.object(tokenserver, "_codex_app_server_command",
+                                   return_value=str(script)):
+                started = time.monotonic()
+                found = tokenserver._read_codex_app_server_limits(
+                    timeout_s=20)
+                elapsed = time.monotonic() - started
+
+        self.assertEqual(found, {})
+        self.assertLess(elapsed, 10)
 
     def test_app_server_rate_limit_maps_remaining_38_to_used_62(self):
         response = {

@@ -36,13 +36,16 @@ are required, and the build gates on their absence:
 Confirm all five before touching anything. Ask the user for anything you
 cannot determine yourself.
 
-1. **macOS?** The tokenserver reads macOS log paths, lock paths and the
-   keychain. On Linux/Windows the firmware still builds and the simulator
-   still runs, but the data service will not work — see issues
-   [#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2) /
-   [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3). Only the
-   Claude token read is portable: on Windows the service reads
-   `%USERPROFILE%\.claude\.credentials.json` instead of the keychain.
+1. **macOS or Windows?** Both serve data. On Windows the Claude token comes
+   from `%USERPROFILE%\.claude\.credentials.json` instead of the keychain,
+   and state and logs live under `%LOCALAPPDATA%\VibePulse\` — but there is
+   **no autostart**, so the service must be started by hand or wired into
+   Task Scheduler, and `smoke.py`'s advice still names `launchctl`
+   ([#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)). On Linux
+   the firmware still builds and the simulator still runs, but the service
+   finds no Claude token at all — there is no keychain and the credential
+   file is read only on Windows
+   ([#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2)).
 2. **Do they have the board?** Waveshare ESP32-S3-Touch-AMOLED-2.16. No
    board → skip to [Simulator only](#simulator-only-no-board).
 3. **Is their WiFi 2.4 GHz?** The ESP32-S3 cannot see 5 GHz at all. This is
