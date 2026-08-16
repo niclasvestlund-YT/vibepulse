@@ -30,6 +30,20 @@ else:  # direktkörning: python3 tools/tokenserver/smoke.py
                              _read_source_fingerprint)
 
 DEFAULT_BASE_URL = "http://localhost:8737"
+
+# Röktestets råd ska gå att klistra in. Ett `launchctl list` hjälper ingen
+# på Windows, och tystnad om HUR man tittar efter tjänsten är sämre än fel
+# kommando — då får man leta själv. Tre värdar, tre svar, ett namn på det
+# som startar tjänsten.
+if sys.platform == "win32":
+    SERVICE_MANAGER = "Schemaläggaren"
+    SERVICE_LIST_HINT = 'schtasks /query /tn "VibePulse Tokenserver"'
+elif sys.platform == "darwin":
+    SERVICE_MANAGER = "launchd"
+    SERVICE_LIST_HINT = "launchctl list | grep torget"
+else:
+    SERVICE_MANAGER = "systemd"
+    SERVICE_LIST_HINT = "systemctl --user status vibepulse-tokenserver"
 # Samma katalog tjänsten faktiskt skriver till, inte en andra gissning på
 # den: röktestet ska inte kunna leta i fel träd på en Windows-maskin.
 STATE_DIR = _state_dir()
@@ -157,8 +171,8 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
         status, root = _get_json(f"{base_url}/")
     except Exception as e:
         return [(FAIL, f"servern svarar inte på {base_url}/ ({type(e).__name__})"
-                       " — kör den? launchctl list | grep torget, eller starta"
-                       " python3 tokenserver.py för hand")]
+                       f" — kör den? {SERVICE_LIST_HINT}, eller starta"
+                       f" python3 tokenserver.py för hand")]
     if status != 200:
         return [(FAIL, f"HTTP {status} på {base_url}/ — fel tjänst, proxy "
                        f"eller trasig server")]
@@ -269,8 +283,8 @@ def check_log_file(path):
     path = Path(path)
     if not path.exists():
         return [(VARN, f"ingen loggfil på {path} — normalt vid "
-                       f"terminalkörning; under launchd betyder det att "
-                       f"tjänsten aldrig startat")]
+                       f"terminalkörning; under {SERVICE_MANAGER} betyder "
+                       f"det att tjänsten aldrig startat")]
     def tail_text(p, cap=2 * 1024 * 1024):
         # Läs bara svansen på en stor fil — röktestet ska vara snabbt.
         n = p.stat().st_size
@@ -302,8 +316,8 @@ def check_log_file(path):
               + old_text.count("serverar http://"))
     if starts >= RESPAWN_SUSPICION_COUNT:
         results.append((VARN, f"{starts} startrader i loggen{suffix} — "
-                              f"respawn-loop? (launchd startar om var 30 s "
-                              f"vid tidig död)"))
+                              f"respawn-loop? ({SERVICE_MANAGER} startar om "
+                              f"var 30 s vid tidig död)"))
     return results
 
 
