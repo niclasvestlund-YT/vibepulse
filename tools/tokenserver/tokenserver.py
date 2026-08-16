@@ -165,11 +165,14 @@ def _maybe_rotate_own_log(path=None, stderr_fd=2):
     """Trunkera loggfilen vid start när den vuxit förbi taket, med svansen
     bevarad i <namn>.old.
 
-    Bara när stderr faktiskt ÄR filen (launchd-fallet): fstat/stat-jämförelsen
-    skyddar terminalkörningar från att röra en fil de inte skriver till.
-    Trunkering i stället för rename: launchd håller fd:n öppen med O_APPEND,
-    så en rename hade bara fått processen att skriva vidare i den flyttade
-    filen medan den nya förblev tom.
+    Bara när stderr faktiskt ÄR filen: fstat/stat-jämförelsen skyddar
+    terminalkörningar från att röra en fil de inte skriver till. Det gäller
+    alla tre tjänstehanterarna — launchd via StandardOutPath, systemd via
+    append:, Task Scheduler via omdirigeringen i sin kommandorad — och
+    ingen av dem behöver särbehandlas: identiteten avgör, inte plattformen.
+    Trunkering i stället för rename: hanteraren håller fd:n öppen med
+    O_APPEND, så en rename hade bara fått processen att skriva vidare i den
+    flyttade filen medan den nya förblev tom.
 
     Hela läs-kopiera-trunkera-sekvensen hålls under root-loggerns
     handlerlås (RLock — vår egen "roterad"-rad kan fortfarande skrivas), så
@@ -1324,15 +1327,59 @@ def _parse_codex_rate_limits_response(body, observed_at, now_ts):
     return out
 
 
+def _codex_runnable(candidate):
+    """Är sökvägen något vi kan starta?
+
+    ``os.access(X_OK)`` beskriver ingenting på Windows — där avgör
+    filändelsen om en fil är körbar, och anropet svarar ja för vad som
+    helst som finns. Att fråga ändå vore att låtsas kontrollera något.
+    """
+    if not os.path.isfile(candidate):
+        return False
+    return True if _IS_WINDOWS else os.access(candidate, os.X_OK)
+
+
+def _codex_fallback_paths():
+    """Platser att leta på när PATH inte räcker.
+
+    PATH räcker nästan alltid när tjänsten startas från ett skal: npm
+    lägger ``codex`` i sin globala bin-katalog, som redan ligger där. Det
+    som INTE har ett skals PATH är just det sätt tjänsten är tänkt att
+    köras på — launchd, Task Scheduler och systemd startar den med en
+    avskalad miljö, och då hittar ``shutil.which`` ingenting.
+
+    macOS-posterna är av annan sort: ChatGPT.app buntar sin egen ``codex``
+    på en plats som aldrig ligger på PATH. De övriga är npm:s globala
+    bin-kataloger per plattform — samma binär som PATH skulle ha pekat ut,
+    letad upp för hand. Räcker inte listan pekar ``VIBEPULSE_CODEX_BIN``
+    var som helst.
+    """
+    if _IS_MACOS:
+        return ("/Applications/ChatGPT.app/Contents/Resources/codex",
+                "/Applications/Codex.app/Contents/Resources/codex")
+    if _IS_WINDOWS:
+        app_data = os.environ.get("APPDATA")
+        base = Path(app_data) if app_data else Path.home() / "AppData" / "Roaming"
+        return (str(base / "npm" / "codex.cmd"),
+                str(base / "npm" / "codex.exe"))
+    return (str(Path.home() / ".local" / "bin" / "codex"),
+            "/usr/local/bin/codex")
+
+
 def _codex_app_server_command():
+    override = os.environ.get("VIBEPULSE_CODEX_BIN", "").strip()
+    if override:
+        # Uttalad avsikt slår gissningar — men bara om den pekar på något.
+        # En trasig variabel ska inte tysta en fungerande PATH-träff.
+        if _codex_runnable(override):
+            return override
+        log.warning("VIBEPULSE_CODEX_BIN pekar inte på en körbar fil: %s",
+                    override)
     executable = shutil.which("codex")
     if executable:
         return executable
-    for candidate in (
-        "/Applications/ChatGPT.app/Contents/Resources/codex",
-        "/Applications/Codex.app/Contents/Resources/codex",
-    ):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+    for candidate in _codex_fallback_paths():
+        if _codex_runnable(candidate):
             return candidate
     return None
 

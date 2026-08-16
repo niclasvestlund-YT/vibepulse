@@ -1053,6 +1053,112 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
              tokenserver._limits_refreshing) = previous
 
 
+class CodexCommandDiscoveryTests(unittest.TestCase):
+    """Att hitta `codex` är inte samma sak i ett skal som under en
+    tjänstehanterare — och det är under en tjänstehanterare den ska köra."""
+
+    def setUp(self):
+        env = dict(tokenserver.os.environ)
+        env.pop("VIBEPULSE_CODEX_BIN", None)
+        patcher = mock.patch.dict(tokenserver.os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_path_hit_wins_before_any_guessing(self):
+        with mock.patch.object(tokenserver.shutil, "which",
+                               return_value="/usr/bin/codex"):
+            self.assertEqual(tokenserver._codex_app_server_command(),
+                             "/usr/bin/codex")
+
+    def test_macos_falls_back_to_the_chatgpt_bundle(self):
+        """ChatGPT.app buntar sin codex på en plats PATH aldrig når."""
+        bundled = "/Applications/ChatGPT.app/Contents/Resources/codex"
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == bundled), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_app_server_command(), bundled)
+
+    def test_windows_falls_back_to_the_npm_global_bin(self):
+        """Task Scheduler ärver inte användarens PATH; npm:s globala
+        bin-katalog är där binären faktiskt ligger."""
+        expected = str(Path(r"C:\Users\erik\AppData\Roaming") / "npm"
+                       / "codex.cmd")
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"APPDATA": r"C:\Users\erik\AppData\Roaming"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected):
+            self.assertEqual(tokenserver._codex_app_server_command(), expected)
+
+    def test_windows_does_not_consult_the_execute_bit(self):
+        """os.access(X_OK) beskriver ingenting på Windows — frågan ska
+        inte ställas, så ett nekande svar får inte gömma en giltig fil."""
+        expected = str(Path(r"C:\Users\erik\AppData\Roaming") / "npm"
+                       / "codex.cmd")
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"APPDATA": r"C:\Users\erik\AppData\Roaming"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=False):
+            self.assertEqual(tokenserver._codex_app_server_command(), expected)
+
+    def test_linux_falls_back_to_the_user_bin(self):
+        expected = str(Path.home() / ".local" / "bin" / "codex")
+        with platform_is("linux"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_app_server_command(), expected)
+
+    def test_explicit_override_beats_a_path_hit(self):
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"VIBEPULSE_CODEX_BIN": "/opt/codex/codex"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value="/usr/bin/codex"), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=True), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_app_server_command(),
+                             "/opt/codex/codex")
+
+    def test_broken_override_does_not_silence_a_working_path(self):
+        """En stavfel i variabeln ska kosta en varning, inte Codex-halvan."""
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"VIBEPULSE_CODEX_BIN": "/opt/typo/codex"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value="/usr/bin/codex"), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=False), \
+                self.assertLogs(tokenserver.log, level="WARNING") as logs:
+            self.assertEqual(tokenserver._codex_app_server_command(),
+                             "/usr/bin/codex")
+        self.assertIn("VIBEPULSE_CODEX_BIN", "\n".join(logs.output))
+
+    def test_nothing_found_is_none_not_a_crash(self):
+        with platform_is("linux"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=False):
+            self.assertIsNone(tokenserver._codex_app_server_command())
+
+
 class CodexLimitLogTests(unittest.TestCase):
     @staticmethod
     def _event(rate_limits, timestamp="2026-08-07T10:00:00Z"):
