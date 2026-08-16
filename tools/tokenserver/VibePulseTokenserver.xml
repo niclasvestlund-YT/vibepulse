@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tokenmätarens tjänst som schemalagd uppgift — Windows-motsvarigheten till
+  se.torget.tokenserver.plist. Importera:
+
+  (Uppgiftshanteraren exporterar UTF-16; den här filen är UTF-8 med
+  deklarationen att matcha, vilket schtasks läser lika gärna och git kan
+  visa som en diff i stället för som binär.)
+
+    schtasks /create /tn "VibePulse Tokenserver" /xml VibePulseTokenserver.xml
+
+  TVÅ rader måste ändras först: <UserId> till ditt konto (`whoami`) och
+  sökvägen till din utcheckning i <Arguments>.
+
+  Tjänsten läser %USERPROFILE%\.claude och .codex, så den måste köra som
+  DIN användare. Kör den aldrig som SYSTEM: då pekar %USERPROFILE% någon
+  annanstans och panelen visar streck för alltid.
+
+  Varför cmd.exe i stället för python.exe direkt: Task Scheduler har ingen
+  motsvarighet till plistens StandardOutPath, och tjänstens egen
+  loggrotation kräver att stderr FAKTISKT ÄR loggfilen (identiteten
+  jämförs, se _maybe_rotate_own_log). Omdirigeringen måste alltså ske i ett
+  skal. mkdir-ledet finns för att >> inte skapar kataloger.
+
+  Brandväggen är ett eget steg, inte en detalj: tjänsten lyssnar på LAN:et
+  och Windows Defender frågar bara interaktivt. Under Task Scheduler finns
+  ingen som kan svara på frågan, så regeln måste finnas INNAN uppgiften
+  startar första gången — annars blockeras panelen tyst. Se README.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>VibePulse tokenserver — serves Claude and Codex usage to the panel over the LAN.</Description>
+    <URI>\VibePulse Tokenserver</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <!-- ÄNDRA: ditt konto, t.ex. DESKTOP-ABC123\erik -->
+      <UserId>DOMAIN\username</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <!-- En hyllpryls tjänst ska inte dö för att laptopen går på batteri. -->
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <!-- KeepAlive + ThrottleInterval 30 ur plisten: starta om, men vänta 30 s
+         så en process som dör direkt vid start inte fyller loggen. -->
+    <RestartOnFailure>
+      <Interval>PT30S</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+    <!-- En tjänst har ingen körtidsgräns. PT0S = ingen. -->
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>cmd.exe</Command>
+      <!-- ÄNDRA sökvägen till din utcheckning. -->
+      <Arguments>/c "if not exist "%LOCALAPPDATA%\VibePulse\Logs" mkdir "%LOCALAPPDATA%\VibePulse\Logs" &amp; python -u tokenserver.py &gt;&gt; "%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log" 2&gt;&amp;1"</Arguments>
+      <WorkingDirectory>C:\Users\username\vibepulse\tools\tokenserver</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

@@ -1,0 +1,46 @@
+# Tokenmätarens tjänst som systemd-användarenhet — Linux-motsvarigheten
+# till se.torget.tokenserver.plist. Installera:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp vibepulse-tokenserver.service ~/.config/systemd/user/
+#   $EDITOR ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vibepulse-tokenserver
+#
+# Tjänsten läser ~/.claude och ~/.codex och måste alltså köra som DIN
+# användare, inte som system. Därför --user, inte /etc/systemd/system.
+#
+# Vill du att den ska köra utan att du är inloggad: `loginctl enable-linger
+# $USER`. Utan lingering startar enheten vid inloggning och stoppas när din
+# sista session tar slut, vilket är det som motsvarar launchds beteende.
+[Unit]
+Description=VibePulse tokenserver
+Documentation=https://github.com/niclasvestlund-YT/vibepulse
+# Kvotproben och GitHub-hämtningen vill ha namnuppslag vid start. Saknas
+# nätet ändå är det ingen katastrof — tjänsten försöker igen — men att
+# starta efter nätet gör den första loggraden sann i stället för missvisande.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Sökvägen till DIN utcheckning. Den här raden är den enda som måste ändras.
+WorkingDirectory=%h/vibepulse/tools/tokenserver
+ExecStart=/usr/bin/python3 -u tokenserver.py
+
+# KeepAlive + ThrottleInterval 30 ur plisten, i systemds ord. Trettio
+# sekunder är staketet mot respawn-loopar: dör processen direkt vid start
+# ska loggen inte fyllas av omstarter.
+Restart=always
+RestartSec=30
+
+# %S är användarens state-katalog ($XDG_STATE_HOME, annars ~/.local/state) —
+# samma träd som _state_dir() räknar ut, så tjänsten och dess logg hamnar på
+# samma ställe utan att någon av dem gissar. StateDirectory skapar katalogen
+# innan append: försöker skriva i den.
+StateDirectory=vibepulse
+StandardOutput=append:%S/vibepulse/torget-tokenserver.log
+StandardError=append:%S/vibepulse/torget-tokenserver.log
+
+[Install]
+WantedBy=default.target
