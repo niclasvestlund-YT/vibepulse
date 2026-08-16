@@ -22,6 +22,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   in the local gate — which is exactly how a green CI hid a runtime
   `NameError` in the rebased Windows branch (PR #11): the missing
   `test_interactions` catches it immediately.
+- The tokenserver reads Claude's OAuth token on Windows, where `claude
+  login` writes `%USERPROFILE%\.claude\.credentials.json` instead of using
+  a keychain — or `%CLAUDE_CONFIG_DIR%\.credentials.json` when that
+  variable relocates Claude Code's config directory, which the reader now
+  honors the same way `claude login` does. Honest caveat, documented in
+  the tokenserver README: the file is plaintext, protected by the user
+  account's filesystem permissions but without keychain-equivalent at-rest
+  protection — Claude Code's own trade-off on Windows and Linux, not the
+  service's. State files and logs live under `%LOCALAPPDATA%\VibePulse\`,
+  the Codex app-server read works without `select.select` (which never
+  worked on pipes on Windows), and its subprocess tests run the fixture
+  through `[sys.executable, script]` so they need neither a shebang nor an
+  execute bit. Autostart is no longer open: see the Linux/Windows entry
+  under Added.
 
 ### Added
 
