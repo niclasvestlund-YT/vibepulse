@@ -587,7 +587,16 @@ def _credentials_file_path():
     writes the same ``{"claudeAiOauth": {...}}`` shape the macOS keychain
     holds to a plain file instead. ``Path.home()`` resolves to
     ``%USERPROFILE%`` there, so one expression covers both.
+
+    ``CLAUDE_CONFIG_DIR`` relocates Claude Code's whole config directory,
+    credentials included — the file then lives directly in that directory,
+    not in a ``.claude`` subdirectory of it. ``claude login`` honors the
+    variable, so a reader that ignored it would probe with a stale token
+    from the abandoned default path, or silently find nothing.
     """
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if config_dir:
+        return Path(config_dir).expanduser() / ".credentials.json"
     return Path.home() / ".claude" / ".credentials.json"
 
 
@@ -1271,16 +1280,26 @@ def _parse_codex_rate_limits_response(body, observed_at, now_ts):
 
 
 def _codex_app_server_command():
+    """The complete argv for the app-server child, or None.
+
+    Returning the whole command line rather than a bare executable keeps
+    every caller — and every test double — launching the process the same
+    way. A test can substitute ``[sys.executable, fixture_script]`` and
+    exercise the identical Popen path, with no shebang or execute bit,
+    which is what lets the subprocess tests run on Windows.
+    """
     executable = shutil.which("codex")
-    if executable:
-        return executable
-    for candidate in (
-        "/Applications/ChatGPT.app/Contents/Resources/codex",
-        "/Applications/Codex.app/Contents/Resources/codex",
-    ):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return None
+    if executable is None:
+        for candidate in (
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/Applications/Codex.app/Contents/Resources/codex",
+        ):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                executable = candidate
+                break
+    if executable is None:
+        return None
+    return [executable, "app-server", "--listen", "stdio://"]
 
 
 def _pump_lines(stream):
@@ -1317,13 +1336,13 @@ def _pump_lines(stream):
 
 def _read_codex_app_server_limits(timeout_s=5):
     """Read Codex's current quota snapshot through its local app protocol."""
-    executable = _codex_app_server_command()
-    if executable is None:
+    command = _codex_app_server_command()
+    if command is None:
         return {}
     process = None
     try:
         process = subprocess.Popen(
-            [executable, "app-server", "--listen", "stdio://"],
+            command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, bufsize=1)
 

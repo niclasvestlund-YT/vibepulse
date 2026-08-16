@@ -3,6 +3,7 @@ import fcntl
 import io
 import json
 import logging
+import sys
 import tempfile
 import threading
 import time
@@ -280,6 +281,42 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         # utgången processtoken att sortera bort.
         self.assertEqual(
             candidates, [("windows-file-token", 1_900_000_000_000)])
+
+    def test_credentials_file_honors_claude_config_dir(self):
+        """CLAUDE_CONFIG_DIR flyttar hela Claude Codes konfigkatalog, och
+        `claude login` följer med — filen ligger då direkt i katalogen, inte
+        under `.claude/`. En läsare som ignorerar variabeln probear med en
+        inaktuell token från den övergivna standardsökvägen, eller hittar
+        tyst ingenting."""
+        credentials = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "config-dir-token",
+                "expiresAt": 1_900_000_000_000,
+            },
+        })
+
+        with tempfile.TemporaryDirectory() as config_dir, \
+                tempfile.TemporaryDirectory() as fake_home:
+            (Path(config_dir) / ".credentials.json").write_text(
+                credentials, encoding="utf-8")
+
+            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(fake_home)), \
+                    mock.patch.dict(tokenserver.os.environ,
+                                    {"CLAUDE_CONFIG_DIR": config_dir}):
+                candidates = tokenserver._read_oauth_candidates()
+            self.assertEqual(
+                candidates, [("config-dir-token", 1_900_000_000_000)])
+
+            # ...och en tom variabel räknas som frånvarande: då gäller
+            # standardsökvägen som förut (tomt hem här → inga kandidater).
+            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(fake_home)), \
+                    mock.patch.dict(tokenserver.os.environ,
+                                    {"CLAUDE_CONFIG_DIR": ""}):
+                self.assertEqual(tokenserver._read_oauth_candidates(), [])
 
     def test_windows_without_a_credentials_file_has_no_candidates(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -947,9 +984,8 @@ class CodexLimitLogTests(unittest.TestCase):
         täckt — så select-bytet hade kunnat gå sönder tyst. Det här kör den
         på riktigt: process, pipe, tråd, kö.
         """
-        script = Path(temp_dir) / "codex"
+        script = Path(temp_dir) / "codex.py"
         script.write_text(
-            "#!/usr/bin/env python3\n"
             "import json, sys\n"
             "for line in sys.stdin:\n"
             "    try:\n"
@@ -962,8 +998,9 @@ class CodexLimitLogTests(unittest.TestCase):
             "    elif got == 2:\n"
             f"        print(json.dumps({body!r}), flush=True)\n",
             encoding="utf-8")
-        script.chmod(0o755)
-        return str(script)
+        # No shebang, no execute bit: the interpreter is named explicitly so
+        # the same fixture runs on Windows, where neither concept exists.
+        return [sys.executable, str(script)]
 
     def test_app_server_read_talks_to_a_real_process(self):
         response = {"id": 2, "result": {"rateLimits": {
@@ -974,9 +1011,9 @@ class CodexLimitLogTests(unittest.TestCase):
         }}}
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            executable = self._fake_app_server(temp_dir, response)
+            command = self._fake_app_server(temp_dir, response)
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=executable):
+                                   return_value=command):
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=20)
 
@@ -987,15 +1024,14 @@ class CodexLimitLogTests(unittest.TestCase):
         """Deadlinen måste hålla utan select: en app-server som svarar
         aldrig får inte hänga probecykeln."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = Path(temp_dir) / "codex"
+            script = Path(temp_dir) / "codex.py"
             script.write_text(
-                "#!/usr/bin/env python3\n"
                 "import time\n"
                 "time.sleep(30)\n", encoding="utf-8")
-            script.chmod(0o755)
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=str(script)):
+                                   return_value=[sys.executable,
+                                                 str(script)]):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=1)
@@ -1008,14 +1044,13 @@ class CodexLimitLogTests(unittest.TestCase):
         """EOF-vakten: strömmen stängs direkt, och läsaren ska returnera på
         en gång i stället för att vänta ut hela sin deadline."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = Path(temp_dir) / "codex"
+            script = Path(temp_dir) / "codex.py"
             script.write_text(
-                "#!/usr/bin/env python3\n"
                 "raise SystemExit(1)\n", encoding="utf-8")
-            script.chmod(0o755)
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=str(script)):
+                                   return_value=[sys.executable,
+                                                 str(script)]):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=20)
