@@ -36,16 +36,27 @@ are required, and the build gates on their absence:
 Confirm all five before touching anything. Ask the user for anything you
 cannot determine yourself.
 
-1. **macOS or Windows?** Both serve data. On Windows the Claude token comes
-   from `%USERPROFILE%\.claude\.credentials.json` instead of the keychain,
-   and state and logs live under `%LOCALAPPDATA%\VibePulse\` — but there is
-   **no autostart**, so the service must be started by hand or wired into
-   Task Scheduler, and `smoke.py`'s advice still names `launchctl`
-   ([#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)). On Linux
-   the firmware still builds and the simulator still runs, but the service
-   finds no Claude token at all — there is no keychain and the credential
-   file is read only on Windows
-   ([#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2)).
+1. **macOS, Linux or Windows?** All three serve data, with autostart, the
+   same state files and the same diagnostics. What differs is where the
+   Claude token comes from — the keychain on macOS, and the file `/login`
+   writes (`~/.claude/.credentials.json`, or `$CLAUDE_CONFIG_DIR`) on the
+   other two — and where state and logs live:
+   `~/Library/…` on macOS, `%LOCALAPPDATA%\VibePulse\` on Windows,
+   `$XDG_STATE_HOME/vibepulse` (else `~/.local/state/vibepulse`) on Linux.
+
+   Two host-specific gotchas worth naming up front:
+
+   - **Windows needs a firewall rule before the first start.** The service
+     listens on the LAN and Defender only ever asks interactively — under
+     Task Scheduler nobody is there to answer, so the panel is blocked
+     silently while everything looks healthy. See
+     `tools/tokenserver/README.md` → Autostart.
+   - **`.local` addressing assumes the host answers mDNS.** macOS does via
+     Bonjour and most desktop Linux does via Avahi; Windows is inconsistent
+     about it. Where it does not resolve, use a DHCP-reserved IP in
+     `secrets.h` instead of the Bonjour name
+     ([#7](https://github.com/niclasvestlund-YT/vibepulse/issues/7) tracks
+     making this dependable).
 2. **Do they have the board?** Waveshare ESP32-S3-Touch-AMOLED-2.16. No
    board → skip to [Simulator only](#simulator-only-no-board).
 3. **Is their WiFi 2.4 GHz?** The ESP32-S3 cannot see 5 GHz at all. This is
@@ -64,8 +75,8 @@ cp secrets.h.example secrets.h
 Then edit `secrets.h`. Two separate things must be right:
 
 - `TG_WIFI_SSID` / `TG_WIFI_PASS` — their 2.4 GHz network.
-- **Replace `DIN-MAC` in `TK_VIBEPULSE_BASE_URL`** with their Mac's Bonjour
-  name.
+- **Replace `DIN-MAC` in `TK_VIBEPULSE_BASE_URL`** with the host's Bonjour
+  name — or its IP, if the host does not answer `.local` (see below).
 
 Those `#define`s ship active on purpose, with an obvious placeholder. Do not
 comment them out or delete them: `components/app_tokens/net.c` guards every
@@ -74,12 +85,21 @@ out entirely and the firmware then compiles cleanly, boots cleanly, connects
 to WiFi cleanly — and shows dashes forever, with no error anywhere to tell
 you why. A wrong hostname at least shows up in the serial log.
 
-Use the Bonjour name, not an IP, so the same binary works at home and on a
-phone hotspot:
+Prefer the Bonjour name over an IP, so the same binary works at home and on
+a phone hotspot:
 
 ```sh
-scutil --get LocalHostName     # e.g. "Niclas-MacBook" -> Niclas-MacBook.local
+scutil --get LocalHostName     # macOS: "Niclas-MacBook" -> Niclas-MacBook.local
+hostname                       # Linux with Avahi: <name>.local
 ```
+
+This only works if the host actually answers `.local` queries. macOS always
+does; desktop Linux usually does through Avahi; **Windows is inconsistent**
+— recent builds ship an mDNS responder, but firewall profiles and policy
+decide whether it answers, so it cannot be relied on. Where the name does
+not resolve, give the host a DHCP reservation in the router and put the IP
+in `TK_VIBEPULSE_BASE_URL` instead. The reservation is what keeps it from
+becoming the "screen went dark after a reboot" problem.
 
 **Verify:** `secrets.h` has a non-empty SSID, and
 

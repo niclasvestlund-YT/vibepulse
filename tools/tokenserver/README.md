@@ -1,4 +1,4 @@
-# tokenserver — VibePulse Mac-tjänst
+# tokenserver — VibePulse värdtjänst (macOS, Linux, Windows)
 
 > **English quickstart:** `python3 tokenserver.py`. Pure Python 3 stdlib,
 > nothing to install. It reads your local Claude Code/Codex logs and serves
@@ -8,10 +8,10 @@
 > `--claude-plan {pro,max5x,max20x}` and/or `--codex-plan
 > {plus,pro}` to show a plan badge on the Max Tracker pages; both flags are
 > optional and purely cosmetic (a display label, never used in any
-> percentage math). Autostart on login: `cp se.torget.tokenserver.plist
-> ~/Library/LaunchAgents/ && launchctl load
-> ~/Library/LaunchAgents/se.torget.tokenserver.plist` (edit the path inside
-> if the repo isn't at `~/Torget`). Privacy contract: only percentages and
+> percentage math). Runs on macOS, Linux and Windows; autostart files for
+> launchd, systemd and Task Scheduler sit beside this README (see
+> *Autostart* below — on Windows, add the firewall rule first). Privacy
+> contract: only percentages and
 > counts are ever served; no prompts, commands or file contents are stored.
 > Full details below in Swedish. Your agent translates.
 
@@ -257,11 +257,16 @@ loggen bor under `%LOCALAPPDATA%\VibePulse\` i stället för macOS
 även förut — `Path.home()` löser ut — men lade ett `Library`-träd i
 användarprofilen som ingenting annat på maskinen känner igen.
 
-Kvar på Windows: **autostart**. launchd-plisten härintill har ingen
-motsvarighet; tjänsten måste startas för hand eller läggas i Task
-Scheduler. `smoke.py` känner till tillståndskatalogen men dess råd pratar
-fortfarande om `launchctl`. Se
-[#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3).
+På Linux bor samma filer under `$XDG_STATE_HOME/vibepulse` (annars
+`~/.local/state/vibepulse`) — XDG pekar ut state-katalogen för precis den
+här sortens tillstånd, loggar inräknade. En relativ `XDG_STATE_HOME`
+behandlas som osatt enligt specen; under systemd hade den annars räknats
+mot en arbetskatalog användaren inte valt.
+
+Autostart finns nu för alla tre: `se.torget.tokenserver.plist` (launchd),
+`vibepulse-tokenserver.service` (systemd) och `VibePulseTokenserver.xml`
+(Schemaläggaren) — se avsnittet längre ned. `smoke.py` anpassar sina råd
+efter värden i stället för att alltid säga `launchctl`.
 
 Svar (kontraktet appen parsar, `components/app_tokens/tokens_parse.c`;
 null = ärlig frånvaro, skärmen visar streck):
@@ -344,7 +349,15 @@ Peka skärmen hit i repytrotens `secrets.h`:
 Macens LAN-IP: `ipconfig getifaddr en0`. Ge gärna Macen fast DHCP-lease i
 routern — byter IP:t adress står skärmen med streck tills secrets.h flashas om.
 
-## Autostart via launchd
+## Autostart
+
+Tre filer, en per värd. Alla tre gör samma två saker: starta vid
+inloggning, och starta om efter 30 sekunder om processen dör — väntetiden
+är staketet mot respawn-loopar, inte en slump. Alla tre kör som DIN
+användare: hela jobbet är att läsa `~/.claude` och `~/.codex`, och ett
+tjänstekonto har inte de filerna.
+
+### macOS — launchd
 
 ```
 cp se.torget.tokenserver.plist ~/Library/LaunchAgents/
@@ -352,11 +365,56 @@ launchctl load ~/Library/LaunchAgents/se.torget.tokenserver.plist
 ```
 
 Plisten antar att repot bor i `~/Torget` och användaren `niclasvestlund` —
-redigera sökvägarna annars. Loggen hamnar i
-`~/Library/Logs/torget-tokenserver.log` (syns i Konsol-appen, överlever
-omstart; servern roterar den själv vid start om den vuxit förbi ~5 MB, med
-svansen bevarad i `.old`). Raderna har tidsstämplar och loggar övergångar,
-inte tillstånd: en frisk vecka är några rader, inte tusen.
+redigera sökvägarna annars.
+
+### Linux — systemd (användarenhet)
+
+```
+mkdir -p ~/.config/systemd/user
+cp vibepulse-tokenserver.service ~/.config/systemd/user/
+$EDITOR ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
+systemctl --user daemon-reload
+systemctl --user enable --now vibepulse-tokenserver
+```
+
+`systemctl --user status vibepulse-tokenserver` visar läget,
+`journalctl --user -u vibepulse-tokenserver` enhetens egna rader. Ska
+tjänsten leva även när du inte är inloggad: `loginctl enable-linger $USER`.
+
+### Windows — Schemaläggaren
+
+```
+schtasks /create /tn "VibePulse Tokenserver" /xml VibePulseTokenserver.xml
+```
+
+Ändra `<UserId>` till ditt konto (`whoami`) och `<WorkingDirectory>` till
+din utcheckning först.
+
+**Brandväggen är ett eget steg och måste göras FÖRE första starten.**
+Tjänsten lyssnar på LAN:et, och Windows Defender frågar bara interaktivt —
+under Schemaläggaren finns ingen som kan svara, så anropet blockeras tyst
+och panelen visar streck utan att något ser trasigt ut. Kör en gång, som
+administratör:
+
+```
+netsh advfirewall firewall add rule name="VibePulse Tokenserver" ^
+  dir=in action=allow protocol=TCP localport=8737 profile=private
+```
+
+`profile=private` med flit: regeln ska gälla hemnätet, inte ett kafés.
+
+### Loggen
+
+Under macOS hamnar den i `~/Library/Logs/torget-tokenserver.log` (syns i
+Konsol-appen), under Windows i
+`%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log` och under Linux i
+`$XDG_STATE_HOME/vibepulse/torget-tokenserver.log`. Servern roterar den
+själv vid start om den vuxit förbi ~5 MB, med svansen bevarad i `.old`.
+Rotationen kräver att tjänstehanteraren faktiskt skickar stderr till just
+den filen — därför går Windows-uppgiften via `cmd.exe` med en
+omdirigering, och systemd-enheten via `append:`. Raderna har tidsstämplar
+och loggar övergångar, inte tillstånd: en frisk vecka är några rader, inte
+tusen.
 
 Snabbaste hälsokollen är röktestet — kamrutinens steg 1–4 som ett kommando:
 

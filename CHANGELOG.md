@@ -56,11 +56,46 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   The old paths worked literally on Windows but planted a `Library` tree in
   the user profile that nothing else on the machine recognises.
 
-  What remains for [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)
-  is autostart: the launchd plist has no Windows equivalent, and `smoke.py`
-  now finds the right state directory but still tells you to run `launchctl`.
   Reported by Erik Elfström, who found it porting a fork to a LilyGO
   T-Display-S3.
+- Linux is a supported host, and the Windows port is finished
+  ([#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2),
+  [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)). Linux had
+  never been a platform here, only the shape of "not Windows", so it
+  inherited macOS's answers: state and logs landed in `~/Library`, and the
+  credential probe went looking for a keychain and a Claude Desktop process
+  that do not exist there. Paths now go three ways — `%LOCALAPPDATA%` on
+  Windows, `~/Library` unchanged on macOS so nothing has to migrate, and
+  `$XDG_STATE_HOME` (else `~/.local/state`) on Linux. The credential file
+  `/login` writes serves Linux and Windows alike, with `security`/`pgrep`
+  demoted to the macOS branch, and `CLAUDE_CONFIG_DIR` is finally honoured
+  so a relocated Claude install is followed rather than missed.
+  `CLAUDE_CODE_OAUTH_TOKEN` in the service's own environment is offered
+  first as a manual escape hatch, without dropping the platform sources
+  behind it.
+
+  Autostart now exists for all three: `vibepulse-tokenserver.service`
+  (systemd user unit) and `VibePulseTokenserver.xml` (Task Scheduler) join
+  the plist, each carrying its two real decisions — restart on death, after
+  30 s, so a process dying at startup cannot fill the log with its own
+  restarts. `smoke.py` names whichever service manager the host actually
+  has instead of always saying `launchctl`. On Windows the firewall rule is
+  documented as a step of its own: the service listens on the LAN, Defender
+  only asks interactively, and under Task Scheduler nobody is there to
+  answer — so without it the panel is blocked silently while everything
+  looks healthy.
+
+  `codex` is now found when a service manager strips `PATH`, which is how
+  the service is meant to run; `VIBEPULSE_CODEX_BIN` overrides when the
+  guesses miss.
+
+  CI runs the tokenserver on ubuntu, windows and macos, and all eleven test
+  modules rather than seven. Both gaps had already cost something:
+  `test_interactions` was among the four skipped, and it is the module that
+  would have caught a missing `select` import when this branch was rebased.
+  Several tests turned out to describe one platform while running on
+  another — patching `_IS_WINDOWS = False` and calling the result macOS —
+  so a `platform_is` helper now sets the flags from a single name.
 - The completion alert finally pulses. The accent outline and icon ring
   breathe (full → 39 % → full, ease-in-out, four 1200 ms cycles filling the
   PULSE phase exactly) and then rest; text and the provider icon stay solid
