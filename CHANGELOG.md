@@ -7,6 +7,27 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- The tokenserver reads Claude's OAuth token on Windows. Claude Code has no
+  keychain integration there, so `claude login` writes the same
+  `{"claudeAiOauth": {...}}` record the macOS keychain holds to a plain file,
+  `%USERPROFILE%\.claude\.credentials.json`; the probe now reads it when
+  running on Windows and skips the two macOS-only sources (`security`,
+  `pgrep` for Claude Desktop's injected token) that cannot exist there. macOS
+  behaviour is untouched.
+
+  Two things had to give way for that read to be reachable at all: `fcntl`
+  is not importable on Windows, so the module could not even load, and the
+  machine-wide single-probe lock was built on `flock`. The import is now
+  guarded and the lock takes `msvcrt.locking` where `flock` is missing —
+  same non-blocking gate, different syscall — so the 429 guard survives the
+  port instead of quietly disappearing with it.
+
+  This is the token half of
+  [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3) only — log
+  paths, state paths and the launchd setup are still macOS-shaped, and the
+  Codex half reads its app-server through `select.select` on a pipe, which
+  Windows does not support. Reported by Erik Elfström, who found it porting
+  a fork to a LilyGO T-Display-S3.
 - The completion alert finally pulses. The accent outline and icon ring
   breathe (full → 39 % → full, ease-in-out, four 1200 ms cycles filling the
   PULSE phase exactly) and then rest; text and the provider icon stay solid

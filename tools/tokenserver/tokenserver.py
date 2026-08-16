@@ -32,7 +32,6 @@ Autostart: se README.md härintill (launchd-plist medföljer).
 """
 
 import argparse
-import fcntl
 import hashlib
 import json
 import logging
@@ -50,6 +49,18 @@ import weakref
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+# Probelåset tas med olika systemanrop på olika plattformar; ingen av
+# modulerna finns på båda. Importen får inte fälla hela tjänsten — utan lås
+# är beteendet som före låset fanns, inte "startar inte alls".
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+try:
+    import msvcrt
+except ImportError:  # macOS/Linux
+    msvcrt = None
 
 if __package__:
     from .agent_status import AgentStatusService
@@ -482,6 +493,9 @@ _CLAUDE_DESKTOP_PROCESS = re.compile(
 _CLAUDE_PROCESS_TOKEN = re.compile(
     r"(?:^|\s)CLAUDE_CODE_OAUTH_TOKEN=([^\s]+)"
 )
+# Vilken token-källa som finns beror på plattformen, inte på konfiguration.
+# Testerna patchar konstanten för att köra Windows-grenen på en Mac.
+_IS_WINDOWS = sys.platform == "win32"
 
 
 def _read_process_oauth_token():
@@ -538,17 +552,54 @@ def _read_keychain_oauth():
         return None, None
 
 
+def _credentials_file_path():
+    """Windows' credential store: ``%USERPROFILE%\\.claude\\.credentials.json``.
+
+    Claude Code has no keychain integration on Windows, so ``claude login``
+    writes the same ``{"claudeAiOauth": {...}}`` shape the macOS keychain
+    holds to a plain file instead. ``Path.home()`` resolves to
+    ``%USERPROFILE%`` there, so one expression covers both.
+    """
+    return Path.home() / ".claude" / ".credentials.json"
+
+
+def _read_credentials_file_oauth():
+    """The Windows credential file as ``(token, expires_at_ms)``.
+
+    Same record ``/login`` writes, same field names as the keychain — only
+    the store differs. A missing or malformed file is not an error worth
+    logging: it just means this host has no credential file, which is the
+    normal case everywhere except Windows.
+    """
+    try:
+        raw = _credentials_file_path().read_text(encoding="utf-8")
+        oauth = json.loads(raw).get("claudeAiOauth") or {}
+        return oauth.get("accessToken"), oauth.get("expiresAt")
+    except Exception:
+        return None, None
+
+
 def _read_oauth_candidates():
     """Distinct token candidates as ``[(token, expires_at_ms), ...]``.
 
-    Claude Desktop's injected process token is listed first (Desktop
-    refreshes OAuth itself while the keychain record can lag), but ``ps eww``
-    shows the environment as of process launch: a Desktop child that outlives
-    its token keeps serving the frozen, expired value even after a fresh
-    ``/login`` has updated the keychain. Neither source is reliably the
-    freshest, so the probe must try them in order rather than trust the
-    first.
+    Which sources exist is a property of the platform. On Windows there is
+    no keychain and no bundled Claude Desktop process to read an injected
+    token from, so the credential file ``/login`` writes is the only source
+    — asking ``pgrep``/``security`` there would only spawn doomed processes
+    every probe cycle.
+
+    On macOS both sources are live. Claude Desktop's injected process token
+    is listed first (Desktop refreshes OAuth itself while the keychain
+    record can lag), but ``ps eww`` shows the environment as of process
+    launch: a Desktop child that outlives its token keeps serving the
+    frozen, expired value even after a fresh ``/login`` has updated the
+    keychain. Neither source is reliably the freshest, so the probe must try
+    them in order rather than trust the first.
     """
+    if _IS_WINDOWS:
+        file_token, expires_at = _read_credentials_file_oauth()
+        return [(file_token, expires_at)] if file_token else []
+
     candidates = []
     process_token = _read_process_oauth_token()
     if process_token:
@@ -812,11 +863,24 @@ def _ota_available_version():
 
 
 def _hold_probe_lock():
-    """Icke-blockerande flock; returnerar filobjektet (= låset) eller None."""
+    """Icke-blockerande exklusivt lås; returnerar filobjektet eller None.
+
+    ``flock`` på macOS/Linux, ``msvcrt.locking`` på Windows — samma grind,
+    olika systemanrop. Båda släpps när filen stängs.
+    """
     try:
         _PROBE_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
         handle = open(_PROBE_LOCK_PATH, "w")
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if fcntl is not None:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        elif msvcrt is not None:
+            # LK_NBLCK låser ett byte utan att blockera och höjer OSError om
+            # en annan instans redan äger det. Filen måste ha en byte att
+            # låsa, annars lyckas anropet utan att grinden betyder något.
+            handle.write("1")
+            handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
         return handle
     except OSError:
         try:

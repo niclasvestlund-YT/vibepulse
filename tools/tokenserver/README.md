@@ -22,8 +22,9 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
 1. **Volymen** — `~/.claude/projects/**/*.jsonl` skannas inkrementellt:
    dagens/månadens tokens, brinntakt, sessioner.
 2. **Claudes tak** (Clawdmeter-mönstret) — tjänsten läser Claude Desktops
-   aktiva, injicerade OAuth-token eller Claude Codes nyckelringsfallback och
-   gör en minimal API-förfrågan
+   aktiva, injicerade OAuth-token eller Claude Codes nyckelringsfallback
+   (på Windows i stället `%USERPROFILE%\.claude\.credentials.json`, samma
+   post — se [Windows](#windows) nedan) och gör en minimal API-förfrågan
    (`max_tokens: 0` — prefill utan output, i praktiken gratis) var 120:e
    sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
    5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
@@ -230,6 +231,27 @@ fristående Claude Code kan första körningen fråga macOS om nyckelringsåtkom
 så tjänsten kan probea utan att fråga om. Startloggen skriver dessutom ut de exakta
 `anthropic-ratelimit-*`-headrarna vid första proben — facit om mappningen
 någonsin behöver justeras.
+
+### Windows
+
+Claude Code har ingen nyckelringsintegration på Windows: `claude login`
+skriver i stället exakt samma `{"claudeAiOauth": {...}}`-post till en vanlig
+fil, `%USERPROFILE%\.claude\.credentials.json`. Kör tjänsten på Windows och
+den läser den filen — ingen dialog, ingen konfiguration, samma
+förtroendegräns som nyckelringsläsningen på Macen. Nyckelringen och Claude
+Desktops processtoken frågas inte alls där; `security` och `pgrep` finns
+ändå inte.
+
+Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
+finns kvar på Windows: `fcntl` saknas där, så låset tas med
+`msvcrt.locking` i stället. Samma icke-blockerande grind, annat systemanrop.
+
+Resten av tjänsten är fortfarande macOS-formad — loggsökvägar,
+tillståndsfiler och launchd-uppsättningen — och Codex-halvan läser sin
+app-server med `select.select` på en pipe, vilket Windows inte stöder. Detta
+löser alltså Claude-tokendelen av
+[#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3), inte hela
+Windows-stödet.
 
 Svar (kontraktet appen parsar, `components/app_tokens/tokens_parse.c`;
 null = ärlig frånvaro, skärmen visar streck):

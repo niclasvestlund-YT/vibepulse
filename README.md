@@ -418,8 +418,12 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
 
 ## FAQ
 
-- **Windows or Linux for the Mac service?** Not yet — the log paths and
-  keychain reads are macOS-specific. Tracked in
+- **Windows or Linux for the Mac service?** Not yet — the log paths, lock
+  paths and launchd setup are macOS-specific. One piece is portable: Claude
+  Code has no keychain on Windows, so `claude login` writes the same
+  `{"claudeAiOauth": {...}}` record to
+  `%USERPROFILE%\.claude\.credentials.json`, and the service reads it there
+  instead. Tracked in
   [#3 (Windows)](https://github.com/niclasvestlund-YT/vibepulse/issues/3)
   and [#2 (Linux)](https://github.com/niclasvestlund-YT/vibepulse/issues/2);
   contributions very welcome.
