@@ -400,6 +400,22 @@ load. Platform-dependent test assumptions are an established theme
 **Fix:** drive the eviction deterministically in the test (injected clock
 or forced verify schedule) instead of relying on wall-clock behavior.
 
+### OBS-30 · Unmapped models reach the panel as raw ids
+`server · S · open`
+`MODEL_LABELS` (`agent_status.py:56`) names six models; `prices.json`
+prices roughly a hundred and ten. `normalize_model` falls through to the
+raw lowercase id for the rest, so the panel mixes typeset labels
+(`OPUS 5`) with bare ids (`claude-opus-4-8`) depending on which model the
+agent happens to pick. Worse, `_bounded_display` clips at 24 bytes to
+match `TK_AGENT_MODEL_CAP`, so a dated id truncates mid-string:
+`claude-haiku-4-5-20251001` renders as `claude-haiku-4-5-2025100`. Found
+via a fork on a T-Display-S3 showing `gpt-5.6-terra` next to its
+typeset siblings; the three `gpt-5.6-*` variants are now mapped, the
+underlying fallthrough is not.
+**Fix:** derive the label from the id (family + version, uppercased,
+dated suffix dropped) and keep the map for exceptions only — then a new
+model is styled on arrival instead of on the next hand edit.
+
 ### OBS-28 · Pin logging config on purpose
 `firmware · S · open`
 `sdkconfig.defaults` deliberately pins flash, PSRAM, LVGL, and mbedTLS

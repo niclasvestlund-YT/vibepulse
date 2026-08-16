@@ -5,6 +5,18 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Fixed
+
+- The panel names all three GPT-5.6 variants. `gpt-5.6-sol` had a typeset
+  screen label while its siblings `terra` and `luna` fell through to their
+  raw lowercase ids — the price table knew all three, the screen knew one,
+  so the agent tile read `gpt-5.6-terra` next to a properly set `OPUS 5`. A
+  test now also holds every label inside `TK_AGENT_MODEL_CAP`, reading the
+  cap from the firmware header rather than restating it. Spotted on Erik
+  Elfström's T-Display-S3 fork. The wider fallthrough — ~110 priced models,
+  six named ones, and dated ids that truncate mid-string — is written up as
+  OBS-30 rather than fixed here.
+
 ### Added
 
 - The tokenserver reads Claude's OAuth token on Windows. Claude Code has no

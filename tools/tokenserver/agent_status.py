@@ -53,11 +53,18 @@ ACTIVITIES = {
     "waiting_approval",
 }
 
+# Skärmetiketter för de modeller agenterna faktiskt rapporterar. Okända
+# id:n faller igenom som råa gemener (se normalize_model) — dvs. sol får
+# "GPT-5.6 SOL" medan dess syskon terra/luna skulle visas som "gpt-5.6-terra".
+# Prislistan känner alla tre; skärmen ska göra det också. (OBS-30 spårar att
+# fallet igenom fortfarande gäller resten av prices.json.)
 MODEL_LABELS = {
     "claude-fable-5": "FABLE 5",
     "claude-opus-5": "OPUS 5",
     "claude-sonnet-5": "SONNET 5",
+    "gpt-5.6-luna": "GPT-5.6 LUNA",
     "gpt-5.6-sol": "GPT-5.6 SOL",
+    "gpt-5.6-terra": "GPT-5.6 TERRA",
 }
 
 
