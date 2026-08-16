@@ -2,6 +2,7 @@ import json
 import os
 import random
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -1278,7 +1279,13 @@ class MaxTrackerStorePersistenceTests(unittest.TestCase):
             self.assertTrue(path.exists())
             leftovers = [p for p in path.parent.iterdir() if p != path]
             self.assertEqual(leftovers, [])
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            if sys.platform != "win32":
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            # Windows har inga POSIX-bitar att läsa: os.chmod styr där bara
+            # skrivskyddsflaggan, så 0o600 säger ingenting om vem som kommer
+            # åt filen. Skyddet är i stället att tillståndet bor under
+            # %LOCALAPPDATA%, som ärver användarprofilens ACL. Att påstå
+            # 0o600 där vore att testa en siffra i stället för en egenskap.
 
     def test_reloaded_store_produces_an_identical_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:

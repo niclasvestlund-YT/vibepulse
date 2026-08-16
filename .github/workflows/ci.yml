@@ -20,14 +20,29 @@ permissions:
 
 jobs:
   tokenserver:
-    name: Tokenserver tests (Python stdlib)
-    runs-on: ubuntu-latest
+    # The service is supported on three platforms, so it is tested on three.
+    # The platform branches are the whole point: state paths, the credential
+    # source and the probe lock differ per OS, and a test that pins one
+    # platform while running on another has already shipped once (macOS tests
+    # asserted their paths against the Linux branch on this very runner).
+    # fail-fast stays off — when one OS breaks, the others' verdicts are the
+    # information you actually want.
+    name: Tokenserver tests (Python stdlib) — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # bash on every runner: the default shell on windows-latest is
+      # PowerShell, where a trailing \ is not a line continuation and this
+      # command would run as seven broken fragments.
       - name: Run tokenserver unit tests
+        shell: bash
         run: |
           # Same eleven modules as test/run.sh, same order. The lists
           # drifting apart is how a green CI hid a runtime NameError in

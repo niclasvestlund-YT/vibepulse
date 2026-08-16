@@ -1,5 +1,4 @@
 import contextlib
-import fcntl
 import io
 import json
 import logging
@@ -12,11 +11,45 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 import os
+import sys
 
 from tools.tokenserver import codex_usage, tokenserver
 from tools.tokenserver.max_tracker import MaxTrackerStore
 from tools.tokenserver.quota_cache import CachedQuota, QuotaCache
 from tools.tokenserver.usage_history import Forecast, UsageHistory
+
+# Samma grindade import som tjänsten själv gör. Modulnivå-``import fcntl``
+# fällde hela filen på Windows innan den hann köra ett enda test — och
+# filen innehåller de tester som ska bevisa att Windows-grenarna fungerar.
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
+
+def write_fake_executable(directory, python_source, name="codex"):
+    """Ett startbart program som kör ``python_source``, på vilken värd som helst.
+
+    Produktionskoden startar ``codex`` som EN sökväg — ingen tolk framför —
+    så testets attrapp måste vara startbar av sig själv. På POSIX räcker en
+    shebang; Windows har ingen, så där skrivs en ``.cmd`` som anropar samma
+    tolk som kör testet. Alternativet vore att hoppa över de här testerna på
+    Windows, och det är precis fel plattform att sluta täcka: hela
+    läsartråden finns därför att ``select`` inte tar pipes där.
+    """
+    source = Path(directory) / f"{name}.py"
+    source.write_text(python_source, encoding="utf-8")
+    if sys.platform == "win32":
+        launcher = Path(directory) / f"{name}.cmd"
+        launcher.write_text(
+            f'@echo off\r\n"{sys.executable}" "{source}" %*\r\n',
+            encoding="utf-8")
+        return str(launcher)
+    launcher = Path(directory) / name
+    launcher.write_text(
+        f"#!{sys.executable}\n{python_source}", encoding="utf-8")
+    launcher.chmod(0o755)
+    return str(launcher)
 
 
 @contextlib.contextmanager
@@ -639,6 +672,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(calls, ["Bearer dead-token"])
         self.assertEqual(status, "token_dead_awaiting_refresh")
 
+    @unittest.skipIf(fcntl is None,
+                     "flock är POSIX; msvcrt-grenen har sitt eget test")
     def test_probe_yields_when_another_instance_holds_the_lock(self):
         """Maskinvida enprobe-garantin: håller någon annan process låset gör
         cykeln INGEN nätaktivitet alls — extra instanser (worktree, manuell
@@ -1206,9 +1241,7 @@ class CodexLimitLogTests(unittest.TestCase):
         täckt — så select-bytet hade kunnat gå sönder tyst. Det här kör den
         på riktigt: process, pipe, tråd, kö.
         """
-        script = Path(temp_dir) / "codex"
-        script.write_text(
-            "#!/usr/bin/env python3\n"
+        return write_fake_executable(temp_dir, (
             "import json, sys\n"
             "for line in sys.stdin:\n"
             "    try:\n"
@@ -1219,10 +1252,7 @@ class CodexLimitLogTests(unittest.TestCase):
             "    if got == 1:\n"
             "        print(json.dumps({'id': 1, 'result': {}}), flush=True)\n"
             "    elif got == 2:\n"
-            f"        print(json.dumps({body!r}), flush=True)\n",
-            encoding="utf-8")
-        script.chmod(0o755)
-        return str(script)
+            f"        print(json.dumps({body!r}), flush=True)\n"))
 
     def test_app_server_read_talks_to_a_real_process(self):
         response = {"id": 2, "result": {"rateLimits": {
@@ -1246,15 +1276,11 @@ class CodexLimitLogTests(unittest.TestCase):
         """Deadlinen måste hålla utan select: en app-server som svarar
         aldrig får inte hänga probecykeln."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = Path(temp_dir) / "codex"
-            script.write_text(
-                "#!/usr/bin/env python3\n"
-                "import time\n"
-                "time.sleep(30)\n", encoding="utf-8")
-            script.chmod(0o755)
+            script = write_fake_executable(
+                temp_dir, "import time\ntime.sleep(30)\n")
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=str(script)):
+                                   return_value=script):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=1)
@@ -1267,14 +1293,11 @@ class CodexLimitLogTests(unittest.TestCase):
         """EOF-vakten: strömmen stängs direkt, och läsaren ska returnera på
         en gång i stället för att vänta ut hela sin deadline."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = Path(temp_dir) / "codex"
-            script.write_text(
-                "#!/usr/bin/env python3\n"
-                "raise SystemExit(1)\n", encoding="utf-8")
-            script.chmod(0o755)
+            script = write_fake_executable(
+                temp_dir, "raise SystemExit(1)\n")
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=str(script)):
+                                   return_value=script):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=20)
