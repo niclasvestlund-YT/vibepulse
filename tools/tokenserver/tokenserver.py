@@ -620,15 +620,15 @@ def _credentials_file_path():
     expression covers both — ``Path.home()`` resolves to ``%USERPROFILE%``
     on Windows and to ``$HOME`` on Linux.
 
-    ``CLAUDE_CONFIG_DIR`` moves Claude Code's whole config tree, credential
-    file included. It REPLACES ``~/.claude`` rather than nesting under it,
-    so the file sits directly in the named directory. Honouring it is what
-    makes the probe follow a relocated install instead of quietly reading
-    a path nobody writes to.
+    ``CLAUDE_CONFIG_DIR`` relocates Claude Code's whole config directory,
+    credentials included — the file then lives directly in that directory,
+    not in a ``.claude`` subdirectory of it. ``claude login`` honors the
+    variable, so a reader that ignored it would probe with a stale token
+    from the abandoned default path, or silently find nothing.
     """
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
     if config_dir:
-        return Path(config_dir) / ".credentials.json"
+        return Path(config_dir).expanduser() / ".credentials.json"
     return Path.home() / ".claude" / ".credentials.json"
 
 
@@ -1367,6 +1367,26 @@ def _codex_fallback_paths():
 
 
 def _codex_app_server_command():
+    """The complete argv for the app-server child, or None.
+
+    Returning the whole command line rather than a bare executable keeps
+    every caller — and every test double — launching the process the same
+    way. A test can substitute ``[sys.executable, fixture_script]`` and
+    exercise the identical Popen path, with no shebang or execute bit,
+    which is what lets the subprocess tests run on Windows.
+    """
+    executable = _codex_executable()
+    if executable is None:
+        return None
+    return [executable, "app-server", "--listen", "stdio://"]
+
+
+def _codex_executable():
+    """Var ``codex`` faktiskt ligger, eller None.
+
+    Skild från argv-byggandet ovan: att HITTA binären är plattformsarbete
+    med tre svar, att STARTA den är en rad som ska se likadan ut överallt.
+    """
     override = os.environ.get("VIBEPULSE_CODEX_BIN", "").strip()
     if override:
         # Uttalad avsikt slår gissningar — men bara om den pekar på något.
@@ -1418,13 +1438,13 @@ def _pump_lines(stream):
 
 def _read_codex_app_server_limits(timeout_s=5):
     """Read Codex's current quota snapshot through its local app protocol."""
-    executable = _codex_app_server_command()
-    if executable is None:
+    command = _codex_app_server_command()
+    if command is None:
         return {}
     process = None
     try:
         process = subprocess.Popen(
-            [executable, "app-server", "--listen", "stdio://"],
+            command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, bufsize=1)
 

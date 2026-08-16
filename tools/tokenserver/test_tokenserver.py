@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import logging
+import sys
 import tempfile
 import threading
 import time
@@ -25,31 +26,6 @@ try:
     import fcntl
 except ImportError:  # Windows
     fcntl = None
-
-
-def write_fake_executable(directory, python_source, name="codex"):
-    """Ett startbart program som kör ``python_source``, på vilken värd som helst.
-
-    Produktionskoden startar ``codex`` som EN sökväg — ingen tolk framför —
-    så testets attrapp måste vara startbar av sig själv. På POSIX räcker en
-    shebang; Windows har ingen, så där skrivs en ``.cmd`` som anropar samma
-    tolk som kör testet. Alternativet vore att hoppa över de här testerna på
-    Windows, och det är precis fel plattform att sluta täcka: hela
-    läsartråden finns därför att ``select`` inte tar pipes där.
-    """
-    source = Path(directory) / f"{name}.py"
-    source.write_text(python_source, encoding="utf-8")
-    if sys.platform == "win32":
-        launcher = Path(directory) / f"{name}.cmd"
-        launcher.write_text(
-            f'@echo off\r\n"{sys.executable}" "{source}" %*\r\n',
-            encoding="utf-8")
-        return str(launcher)
-    launcher = Path(directory) / name
-    launcher.write_text(
-        f"#!{sys.executable}\n{python_source}", encoding="utf-8")
-    launcher.chmod(0o755)
-    return str(launcher)
 
 
 @contextlib.contextmanager
@@ -333,6 +309,42 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         # utgången processtoken att sortera bort.
         self.assertEqual(
             candidates, [("windows-file-token", 1_900_000_000_000)])
+
+    def test_credentials_file_honors_claude_config_dir(self):
+        """CLAUDE_CONFIG_DIR flyttar hela Claude Codes konfigkatalog, och
+        `claude login` följer med — filen ligger då direkt i katalogen, inte
+        under `.claude/`. En läsare som ignorerar variabeln probear med en
+        inaktuell token från den övergivna standardsökvägen, eller hittar
+        tyst ingenting."""
+        credentials = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "config-dir-token",
+                "expiresAt": 1_900_000_000_000,
+            },
+        })
+
+        with tempfile.TemporaryDirectory() as config_dir, \
+                tempfile.TemporaryDirectory() as fake_home:
+            (Path(config_dir) / ".credentials.json").write_text(
+                credentials, encoding="utf-8")
+
+            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(fake_home)), \
+                    mock.patch.dict(tokenserver.os.environ,
+                                    {"CLAUDE_CONFIG_DIR": config_dir}):
+                candidates = tokenserver._read_oauth_candidates()
+            self.assertEqual(
+                candidates, [("config-dir-token", 1_900_000_000_000)])
+
+            # ...och en tom variabel räknas som frånvarande: då gäller
+            # standardsökvägen som förut (tomt hem här → inga kandidater).
+            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(fake_home)), \
+                    mock.patch.dict(tokenserver.os.environ,
+                                    {"CLAUDE_CONFIG_DIR": ""}):
+                self.assertEqual(tokenserver._read_oauth_candidates(), [])
 
     def test_windows_without_a_credentials_file_has_no_candidates(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1102,7 +1114,7 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
     def test_path_hit_wins_before_any_guessing(self):
         with mock.patch.object(tokenserver.shutil, "which",
                                return_value="/usr/bin/codex"):
-            self.assertEqual(tokenserver._codex_app_server_command(),
+            self.assertEqual(tokenserver._codex_executable(),
                              "/usr/bin/codex")
 
     def test_macos_falls_back_to_the_chatgpt_bundle(self):
@@ -1115,7 +1127,7 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                                   side_effect=lambda p: p == bundled), \
                 mock.patch.object(tokenserver.os, "access",
                                   return_value=True):
-            self.assertEqual(tokenserver._codex_app_server_command(), bundled)
+            self.assertEqual(tokenserver._codex_executable(), bundled)
 
     def test_windows_falls_back_to_the_npm_global_bin(self):
         """Task Scheduler ärver inte användarens PATH; npm:s globala
@@ -1129,7 +1141,7 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                                   return_value=None), \
                 mock.patch.object(tokenserver.os.path, "isfile",
                                   side_effect=lambda p: p == expected):
-            self.assertEqual(tokenserver._codex_app_server_command(), expected)
+            self.assertEqual(tokenserver._codex_executable(), expected)
 
     def test_windows_does_not_consult_the_execute_bit(self):
         """os.access(X_OK) beskriver ingenting på Windows — frågan ska
@@ -1145,7 +1157,7 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                                   side_effect=lambda p: p == expected), \
                 mock.patch.object(tokenserver.os, "access",
                                   return_value=False):
-            self.assertEqual(tokenserver._codex_app_server_command(), expected)
+            self.assertEqual(tokenserver._codex_executable(), expected)
 
     def test_linux_falls_back_to_the_user_bin(self):
         expected = str(Path.home() / ".local" / "bin" / "codex")
@@ -1156,7 +1168,7 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                                   side_effect=lambda p: p == expected), \
                 mock.patch.object(tokenserver.os, "access",
                                   return_value=True):
-            self.assertEqual(tokenserver._codex_app_server_command(), expected)
+            self.assertEqual(tokenserver._codex_executable(), expected)
 
     def test_explicit_override_beats_a_path_hit(self):
         with platform_is("linux"), \
@@ -1168,7 +1180,7 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                                   return_value=True), \
                 mock.patch.object(tokenserver.os, "access",
                                   return_value=True):
-            self.assertEqual(tokenserver._codex_app_server_command(),
+            self.assertEqual(tokenserver._codex_executable(),
                              "/opt/codex/codex")
 
     def test_broken_override_does_not_silence_a_working_path(self):
@@ -1181,7 +1193,7 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                 mock.patch.object(tokenserver.os.path, "isfile",
                                   return_value=False), \
                 self.assertLogs(tokenserver.log, level="WARNING") as logs:
-            self.assertEqual(tokenserver._codex_app_server_command(),
+            self.assertEqual(tokenserver._codex_executable(),
                              "/usr/bin/codex")
         self.assertIn("VIBEPULSE_CODEX_BIN", "\n".join(logs.output))
 
@@ -1191,6 +1203,20 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                                   return_value=None), \
                 mock.patch.object(tokenserver.os.path, "isfile",
                                   return_value=False):
+            self.assertIsNone(tokenserver._codex_executable())
+
+    def test_argv_wraps_whatever_discovery_found(self):
+        """Hitta binären och bygga kommandoraden är två jobb. Det andra ska
+        se likadant ut oavsett vilket av det förstas svar som vann."""
+        with mock.patch.object(tokenserver, "_codex_executable",
+                               return_value="/opt/codex/codex"):
+            self.assertEqual(
+                tokenserver._codex_app_server_command(),
+                ["/opt/codex/codex", "app-server", "--listen", "stdio://"])
+
+    def test_argv_is_none_when_nothing_was_found(self):
+        with mock.patch.object(tokenserver, "_codex_executable",
+                               return_value=None):
             self.assertIsNone(tokenserver._codex_app_server_command())
 
 
@@ -1241,7 +1267,8 @@ class CodexLimitLogTests(unittest.TestCase):
         täckt — så select-bytet hade kunnat gå sönder tyst. Det här kör den
         på riktigt: process, pipe, tråd, kö.
         """
-        return write_fake_executable(temp_dir, (
+        script = Path(temp_dir) / "codex.py"
+        script.write_text(
             "import json, sys\n"
             "for line in sys.stdin:\n"
             "    try:\n"
@@ -1252,7 +1279,11 @@ class CodexLimitLogTests(unittest.TestCase):
             "    if got == 1:\n"
             "        print(json.dumps({'id': 1, 'result': {}}), flush=True)\n"
             "    elif got == 2:\n"
-            f"        print(json.dumps({body!r}), flush=True)\n"))
+            f"        print(json.dumps({body!r}), flush=True)\n",
+            encoding="utf-8")
+        # No shebang, no execute bit: the interpreter is named explicitly so
+        # the same fixture runs on Windows, where neither concept exists.
+        return [sys.executable, str(script)]
 
     def test_app_server_read_talks_to_a_real_process(self):
         response = {"id": 2, "result": {"rateLimits": {
@@ -1263,9 +1294,9 @@ class CodexLimitLogTests(unittest.TestCase):
         }}}
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            executable = self._fake_app_server(temp_dir, response)
+            command = self._fake_app_server(temp_dir, response)
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=executable):
+                                   return_value=command):
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=20)
 
@@ -1276,11 +1307,14 @@ class CodexLimitLogTests(unittest.TestCase):
         """Deadlinen måste hålla utan select: en app-server som svarar
         aldrig får inte hänga probecykeln."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = write_fake_executable(
-                temp_dir, "import time\ntime.sleep(30)\n")
+            script = Path(temp_dir) / "codex.py"
+            script.write_text(
+                "import time\n"
+                "time.sleep(30)\n", encoding="utf-8")
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=script):
+                                   return_value=[sys.executable,
+                                                 str(script)]):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=1)
@@ -1293,11 +1327,13 @@ class CodexLimitLogTests(unittest.TestCase):
         """EOF-vakten: strömmen stängs direkt, och läsaren ska returnera på
         en gång i stället för att vänta ut hela sin deadline."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = write_fake_executable(
-                temp_dir, "raise SystemExit(1)\n")
+            script = Path(temp_dir) / "codex.py"
+            script.write_text(
+                "raise SystemExit(1)\n", encoding="utf-8")
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=script):
+                                   return_value=[sys.executable,
+                                                 str(script)]):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=20)
