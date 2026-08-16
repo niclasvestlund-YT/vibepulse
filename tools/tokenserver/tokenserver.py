@@ -91,32 +91,60 @@ LIMITS_EVERY_S = 240  # rate-limit-proben: 15 anrop/h — kontots bucket delas
                       # panelens 30 s-pollar får ändå cachat svar direkt
 
 # Vilka token-källor och systemanrop som finns beror på plattformen, inte på
-# konfiguration. Testerna patchar konstanten för att köra Windows-grenarna
-# på en Mac.
+# konfiguration. Testerna patchar konstanterna för att köra en annan
+# plattforms grenar på den de råkar sitta på. Tre världar, inte två: allt
+# som inte är Windows eller macOS behandlas som Linux/BSD och följer XDG.
 _IS_WINDOWS = sys.platform == "win32"
+_IS_MACOS = sys.platform == "darwin"
 
 
 def _state_dir():
     """Tjänstens tillståndskatalog — låset, cachen, historiken, spåraren.
 
-    ``~/Library/Application Support`` är macOS-konventionen; Windows
-    motsvarighet är ``%LOCALAPPDATA%``. Sökvägarna FUNGERAR bokstavligt på
-    Windows (``Path.home()`` löser ut), men skulle lägga ett ``Library``-träd
-    i användarprofilen som ingenting annat på maskinen känner igen.
+    En katalog per plattformskonvention, inte en som fungerar överallt:
+    ``~/Library/Application Support`` på macOS, ``%LOCALAPPDATA%`` på
+    Windows, ``$XDG_STATE_HOME`` (annars ``~/.local/state``) på Linux.
+    macOS-sökvägen är oförändrad — befintliga installationer hittar sitt
+    tillstånd där det redan ligger, så ingen migrering behövs.
+
+    Sökvägarna FUNGERAR bokstavligt på alla tre (``Path.home()`` löser ut
+    överallt), men ett ``Library``-träd i en Windows-användarprofil eller i
+    en Linux-hemkatalog är något ingenting annat på maskinen känner igen.
     """
     if _IS_WINDOWS:
         local_app_data = os.environ.get("LOCALAPPDATA")
         base = (Path(local_app_data) if local_app_data
                 else Path.home() / "AppData" / "Local")
         return base / "VibePulse"
-    return Path.home() / "Library" / "Application Support" / "VibePulse"
+    if _IS_MACOS:
+        return Path.home() / "Library" / "Application Support" / "VibePulse"
+    return _xdg_state_home() / "vibepulse"
+
+
+def _xdg_state_home():
+    """``$XDG_STATE_HOME`` med specens fallback.
+
+    XDG pekar ut state-katalogen för just det vi lägger där — tillstånd som
+    ska överleva omstart men som varken är konfiguration eller cache. En
+    relativ eller tom variabel ska enligt specen behandlas som osatt.
+    """
+    raw = os.environ.get("XDG_STATE_HOME")
+    if raw:
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            return candidate
+    return Path.home() / ".local" / "state"
 
 
 def _log_dir():
-    """Loggkatalogen. macOS har ~/Library/Logs; Windows har ingen egen
-    logg-konvention för användartjänster, så loggen bor i tillståndsträdet."""
-    return Path.home() / "Library" / "Logs" if not _IS_WINDOWS else (
-        _state_dir() / "Logs")
+    """Loggkatalogen. macOS har ~/Library/Logs; varken Windows eller Linux
+    har någon egen logg-konvention för användartjänster, så loggen bor i
+    tillståndsträdet (XDG pekar dessutom ut state-katalogen för loggar)."""
+    if _IS_WINDOWS:
+        return _state_dir() / "Logs"
+    if _IS_MACOS:
+        return Path.home() / "Library" / "Logs"
+    return _state_dir()
 
 # Diagnostiken går via logging till stderr med tidsstämplar (basicConfig i
 # main; launchd samlar bägge strömmarna i loggfilen, se plisten). Regeln är
@@ -581,23 +609,33 @@ def _read_keychain_oauth():
 
 
 def _credentials_file_path():
-    """Windows' credential store: ``%USERPROFILE%\\.claude\\.credentials.json``.
+    """The credential store off macOS: ``~/.claude/.credentials.json``.
 
-    Claude Code has no keychain integration on Windows, so ``claude login``
-    writes the same ``{"claudeAiOauth": {...}}`` shape the macOS keychain
-    holds to a plain file instead. ``Path.home()`` resolves to
-    ``%USERPROFILE%`` there, so one expression covers both.
+    Claude Code integrates with a keychain only on macOS. On Windows and
+    Linux alike ``claude login`` writes the same ``{"claudeAiOauth": {...}}``
+    shape the macOS keychain holds to a plain file instead, so one
+    expression covers both — ``Path.home()`` resolves to ``%USERPROFILE%``
+    on Windows and to ``$HOME`` on Linux.
+
+    ``CLAUDE_CONFIG_DIR`` moves Claude Code's whole config tree, credential
+    file included. It REPLACES ``~/.claude`` rather than nesting under it,
+    so the file sits directly in the named directory. Honouring it is what
+    makes the probe follow a relocated install instead of quietly reading
+    a path nobody writes to.
     """
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if config_dir:
+        return Path(config_dir) / ".credentials.json"
     return Path.home() / ".claude" / ".credentials.json"
 
 
 def _read_credentials_file_oauth():
-    """The Windows credential file as ``(token, expires_at_ms)``.
+    """The credential file as ``(token, expires_at_ms)``.
 
     Same record ``/login`` writes, same field names as the keychain — only
     the store differs. A missing or malformed file is not an error worth
     logging: it just means this host has no credential file, which is the
-    normal case everywhere except Windows.
+    normal case on macOS, where the keychain holds it instead.
     """
     try:
         raw = _credentials_file_path().read_text(encoding="utf-8")
@@ -610,11 +648,20 @@ def _read_credentials_file_oauth():
 def _read_oauth_candidates():
     """Distinct token candidates as ``[(token, expires_at_ms), ...]``.
 
-    Which sources exist is a property of the platform. On Windows there is
-    no keychain and no bundled Claude Desktop process to read an injected
-    token from, so the credential file ``/login`` writes is the only source
-    — asking ``pgrep``/``security`` there would only spawn doomed processes
-    every probe cycle.
+    ``CLAUDE_CODE_OAUTH_TOKEN`` in the SERVICE's own environment comes
+    first when set. It is the manual escape hatch: Claude Code itself
+    prefers that variable over its stored credentials, and a host whose
+    store this probe cannot reach needs some way to be told the token
+    rather than showing dashes forever. Unlike Claude Code we do not stop
+    there — the platform sources are still appended, so a stale value in a
+    long-lived environment degrades to the normal path instead of pinning
+    the probe to a dead token.
+
+    Which of the remaining sources exist is a property of the platform. Off
+    macOS there is no keychain, and no bundled Claude Desktop process to
+    read an injected token from, so the credential file ``/login`` writes
+    is the only store — asking ``pgrep``/``security`` there would only
+    spawn doomed processes every probe cycle.
 
     On macOS both sources are live. Claude Desktop's injected process token
     is listed first (Desktop refreshes OAuth itself while the keychain
@@ -624,17 +671,24 @@ def _read_oauth_candidates():
     keychain. Neither source is reliably the freshest, so the probe must try
     them in order rather than trust the first.
     """
-    if _IS_WINDOWS:
-        file_token, expires_at = _read_credentials_file_oauth()
-        return [(file_token, expires_at)] if file_token else []
-
     candidates = []
-    process_token = _read_process_oauth_token()
-    if process_token:
-        candidates.append((process_token, None))
-    keychain_token, expires_at = _read_keychain_oauth()
-    if keychain_token and keychain_token != process_token:
-        candidates.append((keychain_token, expires_at))
+    seen = set()
+
+    def offer(token, expires_at=None):
+        """Ta emot en kandidat om den finns och inte redan är med.
+        Ordningen är prioritet; dubbletter kostar en probecykel var."""
+        if token and token not in seen:
+            seen.add(token)
+            candidates.append((token, expires_at))
+
+    offer(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
+
+    if not _IS_MACOS:
+        offer(*_read_credentials_file_oauth())
+        return candidates
+
+    offer(_read_process_oauth_token())
+    offer(*_read_keychain_oauth())
     return candidates
 
 

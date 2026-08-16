@@ -19,6 +19,23 @@ from tools.tokenserver.quota_cache import CachedQuota, QuotaCache
 from tools.tokenserver.usage_history import Forecast, UsageHistory
 
 
+@contextlib.contextmanager
+def platform_is(name):
+    """Kör kroppen som om värden vore ``windows``, ``macos`` eller ``linux``.
+
+    BÅDA flaggorna sätts, alltid. Att bara patcha den ena lämnar testet
+    beroende av vilken plattform det råkar köra på för den andra — och det
+    beroendet är tyst: ett macOS-test som bara sa ``_IS_WINDOWS = False``
+    läste Linux-grenen på CI:s ubuntu-körare och påstod ändå att det
+    beskrev en Mac. Tre plattformar, ett namn, inga underförstådda "resten".
+    """
+    if name not in ("windows", "macos", "linux"):
+        raise AssertionError(f"okänd plattform: {name}")
+    with mock.patch.object(tokenserver, "_IS_WINDOWS", name == "windows"), \
+            mock.patch.object(tokenserver, "_IS_MACOS", name == "macos"):
+        yield
+
+
 class StubHistory:
     def __init__(self, forecasts=None):
         self.forecasts = forecasts or {}
@@ -191,8 +208,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 return mock.Mock(stdout=expired_keychain)
             raise AssertionError(command)
 
-        with mock.patch.object(tokenserver.subprocess, "run",
-                               side_effect=run):
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=run):
             candidates = tokenserver._read_oauth_candidates()
 
         # Processtokenen först, men den utgångna nyckelringsposten står kvar
@@ -223,8 +241,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 return mock.Mock(stdout=keychain)
             raise AssertionError(command)
 
-        with mock.patch.object(tokenserver.subprocess, "run",
-                               side_effect=run):
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=run):
             candidates = tokenserver._read_oauth_candidates()
 
         self.assertEqual(
@@ -245,8 +264,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 return mock.Mock(stdout=keychain)
             raise AssertionError(command)
 
-        with mock.patch.object(tokenserver.subprocess, "run",
-                               side_effect=run):
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=run):
             candidates = tokenserver._read_oauth_candidates()
 
         self.assertEqual(
@@ -268,7 +288,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(credentials, encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)), \
                     mock.patch.object(tokenserver.subprocess, "run",
@@ -283,7 +303,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
 
     def test_windows_without_a_credentials_file_has_no_candidates(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)):
                 self.assertEqual(tokenserver._read_oauth_candidates(), [])
@@ -296,7 +316,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             path.write_text('{"claudeAiOauth": {"accessTok',
                             encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)):
                 self.assertEqual(tokenserver._read_oauth_candidates(), [])
@@ -325,7 +345,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 "claudeAiOauth": {"accessToken": "stale-file-token"},
             }), encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
+            with platform_is("macos"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)), \
                     mock.patch.object(tokenserver.subprocess, "run",
@@ -367,7 +387,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 },
             }), encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver, "fcntl", None), \
                     mock.patch.object(tokenserver, "msvcrt", FakeMsvcrt), \
                     mock.patch.object(tokenserver, "_PROBE_LOCK_PATH",
@@ -390,7 +410,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(found["weekPct"], 47.0)
 
     def test_state_dir_is_local_app_data_on_windows(self):
-        with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+        with platform_is("windows"), \
                 mock.patch.dict(tokenserver.os.environ,
                                 {"LOCALAPPDATA": r"C:\Users\erik\AppData\Local"}):
             self.assertEqual(
@@ -402,7 +422,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         SYSTEM) saknar LOCALAPPDATA — sökvägen ska ändå bli den rätta."""
         env = dict(tokenserver.os.environ)
         env.pop("LOCALAPPDATA", None)
-        with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+        with platform_is("windows"), \
                 mock.patch.dict(tokenserver.os.environ, env, clear=True), \
                 mock.patch.object(tokenserver.Path, "home",
                                   return_value=Path("/home/tester")):
@@ -411,7 +431,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 Path("/home/tester/AppData/Local/VibePulse"))
 
     def test_state_dir_is_unchanged_on_macos(self):
-        with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
+        """Befintliga Mac-installationer ska hitta sitt tillstånd där det
+        redan ligger — den här sökvägen får aldrig röra sig."""
+        with platform_is("macos"), \
                 mock.patch.object(tokenserver.Path, "home",
                                   return_value=Path("/Users/niclas")):
             self.assertEqual(
@@ -420,12 +442,143 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             self.assertEqual(
                 tokenserver._log_dir(), Path("/Users/niclas/Library/Logs"))
 
+    def test_state_dir_follows_xdg_on_linux(self):
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"XDG_STATE_HOME": "/home/erik/.local/state"}):
+            self.assertEqual(tokenserver._state_dir(),
+                             Path("/home/erik/.local/state/vibepulse"))
+            # XDG pekar ut state-katalogen för loggar också: ingen separat
+            # logg-konvention att följa, alltså inget separat träd.
+            self.assertEqual(tokenserver._log_dir(),
+                             Path("/home/erik/.local/state/vibepulse"))
+
+    def test_state_dir_falls_back_when_xdg_state_home_is_unset(self):
+        env = dict(tokenserver.os.environ)
+        env.pop("XDG_STATE_HOME", None)
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/erik")):
+            self.assertEqual(tokenserver._state_dir(),
+                             Path("/home/erik/.local/state/vibepulse"))
+
+    def test_relative_xdg_state_home_is_ignored(self):
+        """Specen säger att en relativ sökväg ska behandlas som osatt —
+        annars hamnar tillståndet relativt tjänstens arbetskatalog, som
+        under systemd inte är den användaren tror."""
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"XDG_STATE_HOME": "relative/state"}), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/erik")):
+            self.assertEqual(tokenserver._state_dir(),
+                             Path("/home/erik/.local/state/vibepulse"))
+
+    def test_windows_log_dir_sits_under_the_state_tree(self):
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"LOCALAPPDATA": r"C:\Users\erik\AppData\Local"}):
+            self.assertEqual(
+                tokenserver._log_dir(),
+                Path(r"C:\Users\erik\AppData\Local") / "VibePulse" / "Logs")
+
     def test_credentials_file_path_sits_under_home(self):
-        with mock.patch.object(tokenserver.Path, "home",
-                               return_value=Path("/home/tester")):
+        env = dict(tokenserver.os.environ)
+        env.pop("CLAUDE_CONFIG_DIR", None)
+        with mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/tester")):
             self.assertEqual(
                 tokenserver._credentials_file_path(),
                 Path("/home/tester/.claude/.credentials.json"))
+
+    def test_credentials_file_path_follows_claude_config_dir(self):
+        """CLAUDE_CONFIG_DIR ERSÄTTER ~/.claude — filen ligger direkt i den
+        utpekade katalogen, inte i ett .claude under den."""
+        with mock.patch.dict(tokenserver.os.environ,
+                             {"CLAUDE_CONFIG_DIR": "/opt/claude-config"}), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/tester")):
+            self.assertEqual(
+                tokenserver._credentials_file_path(),
+                Path("/opt/claude-config/.credentials.json"))
+
+    def test_linux_reads_the_same_credentials_file_as_windows(self):
+        """Linux har lika lite nyckelring som Windows: samma fil, samma
+        post, samma gren. Nyckelringen är macOS-grenen, inte normalfallet."""
+        credentials = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "linux-file-token",
+                "expiresAt": 1_900_000_000_000,
+            },
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / ".claude" / ".credentials.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(credentials, encoding="utf-8")
+
+            env = dict(tokenserver.os.environ)
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+            with platform_is("linux"), \
+                    mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(temp_dir)), \
+                    mock.patch.object(tokenserver.subprocess, "run",
+                                      side_effect=AssertionError(
+                                          "no subprocess off macOS")):
+                candidates = tokenserver._read_oauth_candidates()
+
+        self.assertEqual(candidates,
+                         [("linux-file-token", 1_900_000_000_000)])
+
+    def test_env_override_is_offered_before_the_file(self):
+        """Nödutgången: en värd vars lagring proben inte når ska kunna få
+        token angiven för hand. Filen faller INTE bort — en gammal variabel
+        i en långlivad miljö ska degradera till normalvägen, inte spika
+        proben vid en död token."""
+        credentials = json.dumps({
+            "claudeAiOauth": {"accessToken": "file-token", "expiresAt": 1},
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / ".claude" / ".credentials.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(credentials, encoding="utf-8")
+
+            env = dict(tokenserver.os.environ)
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = "env-token"
+            with platform_is("linux"), \
+                    mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(temp_dir)):
+                candidates = tokenserver._read_oauth_candidates()
+
+        self.assertEqual(candidates,
+                         [("env-token", None), ("file-token", 1)])
+
+    def test_env_override_matching_the_file_is_not_offered_twice(self):
+        """Samma token ur två källor är en kandidat, inte två — en dubblett
+        kostar en probecykel mot en delad bucket."""
+        credentials = json.dumps({
+            "claudeAiOauth": {"accessToken": "same-token", "expiresAt": 7},
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / ".claude" / ".credentials.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(credentials, encoding="utf-8")
+
+            env = dict(tokenserver.os.environ)
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = "same-token"
+            with platform_is("linux"), \
+                    mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(temp_dir)):
+                candidates = tokenserver._read_oauth_candidates()
+
+        self.assertEqual(candidates, [("same-token", None)])
 
     def test_probe_falls_back_to_keychain_when_process_token_rejected(self):
         calls = []
@@ -1589,7 +1742,11 @@ class UsageSnapshotTests(unittest.TestCase):
             self.assertEqual(len(history.records), 4)
 
     def test_default_history_path_is_under_vibepulse_application_support(self):
+        # Plattformen pinnas: sökvägen nedan är macOS-konventionen, och utan
+        # pinningen läser testet värdens egen plattform i stället för den
+        # det påstår sig beskriva. _state_dir har egna tester per plattform.
         with tempfile.TemporaryDirectory() as temp_dir, \
+                platform_is("macos"), \
                 mock.patch.object(Path, "home", return_value=Path(temp_dir)):
             tokenserver._default_usage_history = None
 
@@ -1603,6 +1760,7 @@ class UsageSnapshotTests(unittest.TestCase):
 
     def test_default_quota_cache_path_is_under_vibepulse_support(self):
         with tempfile.TemporaryDirectory() as temp_dir, \
+                platform_is("macos"), \
                 mock.patch.object(Path, "home", return_value=Path(temp_dir)):
             tokenserver._default_quota_cache = None
             cache = tokenserver._get_quota_cache()
