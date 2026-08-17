@@ -390,12 +390,28 @@ tjänsten leva även när du inte är inloggad: `loginctl enable-linger $USER`.
 
 ### Windows — Schemaläggaren
 
+Ändra `<UserId>` till ditt konto (`whoami`) och `<WorkingDirectory>` till
+din utcheckning först. Konvertera sedan till UTF-16 — `schtasks /xml`
+kräver det och svarar annars `ERROR: The task XML is malformed.` följt av
+`unable to switch the encoding`:
+
 ```
-schtasks /create /tn "VibePulse Tokenserver" /xml VibePulseTokenserver.xml
+$utf16 = "$env:TEMP\vibepulse-task.xml"
+Get-Content -Raw VibePulseTokenserver.xml | Set-Content -Encoding Unicode $utf16
+schtasks /create /tn "VibePulse Tokenserver" /xml $utf16
 ```
 
-Ändra `<UserId>` till ditt konto (`whoami`) och `<WorkingDirectory>` till
-din utcheckning först.
+Eller utan temporärfil, genom att skicka XML:en som en sträng:
+
+```
+Register-ScheduledTask -TaskName "VibePulse Tokenserver" `
+  -Xml (Get-Content -Raw VibePulseTokenserver.xml)
+```
+
+Filen är UTF-8 i git så att kommandoraden går att granska i en diff, och
+dess XML-deklaration saknar `encoding` med flit: det är det enda sättet
+att göra samma fil giltig både som UTF-8 här och som UTF-16 efter
+konverteringen.
 
 **Brandväggen är ett eget steg och måste göras FÖRE första starten.**
 Tjänsten lyssnar på LAN:et, och Windows Defender frågar bara interaktivt —

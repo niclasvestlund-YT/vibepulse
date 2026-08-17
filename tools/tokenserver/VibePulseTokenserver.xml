@@ -1,13 +1,33 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0"?>
 <!--
   Tokenmätarens tjänst som schemalagd uppgift — Windows-motsvarigheten till
-  se.torget.tokenserver.plist. Importera:
+  se.torget.tokenserver.plist.
 
-  (Uppgiftshanteraren exporterar UTF-16; den här filen är UTF-8 med
-  deklarationen att matcha, vilket schtasks läser lika gärna och git kan
-  visa som en diff i stället för som binär.)
+  VIKTIGT — konvertera till UTF-16 först. `schtasks /xml` kräver det och
+  avvisar annars filen med "unable to switch the encoding" på rad 1, mitt i
+  deklarationen. Filen ligger i UTF-8 här med flit: en UTF-16-fil är binär
+  för git, och den här filen innehåller en kommandorad som ska gå att läsa i
+  en diff innan någon kör den.
 
-    schtasks /create /tn "VibePulse Tokenserver" /xml VibePulseTokenserver.xml
+  Notera att deklarationen ovan saknar encoding, och att det är avsiktligt.
+  Med `encoding="UTF-8"` avvisar schtasks filen; med `encoding="UTF-16"`
+  avvisar varje XML-parser den så länge den ligger i UTF-8 — deklarationen
+  och filen måste vara överens, och filen byter kodning på vägen. Utan
+  encoding gäller XML-specens egna regler: UTF-8 antas när inget annat sägs,
+  och byteordningsmärket som konverteringen lägger till talar för sig självt
+  efteråt. Samma fil är alltså giltig i båda ändarna.
+
+  Konverteringen är en rad:
+
+    $utf16 = "$env:TEMP\vibepulse-task.xml"
+    Get-Content -Raw VibePulseTokenserver.xml | Set-Content -Encoding Unicode $utf16
+    schtasks /create /tn "VibePulse Tokenserver" /xml $utf16
+
+  Alternativet slipper temporärfilen helt, eftersom XML:en då skickas som
+  en sträng i stället för som en fil att gissa teckenkodning på:
+
+    Register-ScheduledTask -TaskName "VibePulse Tokenserver" `
+      -Xml (Get-Content -Raw VibePulseTokenserver.xml)
 
   TVÅ rader måste ändras först: <UserId> till ditt konto (`whoami`) och
   sökvägen till din utcheckning i <Arguments>.
