@@ -73,10 +73,16 @@
     <AllowHardTerminate>true</AllowHardTerminate>
     <StartWhenAvailable>true</StartWhenAvailable>
     <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <!-- KeepAlive + ThrottleInterval 30 ur plisten: starta om, men vänta 30 s
-         så en process som dör direkt vid start inte fyller loggen. -->
+    <!-- KeepAlive + ThrottleInterval ur plisten: starta om, men vänta först,
+         så en process som dör direkt vid start inte fyller loggen med sina
+         egna omstarter.
+
+         Plistens 30 s går inte att uttrycka här: Schemaläggaren har en
+         undre gräns på en minut och avvisar PT30S med "contains a value
+         which is incorrectly formatted or out of range". PT1M är alltså
+         inte ett val utan golvet — staketet står kvar, bara glesare. -->
     <RestartOnFailure>
-      <Interval>PT30S</Interval>
+      <Interval>PT1M</Interval>
       <Count>999</Count>
     </RestartOnFailure>
     <!-- En tjänst har ingen körtidsgräns. PT0S = ingen. -->

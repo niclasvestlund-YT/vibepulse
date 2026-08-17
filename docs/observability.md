@@ -124,7 +124,7 @@ that file, which is why each autostart file redirects rather than leaving
 it to chance: `StandardOutPath` in the plist, `append:` in the systemd
 unit, a `cmd.exe` redirect in the scheduled task. A missing
 `~/.claude/projects` no longer crash-loops: the server logs one warning
-and waits for the directory, with the 30 s restart delay as the backstop.
+and waits for the directory, with the manager's restart delay as the backstop.
 
 All three autostart files hardcode a working directory; if the repo lives
 elsewhere, the service is silently running *different code than you're

@@ -359,7 +359,7 @@ routern — byter IP:t adress står skärmen med streck tills secrets.h flashas 
 ## Autostart
 
 Tre filer, en per värd. Alla tre gör samma två saker: starta vid
-inloggning, och starta om efter 30 sekunder om processen dör — väntetiden
+inloggning, och starta om efter en paus om processen dör — väntetiden
 är staketet mot respawn-loopar, inte en slump. Alla tre kör som DIN
 användare: hela jobbet är att läsa `~/.claude` och `~/.codex`, och ett
 tjänstekonto har inte de filerna.
