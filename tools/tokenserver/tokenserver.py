@@ -2163,6 +2163,33 @@ class Handler(BaseHTTPRequestHandler):
         host = self.client_address[0] if self.client_address else ""
         return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
+    def _drain_request_body(self, limit=64 * 1024):
+        """Läs och kasta kroppen innan ett svar som inte vill ha den.
+
+        Stänger vi medan oläst data ligger kvar i mottagarbufferten skickar
+        Windows RST i stället för FIN, och klienten ser
+        ``ConnectionResetError`` i stället för svaret vi just skrev. En hook
+        som postar till en avstängd brygga fick alltså ett transportfel där
+        vi menade ett ärligt 404 — ofarligt (inget beslut = terminalens
+        egen fråga, som förut) men vilseledande: det ser trasigt ut i
+        stället för avstängt. Linux och macOS skickar svaret ändå, vilket
+        är varför det aldrig syntes.
+
+        Kroppar över taket dräneras inte: den som skickar megabyte till en
+        stängd dörr får sin reset. Att läsa dem vore att låta en avvisad
+        begäran kosta mer än en accepterad.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            return
+        if length <= 0 or length > limit:
+            return
+        try:
+            self.rfile.read(length)
+        except (ConnectionError, TimeoutError, OSError):
+            pass
+
     def _read_json_body(self, limit=64 * 1024):
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -2331,6 +2358,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.interaction_store is None:
+            self._drain_request_body()
             self._send(404, {"error": "interactions are not enabled"})
             return
         if self.path in ("/api/hook/question", "/api/hook/permission"):
@@ -2338,6 +2366,7 @@ class Handler(BaseHTTPRequestHandler):
                 log.warning("hook-POST från %s avvisad — hookar får bara "
                             "komma från den här maskinen",
                             self.address_string())
+                self._drain_request_body()
                 self._send(403, {"error": "hooks must be local"})
                 return
             self._handle_hook(
@@ -2347,6 +2376,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/panic":
             self._handle_panic()
         else:
+            self._drain_request_body()
             self._send(404, {"error": "not found"})
 
     def do_GET(self):

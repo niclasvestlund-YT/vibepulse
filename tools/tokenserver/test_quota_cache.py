@@ -423,6 +423,9 @@ class QuotaCacheTests(unittest.TestCase):
                              original)
             self.assertEqual(path.read_text(encoding="utf-8"), on_disk)
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "directory fsync is POSIX; Windows has no handle "
+                     "to sync and _fsync_parent returns early")
     def test_directory_fsync_rollback_restores_exact_prior_file_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "quota.json"
