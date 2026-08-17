@@ -1436,6 +1436,39 @@ def _pump_lines(stream):
     return lines
 
 
+def _terminate_app_server(process):
+    """Avsluta app-servern OCH det den startade.
+
+    ``terminate()`` träffar bara processen vi själva startade. På macOS och
+    Linux är det ``codex`` direkt, så det räcker. På Windows är ``codex``
+    normalt ``codex.cmd`` — npm:s batch-omslagare runt node — och då dödar
+    vi cmd.exe medan node-barnet lever vidare med sin ände av vår pipe
+    öppen. Läsartråden sitter kvar i ``readline``, och stängningen av
+    stdout strax nedanför blockerar tills barnet självdör: en app-server
+    som hänger i trettio sekunder håller alltså hämtcykeln i trettio
+    sekunder, trots att deadlinen löpt ut för länge sedan.
+
+    ``taskkill /T`` tar hela trädet. Saknas det, eller svarar det inte,
+    faller vi igenom till samma terminate/kill som förut — sämre, men
+    aldrig sämre än innan.
+    """
+    if _IS_WINDOWS:
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                capture_output=True, timeout=5)
+            process.wait(timeout=2)
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    process.terminate()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=1)
+
+
 def _read_codex_app_server_limits(timeout_s=5):
     """Read Codex's current quota snapshot through its local app protocol."""
     command = _codex_app_server_command()
@@ -1492,12 +1525,7 @@ def _read_codex_app_server_limits(timeout_s=5):
     finally:
         if process is not None:
             if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=1)
+                _terminate_app_server(process)
             # Rören stängs uttryckligen, i den här ordningen: processen är
             # redan död, så läsartråden har lämnat readline och kan inte
             # väckas mitt i en stängd ström. Utan det här hängde tre

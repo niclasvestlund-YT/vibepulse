@@ -488,15 +488,19 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 tokenserver._log_dir(), Path("/Users/niclas/Library/Logs"))
 
     def test_state_dir_follows_xdg_on_linux(self):
+        # Sökvägen BYGGS för värden i stället för att skrivas som en
+        # POSIX-litteral: "/home/erik" saknar enhetsbokstav och är därför
+        # inte absolut på Windows, så _xdg_state_home förkastade den — helt
+        # riktigt — och testet mätte fallbacken i stället för det det
+        # påstod sig mäta.
+        base = Path(tempfile.gettempdir()).resolve() / "xdg-state"
         with platform_is("linux"), \
                 mock.patch.dict(tokenserver.os.environ,
-                                {"XDG_STATE_HOME": "/home/erik/.local/state"}):
-            self.assertEqual(tokenserver._state_dir(),
-                             Path("/home/erik/.local/state/vibepulse"))
+                                {"XDG_STATE_HOME": str(base)}):
+            self.assertEqual(tokenserver._state_dir(), base / "vibepulse")
             # XDG pekar ut state-katalogen för loggar också: ingen separat
             # logg-konvention att följa, alltså inget separat träd.
-            self.assertEqual(tokenserver._log_dir(),
-                             Path("/home/erik/.local/state/vibepulse"))
+            self.assertEqual(tokenserver._log_dir(), base / "vibepulse")
 
     def test_state_dir_falls_back_when_xdg_state_home_is_unset(self):
         env = dict(tokenserver.os.environ)
@@ -1204,6 +1208,45 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                 mock.patch.object(tokenserver.os.path, "isfile",
                                   return_value=False):
             self.assertIsNone(tokenserver._codex_executable())
+
+    def test_windows_kills_the_whole_process_tree(self):
+        """`codex` är normalt `codex.cmd` på Windows — npm:s omslagare runt
+        node. Dödar vi bara den vi startade lever node-barnet vidare med
+        sin ände av pipen öppen, och stängningen av stdout blockerar tills
+        barnet självdör. En hängd app-server skulle alltså hålla
+        hämtcykeln lika länge som den hänger."""
+        process = mock.Mock(pid=4242)
+        process.poll.return_value = None
+        with platform_is("windows"), \
+                mock.patch.object(tokenserver.subprocess, "run") as run:
+            tokenserver._terminate_app_server(process)
+
+        run.assert_called_once()
+        self.assertEqual(run.call_args[0][0],
+                         ["taskkill", "/F", "/T", "/PID", "4242"])
+        # Trädet är redan borta; ingen andra omgång behövs.
+        process.terminate.assert_not_called()
+
+    def test_posix_terminates_without_reaching_for_taskkill(self):
+        """Där `codex` är binären själv finns inget träd att jaga."""
+        process = mock.Mock(pid=17)
+        with platform_is("linux"), \
+                mock.patch.object(tokenserver.subprocess, "run") as run:
+            tokenserver._terminate_app_server(process)
+
+        run.assert_not_called()
+        process.terminate.assert_called_once()
+
+    def test_a_host_without_taskkill_still_terminates(self):
+        """Nödutgången: hittas inte taskkill ska nedstängningen bli exakt
+        den den var förut, inte ett undantag ur en finally-gren."""
+        process = mock.Mock(pid=99)
+        with platform_is("windows"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=FileNotFoundError):
+            tokenserver._terminate_app_server(process)
+
+        process.terminate.assert_called_once()
 
     def test_argv_wraps_whatever_discovery_found(self):
         """Hitta binären och bygga kommandoraden är två jobb. Det andra ska
