@@ -328,7 +328,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             (Path(config_dir) / ".credentials.json").write_text(
                 credentials, encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(fake_home)), \
                     mock.patch.dict(tokenserver.os.environ,
@@ -339,7 +339,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
 
             # ...och en tom variabel räknas som frånvarande: då gäller
             # standardsökvägen som förut (tomt hem här → inga kandidater).
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(fake_home)), \
                     mock.patch.dict(tokenserver.os.environ,
@@ -3380,6 +3380,42 @@ class ProbeTransitionLogTests(unittest.TestCase):
                 tokenserver._refresh_limits()
             self.assertIn("usage_http_401 -> usage_http_200 + ok",
                           "\n".join(captured.output))
+
+
+class PlatformPinningTests(unittest.TestCase):
+    """Vaktposten över hur plattform pinnas i den här filen.
+
+    Att patcha bara ``_IS_WINDOWS`` lämnar ``_IS_MACOS`` på värdens värde,
+    och testet beskriver då en plattform det inte kör på. Det har hänt två
+    gånger: först här (macOS-tester som i själva verket körde Linux-grenen
+    på ubuntu-köraren), sedan när en gren skriven mot den gamla
+    tvåvägsgrinden slogs ihop med treväg och gick grön överallt utom på
+    macOS. Bägge gångerna kostade en CI-runda att upptäcka.
+
+    ``platform_is`` sätter båda från ett namn. Den här regeln säger att den
+    är enda vägen dit.
+    """
+
+    def test_platform_flags_are_pinned_only_through_the_helper(self):
+        lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if line.startswith("def platform_is("))
+        end = next(i for i, line in enumerate(lines[start + 1:], start + 1)
+                   if line and not line[0].isspace())
+
+        # "patch.object" med i villkoret gör regeln precis — den handlar om
+        # att SÄTTA flaggorna, inte om att nämna dem. Utan det anmäler den
+        # sin egen rad, vilket den också gjorde första gången.
+        stray = [f"line {i + 1}: {line.strip()}"
+                 for i, line in enumerate(lines)
+                 if "patch.object" in line
+                 and ('"_IS_WINDOWS"' in line or '"_IS_MACOS"' in line)
+                 and not start <= i < end]
+
+        self.assertEqual(
+            stray, [],
+            "patcha plattformsflaggorna via platform_is('windows'/'macos'/"
+            "'linux') i stället — annars ärver den opatchade flaggan värden")
 
 
 if __name__ == "__main__":
