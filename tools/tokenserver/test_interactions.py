@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import unittest
+from unittest import mock
 
 from tools.tokenserver import interactions
 from tools.tokenserver.interactions import (
@@ -523,6 +524,38 @@ class AbandonedHookTests(unittest.TestCase):
         self.assertEqual(self.store.pending_public()["request_id"],
                          live.request_id)
         self.store.deny_all()
+
+    def test_oldest_first_holds_when_the_clock_cannot_tell_them_apart(self):
+        """Windows tickar ~15,6 ms, inte mikrosekunder. Två hookar som
+        landar i samma tick delar created_at exakt, och då avgjorde förr
+        request_id — ett slumpat hashvärde. "Panelen visar den äldsta"
+        blev alltså "panelen visar någon av dem".
+
+        En frusen klocka framtvingar samma likhet på alla plattformar, så
+        regressionen går att se var som helst i stället för bara där den
+        biter. Fem poster: med den gamla sorteringen är sannolikheten att
+        slumpen råkar ge rätt ordning under en procent.
+        """
+        store = InteractionStore(secret=SECRET, reveal_detail=True,
+                                 now=lambda: 1_000.0)
+        parked = [store.park("approval", approval_event(), 600)
+                  for _ in range(5)]
+        # Reaping five entries at the real 2 s liveness poll would cost ten
+        # seconds to assert an ordering question. The interval is not what
+        # is under test here.
+        self.enterContext(mock.patch.object(interactions, "ALIVE_POLL_S",
+                                            0.01))
+        self.assertTrue(all(parked))
+        self.assertEqual([p.created_at for p in parked],
+                         [1_000.0] * 5, "klockan ska vara frusen")
+
+        seen = []
+        for entry in parked:
+            seen.append(store.pending_public()["request_id"])
+            # Reap it the way the ghost test does — no signature needed, and
+            # it is the same path a hung-up client takes.
+            store.await_verdict(entry, is_alive=lambda: False)
+        self.assertEqual(seen, [p.request_id for p in parked])
 
     def test_zombies_no_longer_fill_the_queue(self):
         for _ in range(interactions.MAX_PENDING):

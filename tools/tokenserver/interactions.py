@@ -355,6 +355,13 @@ class _Pending:
     session_key: Optional[str]
     created_at: float
     expires_at: float
+    # Arrival order, independent of the clock. ``created_at`` alone cannot
+    # order two hooks that land in the same tick, and a tick is not small
+    # everywhere: it is under a microsecond on macOS and Linux but about
+    # 15.6 ms on Windows, which two agents answering at once will share.
+    # Falling back to request_id there ordered the queue by a random mint,
+    # so "the panel shows the oldest first" quietly became "shows either".
+    arrival: int = 0
     done: threading.Event = field(default_factory=threading.Event)
     verdict: Optional[str] = None
 
@@ -378,6 +385,7 @@ class InteractionStore:
         self._lock = threading.Lock()
         self._pending: Dict[str, _Pending] = {}
         self._counter = 0
+        self._arrivals = 0
 
     # -- creation ---------------------------------------------------------
 
@@ -419,6 +427,10 @@ class InteractionStore:
             self._sweep_locked(now)
             if len(self._pending) >= MAX_PENDING:
                 return None
+            # Under the lock, so two hooks arriving together get distinct,
+            # correctly ordered numbers rather than racing for one.
+            self._arrivals += 1
+            entry.arrival = self._arrivals
             self._pending[entry.request_id] = entry
         self._log("parked", entry, None)
         return entry
@@ -524,7 +536,7 @@ class InteractionStore:
             if not self._pending:
                 return None
             entry = min(self._pending.values(),
-                        key=lambda item: (item.created_at, item.request_id))
+                        key=lambda item: (item.created_at, item.arrival))
             payload = {
                 "request_id": entry.request_id,
                 "project": entry.project,

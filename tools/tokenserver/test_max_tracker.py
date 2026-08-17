@@ -76,7 +76,7 @@ def _rollout_limits(primary_pct=None, secondary_pct=None, *,
 
 def _write_jsonl(path, rows):
     path.write_text("".join(json.dumps(row) + "\n" for row in rows),
-                    encoding="utf-8")
+                    encoding="utf-8", newline="")
 
 
 def _age_into_last_month(path):
@@ -502,7 +502,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             path_a = claude_root / "session-a.jsonl"
             # No trailing newline on the last line -- a writer that
             # crashed or simply hasn't finished this line yet.
-            path_a.write_text(complete_line + "\n" + dangling)
+            path_a.write_text(complete_line + "\n" + dangling, newline="")
             _age_into_last_month(path_a)  # Finding C: else deferred to live
             path_b = claude_root / "session-b.jsonl"
             _write_jsonl(path_b, [_claude_usage_line(
@@ -537,7 +537,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             dangling = json.dumps(_claude_usage_line(
                 "m2", 999, f"{day}T11:00:00Z"))
             path = claude_root / "session.jsonl"
-            path.write_text(complete_line + "\n" + dangling)
+            path.write_text(complete_line + "\n" + dangling, newline="")
             _age_into_last_month(path)
 
             _drain(store)
@@ -807,7 +807,7 @@ class MaxTrackerStoreEventDateOwnershipTests(unittest.TestCase):
             junk_line = json.dumps({"junk": "x" * (12 * 1024 * 1024)})
             real_tail = json.dumps(_claude_usage_line(
                 "tail", 999, "2020-01-15T10:00:00Z"))
-            path.write_text(junk_line + "\n" + real_tail + "\n")
+            path.write_text(junk_line + "\n" + real_tail + "\n", newline="")
             _age_into_last_month(path)  # dormant -- backfill-owned from the start
             file_mtime = path.stat().st_mtime
             ino = path.stat().st_ino
