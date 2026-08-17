@@ -886,6 +886,25 @@ class JsonlTailerTests(unittest.TestCase):
                 encoding="utf-8", newline=""
             )
             self.assertEqual(path.stat().st_ino, original_inode)
+            # Storleken är oförändrad med flit — det är hela poängen. Kvar
+            # som ändringssignal finns då bara tidsstämplarna, och de betyder
+            # inte samma sak överallt: på POSIX rör sig st_ctime vid varje
+            # skrivning, medan det på Windows är SKAPANDETID (avvecklat i
+            # 3.12, ändrat till metadatatid i en senare version) och alltså
+            # konstant. Där återstår st_mtime, vars upplösning är ~15,6 ms,
+            # så två skrivningar i samma tick ser identiska ut.
+            #
+            # Testet handlar om omskrivningsdetektionen, inte om filsystemets
+            # klocka: vi flyttar stämpeln så att snabbvägen släpper igenom
+            # och prefixdigesten får göra sitt jobb — samma grepp som
+            # test_rewrite_during_prefix_verification redan använder.
+            #
+            # Konsekvensen i drift är värd att veta: på Windows med Python
+            # 3.12/3.13 upptäcks en likastor omskrivning inte omedelbart utan
+            # först vid nästa fulla SHA-256-verifiering (högst var femte
+            # sekund). Fördröjning, inte dataförlust.
+            stat = path.stat()
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
             self.assertEqual(tailer.read(path), [replacement, unchanged_tail])
             self.assertEqual(tailer.read(path), [])
