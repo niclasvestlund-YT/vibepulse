@@ -1,12 +1,14 @@
 import json
 import os
 import stat
+import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from tools.tokenserver import quota_cache
 from tools.tokenserver.quota_cache import CachedQuota, QuotaCache
 
 
@@ -69,6 +71,37 @@ class QuotaCacheTests(unittest.TestCase):
 
             self.assertEqual(QuotaCache(path, now=lambda: 1_100).latest(
                 "codex", "general_weekly"), record)
+
+    def test_windows_persists_without_a_directory_fsync(self):
+        """Regressionen som gjorde kvotcachen oanvändbar på Windows.
+
+        ``os.replace`` har redan lyckats när katalogsynken körs. Att den
+        kastade där — en katalog går inte att öppna som filhandtag på
+        Windows — rullade alltså tillbaka ett REDAN SKRIVET värde och
+        rapporterade skrivfel. Varje put returnerade False, minnesbilden
+        backades till ett disktillstånd som inte längre fanns, och inget
+        blev kvar att servera som stale.
+
+        Flaggan patchas i stället för att hoppa över testet: då körs
+        Windows-grenen på alla tre plattformarna, i stället för bara på
+        den som redan var trasig.
+        """
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(quota_cache, "_IS_WINDOWS", True):
+            path = Path(directory) / "quota.json"
+            # Fast klocka före reset_at=2000, som de andra persistenstesterna:
+            # annars filtrerar latest() bort posten som utgången och testet
+            # mäter fel sak.
+            cache = QuotaCache(path, now=lambda: 1_100)
+            record = self.record()
+
+            self.assertTrue(cache.put(record))
+            self.assertEqual(cache.latest("codex", "general_weekly"), record)
+            # Och det ska faktiskt ligga kvar på disken, inte bara i minnet.
+            self.assertEqual(
+                QuotaCache(path, now=lambda: 1_100).latest(
+                    "codex", "general_weekly"),
+                record)
 
     def test_latest_expires_at_exact_reset(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -316,6 +349,9 @@ class QuotaCacheTests(unittest.TestCase):
                              original)
             self.assertEqual(path.read_text(encoding="utf-8"), on_disk)
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "directory fsync is POSIX; Windows has no handle "
+                     "to sync and _fsync_parent returns early")
     def test_fsyncs_temp_before_replace_and_directory_after(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "quota.json"
@@ -356,6 +392,9 @@ class QuotaCacheTests(unittest.TestCase):
                 "directory-close",
             ])
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "directory fsync is POSIX; Windows has no handle "
+                     "to sync and _fsync_parent returns early")
     def test_directory_fsync_failure_rolls_back_memory_and_disk(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "quota.json"
