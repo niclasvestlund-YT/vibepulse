@@ -34,7 +34,7 @@ enligt granskningens tre krav: (1) versionerat appkontrakt
 äger bara WiFi/SNTP/lås/ljus/rotation; (3) MIT-licens.
 
 **Det här repot innehåller EN app: VibePulse** (Claude/Codex-användning via
-tools/tokenserver på Macen, platt JSON över LAN). Den ligger först i
+tools/tokenserver på macOS, Linux eller Windows, platt JSON över LAN). Den ligger först i
 registret, så en färsk klon utifrån bygger en binär som startar i VibePulse
 och ingenting annat.
 
@@ -80,11 +80,11 @@ authorization for the physical install.
 ## Logs, errors, and learning from mistakes
 
 `docs/observability.md` maps every log the system generates (device serial,
-tokenserver stdout/launchd file, `GET /` diagnostics, state files, the screen
-itself) and contains the periodic comb routine — follow it when asked to
+tokenserver stdout/service-manager log file, `GET /` diagnostics, state
+files, the screen itself) and contains the periodic comb routine — follow it when asked to
 comb, audit, or investigate logs or odd behavior. Findings go to
 `docs/observability-backlog.md`. Read `docs/lessons.md` before touching
-pollers, parsers, staleness logic, or the launchd setup; fixes with a
+pollers, parsers, staleness logic, or the autostart setup; fixes with a
 root-cause story add an entry there.
 
 ## Hårdvarufällorna i kortform (detaljer i spec/hardware.md)

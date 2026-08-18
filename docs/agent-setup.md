@@ -244,7 +244,7 @@ Three things must line up — a device key, the bridge, and hooks.
    `--interactions` opens the held-hook endpoints and the signed answer path;
    `--interaction-detail` lets the command/question text reach the glass (leave
    it off to keep the panel to "something is waiting" only). Prove the whole
-   loop on the Mac alone first, before any hardware: `python3 tools/fake-panel.py`.
+   loop on the host alone first, before any hardware: `python3 tools/fake-panel.py`.
 
 3. **Hooks.** Point Claude Code's hooks at the bridge on loopback (Claude Code
    blocks http hooks that resolve to the LAN, which is why the bridge splits

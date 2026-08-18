@@ -14,8 +14,10 @@ OTA. Non-negotiables: the maintenance window opens ONLY from the device (a
 script can; the sender gates (newest-binary-at-send, version printed,
 -dirty refused) exist because a stale archived build once froze the panel —
 never bypass them with TG_OTA_ALLOW_DIRTY without the user saying so; and
-after editing `tools/tokenserver/`, restart the launchd service
-(`launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`) — the running
+after editing `tools/tokenserver/`, restart the service — `launchctl
+kickstart -k gui/$(id -u)/se.torget.tokenserver` on macOS, `systemctl
+--user restart vibepulse-tokenserver` on Linux, `schtasks /end` then
+`/run /tn "VibePulse Tokenserver"` on Windows — because the running
 process keeps old code and the panel honestly shows the gap.
 
 ## AMOLED visual work
@@ -31,7 +33,7 @@ authorization for the physical install.
 periodic comb routine — follow it when asked to comb, audit, or investigate
 logs or odd behavior. Findings go to `docs/observability-backlog.md`. Read
 `docs/lessons.md` before touching pollers, parsers, staleness logic, or the
-launchd setup: most sharp edges here have a story, and fixes with a
+autostart setup: most sharp edges here have a story, and fixes with a
 root-cause story add an entry there.
 
 ## Hardware-aware work
