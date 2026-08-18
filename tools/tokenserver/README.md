@@ -31,7 +31,10 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    Tokenen lämnar aldrig värddatorn — skärmen får bara procenttal.
 3. **Codex tak** — tjänsten frågar Codex lokala, skrivskyddade app-server via
    `account/rateLimits/read`, alltså samma aktuella snapshot som Codex-panelen
-   visar. Om app-servern saknas används en passiv fallback: begränsad läsning
+   visar. Binären hittas via PATH, via skrivbordsappens medföljande
+   app-server under `~/.codex/plugins/.plugin-appserver/` (som aldrig ligger
+   på PATH — bara skrivbordsappen installerad räcker alltså), eller via
+   `VIBEPULSE_CODEX_BIN` när den bor någon annanstans. Om app-servern saknas används en passiv fallback: begränsad läsning
    av de 20 nyaste `~/.codex/sessions/**/rollout-*.jsonl` (högst den sista MiB
    per fil). Bara Codex faktiska `event_msg`/`token_count`-händelse med ett
    direkt `payload.rate_limits` accepteras i fallbacken.

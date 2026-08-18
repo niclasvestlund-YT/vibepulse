@@ -1360,16 +1360,26 @@ def _codex_fallback_paths():
     letad upp för hand. Räcker inte listan pekar ``VIBEPULSE_CODEX_BIN``
     var som helst.
     """
+    # Skrivbordsappens medföljande app-server, före allt annat. Den ligger
+    # under ~/.codex och alltså aldrig på PATH, och på en maskin där bara
+    # appen är installerad — inget npm, inget CLI — är den enda källan till
+    # kvoten. Verifierad på Windows: binären svarade på
+    # account/rateLimits/read med riktiga värden. Sökvägen är densamma på
+    # alla tre plattformarna; bara filändelsen skiljer.
+    bundled = Path.home() / ".codex" / "plugins" / ".plugin-appserver"
+    common = (str(bundled / ("codex.exe" if _IS_WINDOWS else "codex")),)
+
     if _IS_MACOS:
-        return ("/Applications/ChatGPT.app/Contents/Resources/codex",
-                "/Applications/Codex.app/Contents/Resources/codex")
+        return common + (
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/Applications/Codex.app/Contents/Resources/codex")
     if _IS_WINDOWS:
         app_data = os.environ.get("APPDATA")
         base = Path(app_data) if app_data else Path.home() / "AppData" / "Roaming"
-        return (str(base / "npm" / "codex.cmd"),
-                str(base / "npm" / "codex.exe"))
-    return (str(Path.home() / ".local" / "bin" / "codex"),
-            "/usr/local/bin/codex")
+        return common + (str(base / "npm" / "codex.cmd"),
+                         str(base / "npm" / "codex.exe"))
+    return common + (str(Path.home() / ".local" / "bin" / "codex"),
+                     "/usr/local/bin/codex")
 
 
 def _codex_app_server_command():

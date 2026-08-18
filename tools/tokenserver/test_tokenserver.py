@@ -1134,6 +1134,34 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
                                   return_value=True):
             self.assertEqual(tokenserver._codex_executable(), bundled)
 
+    def test_the_desktop_apps_bundled_app_server_is_found(self):
+        """Skrivbordsappen utan CLI är inte ett kantfall — det är vad man
+        får när man installerar Codex utan att veta att ett CLI finns.
+        Binären den buntar svarar på account/rateLimits/read (verifierat på
+        Windows) men ligger under ~/.codex, alltså aldrig på PATH."""
+        expected = str(Path.home() / ".codex" / "plugins"
+                       / ".plugin-appserver" / "codex.exe")
+        with platform_is("windows"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected):
+            self.assertEqual(tokenserver._codex_executable(), expected)
+
+    def test_the_bundled_app_server_is_preferred_over_the_npm_guess(self):
+        """Buntad binär är en observation; npm-sökvägen är en konvention.
+        Finns båda ska den vi vet något om vinna."""
+        home = Path.home() / ".codex" / "plugins" / ".plugin-appserver"
+        bundled = str(home / "codex.exe")
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"APPDATA": r"C:\Users\erik\AppData\Roaming"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_executable(), bundled)
+
     def test_windows_falls_back_to_the_npm_global_bin(self):
         """Task Scheduler ärver inte användarens PATH; npm:s globala
         bin-katalog är där binären faktiskt ligger."""
