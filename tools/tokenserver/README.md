@@ -274,7 +274,7 @@ inloggad (aug 2026, app 1.32352.1.0, MSIX-paketerad):
 |---|---|
 | Windows Credential Manager | Ingen post alls — `cmdkey /list` tom på Claude |
 | Appens processer | Bara Electron (`renderer`, `gpu-process`, `utility`). Ingen medföljande Claude Code-process att läsa miljön ur, vilket är exakt vad macOS-proben gör — och Windows lämnar ändå inte ut en annan process miljöblock utan `ReadProcessMemory` |
-| Paketets datakatalog | `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude`. Innehåller `.credentials.json` per lokal agentsession (99 stycken) — men den nyaste var fem dagar gammal OCH tom på token: inget `accessToken`, inget `refreshToken`, inga scopes |
+| Paketets datakatalog | `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude`. Innehåller `.credentials.json` per lokal agentsession (99 stycken) — men den nyaste var fem dagar gammal och innehåller bara `mcpOAuth`, alltså tokens för MCP-servrar. Ingen `claudeAiOauth`-post, inget om kontot |
 | `claude doctor` | Rör inte autentiseringen; `expiresAt` står stilla |
 | `claude setup-token` i `CLAUDE_CODE_OAUTH_TOKEN` | 403 på usage-endpointen (se felsökningstabellen) |
 
