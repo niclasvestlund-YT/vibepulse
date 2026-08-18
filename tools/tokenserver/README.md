@@ -435,6 +435,18 @@ halv brandväggsregel misslyckas tyst, precis som allt annat här.
 
 `profile=private` också med flit: regeln ska gälla hemnätet, inte ett kafés.
 
+Regeln gäller **Windows Defender-brandväggen**. Kör maskinen en annan
+brandvägg är det den som bestämmer, och `netsh` svarar `Ok.` medan den
+ändrar något som inte längre styr trafiken — tyst fel av samma sort som
+resten av det här avsnittet handlar om. Kolla vem som faktiskt gäller:
+
+```
+Get-NetFirewallProfile | Select-Object Name, Enabled
+```
+
+Är profilerna avstängda sköts filtreringen någon annanstans, och port 8737
+ska öppnas i det programmet i stället.
+
 Kontrollera efteråt:
 
 ```
