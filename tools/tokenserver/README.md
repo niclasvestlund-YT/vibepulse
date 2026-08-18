@@ -256,43 +256,29 @@ Tokenet lever kort, och ingen förnyar det åt tjänsten. Posten har ett
 `expiresAt`, och tjänsten använder aldrig `refreshToken` — den rider på det
 Claude Code självt har lagrat och läser om filen vid varje probe. Claude
 Code skriver en ny token när DEN pratar med API:t, alltså när du kör den på
-maskinen. En värd som bara serverar panelen får därför streck för
-Claude-halvan när tokenet gått ut: verifierat på Windows, där ett token
-stämplat 20:54 var dött när tjänsten startade 22:28. macOS har en andra
-källa som saknas här — Claude Desktops processtoken, som skrivbordsappen
-håller färsk — och `CLAUDE_CODE_OAUTH_TOKEN` med ett `claude
-setup-token`-värde är ingen ersättning: usage-endpointen svarar 403 på det
-(se felsökningstabellen i `docs/agent-setup.md`). I praktiken: kör Claude
-Code på värden, vilket är precis vad den som sätter upp panelen ändå gör.
-Kvoten kommer tillbaka av sig själv inom en probeintervall efteråt.
+maskinen. Tokenet lever ungefär åtta timmar, så en värd som bara serverar
+panelen visar streck för Claude-halvan tills någon kör `claude` där igen;
+kvoten kommer tillbaka av sig själv inom en probeintervall efteråt.
+`CLAUDE_CODE_OAUTH_TOKEN` med ett `claude setup-token`-värde är ingen
+ersättning: usage-endpointen svarar 403 på det (se felsökningstabellen i
+`docs/agent-setup.md`).
 
-Skrivbordsappen hjälper inte, och det är genomsökt en gång så att ingen
-behöver göra om det. På en Windows-maskin med appen installerad och
-inloggad (aug 2026, app 1.32352.1.0, MSIX-paketerad):
+Skrivbordsappen hjälper inte. Kontrollerat på Windows med appen
+installerad och inloggad (aug 2026, app 1.32352.1.0, MSIX-paketerad):
 
 | Källa | Utfall |
 |---|---|
 | Windows Credential Manager | Ingen post alls — `cmdkey /list` tom på Claude |
-| Appens processer | Bara Electron (`renderer`, `gpu-process`, `utility`). Ingen medföljande Claude Code-process att läsa miljön ur, vilket är exakt vad macOS-proben gör — och Windows lämnar ändå inte ut en annan process miljöblock utan `ReadProcessMemory` |
+| Appens processer | Bara Electron. Windows lämnar dessutom inte ut en annan process miljöblock utan `ReadProcessMemory` |
 | Paketets datakatalog | `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude` (samma träd som appen ser som `%APPDATA%\Claude` — MSIX omdirigerar, vilket är varför en titt i `%APPDATA%` ser tom ut). `.credentials.json` per lokal agentsession, men bara med `mcpOAuth`: sessionens MCP-tokens, inget om kontot |
-| En lokal session i appen | Startar mycket riktigt den medföljande `claude-code\<version>\claude.exe`, och den kör mot `%USERPROFILE%\.claude` — argumentraden saknar `--config-dir` och pekar på riktiga `~/.claude/plugins`. Ändå skrevs INGEN token: `expiresAt` stod stilla, och enda `.credentials.json` som rörts i hela profilen det dygnet var CLI:ns egen skrivning. Appen injicerar tokenet i processens miljö, så Claude Code har inget att spara |
+| En lokal session i appen | Startar den medföljande `claude-code\<version>\claude.exe` mot `%USERPROFILE%\.claude`, men skriver ingen token: appen injicerar den i processens miljö, så Claude Code har inget att spara |
 | `claude doctor` | Rör inte autentiseringen; `expiresAt` står stilla |
 | `claude setup-token` i `CLAUDE_CODE_OAUTH_TOKEN` | 403 på usage-endpointen (se felsökningstabellen) |
 
-Kvar står alltså CLI:ns egen fil, och det är bokstavligt: `claude` från
-kommandoraden är enda källan som skriver den. Skrivbordsappen gör det
-aldrig — varken när arbetet körs någon annanstans (då autentiserar värden
-inte alls) eller när det körs lokalt (då finns tokenet bara i den
-medföljande processens miljö). Panelen slocknar därför ungefär åtta timmar
-efter senaste CLI-kommandot, oavsett hur mycket du använder appen.
-
-Det är också exakt vad macOS-proben löser: `ps eww` läser tokenet ur den
-medföljande processens miljö. Linux kan göra samma sak via
-`/proc/<pid>/environ`; Windows lämnar inte ut en annan process miljöblock
-utan `ReadProcessMemory`. Ingen av dem är byggd här — ingen av maskinerna i
-det här arbetet kör skrivbordsappen på Linux, och en probe ingen kunnat
-provköra hör inte hemma i en gren som just lärt sig att ett autostartfile
-inte är testat förrän en tjänstehanterare läst det.
+Kvar står alltså `claude` från kommandoraden som enda källa som skriver
+filen; appen gör det aldrig, oavsett flik. På macOS finns en väg runt det
+— `ps eww` läser det injicerade tokenet ur processens miljö — och Linux
+skulle kunna göra samma sak via `/proc/<pid>/environ`. Windows kan inte.
 
 Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
 finns kvar på Windows: `fcntl` saknas där, så låset tas med

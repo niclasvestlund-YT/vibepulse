@@ -55,9 +55,8 @@ cannot determine yourself.
      Off macOS the probe reads the file `claude login` writes, and a
      desktop-app-only login can leave that file holding its scopes with no
      token in it — which looks exactly like "not signed in" while the user
-     plainly is. Run `claude login` in the CLI as well. Verified on
-     Windows: before, `no_claude_oauth_token`; after, `usage_http_200 + ok`
-     with real percentages. (A `claude setup-token` value in
+     plainly is. Run `claude login` in the CLI as well. (A `claude
+     setup-token` value in
      `CLAUDE_CODE_OAUTH_TOKEN` is *not* a substitute — it authenticates and
      is then refused with 403.)
    - **`.local` addressing assumes the host answers mDNS.** macOS does via
@@ -181,7 +180,7 @@ are not arriving:
 | *(any value)* | `GET /` reports the **last recorded** verdict, and it never runs a probe itself — `claudeProbeAgeS` beside it says how old that verdict is. A stale string reads exactly like a current one without it | Request `/api/tokens` to make the probe re-evaluate, then read `/` again |
 | `not_run` | Probe has not fired yet | It runs every 240 s — wait |
 | `no_claude_oauth_token` | No token found in any source this host has | Sign in to Claude Code on this machine. Off macOS the file `/login` writes is the source, and a desktop-app-only login can leave it holding scopes but no token — verified on Windows |
-| `token_expired_…` | Token found but expired. **Expect this off macOS on a host that only serves the panel:** the service rides on Claude Code's stored token and never refreshes it itself, and the only source Windows/Linux have is the file `claude login` writes — which Claude Code rewrites when *it* talks to the API. Observed on Windows: a token stamped `20:54` was dead when the service started at `22:28`. macOS has a second source (Claude Desktop's running-process token) that this path lacks | Run Claude Code on that host — any real command refreshes the file, and the probe re-reads it every cycle, so quota returns on its own within one probe interval — a local verdict like this one no longer widens that interval, so it is 240 s and not the backed-off 960 s. `claude login` again if it does not. A `claude setup-token` value in `CLAUDE_CODE_OAUTH_TOKEN` is **not** a workaround — see the 403 row |
+| `token_expired_…` | Token found but expired. Off macOS the only source is the file `claude login` writes, and only the CLI rewrites it — the desktop app never does. Tokens last about 8 h, so a host nobody runs `claude` on goes dark | Run `claude` on that host; the probe re-reads the file every cycle and quota returns within one interval (240 s — a local verdict like this no longer widens it). `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN` is not a workaround, see the 403 row |
 | `usage_http_401` | Every token source rejected as invalid (macOS tries Claude Desktop's process token, then the keychain; elsewhere the credential file, plus `CLAUDE_CODE_OAUTH_TOKEN` if set) | Re-authenticate in Claude Code |
 | `usage_http_403` | A token authenticated and was then **refused** — a different thing from 401. Seen on Windows with a `claude setup-token` value in `CLAUDE_CODE_OAUTH_TOKEN`: it is meant for CI and is not accepted at the usage endpoint | Use an interactive `claude login` instead, so the credential file holds a session token. The variable is still tried first, but the probe falls through to the file rather than stopping there |
 | `usage_http_200 + no_mapped_limits` | Authenticated, but nothing in the usage response mapped (a `; fallback_…` suffix records the header-probe outcome) | Plan may not expose limits; Codex half still works |

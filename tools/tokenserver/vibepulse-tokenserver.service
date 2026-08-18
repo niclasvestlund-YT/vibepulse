@@ -22,28 +22,18 @@ Type=simple
 # Sökvägen till DIN utcheckning. Den här raden är den enda som måste ändras.
 WorkingDirectory=%h/vibepulse/tools/tokenserver
 
-# Omdirigeringen sker i ett skal, inte med StandardOutput=append:, och det
-# är inte en smaksak. append: öppnar filen INNAN StateDirectory= hinner
-# skapa katalogen, så enheten dog vid start med
+# Omdirigeringen sker i ett skal, inte med StandardOutput=append:.
+# append: öppnar loggfilen INNAN StateDirectory= hunnit skapa katalogen,
+# och enheten dör då med "Failed to set up standard output: No such file
+# or directory". ExecStartPre= hjälper inte — den ärver samma
+# StandardOutput= och faller innan sitt mkdir. Skalet gör katalogen och
+# skriver till den i samma kommando, precis som cmd.exe i den schemalagda
+# uppgiften på Windows.
 #
-#   Failed to set up standard output: No such file or directory
-#
-# på en maskin där katalogen ännu inte fanns. ExecStartPre= räddar inget:
-# den ärver samma StandardOutput= och faller på samma sätt innan den hinner
-# köra sitt mkdir. Skalet gör i stället katalogen och skriver till den i
-# samma kommando, vilket är exakt varför den schemalagda uppgiften på
-# Windows går via cmd.exe. Alla tre hanterarna omdirigerar alltså själva.
-#
-# `exec` är inte dekoration: utan det blir /bin/sh huvudprocess, och då
-# pekar MAINPID på skalet i stället för på tjänsten — signaler och
-# Restart= skulle gälla fel process.
-#
-# Sökvägen räknas ut som _log_dir() gör den, inte med %S. Vad %S betyder
-# för en användarenhet har flyttat mellan systemd-versioner, och en enhet
-# som gissar fel lägger loggen i ett annat träd än tillståndet. Här står
-# regeln en gång: $XDG_STATE_HOME när den är satt OCH absolut — specen
-# säger att en relativ eller tom variabel ska behandlas som osatt, precis
-# som _xdg_state_home() gör — annars ~/.local/state.
+# `exec` gör python till huvudprocess; utan det pekar MAINPID på skalet.
+# Sökvägen räknas ut som _log_dir() gör den och inte med %S, vars innebörd
+# för användarenheter har flyttat mellan systemd-versioner. Tom eller
+# relativ XDG_STATE_HOME behandlas som osatt, enligt specen.
 ExecStart=/bin/sh -c 'D="$${XDG_STATE_HOME:-$$HOME/.local/state}"; case "$$D" in /*) ;; *) D="$$HOME/.local/state" ;; esac; D="$$D/vibepulse"; mkdir -p "$$D" && exec /usr/bin/python3 -u tokenserver.py >> "$$D/torget-tokenserver.log" 2>&1'
 
 # KeepAlive + ThrottleInterval 30 ur plisten, i systemds ord. Trettio
