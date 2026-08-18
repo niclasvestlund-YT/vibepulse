@@ -3,7 +3,7 @@
 #
 #   mkdir -p ~/.config/systemd/user
 #   cp vibepulse-tokenserver.service ~/.config/systemd/user/
-#   $EDITOR ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
+#   nano ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now vibepulse-tokenserver
 #
@@ -16,31 +16,41 @@
 [Unit]
 Description=VibePulse tokenserver
 Documentation=https://github.com/niclasvestlund-YT/vibepulse
-# Kvotproben och GitHub-hämtningen vill ha namnuppslag vid start. Saknas
-# nätet ändå är det ingen katastrof — tjänsten försöker igen — men att
-# starta efter nätet gör den första loggraden sann i stället för missvisande.
-After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=simple
 # Sökvägen till DIN utcheckning. Den här raden är den enda som måste ändras.
 WorkingDirectory=%h/vibepulse/tools/tokenserver
-ExecStart=/usr/bin/python3 -u tokenserver.py
+
+# Omdirigeringen sker i ett skal, inte med StandardOutput=append:, och det
+# är inte en smaksak. append: öppnar filen INNAN StateDirectory= hinner
+# skapa katalogen, så enheten dog vid start med
+#
+#   Failed to set up standard output: No such file or directory
+#
+# på en maskin där katalogen ännu inte fanns. ExecStartPre= räddar inget:
+# den ärver samma StandardOutput= och faller på samma sätt innan den hinner
+# köra sitt mkdir. Skalet gör i stället katalogen och skriver till den i
+# samma kommando, vilket är exakt varför den schemalagda uppgiften på
+# Windows går via cmd.exe. Alla tre hanterarna omdirigerar alltså själva.
+#
+# `exec` är inte dekoration: utan det blir /bin/sh huvudprocess, och då
+# pekar MAINPID på skalet i stället för på tjänsten — signaler och
+# Restart= skulle gälla fel process.
+#
+# Sökvägen räknas ut som _log_dir() gör den, inte med %S. Vad %S betyder
+# för en användarenhet har flyttat mellan systemd-versioner, och en enhet
+# som gissar fel lägger loggen i ett annat träd än tillståndet. Här står
+# regeln en gång: $XDG_STATE_HOME när den är satt OCH absolut — specen
+# säger att en relativ eller tom variabel ska behandlas som osatt, precis
+# som _xdg_state_home() gör — annars ~/.local/state.
+ExecStart=/bin/sh -c 'D="$${XDG_STATE_HOME:-$$HOME/.local/state}"; case "$$D" in /*) ;; *) D="$$HOME/.local/state" ;; esac; D="$$D/vibepulse"; mkdir -p "$$D" && exec /usr/bin/python3 -u tokenserver.py >> "$$D/torget-tokenserver.log" 2>&1'
 
 # KeepAlive + ThrottleInterval 30 ur plisten, i systemds ord. Trettio
 # sekunder är staketet mot respawn-loopar: dör processen direkt vid start
 # ska loggen inte fyllas av omstarter.
 Restart=always
 RestartSec=30
-
-# %S är användarens state-katalog ($XDG_STATE_HOME, annars ~/.local/state) —
-# samma träd som _state_dir() räknar ut, så tjänsten och dess logg hamnar på
-# samma ställe utan att någon av dem gissar. StateDirectory skapar katalogen
-# innan append: försöker skriva i den.
-StateDirectory=vibepulse
-StandardOutput=append:%S/vibepulse/torget-tokenserver.log
-StandardError=append:%S/vibepulse/torget-tokenserver.log
 
 [Install]
 WantedBy=default.target

@@ -382,7 +382,7 @@ redigera sökvägarna annars.
 ```
 mkdir -p ~/.config/systemd/user
 cp vibepulse-tokenserver.service ~/.config/systemd/user/
-$EDITOR ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
+nano ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
 systemctl --user daemon-reload
 systemctl --user enable --now vibepulse-tokenserver
 ```
@@ -471,8 +471,12 @@ Konsol-appen), under Windows i
 `$XDG_STATE_HOME/vibepulse/torget-tokenserver.log`. Servern roterar den
 själv vid start om den vuxit förbi ~5 MB, med svansen bevarad i `.old`.
 Rotationen kräver att tjänstehanteraren faktiskt skickar stderr till just
-den filen — därför går Windows-uppgiften via `cmd.exe` med en
-omdirigering, och systemd-enheten via `append:`. Raderna har tidsstämplar
+den filen — därför går både Windows-uppgiften (via `cmd.exe`) och
+systemd-enheten (via `/bin/sh`) genom ett skal som gör katalogen och
+omdirigerar i samma kommando. `StandardOutput=append:` duger inte:
+systemd öppnar filen innan `StateDirectory=` hunnit skapa katalogen, och
+enheten dör med `Failed to set up standard output: No such file or
+directory`. Raderna har tidsstämplar
 och loggar övergångar, inte tillstånd: en frisk vecka är några rader, inte
 tusen.
 

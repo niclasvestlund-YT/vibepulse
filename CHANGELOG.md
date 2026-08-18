@@ -7,6 +7,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- The systemd user unit starts. It redirected with
+  `StandardOutput=append:%S/vibepulse/torget-tokenserver.log` and trusted
+  `StateDirectory=` to have made that directory first — systemd opens the
+  file before it creates the directory, so on a machine without the tree
+  the service died at startup with `Failed to set up standard output: No
+  such file or directory`. `ExecStartPre=` cannot fix it (it inherits the
+  same `StandardOutput=` and fails before its `mkdir` runs), so the unit
+  now redirects inside `/bin/sh` — `mkdir -p` and `>>` in one command,
+  the same shape the Windows scheduled task uses via `cmd.exe`, and for
+  the same reason. The log path is derived the way `_log_dir()` derives
+  it rather than from `%S`, whose meaning for user units has moved
+  between systemd versions; `exec` keeps the Python process as MAINPID so
+  `Restart=` and signals reach the service and not the shell.
+
 - The panel names all three GPT-5.6 variants. `gpt-5.6-sol` had a typeset
   screen label while its siblings `terra` and `luna` fell through to their
   raw lowercase ids — the price table knew all three, the screen knew one,

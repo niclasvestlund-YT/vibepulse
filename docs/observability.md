@@ -121,8 +121,10 @@ Under a service manager both streams append to the log file
 survives reboot, and the server self-rotates it at startup past ~5 MB
 (tail preserved in `.old`). Rotation only fires when stderr genuinely *is*
 that file, which is why each autostart file redirects rather than leaving
-it to chance: `StandardOutPath` in the plist, `append:` in the systemd
-unit, a `cmd.exe` redirect in the scheduled task. A missing
+it to chance: `StandardOutPath` in the plist, a `/bin/sh` redirect in the
+systemd unit, a `cmd.exe` redirect in the scheduled task. Two of the three
+redirect in a shell for the same reason: neither manager creates the log's
+directory before it opens the file. A missing
 `~/.claude/projects` no longer crash-loops: the server logs one warning
 and waits for the directory, with the manager's restart delay as the backstop.
 

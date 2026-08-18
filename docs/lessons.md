@@ -261,3 +261,33 @@ two doc-content tests (`test_shared_amoled_skill.py`,
 `design-qa.md` has already drifted again (OBS-26). **Watch for:** every
 new doc in this observability set is prose too; comb step 7 includes
 checking that these files still tell the truth.
+
+## 2026-08-18 · The systemd unit had never been started by anyone
+
+**What happened:** the Linux autostart unit shipped in the
+Windows/Linux branch, past CI and past review, and died on the first
+machine that actually ran it: `Failed to set up standard output: No such
+file or directory`. **Root cause:** it used
+`StandardOutput=append:%S/vibepulse/…` and a comment asserting that
+`StateDirectory=` creates that directory first. Systemd opens the output
+file *before* it creates the exec directories, so on any host without
+the tree the unit cannot start at all — and `ExecStartPre=/bin/mkdir`
+is no escape, because it inherits the same `StandardOutput=` and fails
+before its own command runs. The Windows task had already hit the same
+wall and solved it (`cmd.exe`, mkdir and redirect in one line); the
+Linux file was written as if that lesson were Windows-specific.
+**The rule:** an autostart file is only tested by a service manager
+parsing it. Unit tests, CI and careful reading all pass on a file that
+cannot start — the Task Scheduler XML proved this twice already
+(encoding, then `PT30S` below the interval floor), and this is the third
+instance in one branch. Ship no manager file that has not been loaded by
+its manager, and treat a comment asserting an ordering guarantee as an
+untested claim until something has actually enforced it. **Guards:** the
+unit now redirects inside `/bin/sh` with `exec` (MAINPID stays the Python
+process); the log path is derived like `_log_dir()` rather than from
+`%S`, whose meaning for user units has moved between systemd versions;
+`docs/observability.md` and the tokenserver README no longer say
+`append:`. **Watch for:** the remaining untested claim in the same file
+is `WorkingDirectory=%h/vibepulse/tools/tokenserver` — wrong for any
+checkout living elsewhere, silent when wrong, and the reason `GET /`
+reports `rev`.
