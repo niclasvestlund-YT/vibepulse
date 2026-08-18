@@ -51,6 +51,15 @@ cannot determine yourself.
      Task Scheduler nobody is there to answer, so the panel is blocked
      silently while everything looks healthy. See
      `tools/tokenserver/README.md` → Autostart.
+   - **Signing into the desktop app is not enough for the Claude quota.**
+     Off macOS the probe reads the file `claude login` writes, and a
+     desktop-app-only login can leave that file holding its scopes with no
+     token in it — which looks exactly like "not signed in" while the user
+     plainly is. Run `claude login` in the CLI as well. Verified on
+     Windows: before, `no_claude_oauth_token`; after, `usage_http_200 + ok`
+     with real percentages. (A `claude setup-token` value in
+     `CLAUDE_CODE_OAUTH_TOKEN` is *not* a substitute — it authenticates and
+     is then refused with 403.)
    - **`.local` addressing assumes the host answers mDNS.** macOS does via
      Bonjour and most desktop Linux does via Avahi; Windows is inconsistent
      about it. Where it does not resolve, use a DHCP-reserved IP in
