@@ -426,11 +426,30 @@ och panelen visar streck utan att något ser trasigt ut. Kör en gång, som
 administratör:
 
 ```
-netsh advfirewall firewall add rule name="VibePulse Tokenserver" ^
-  dir=in action=allow protocol=TCP localport=8737 profile=private
+netsh advfirewall firewall add rule name="VibePulse Tokenserver" dir=in action=allow protocol=TCP localport=8737 profile=private
 ```
 
-`profile=private` med flit: regeln ska gälla hemnätet, inte ett kafés.
+En rad med flit: `^` är cmd.exes radfortsättning och PowerShells är en
+bakåtfnutt, så en delad rad kör olika saker i de två skalen — och en
+halv brandväggsregel misslyckas tyst, precis som allt annat här.
+
+`profile=private` också med flit: regeln ska gälla hemnätet, inte ett kafés.
+
+Kontrollera efteråt:
+
+```
+netsh advfirewall firewall show rule name="VibePulse Tokenserver"
+```
+
+Beviset är dock inte att regeln finns, utan att någon annan maskin når
+porten. Från en annan dator på samma nät:
+
+```
+curl http://<windows-maskinens-ip>:8737/api/tokens
+```
+
+Före regeln tar den timeout; efter svarar den med JSON. `localhost` säger
+ingenting — den vägen har aldrig gått genom brandväggen.
 
 ### Loggen
 
