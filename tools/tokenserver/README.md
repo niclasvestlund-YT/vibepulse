@@ -274,13 +274,25 @@ inloggad (aug 2026, app 1.32352.1.0, MSIX-paketerad):
 |---|---|
 | Windows Credential Manager | Ingen post alls — `cmdkey /list` tom på Claude |
 | Appens processer | Bara Electron (`renderer`, `gpu-process`, `utility`). Ingen medföljande Claude Code-process att läsa miljön ur, vilket är exakt vad macOS-proben gör — och Windows lämnar ändå inte ut en annan process miljöblock utan `ReadProcessMemory` |
-| Paketets datakatalog | `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude`. Innehåller `.credentials.json` per lokal agentsession (99 stycken) — men den nyaste var fem dagar gammal och innehåller bara `mcpOAuth`, alltså tokens för MCP-servrar. Ingen `claudeAiOauth`-post, inget om kontot |
+| Paketets datakatalog | `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude` (samma träd som appen ser som `%APPDATA%\Claude` — MSIX omdirigerar, vilket är varför en titt i `%APPDATA%` ser tom ut). `.credentials.json` per lokal agentsession, men bara med `mcpOAuth`: sessionens MCP-tokens, inget om kontot |
+| En lokal session i appen | Startar mycket riktigt den medföljande `claude-code\<version>\claude.exe`, och den kör mot `%USERPROFILE%\.claude` — argumentraden saknar `--config-dir` och pekar på riktiga `~/.claude/plugins`. Ändå skrevs INGEN token: `expiresAt` stod stilla, och enda `.credentials.json` som rörts i hela profilen det dygnet var CLI:ns egen skrivning. Appen injicerar tokenet i processens miljö, så Claude Code har inget att spara |
 | `claude doctor` | Rör inte autentiseringen; `expiresAt` står stilla |
 | `claude setup-token` i `CLAUDE_CODE_OAUTH_TOKEN` | 403 på usage-endpointen (se felsökningstabellen) |
 
-Kvar står alltså CLI:ns egen fil, och den skrivs bara när CLI:t kör.
-Kör du dina sessioner via Remote Control är det ingen som rör den —
-värden autentiserar aldrig, och panelen slocknar när tokenet gått ut.
+Kvar står alltså CLI:ns egen fil, och det är bokstavligt: `claude` från
+kommandoraden är enda källan som skriver den. Skrivbordsappen gör det
+aldrig — varken när arbetet körs någon annanstans (då autentiserar värden
+inte alls) eller när det körs lokalt (då finns tokenet bara i den
+medföljande processens miljö). Panelen slocknar därför ungefär åtta timmar
+efter senaste CLI-kommandot, oavsett hur mycket du använder appen.
+
+Det är också exakt vad macOS-proben löser: `ps eww` läser tokenet ur den
+medföljande processens miljö. Linux kan göra samma sak via
+`/proc/<pid>/environ`; Windows lämnar inte ut en annan process miljöblock
+utan `ReadProcessMemory`. Ingen av dem är byggd här — ingen av maskinerna i
+det här arbetet kör skrivbordsappen på Linux, och en probe ingen kunnat
+provköra hör inte hemma i en gren som just lärt sig att ett autostartfile
+inte är testat förrän en tjänstehanterare läst det.
 
 Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
 finns kvar på Windows: `fcntl` saknas där, så låset tas med
