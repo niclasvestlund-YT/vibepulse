@@ -7,6 +7,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- The systemd user unit starts. It redirected with
+  `StandardOutput=append:%S/vibepulse/torget-tokenserver.log` and trusted
+  `StateDirectory=` to have made that directory first — systemd opens the
+  file before it creates the directory, so on a machine without the tree
+  the service died at startup with `Failed to set up standard output: No
+  such file or directory`. `ExecStartPre=` cannot fix it (it inherits the
+  same `StandardOutput=` and fails before its `mkdir` runs), so the unit
+  now redirects inside `/bin/sh` — `mkdir -p` and `>>` in one command,
+  the same shape the Windows scheduled task uses via `cmd.exe`, and for
+  the same reason. The log path is derived the way `_log_dir()` derives
+  it rather than from `%S`, whose meaning for user units has moved
+  between systemd versions; `exec` keeps the Python process as MAINPID so
+  `Restart=` and signals reach the service and not the shell.
+
 - The panel names all three GPT-5.6 variants. `gpt-5.6-sol` had a typeset
   screen label while its siblings `terra` and `luna` fell through to their
   raw lowercase ids — the price table knew all three, the screen knew one,
@@ -22,6 +36,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   in the local gate — which is exactly how a green CI hid a runtime
   `NameError` in the rebased Windows branch (PR #11): the missing
   `test_interactions` catches it immediately.
+- The tokenserver reads Claude's OAuth token on Windows, where `claude
+  login` writes `%USERPROFILE%\.claude\.credentials.json` instead of using
+  a keychain — or `%CLAUDE_CONFIG_DIR%\.credentials.json` when that
+  variable relocates Claude Code's config directory, which the reader now
+  honors the same way `claude login` does. Honest caveat, documented in
+  the tokenserver README: the file is plaintext, protected by the user
+  account's filesystem permissions but without keychain-equivalent at-rest
+  protection — Claude Code's own trade-off on Windows and Linux, not the
+  service's. State files and logs live under `%LOCALAPPDATA%\VibePulse\`,
+  the Codex app-server read works without `select.select` (which never
+  worked on pipes on Windows), and its subprocess tests run the fixture
+  through `[sys.executable, script]` so they need neither a shebang nor an
+  execute bit. Autostart is no longer open: see the Linux/Windows entry
+  under Added.
 
 ### Added
 
@@ -56,11 +84,46 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   The old paths worked literally on Windows but planted a `Library` tree in
   the user profile that nothing else on the machine recognises.
 
-  What remains for [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)
-  is autostart: the launchd plist has no Windows equivalent, and `smoke.py`
-  now finds the right state directory but still tells you to run `launchctl`.
   Reported by Erik Elfström, who found it porting a fork to a LilyGO
   T-Display-S3.
+- Linux is a supported host, and the Windows port is finished
+  ([#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2),
+  [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)). Linux had
+  never been a platform here, only the shape of "not Windows", so it
+  inherited macOS's answers: state and logs landed in `~/Library`, and the
+  credential probe went looking for a keychain and a Claude Desktop process
+  that do not exist there. Paths now go three ways — `%LOCALAPPDATA%` on
+  Windows, `~/Library` unchanged on macOS so nothing has to migrate, and
+  `$XDG_STATE_HOME` (else `~/.local/state`) on Linux. The credential file
+  `/login` writes serves Linux and Windows alike, with `security`/`pgrep`
+  demoted to the macOS branch, and `CLAUDE_CONFIG_DIR` is finally honoured
+  so a relocated Claude install is followed rather than missed.
+  `CLAUDE_CODE_OAUTH_TOKEN` in the service's own environment is offered
+  first as a manual escape hatch, without dropping the platform sources
+  behind it.
+
+  Autostart now exists for all three: `vibepulse-tokenserver.service`
+  (systemd user unit) and `VibePulseTokenserver.xml` (Task Scheduler) join
+  the plist, each carrying its two real decisions — restart on death, after
+  30 s, so a process dying at startup cannot fill the log with its own
+  restarts. `smoke.py` names whichever service manager the host actually
+  has instead of always saying `launchctl`. On Windows the firewall rule is
+  documented as a step of its own: the service listens on the LAN, Defender
+  only asks interactively, and under Task Scheduler nobody is there to
+  answer — so without it the panel is blocked silently while everything
+  looks healthy.
+
+  `codex` is now found when a service manager strips `PATH`, which is how
+  the service is meant to run; `VIBEPULSE_CODEX_BIN` overrides when the
+  guesses miss.
+
+  CI runs the tokenserver on ubuntu, windows and macos, and all eleven test
+  modules rather than seven. Both gaps had already cost something:
+  `test_interactions` was among the four skipped, and it is the module that
+  would have caught a missing `select` import when this branch was rebased.
+  Several tests turned out to describe one platform while running on
+  another — patching `_IS_WINDOWS = False` and calling the result macOS —
+  so a `platform_is` helper now sets the flags from a single name.
 - The completion alert finally pulses. The accent outline and icon ring
   breathe (full → 39 % → full, ease-in-out, four 1200 ms cycles filling the
   PULSE phase exactly) and then rest; text and the provider icon stay solid

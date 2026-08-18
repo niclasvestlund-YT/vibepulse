@@ -91,32 +91,60 @@ LIMITS_EVERY_S = 240  # rate-limit-proben: 15 anrop/h — kontots bucket delas
                       # panelens 30 s-pollar får ändå cachat svar direkt
 
 # Vilka token-källor och systemanrop som finns beror på plattformen, inte på
-# konfiguration. Testerna patchar konstanten för att köra Windows-grenarna
-# på en Mac.
+# konfiguration. Testerna patchar konstanterna för att köra en annan
+# plattforms grenar på den de råkar sitta på. Tre världar, inte två: allt
+# som inte är Windows eller macOS behandlas som Linux/BSD och följer XDG.
 _IS_WINDOWS = sys.platform == "win32"
+_IS_MACOS = sys.platform == "darwin"
 
 
 def _state_dir():
     """Tjänstens tillståndskatalog — låset, cachen, historiken, spåraren.
 
-    ``~/Library/Application Support`` är macOS-konventionen; Windows
-    motsvarighet är ``%LOCALAPPDATA%``. Sökvägarna FUNGERAR bokstavligt på
-    Windows (``Path.home()`` löser ut), men skulle lägga ett ``Library``-träd
-    i användarprofilen som ingenting annat på maskinen känner igen.
+    En katalog per plattformskonvention, inte en som fungerar överallt:
+    ``~/Library/Application Support`` på macOS, ``%LOCALAPPDATA%`` på
+    Windows, ``$XDG_STATE_HOME`` (annars ``~/.local/state``) på Linux.
+    macOS-sökvägen är oförändrad — befintliga installationer hittar sitt
+    tillstånd där det redan ligger, så ingen migrering behövs.
+
+    Sökvägarna FUNGERAR bokstavligt på alla tre (``Path.home()`` löser ut
+    överallt), men ett ``Library``-träd i en Windows-användarprofil eller i
+    en Linux-hemkatalog är något ingenting annat på maskinen känner igen.
     """
     if _IS_WINDOWS:
         local_app_data = os.environ.get("LOCALAPPDATA")
         base = (Path(local_app_data) if local_app_data
                 else Path.home() / "AppData" / "Local")
         return base / "VibePulse"
-    return Path.home() / "Library" / "Application Support" / "VibePulse"
+    if _IS_MACOS:
+        return Path.home() / "Library" / "Application Support" / "VibePulse"
+    return _xdg_state_home() / "vibepulse"
+
+
+def _xdg_state_home():
+    """``$XDG_STATE_HOME`` med specens fallback.
+
+    XDG pekar ut state-katalogen för just det vi lägger där — tillstånd som
+    ska överleva omstart men som varken är konfiguration eller cache. En
+    relativ eller tom variabel ska enligt specen behandlas som osatt.
+    """
+    raw = os.environ.get("XDG_STATE_HOME")
+    if raw:
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            return candidate
+    return Path.home() / ".local" / "state"
 
 
 def _log_dir():
-    """Loggkatalogen. macOS har ~/Library/Logs; Windows har ingen egen
-    logg-konvention för användartjänster, så loggen bor i tillståndsträdet."""
-    return Path.home() / "Library" / "Logs" if not _IS_WINDOWS else (
-        _state_dir() / "Logs")
+    """Loggkatalogen. macOS har ~/Library/Logs; varken Windows eller Linux
+    har någon egen logg-konvention för användartjänster, så loggen bor i
+    tillståndsträdet (XDG pekar dessutom ut state-katalogen för loggar)."""
+    if _IS_WINDOWS:
+        return _state_dir() / "Logs"
+    if _IS_MACOS:
+        return Path.home() / "Library" / "Logs"
+    return _state_dir()
 
 # Diagnostiken går via logging till stderr med tidsstämplar (basicConfig i
 # main; launchd samlar bägge strömmarna i loggfilen, se plisten). Regeln är
@@ -137,11 +165,14 @@ def _maybe_rotate_own_log(path=None, stderr_fd=2):
     """Trunkera loggfilen vid start när den vuxit förbi taket, med svansen
     bevarad i <namn>.old.
 
-    Bara när stderr faktiskt ÄR filen (launchd-fallet): fstat/stat-jämförelsen
-    skyddar terminalkörningar från att röra en fil de inte skriver till.
-    Trunkering i stället för rename: launchd håller fd:n öppen med O_APPEND,
-    så en rename hade bara fått processen att skriva vidare i den flyttade
-    filen medan den nya förblev tom.
+    Bara när stderr faktiskt ÄR filen: fstat/stat-jämförelsen skyddar
+    terminalkörningar från att röra en fil de inte skriver till. Det gäller
+    alla tre tjänstehanterarna — launchd via StandardOutPath, systemd via
+    append:, Task Scheduler via omdirigeringen i sin kommandorad — och
+    ingen av dem behöver särbehandlas: identiteten avgör, inte plattformen.
+    Trunkering i stället för rename: hanteraren håller fd:n öppen med
+    O_APPEND, så en rename hade bara fått processen att skriva vidare i den
+    flyttade filen medan den nya förblev tom.
 
     Hela läs-kopiera-trunkera-sekvensen hålls under root-loggerns
     handlerlås (RLock — vår egen "roterad"-rad kan fortfarande skrivas), så
@@ -507,6 +538,12 @@ _probe_headers = []
 _probe_unknown_buckets = []
 _probe_cooldown_until = 0.0
 _probe_failure_streak = 0
+# Rörde den SENASTE proben nätet? Backoffen finns för att inte hamra API:t,
+# så bara ett upstream-svar får glesa ut takten. Lokala orsaker — utgången
+# token, ingen token alls, en annan instans som håller låset — kostar noll
+# anrop, och att straffa dem betyder bara att panelen står mörk längre än
+# nödvändigt efter att orsaken är åtgärdad.
+_probe_reached_upstream = False
 _probe_status_logged = None  # senast loggade status — övergångar loggas, tillstånd inte
 # Döda tokens (värde → orsak): en kandidat som fått 401/403 skickas ALDRIG
 # igen. Det var mönstret bakom 429-straffrutan: nyckelringstokenen dog på
@@ -581,23 +618,33 @@ def _read_keychain_oauth():
 
 
 def _credentials_file_path():
-    """Windows' credential store: ``%USERPROFILE%\\.claude\\.credentials.json``.
+    """The credential store off macOS: ``~/.claude/.credentials.json``.
 
-    Claude Code has no keychain integration on Windows, so ``claude login``
-    writes the same ``{"claudeAiOauth": {...}}`` shape the macOS keychain
-    holds to a plain file instead. ``Path.home()`` resolves to
-    ``%USERPROFILE%`` there, so one expression covers both.
+    Claude Code integrates with a keychain only on macOS. On Windows and
+    Linux alike ``claude login`` writes the same ``{"claudeAiOauth": {...}}``
+    shape the macOS keychain holds to a plain file instead, so one
+    expression covers both — ``Path.home()`` resolves to ``%USERPROFILE%``
+    on Windows and to ``$HOME`` on Linux.
+
+    ``CLAUDE_CONFIG_DIR`` relocates Claude Code's whole config directory,
+    credentials included — the file then lives directly in that directory,
+    not in a ``.claude`` subdirectory of it. ``claude login`` honors the
+    variable, so a reader that ignored it would probe with a stale token
+    from the abandoned default path, or silently find nothing.
     """
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if config_dir:
+        return Path(config_dir).expanduser() / ".credentials.json"
     return Path.home() / ".claude" / ".credentials.json"
 
 
 def _read_credentials_file_oauth():
-    """The Windows credential file as ``(token, expires_at_ms)``.
+    """The credential file as ``(token, expires_at_ms)``.
 
     Same record ``/login`` writes, same field names as the keychain — only
     the store differs. A missing or malformed file is not an error worth
     logging: it just means this host has no credential file, which is the
-    normal case everywhere except Windows.
+    normal case on macOS, where the keychain holds it instead.
     """
     try:
         raw = _credentials_file_path().read_text(encoding="utf-8")
@@ -610,11 +657,20 @@ def _read_credentials_file_oauth():
 def _read_oauth_candidates():
     """Distinct token candidates as ``[(token, expires_at_ms), ...]``.
 
-    Which sources exist is a property of the platform. On Windows there is
-    no keychain and no bundled Claude Desktop process to read an injected
-    token from, so the credential file ``/login`` writes is the only source
-    — asking ``pgrep``/``security`` there would only spawn doomed processes
-    every probe cycle.
+    ``CLAUDE_CODE_OAUTH_TOKEN`` in the SERVICE's own environment comes
+    first when set. It is the manual escape hatch: Claude Code itself
+    prefers that variable over its stored credentials, and a host whose
+    store this probe cannot reach needs some way to be told the token
+    rather than showing dashes forever. Unlike Claude Code we do not stop
+    there — the platform sources are still appended, so a stale value in a
+    long-lived environment degrades to the normal path instead of pinning
+    the probe to a dead token.
+
+    Which of the remaining sources exist is a property of the platform. Off
+    macOS there is no keychain, and no bundled Claude Desktop process to
+    read an injected token from, so the credential file ``/login`` writes
+    is the only store — asking ``pgrep``/``security`` there would only
+    spawn doomed processes every probe cycle.
 
     On macOS both sources are live. Claude Desktop's injected process token
     is listed first (Desktop refreshes OAuth itself while the keychain
@@ -624,17 +680,24 @@ def _read_oauth_candidates():
     keychain. Neither source is reliably the freshest, so the probe must try
     them in order rather than trust the first.
     """
-    if _IS_WINDOWS:
-        file_token, expires_at = _read_credentials_file_oauth()
-        return [(file_token, expires_at)] if file_token else []
-
     candidates = []
-    process_token = _read_process_oauth_token()
-    if process_token:
-        candidates.append((process_token, None))
-    keychain_token, expires_at = _read_keychain_oauth()
-    if keychain_token and keychain_token != process_token:
-        candidates.append((keychain_token, expires_at))
+    seen = set()
+
+    def offer(token, expires_at=None):
+        """Ta emot en kandidat om den finns och inte redan är med.
+        Ordningen är prioritet; dubbletter kostar en probecykel var."""
+        if token and token not in seen:
+            seen.add(token)
+            candidates.append((token, expires_at))
+
+    offer(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
+
+    if not _IS_MACOS:
+        offer(*_read_credentials_file_oauth())
+        return candidates
+
+    offer(_read_process_oauth_token())
+    offer(*_read_keychain_oauth())
     return candidates
 
 
@@ -920,7 +983,8 @@ def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
     global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _probe_cooldown_until
+        _probe_cooldown_until, _probe_reached_upstream
+    _probe_reached_upstream = False
     _load_probe_state()
     if time.time() < _probe_cooldown_until:
         # I nedkylning efter 429 — statusen står kvar på backoff-strängen.
@@ -939,7 +1003,7 @@ def _probe_limits():
 
 def _probe_limits_locked():
     global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _probe_cooldown_until
+        _probe_cooldown_until, _probe_reached_upstream
     candidates = _read_oauth_candidates()
     if not candidates:
         _probe_status = "no_claude_oauth_token"
@@ -963,6 +1027,7 @@ def _probe_limits_locked():
         # an active scoped weekly pool (for example Fable) and its reset
         # explicitly.
         try:
+            _probe_reached_upstream = True
             with urllib.request.urlopen(
                     _usage_request(candidate), timeout=15) as resp:
                 usage = json.load(resp)
@@ -1074,7 +1139,7 @@ def _probe_limits_locked():
 
 
 def _probe_interval_s():
-    """Backa av vid upprepade misslyckanden: 120 → 240 → 480 s (tak).
+    """Backa av vid upprepade misslyckanden: 240 → 480 → 960 s (tak).
 
     En död token fick tidigare hamra API:t varannan minut i timmar — det
     mönstret utlöste en 429-straffruta. Lyckad probe återställer takten.
@@ -1084,7 +1149,8 @@ def _probe_interval_s():
 
 def _refresh_limits():
     global _last_limits, _last_probed, _limits_refreshing, \
-        _probe_failure_streak, _probe_status_logged, _probe_status
+        _probe_failure_streak, _probe_status_logged, _probe_status, \
+        _probe_reached_upstream
     try:
         refreshed = _probe_limits()
     except Exception as e:
@@ -1106,7 +1172,13 @@ def _refresh_limits():
                  _probe_status_logged or "start", _probe_status)
         _probe_status_logged = _probe_status
     with _limits_lock:
-        _probe_failure_streak = 0 if refreshed else _probe_failure_streak + 1
+        if refreshed:
+            _probe_failure_streak = 0
+        elif _probe_reached_upstream:
+            _probe_failure_streak += 1
+        # Annars: proben kom aldrig till nätet. Takten ska stå kvar på
+        # grundintervallet så att en ny token syns inom en probe i stället
+        # för efter en utglesning ingen upstream bett om.
         _last_limits = refreshed
         _last_probed = time.monotonic()
         _limits_refreshing = False
@@ -1138,6 +1210,12 @@ def get_limits():
 CODEX_SESSIONS = Path(os.path.expanduser("~/.codex/sessions"))
 CODEX_LIMITS_EVERY_S = 30
 CODEX_LIMIT_SCAN_BYTES = 1024 * 1024
+# Nedstängningen av app-servern på Windows. Femton sekunder är inte en
+# gissning: taskkill mättes till 7,66 s på en riktig burk (rc=0, hela
+# trädet dödat), och den gamla femsekunderstimeouten övergav alltså ett
+# anrop som lyckades. Vägen går i en bakgrundstråd, aldrig i HTTP-svaret,
+# så tålamod kostar ingen väntande begäran.
+_TASKKILL_TIMEOUT_S = 15
 _codex_limits_lock = threading.Lock()
 _last_codex_limits = None
 _last_codex_read = 0.0
@@ -1270,15 +1348,89 @@ def _parse_codex_rate_limits_response(body, observed_at, now_ts):
     return out
 
 
+def _codex_runnable(candidate):
+    """Är sökvägen något vi kan starta?
+
+    ``os.access(X_OK)`` beskriver ingenting på Windows — där avgör
+    filändelsen om en fil är körbar, och anropet svarar ja för vad som
+    helst som finns. Att fråga ändå vore att låtsas kontrollera något.
+    """
+    if not os.path.isfile(candidate):
+        return False
+    return True if _IS_WINDOWS else os.access(candidate, os.X_OK)
+
+
+def _codex_fallback_paths():
+    """Platser att leta på när PATH inte räcker.
+
+    PATH räcker nästan alltid när tjänsten startas från ett skal: npm
+    lägger ``codex`` i sin globala bin-katalog, som redan ligger där. Det
+    som INTE har ett skals PATH är just det sätt tjänsten är tänkt att
+    köras på — launchd, Task Scheduler och systemd startar den med en
+    avskalad miljö, och då hittar ``shutil.which`` ingenting.
+
+    macOS-posterna är av annan sort: ChatGPT.app buntar sin egen ``codex``
+    på en plats som aldrig ligger på PATH. De övriga är npm:s globala
+    bin-kataloger per plattform — samma binär som PATH skulle ha pekat ut,
+    letad upp för hand. Räcker inte listan pekar ``VIBEPULSE_CODEX_BIN``
+    var som helst.
+    """
+    # Skrivbordsappens medföljande app-server, före allt annat. Den ligger
+    # under ~/.codex och alltså aldrig på PATH, och på en maskin där bara
+    # appen är installerad — inget npm, inget CLI — är den enda källan till
+    # kvoten. Verifierad på Windows: binären svarade på
+    # account/rateLimits/read med riktiga värden. Sökvägen är densamma på
+    # alla tre plattformarna; bara filändelsen skiljer.
+    bundled = Path.home() / ".codex" / "plugins" / ".plugin-appserver"
+    common = (str(bundled / ("codex.exe" if _IS_WINDOWS else "codex")),)
+
+    if _IS_MACOS:
+        return common + (
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/Applications/Codex.app/Contents/Resources/codex")
+    if _IS_WINDOWS:
+        app_data = os.environ.get("APPDATA")
+        base = Path(app_data) if app_data else Path.home() / "AppData" / "Roaming"
+        return common + (str(base / "npm" / "codex.cmd"),
+                         str(base / "npm" / "codex.exe"))
+    return common + (str(Path.home() / ".local" / "bin" / "codex"),
+                     "/usr/local/bin/codex")
+
+
 def _codex_app_server_command():
+    """The complete argv for the app-server child, or None.
+
+    Returning the whole command line rather than a bare executable keeps
+    every caller — and every test double — launching the process the same
+    way. A test can substitute ``[sys.executable, fixture_script]`` and
+    exercise the identical Popen path, with no shebang or execute bit,
+    which is what lets the subprocess tests run on Windows.
+    """
+    executable = _codex_executable()
+    if executable is None:
+        return None
+    return [executable, "app-server", "--listen", "stdio://"]
+
+
+def _codex_executable():
+    """Var ``codex`` faktiskt ligger, eller None.
+
+    Skild från argv-byggandet ovan: att HITTA binären är plattformsarbete
+    med tre svar, att STARTA den är en rad som ska se likadan ut överallt.
+    """
+    override = os.environ.get("VIBEPULSE_CODEX_BIN", "").strip()
+    if override:
+        # Uttalad avsikt slår gissningar — men bara om den pekar på något.
+        # En trasig variabel ska inte tysta en fungerande PATH-träff.
+        if _codex_runnable(override):
+            return override
+        log.warning("VIBEPULSE_CODEX_BIN pekar inte på en körbar fil: %s",
+                    override)
     executable = shutil.which("codex")
     if executable:
         return executable
-    for candidate in (
-        "/Applications/ChatGPT.app/Contents/Resources/codex",
-        "/Applications/Codex.app/Contents/Resources/codex",
-    ):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+    for candidate in _codex_fallback_paths():
+        if _codex_runnable(candidate):
             return candidate
     return None
 
@@ -1315,15 +1467,57 @@ def _pump_lines(stream):
     return lines
 
 
+def _terminate_app_server(process):
+    """Avsluta app-servern OCH det den startade.
+
+    ``terminate()`` träffar bara processen vi själva startade. På macOS och
+    Linux är det ``codex`` direkt, så det räcker. På Windows är ``codex``
+    normalt ``codex.cmd`` — npm:s batch-omslagare runt node — och då dödar
+    vi cmd.exe medan node-barnet lever vidare med sin ände av vår pipe
+    öppen. Läsartråden sitter kvar i ``readline``, och stängningen av
+    stdout strax nedanför blockerar tills barnet självdör: en app-server
+    som hänger i trettio sekunder håller alltså hämtcykeln i trettio
+    sekunder, trots att deadlinen löpt ut för länge sedan.
+
+    ``taskkill /T`` tar hela trädet. Saknas det, eller svarar det inte,
+    faller vi igenom till samma terminate/kill som förut — sämre, men
+    aldrig sämre än innan.
+    """
+    if _IS_WINDOWS:
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                capture_output=True, timeout=_TASKKILL_TIMEOUT_S)
+        except (OSError, subprocess.SubprocessError):
+            pass  # saknas, hänger eller svarar inte — utfallet avgör nedan
+        # Fråga processen, inte taskkill. Uppmätt på en riktig Windows-burk:
+        # taskkill tog 7,66 s och lyckades (rc=0, båda processerna dödade).
+        # Med den gamla femsekunderstimeouten övergavs anropet i förtid och
+        # trädet dog ändå, i bakgrunden — rätt utfall av fel skäl. Det som
+        # betyder något är om processen är borta, inte om verktyget hann
+        # svara, så det är den frågan som ställs.
+        try:
+            process.wait(timeout=_TASKKILL_TIMEOUT_S)
+            return
+        except subprocess.TimeoutExpired:
+            pass  # trädet lever vidare: fall igenom till terminate/kill
+    process.terminate()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=1)
+
+
 def _read_codex_app_server_limits(timeout_s=5):
     """Read Codex's current quota snapshot through its local app protocol."""
-    executable = _codex_app_server_command()
-    if executable is None:
+    command = _codex_app_server_command()
+    if command is None:
         return {}
     process = None
     try:
         process = subprocess.Popen(
-            [executable, "app-server", "--listen", "stdio://"],
+            command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, bufsize=1)
 
@@ -1371,12 +1565,7 @@ def _read_codex_app_server_limits(timeout_s=5):
     finally:
         if process is not None:
             if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=1)
+                _terminate_app_server(process)
             # Rören stängs uttryckligen, i den här ordningen: processen är
             # redan död, så läsartråden har lämnat readline och kan inte
             # väckas mitt i en stängd ström. Utan det här hängde tre
@@ -2014,6 +2203,33 @@ class Handler(BaseHTTPRequestHandler):
         host = self.client_address[0] if self.client_address else ""
         return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
+    def _drain_request_body(self, limit=64 * 1024):
+        """Läs och kasta kroppen innan ett svar som inte vill ha den.
+
+        Stänger vi medan oläst data ligger kvar i mottagarbufferten skickar
+        Windows RST i stället för FIN, och klienten ser
+        ``ConnectionResetError`` i stället för svaret vi just skrev. En hook
+        som postar till en avstängd brygga fick alltså ett transportfel där
+        vi menade ett ärligt 404 — ofarligt (inget beslut = terminalens
+        egen fråga, som förut) men vilseledande: det ser trasigt ut i
+        stället för avstängt. Linux och macOS skickar svaret ändå, vilket
+        är varför det aldrig syntes.
+
+        Kroppar över taket dräneras inte: den som skickar megabyte till en
+        stängd dörr får sin reset. Att läsa dem vore att låta en avvisad
+        begäran kosta mer än en accepterad.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            return
+        if length <= 0 or length > limit:
+            return
+        try:
+            self.rfile.read(length)
+        except (ConnectionError, TimeoutError, OSError):
+            pass
+
     def _read_json_body(self, limit=64 * 1024):
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -2182,6 +2398,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.interaction_store is None:
+            self._drain_request_body()
             self._send(404, {"error": "interactions are not enabled"})
             return
         if self.path in ("/api/hook/question", "/api/hook/permission"):
@@ -2189,6 +2406,7 @@ class Handler(BaseHTTPRequestHandler):
                 log.warning("hook-POST från %s avvisad — hookar får bara "
                             "komma från den här maskinen",
                             self.address_string())
+                self._drain_request_body()
                 self._send(403, {"error": "hooks must be local"})
                 return
             self._handle_hook(
@@ -2198,6 +2416,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/panic":
             self._handle_panic()
         else:
+            self._drain_request_body()
             self._send(404, {"error": "not found"})
 
     def do_GET(self):
@@ -2236,6 +2455,13 @@ class Handler(BaseHTTPRequestHandler):
                            if self.github_monitor is not None
                            else disabled_snapshot()),
                 "claudeProbe": _probe_status,
+                # Statussträngen är ett SPARAT omdöme, inte en läsning nu.
+                # Utan åldern läses "token_expired_20:54" som ett aktuellt
+                # besked när det i själva verket kan vara en kvart gammalt
+                # — och GET / rör aldrig proben, så det är först en
+                # /api/tokens som omprövar saken.
+                "claudeProbeAgeS": (None if _last_probed == 0.0 else
+                                    int(time.monotonic() - _last_probed)),
                 "ratelimitHeaders": _probe_headers,
                 "unknownRateLimitBuckets": _probe_unknown_buckets,
                 # GET / parsas aldrig av skärmen — fält kan läggas till

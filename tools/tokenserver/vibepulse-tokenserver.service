@@ -1,0 +1,46 @@
+# Tokenmätarens tjänst som systemd-användarenhet — Linux-motsvarigheten
+# till se.torget.tokenserver.plist. Installera:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp vibepulse-tokenserver.service ~/.config/systemd/user/
+#   nano ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vibepulse-tokenserver
+#
+# Tjänsten läser ~/.claude och ~/.codex och måste alltså köra som DIN
+# användare, inte som system. Därför --user, inte /etc/systemd/system.
+#
+# Vill du att den ska köra utan att du är inloggad: `loginctl enable-linger
+# $USER`. Utan lingering startar enheten vid inloggning och stoppas när din
+# sista session tar slut, vilket är det som motsvarar launchds beteende.
+[Unit]
+Description=VibePulse tokenserver
+Documentation=https://github.com/niclasvestlund-YT/vibepulse
+
+[Service]
+Type=simple
+# Sökvägen till DIN utcheckning. Den här raden är den enda som måste ändras.
+WorkingDirectory=%h/vibepulse/tools/tokenserver
+
+# Omdirigeringen sker i ett skal, inte med StandardOutput=append:.
+# append: öppnar loggfilen INNAN StateDirectory= hunnit skapa katalogen,
+# och enheten dör då med "Failed to set up standard output: No such file
+# or directory". ExecStartPre= hjälper inte — den ärver samma
+# StandardOutput= och faller innan sitt mkdir. Skalet gör katalogen och
+# skriver till den i samma kommando, precis som cmd.exe i den schemalagda
+# uppgiften på Windows.
+#
+# `exec` gör python till huvudprocess; utan det pekar MAINPID på skalet.
+# Sökvägen räknas ut som _log_dir() gör den och inte med %S, vars innebörd
+# för användarenheter har flyttat mellan systemd-versioner. Tom eller
+# relativ XDG_STATE_HOME behandlas som osatt, enligt specen.
+ExecStart=/bin/sh -c 'D="$${XDG_STATE_HOME:-$$HOME/.local/state}"; case "$$D" in /*) ;; *) D="$$HOME/.local/state" ;; esac; D="$$D/vibepulse"; mkdir -p "$$D" && exec /usr/bin/python3 -u tokenserver.py >> "$$D/torget-tokenserver.log" 2>&1'
+
+# KeepAlive + ThrottleInterval 30 ur plisten, i systemds ord. Trettio
+# sekunder är staketet mot respawn-loopar: dör processen direkt vid start
+# ska loggen inte fyllas av omstarter.
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

@@ -2,6 +2,7 @@ import json
 import os
 import random
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -75,7 +76,7 @@ def _rollout_limits(primary_pct=None, secondary_pct=None, *,
 
 def _write_jsonl(path, rows):
     path.write_text("".join(json.dumps(row) + "\n" for row in rows),
-                    encoding="utf-8")
+                    encoding="utf-8", newline="")
 
 
 def _age_into_last_month(path):
@@ -501,7 +502,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             path_a = claude_root / "session-a.jsonl"
             # No trailing newline on the last line -- a writer that
             # crashed or simply hasn't finished this line yet.
-            path_a.write_text(complete_line + "\n" + dangling)
+            path_a.write_text(complete_line + "\n" + dangling, newline="")
             _age_into_last_month(path_a)  # Finding C: else deferred to live
             path_b = claude_root / "session-b.jsonl"
             _write_jsonl(path_b, [_claude_usage_line(
@@ -536,7 +537,7 @@ class MaxTrackerStoreBackfillBudgetTests(unittest.TestCase):
             dangling = json.dumps(_claude_usage_line(
                 "m2", 999, f"{day}T11:00:00Z"))
             path = claude_root / "session.jsonl"
-            path.write_text(complete_line + "\n" + dangling)
+            path.write_text(complete_line + "\n" + dangling, newline="")
             _age_into_last_month(path)
 
             _drain(store)
@@ -806,7 +807,7 @@ class MaxTrackerStoreEventDateOwnershipTests(unittest.TestCase):
             junk_line = json.dumps({"junk": "x" * (12 * 1024 * 1024)})
             real_tail = json.dumps(_claude_usage_line(
                 "tail", 999, "2020-01-15T10:00:00Z"))
-            path.write_text(junk_line + "\n" + real_tail + "\n")
+            path.write_text(junk_line + "\n" + real_tail + "\n", newline="")
             _age_into_last_month(path)  # dormant -- backfill-owned from the start
             file_mtime = path.stat().st_mtime
             ino = path.stat().st_ino
@@ -1278,7 +1279,13 @@ class MaxTrackerStorePersistenceTests(unittest.TestCase):
             self.assertTrue(path.exists())
             leftovers = [p for p in path.parent.iterdir() if p != path]
             self.assertEqual(leftovers, [])
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            if sys.platform != "win32":
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            # Windows har inga POSIX-bitar att läsa: os.chmod styr där bara
+            # skrivskyddsflaggan, så 0o600 säger ingenting om vem som kommer
+            # åt filen. Skyddet är i stället att tillståndet bor under
+            # %LOCALAPPDATA%, som ärver användarprofilens ACL. Att påstå
+            # 0o600 där vore att testa en siffra i stället för en egenskap.
 
     def test_reloaded_store_produces_an_identical_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:

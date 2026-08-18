@@ -1,0 +1,112 @@
+<?xml version="1.0"?>
+<!--
+  Tokenmätarens tjänst som schemalagd uppgift — Windows-motsvarigheten till
+  se.torget.tokenserver.plist.
+
+  VIKTIGT — konvertera till UTF-16 först. `schtasks /xml` kräver det och
+  avvisar annars filen med "unable to switch the encoding" på rad 1, mitt i
+  deklarationen. Filen ligger i UTF-8 här med flit: en UTF-16-fil är binär
+  för git, och den här filen innehåller en kommandorad som ska gå att läsa i
+  en diff innan någon kör den.
+
+  Notera att deklarationen ovan saknar encoding, och att det är avsiktligt.
+  Med `encoding="UTF-8"` avvisar schtasks filen; med `encoding="UTF-16"`
+  avvisar varje XML-parser den så länge den ligger i UTF-8 — deklarationen
+  och filen måste vara överens, och filen byter kodning på vägen. Utan
+  encoding gäller XML-specens egna regler: UTF-8 antas när inget annat sägs,
+  och byteordningsmärket som konverteringen lägger till talar för sig självt
+  efteråt. Samma fil är alltså giltig i båda ändarna.
+
+  Konverteringen är en rad:
+
+    $utf16 = "$env:TEMP\vibepulse-task.xml"
+    Get-Content -Raw VibePulseTokenserver.xml | Set-Content -Encoding Unicode $utf16
+    schtasks /create /tn "VibePulse Tokenserver" /xml $utf16
+
+  Alternativet slipper temporärfilen helt, eftersom XML:en då skickas som
+  en sträng i stället för som en fil att gissa teckenkodning på:
+
+    Register-ScheduledTask -TaskName "VibePulse Tokenserver" `
+      -Xml (Get-Content -Raw VibePulseTokenserver.xml)
+
+  Importen kräver ett ADMINISTRATÖRSFÖNSTER: uppgiften registreras i
+  schemaläggarens rot, och utan förhöjd behörighet nekas den.
+
+  TVÅ rader måste ändras först: <UserId> till ditt konto (`whoami`) och
+  sökvägen till din utcheckning i <Arguments>.
+
+  Tjänsten läser %USERPROFILE%\.claude och .codex, så den måste köra som
+  DIN användare. Kör den aldrig som SYSTEM: då pekar %USERPROFILE% någon
+  annanstans och panelen visar streck för alltid.
+
+  Varför cmd.exe i stället för python.exe direkt: Task Scheduler har ingen
+  motsvarighet till plistens StandardOutPath, och tjänstens egen
+  loggrotation kräver att stderr FAKTISKT ÄR loggfilen (identiteten
+  jämförs, se _maybe_rotate_own_log). Omdirigeringen måste alltså ske i ett
+  skal. mkdir-ledet finns för att >> inte skapar kataloger.
+
+  Brandväggen är ett eget steg, inte en detalj: tjänsten lyssnar på LAN:et
+  och Windows Defender frågar bara interaktivt. Under Task Scheduler finns
+  ingen som kan svara på frågan, så regeln måste finnas INNAN uppgiften
+  startar första gången — annars blockeras panelen tyst. Se README.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>VibePulse tokenserver — serves Claude and Codex usage to the panel over the LAN.</Description>
+    <URI>\VibePulse Tokenserver</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <!-- ÄNDRA: ditt konto, t.ex. DESKTOP-ABC123\erik -->
+      <UserId>DOMAIN\username</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <!-- En hyllpryls tjänst ska inte dö för att laptopen går på batteri. -->
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <!-- KeepAlive + ThrottleInterval ur plisten: starta om, men vänta först,
+         så en process som dör direkt vid start inte fyller loggen med sina
+         egna omstarter.
+
+         Plistens 30 s går inte att uttrycka här: Schemaläggaren har en
+         undre gräns på en minut och avvisar PT30S med "contains a value
+         which is incorrectly formatted or out of range". PT1M är alltså
+         inte ett val utan golvet — staketet står kvar, bara glesare. -->
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+    <!-- En tjänst har ingen körtidsgräns. PT0S = ingen. -->
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>cmd.exe</Command>
+      <!-- ÄNDRA sökvägen till din utcheckning. -->
+      <Arguments>/c "if not exist "%LOCALAPPDATA%\VibePulse\Logs" mkdir "%LOCALAPPDATA%\VibePulse\Logs" &amp; python -u tokenserver.py &gt;&gt; "%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log" 2&gt;&amp;1"</Arguments>
+      <WorkingDirectory>C:\Users\username\vibepulse\tools\tokenserver</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

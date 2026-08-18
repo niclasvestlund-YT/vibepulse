@@ -10,7 +10,8 @@ you, and (if you want) lets you answer it with a tap on the glass.**
 
 Claude Code and Codex usage, live agent activity, and a full-screen
 **NEEDS YOU** alert you can answer with a tap. A ~$30 ESP32-S3 panel plus a
-pure-stdlib Python service on your Mac. No cloud, no accounts, no API keys on the device. Agent data
+pure-stdlib Python service on your computer — macOS, Linux or Windows. No cloud,
+no accounts, no API keys on the device. Agent data
 never leaves your LAN; the optional public-repository module makes only
 anonymous GitHub API reads from the Mac.
 
@@ -249,7 +250,8 @@ only ever receives percentages, counts and coarse status.
 - **[Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm)**
   (~$30). No soldering, just a USB-C cable. It's the same board Clawdmeter
   uses, so if you already own one you're 10 minutes away.
-- **A Mac** on the same WiFi (the log-reading service is macOS-only for now)
+- **A computer on the same WiFi** to run the log-reading service: macOS,
+  Linux or Windows, all three supported.
 - **Claude Code and/or Codex.** Either alone is fine.
 - **2.4 GHz WiFi.** The ESP32-S3 can't see 5 GHz networks.
 
@@ -300,7 +302,7 @@ understand how the pieces fit together.
    panel's draw makes the board bounce off the bus or hang, which looks
    like a flaky cable. After flashing, run the screen from its own USB
    power supply, not your computer.
-3. Start the service on your Mac. Pure Python stdlib, nothing to install:
+3. Start the service on your computer. Pure Python stdlib, nothing to install:
 
    ```
    python3 tools/tokenserver/tokenserver.py
@@ -409,7 +411,7 @@ zeros, and provider accents locked to Claude `#D97757` and Codex `#6F78FF`.
 platform/            app contract + launcher + fonts (IBM Plex)
 main/                ESP32 host layer: boot, WiFi, SNTP, app registry
 components/app_*     the app (VibePulse lives in app_tokens/)
-tools/tokenserver/   the Mac service (Python stdlib)
+tools/tokenserver/   the host service (Python stdlib, macOS/Linux/Windows)
 sim/                 SDL simulator, the whole platform on your Mac
 test/                host tests, run with ./test/run.sh (no ESP-IDF needed)
 spec/                hardware truth + UI design system
@@ -442,18 +444,17 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
 
 ## FAQ
 
-- **Windows for the Mac service?** The data half works. Claude Code has no
-  keychain there, so `claude login` writes the same
-  `{"claudeAiOauth": {...}}` record to
-  `%USERPROFILE%\.claude\.credentials.json` and the service reads it; the
-  Codex app-server read and the single-probe lock no longer depend on
-  macOS-only syscalls; state and logs live under `%LOCALAPPDATA%\VibePulse\`.
-  What is missing is **autostart** — the launchd plist has no Windows
-  equivalent, so you start it by hand or wire up Task Scheduler yourself.
-  [#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3).
-- **Linux for the Mac service?** Not yet —
-  [#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2);
-  contributions very welcome.
+- **Windows or Linux for the service?** Both supported. Claude Code keeps a
+  keychain only on macOS; elsewhere `claude login` writes the same
+  `{"claudeAiOauth": {...}}` record to `~/.claude/.credentials.json` (or
+  `$CLAUDE_CONFIG_DIR`) and the service reads it. State and logs follow each
+  platform's convention — `%LOCALAPPDATA%\VibePulse\` on Windows,
+  `$XDG_STATE_HOME/vibepulse` on Linux — and autostart files ship for
+  launchd, systemd and Task Scheduler. On Windows, add the firewall rule
+  before the first start: the service listens on the LAN and Defender only
+  asks interactively, so under Task Scheduler the prompt never appears and
+  the panel is blocked silently. See
+  [`tools/tokenserver/README.md`](tools/tokenserver/README.md).
 - **Other boards or panel sizes?** Not yet. The platform is pinned to this
   exact panel so one pixel-perfect build stays pixel-perfect, but a port is
   a contained job (BSP, layout constants, fonts) —

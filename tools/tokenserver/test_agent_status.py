@@ -791,7 +791,7 @@ class JsonlTailerTests(unittest.TestCase):
                 path = root / f"session-{index:02d}.jsonl"
                 path.write_text(
                     '{"private":"cold-secret-' + str(index),
-                    encoding="utf-8")
+                    encoding="utf-8", newline="")
                 paths.append(path)
                 tailer.read(path)
                 stat = path.stat()
@@ -819,7 +819,7 @@ class JsonlTailerTests(unittest.TestCase):
             for index, path in enumerate(paths):
                 path.write_text(
                     '{"private":"base-secret-' + str(index),
-                    encoding="utf-8")
+                    encoding="utf-8", newline="")
                 tailer.read(path)
 
             for wave in range(4):
@@ -827,7 +827,7 @@ class JsonlTailerTests(unittest.TestCase):
                     replacement = root / f"replacement-{wave}-{index}.tmp"
                     replacement.write_text(
                         '{"private":"wave-' + str(wave) + "-secret-" +
-                        str(index), encoding="utf-8")
+                        str(index), encoding="utf-8", newline="")
                     os.replace(replacement, path)
                     tailer.read(path)
 
@@ -874,7 +874,7 @@ class JsonlTailerTests(unittest.TestCase):
             path.write_text(
                 json.dumps(original) + "\n" +
                 json.dumps(unchanged_tail) + "\n",
-                encoding="utf-8",
+                encoding="utf-8", newline=""
             )
             original_inode = path.stat().st_ino
             tailer = JsonlTailer()
@@ -883,9 +883,28 @@ class JsonlTailerTests(unittest.TestCase):
             path.write_text(
                 json.dumps(replacement) + "\n" +
                 json.dumps(unchanged_tail) + "\n",
-                encoding="utf-8",
+                encoding="utf-8", newline=""
             )
             self.assertEqual(path.stat().st_ino, original_inode)
+            # Storleken är oförändrad med flit — det är hela poängen. Kvar
+            # som ändringssignal finns då bara tidsstämplarna, och de betyder
+            # inte samma sak överallt: på POSIX rör sig st_ctime vid varje
+            # skrivning, medan det på Windows är SKAPANDETID (avvecklat i
+            # 3.12, ändrat till metadatatid i en senare version) och alltså
+            # konstant. Där återstår st_mtime, vars upplösning är ~15,6 ms,
+            # så två skrivningar i samma tick ser identiska ut.
+            #
+            # Testet handlar om omskrivningsdetektionen, inte om filsystemets
+            # klocka: vi flyttar stämpeln så att snabbvägen släpper igenom
+            # och prefixdigesten får göra sitt jobb — samma grepp som
+            # test_rewrite_during_prefix_verification redan använder.
+            #
+            # Konsekvensen i drift är värd att veta: på Windows med Python
+            # 3.12/3.13 upptäcks en likastor omskrivning inte omedelbart utan
+            # först vid nästa fulla SHA-256-verifiering (högst var femte
+            # sekund). Fördröjning, inte dataförlust.
+            stat = path.stat()
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
             self.assertEqual(tailer.read(path), [replacement, unchanged_tail])
             self.assertEqual(tailer.read(path), [])
@@ -904,14 +923,15 @@ class JsonlTailerTests(unittest.TestCase):
                     self.rewrite_after_digest = False
                     self.path.write_text(
                         json.dumps(self.replacement) + "\n",
-                        encoding="utf-8")
+                        encoding="utf-8", newline="")
                 return digest
 
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "session.jsonl"
             original = {"old": 1}
             replacement = {"new": 2}
-            path.write_text(json.dumps(original) + "\n", encoding="utf-8")
+            path.write_text(json.dumps(original) + "\n",
+                            encoding="utf-8", newline="")
             tailer = RewriteAfterDigestTailer(path, replacement)
             self.assertEqual(tailer.read(path), [original])
             stat = path.stat()
@@ -928,7 +948,7 @@ class JsonlTailerTests(unittest.TestCase):
             path = Path(temp_dir) / "session.jsonl"
             secret = "synthetic-private-message-content"
             path.write_text(json.dumps({"message": secret}) + "\n",
-                            encoding="utf-8")
+                            encoding="utf-8", newline="")
             tailer = JsonlTailer()
 
             tailer.read(path)
@@ -1003,7 +1023,7 @@ class JsonlTailerTests(unittest.TestCase):
     def test_file_disappearance_is_tolerated(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "session.jsonl"
-            path.write_text('{"event":1}\n', encoding="utf-8")
+            path.write_text('{"event":1}\n', encoding="utf-8", newline="")
             tailer = JsonlTailer()
             self.assertEqual(tailer.read(path), [{"event": 1}])
 
@@ -1015,7 +1035,7 @@ class JsonlTailerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "session.jsonl"
             moved = Path(temp_dir) / "session.moved"
-            path.write_text('{"event":1}\n', encoding="utf-8")
+            path.write_text('{"event":1}\n', encoding="utf-8", newline="")
             tailer = JsonlTailer()
             self.assertEqual(tailer.read(path), [{"event": 1}])
 
@@ -1031,12 +1051,14 @@ class JsonlTailerTests(unittest.TestCase):
             rotated = Path(temp_dir) / "rotated.jsonl"
             old = {"old": 1}
             new = {"newfile": 1}
-            current.write_text(json.dumps(old) + "\n", encoding="utf-8")
+            current.write_text(json.dumps(old) + "\n",
+                               encoding="utf-8", newline="")
             tailer = JsonlTailer()
             self.assertEqual(tailer.read(current), [old])
 
             current.rename(rotated)
-            current.write_text(json.dumps(new) + "\n", encoding="utf-8")
+            current.write_text(json.dumps(new) + "\n",
+                               encoding="utf-8", newline="")
 
             self.assertEqual(tailer.read(current), [new])
             self.assertEqual(tailer.read(rotated), [])
@@ -1046,7 +1068,7 @@ class AgentStatusServiceTests(unittest.TestCase):
     @staticmethod
     def _write_line(path, event):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+        path.write_text(json.dumps(event) + "\n", encoding="utf-8", newline="")
 
     def test_poll_discovers_claude_and_codex_and_counts_changes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1199,7 +1221,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(
                 json.dumps(working) + "\n" + json.dumps(completed) + "\n",
-                encoding="utf-8")
+                encoding="utf-8", newline="")
             os.utime(path, (900, 900))
             now = [0.0]
             service = AgentStatusService(
@@ -1212,7 +1234,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             working["private"] = "B"
             path.write_text(
                 json.dumps(working) + "\n" + json.dumps(completed) + "\n",
-                encoding="utf-8")
+                encoding="utf-8", newline="")
             os.utime(path, (901, 901))
             self.assertEqual(path.stat().st_ino, original_inode)
 
@@ -1232,7 +1254,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(
                 json.dumps(working) + "\n" + json.dumps(completed) + "\n",
-                encoding="utf-8")
+                encoding="utf-8", newline="")
             os.utime(path, (999, 999))
             service = AgentStatusService(
                 root / "claude", root / "codex", now=lambda: 0.0,
@@ -1268,7 +1290,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(
                 json.dumps(working) + "\n" + json.dumps(completed) + "\n",
-                encoding="utf-8")
+                encoding="utf-8", newline="")
             os.utime(path, (998, 998))
             service = AgentStatusService(
                 root / "claude", root / "codex", now=lambda: 0.0,
@@ -1281,7 +1303,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             working["private"] = "replacement-only-private-change"
             replacement.write_text(
                 json.dumps(working) + "\n" + json.dumps(completed) + "\n",
-                encoding="utf-8")
+                encoding="utf-8", newline="")
             os.utime(replacement, (999, 999))
             os.replace(replacement, path)
             self.assertNotEqual(path.stat().st_ino, original_inode)
@@ -1364,7 +1386,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             target.parent.mkdir(parents=True)
             target.write_text(
                 json.dumps(working) + "\n" + json.dumps(completed) + "\n",
-                encoding="utf-8")
+                encoding="utf-8", newline="")
             os.utime(target, (1, 1))
             now = [0.0]
             service = AgentStatusService(
@@ -1402,7 +1424,7 @@ class AgentStatusServiceTests(unittest.TestCase):
                     replacement = root / f"replacement-{wave}-{index}.tmp"
                     replacement.write_text(
                         json.dumps({"ignored": [wave, index]}) + "\n",
-                        encoding="utf-8")
+                        encoding="utf-8", newline="")
                     os.replace(replacement, filler)
                     os.utime(filler, (10 + index, 10 + index))
                 now[0] += 0.1
@@ -1499,7 +1521,7 @@ class AgentStatusServiceTests(unittest.TestCase):
             old_path.parent.mkdir(parents=True)
             old_path.write_text(
                 json.dumps(first) + "\n" + json.dumps(second) + "\n",
-                encoding="utf-8",
+                encoding="utf-8", newline=""
             )
             service = AgentStatusService(root / "claude", root / "codex",
                                          now=lambda: 10.0)
@@ -1840,7 +1862,8 @@ class AgentStatusServiceTests(unittest.TestCase):
             path = root / "claude" / "session.jsonl"
             secret = "synthetic-incomplete-private-prompt"
             path.parent.mkdir(parents=True)
-            path.write_text('{"prompt":"' + secret, encoding="utf-8")
+            path.write_text('{"prompt":"' + secret,
+                            encoding="utf-8", newline="")
             service = AgentStatusService(root / "claude", root / "codex")
             self.assertEqual(service.poll_once(), 0)
             self.assertIn(secret, repr(service._tailer._files))

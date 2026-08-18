@@ -1,7 +1,8 @@
 # Observability: every log this system generates
 
 VibePulse spans two machines — a screen with no persistent storage and a
-Python service on a Mac — and each produces evidence in a different place,
+Python service on your computer (macOS, Linux or Windows) — and each
+produces evidence in a different place,
 with a different lifetime, in a different language. This doc maps all of
 it: where each log lives, how long it survives, what a healthy one looks
 like, and a periodic **comb routine** for reading through them to catch
@@ -14,7 +15,7 @@ Companion docs:
   isn't already there gets added there.
 - **[lessons.md](lessons.md)** — what has already bitten us and what it
   taught. Read it before touching pollers, parsers, staleness logic, or
-  the launchd setup: most of this system's sharp edges have a story.
+  the autostart setup: most of this system's sharp edges have a story.
 
 This doc describes the system **as it is**, including what is *not*
 logged. Several sources below are honest about being blind spots; the
@@ -25,11 +26,29 @@ backlog IDs in parentheses track closing them.
 | # | Source | Where it lives | Survives |
 |---|--------|----------------|----------|
 | 1 | Firmware serial console | USB, only while a monitor is attached | nothing — not even a reboot |
-| 2 | Tokenserver stderr | terminal, or `~/Library/Logs/torget-tokenserver.log` under launchd | durable; self-rotated at ~5 MB (tail kept in `.old`) |
-| 3 | `GET /` diagnostic endpoint | `http://<mac>:8737/`, live state | process lifetime |
-| 4 | Server state files | `~/Library/Application Support/VibePulse/` | durable (8 d / 400 d retention) |
+| 2 | Tokenserver stderr | terminal, or the log file under a service manager ([paths](#where-those-paths-are)) | durable; self-rotated at ~5 MB (tail kept in `.old`) |
+| 3 | `GET /` diagnostic endpoint | `http://<host>:8737/`, live state | process lifetime |
+| 4 | Server state files | the state directory ([paths](#where-those-paths-are)) | durable (8 d / 400 d retention) |
 | 5 | The screen itself | dashes, `STALE`, `NO DATA` | live only |
 | 6 | CI logs | GitHub Actions | per-run |
+
+### Where those paths are
+
+The service follows each platform's own convention rather than carrying
+macOS's everywhere, so rows 2 and 4 resolve differently per host. Ask the
+service instead of guessing — `GET /` reports what it is actually using,
+and `smoke.py` reads the same helper the service does.
+
+| Host | State files | Log file |
+|------|-------------|----------|
+| macOS | `~/Library/Application Support/VibePulse/` | `~/Library/Logs/torget-tokenserver.log` |
+| Windows | `%LOCALAPPDATA%\VibePulse\` | `%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log` |
+| Linux | `$XDG_STATE_HOME/vibepulse/` (else `~/.local/state/vibepulse/`) | same directory, `torget-tokenserver.log` |
+
+The service manager differs with it: `launchctl list | grep torget` on
+macOS, `systemctl --user status vibepulse-tokenserver` on Linux,
+`schtasks /query /tn "VibePulse Tokenserver"` on Windows. `smoke.py` names
+whichever applies to the host it runs on.
 
 Fastest health check: the **smoke test** automates comb steps 1–4 in one
 command — `python3 tools/tokenserver/smoke.py` (exit 0 ok / 1 warnings /
@@ -97,14 +116,20 @@ repeating deserves attention. What a healthy boot looks like:
 - Access logging stays muted (a 30 s poll must not fill the file), but
   HTTP-level *errors* log again — the old mute silenced both.
 
-Under launchd (`se.torget.tokenserver.plist`) both streams append to
-**`~/Library/Logs/torget-tokenserver.log`** — visible in Console.app,
+Under a service manager both streams append to the log file
+([paths](#where-those-paths-are)) — on macOS visible in Console.app — it
 survives reboot, and the server self-rotates it at startup past ~5 MB
-(tail preserved in `.old`). A missing `~/.claude/projects` no longer
-crash-loops: the server logs one warning and waits for the directory,
-with `ThrottleInterval` as the backstop. The plist hardcodes
-`WorkingDirectory` to `~/Torget/tools/tokenserver`; if the repo lives
-elsewhere, launchd is silently running *different code than you're
+(tail preserved in `.old`). Rotation only fires when stderr genuinely *is*
+that file, which is why each autostart file redirects rather than leaving
+it to chance: `StandardOutPath` in the plist, a `/bin/sh` redirect in the
+systemd unit, a `cmd.exe` redirect in the scheduled task. Two of the three
+redirect in a shell for the same reason: neither manager creates the log's
+directory before it opens the file. A missing
+`~/.claude/projects` no longer crash-loops: the server logs one warning
+and waits for the directory, with the manager's restart delay as the backstop.
+
+All three autostart files hardcode a working directory; if the repo lives
+elsewhere, the service is silently running *different code than you're
 editing* — that exact trap cost an hour once and is why `GET /` reports
 `rev` ([lessons.md](lessons.md)) and why the smoke test compares it to
 your checkout.
@@ -151,7 +176,7 @@ currently its only documentation.
 
 ### 4. Server state files
 
-`~/Library/Application Support/VibePulse/`:
+In the state directory ([paths](#where-those-paths-are)):
 
 | File | Content | Retention |
 |------|---------|-----------|
@@ -219,8 +244,8 @@ Verbatim strings worth grepping for, and what they mean:
 Run every week or two, and after any incident. Every step is a command
 plus a question; an agent asked to **"comb the logs"** follows this list
 top to bottom and reports findings against the backlog. With the
-tokenserver on the Mac and the board on its shelf, steps 1–5 need no
-hardware handling at all.
+tokenserver on your computer and the board on its shelf, steps 1–5 need
+no hardware handling at all.
 
 Steps 1–4 are automated: **`python3 tools/tokenserver/smoke.py`** runs
 them as one command (exit 0/1/2 = ok/warnings/failures). Start there;
@@ -228,24 +253,25 @@ the manual detail below is for interpreting what it flags — and steps
 5–7 are judgment calls no script makes for you.
 
 1. **Identity.** `curl -s http://localhost:8737/ | python3 -m json.tool`.
-   Does `rev` match `git rev-parse --short HEAD` in the repo launchd runs
-   from (check `WorkingDirectory` in the plist — not necessarily this
-   checkout)? Is `startedAt` older than the last reboot, i.e. no silent
-   crash-looping?
+   Does `rev` match `git rev-parse --short HEAD` in the repo the SERVICE
+   runs from (check the working directory in whichever autostart file
+   applies — not necessarily this checkout)? Is `startedAt` older than
+   the last reboot, i.e. no silent crash-looping?
 2. **Probe health.** Same payload: `claudeProbe` should be
    `usage_http_200 + ok`. Anything else → the table in
    [agent-setup.md](agent-setup.md). `unknownRateLimitBuckets` non-empty
    → new upstream bucket, file a backlog item.
-3. **The log file.** `wc -c ~/Library/Logs/torget-tokenserver.log`
-   (missing file under launchd means the service never started).
+3. **The log file.** `wc -c` it ([paths](#where-those-paths-are); on
+   Windows `dir` it). A missing file under a service manager means the
+   service never started.
    `grep -c serverar` — more than one per intended restart means
    crash-looping. `grep -n Traceback` — any hit is a bug; the `500 på`
    line above it names the route. `grep -c 'agent-status'` — a large
    count means a persistent throttled error has been repeating every
    30 s. `grep 'claude-probe:'` — the transition history: when did
    things break, when did they recover.
-4. **State files.** For each file in
-   `~/Library/Application Support/VibePulse/`: does it parse
+4. **State files.** For each file in the state directory
+   ([paths](#where-those-paths-are)): does it parse
    (`python3 -m json.tool < f > /dev/null`)? Is the mtime recent for
    `usage-history.json` (should move every ≤15 min while you work)? Did
    `max-tracker.json` shrink dramatically since last comb (silent

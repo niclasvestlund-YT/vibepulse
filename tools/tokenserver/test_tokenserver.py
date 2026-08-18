@@ -1,8 +1,8 @@
 import contextlib
-import fcntl
 import io
 import json
 import logging
+import sys
 import tempfile
 import threading
 import time
@@ -12,11 +12,46 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 import os
+import subprocess
+import sys
 
 from tools.tokenserver import codex_usage, tokenserver
 from tools.tokenserver.max_tracker import MaxTrackerStore
 from tools.tokenserver.quota_cache import CachedQuota, QuotaCache
 from tools.tokenserver.usage_history import Forecast, UsageHistory
+
+# Samma grindade import som tjänsten själv gör. Modulnivå-``import fcntl``
+# fällde hela filen på Windows innan den hann köra ett enda test — och
+# filen innehåller de tester som ska bevisa att Windows-grenarna fungerar.
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
+
+# Hur länge ett test väntar på att en bakgrundstråd ska hinna fram. Det är
+# en LIVLIGHETSGRÄNS, inte ett påstående om fart: testerna som verkligen
+# mäter latens (att ett svar inte blockerar på en skrivning) har egna, korta
+# gränser och rörs inte av den här. En sekund räckte tills windows-köraren
+# blev långsam nog att missa den — samma skrivning, samma tråd, bara en
+# lastad maskin — och ett flakigt körfält är värdelöst som grind.
+_THREAD_BARRIER_S = 10
+
+@contextlib.contextmanager
+def platform_is(name):
+    """Kör kroppen som om värden vore ``windows``, ``macos`` eller ``linux``.
+
+    BÅDA flaggorna sätts, alltid. Att bara patcha den ena lämnar testet
+    beroende av vilken plattform det råkar köra på för den andra — och det
+    beroendet är tyst: ett macOS-test som bara sa ``_IS_WINDOWS = False``
+    läste Linux-grenen på CI:s ubuntu-körare och påstod ändå att det
+    beskrev en Mac. Tre plattformar, ett namn, inga underförstådda "resten".
+    """
+    if name not in ("windows", "macos", "linux"):
+        raise AssertionError(f"okänd plattform: {name}")
+    with mock.patch.object(tokenserver, "_IS_WINDOWS", name == "windows"), \
+            mock.patch.object(tokenserver, "_IS_MACOS", name == "macos"):
+        yield
 
 
 class StubHistory:
@@ -191,8 +226,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 return mock.Mock(stdout=expired_keychain)
             raise AssertionError(command)
 
-        with mock.patch.object(tokenserver.subprocess, "run",
-                               side_effect=run):
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=run):
             candidates = tokenserver._read_oauth_candidates()
 
         # Processtokenen först, men den utgångna nyckelringsposten står kvar
@@ -223,8 +259,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 return mock.Mock(stdout=keychain)
             raise AssertionError(command)
 
-        with mock.patch.object(tokenserver.subprocess, "run",
-                               side_effect=run):
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=run):
             candidates = tokenserver._read_oauth_candidates()
 
         self.assertEqual(
@@ -245,8 +282,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 return mock.Mock(stdout=keychain)
             raise AssertionError(command)
 
-        with mock.patch.object(tokenserver.subprocess, "run",
-                               side_effect=run):
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=run):
             candidates = tokenserver._read_oauth_candidates()
 
         self.assertEqual(
@@ -268,7 +306,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(credentials, encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)), \
                     mock.patch.object(tokenserver.subprocess, "run",
@@ -281,9 +319,45 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(
             candidates, [("windows-file-token", 1_900_000_000_000)])
 
+    def test_credentials_file_honors_claude_config_dir(self):
+        """CLAUDE_CONFIG_DIR flyttar hela Claude Codes konfigkatalog, och
+        `claude login` följer med — filen ligger då direkt i katalogen, inte
+        under `.claude/`. En läsare som ignorerar variabeln probear med en
+        inaktuell token från den övergivna standardsökvägen, eller hittar
+        tyst ingenting."""
+        credentials = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "config-dir-token",
+                "expiresAt": 1_900_000_000_000,
+            },
+        })
+
+        with tempfile.TemporaryDirectory() as config_dir, \
+                tempfile.TemporaryDirectory() as fake_home:
+            (Path(config_dir) / ".credentials.json").write_text(
+                credentials, encoding="utf-8")
+
+            with platform_is("windows"), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(fake_home)), \
+                    mock.patch.dict(tokenserver.os.environ,
+                                    {"CLAUDE_CONFIG_DIR": config_dir}):
+                candidates = tokenserver._read_oauth_candidates()
+            self.assertEqual(
+                candidates, [("config-dir-token", 1_900_000_000_000)])
+
+            # ...och en tom variabel räknas som frånvarande: då gäller
+            # standardsökvägen som förut (tomt hem här → inga kandidater).
+            with platform_is("windows"), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(fake_home)), \
+                    mock.patch.dict(tokenserver.os.environ,
+                                    {"CLAUDE_CONFIG_DIR": ""}):
+                self.assertEqual(tokenserver._read_oauth_candidates(), [])
+
     def test_windows_without_a_credentials_file_has_no_candidates(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)):
                 self.assertEqual(tokenserver._read_oauth_candidates(), [])
@@ -296,7 +370,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             path.write_text('{"claudeAiOauth": {"accessTok',
                             encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)):
                 self.assertEqual(tokenserver._read_oauth_candidates(), [])
@@ -325,7 +399,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 "claudeAiOauth": {"accessToken": "stale-file-token"},
             }), encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
+            with platform_is("macos"), \
                     mock.patch.object(tokenserver.Path, "home",
                                       return_value=Path(temp_dir)), \
                     mock.patch.object(tokenserver.subprocess, "run",
@@ -367,7 +441,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 },
             }), encoding="utf-8")
 
-            with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+            with platform_is("windows"), \
                     mock.patch.object(tokenserver, "fcntl", None), \
                     mock.patch.object(tokenserver, "msvcrt", FakeMsvcrt), \
                     mock.patch.object(tokenserver, "_PROBE_LOCK_PATH",
@@ -390,7 +464,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(found["weekPct"], 47.0)
 
     def test_state_dir_is_local_app_data_on_windows(self):
-        with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+        with platform_is("windows"), \
                 mock.patch.dict(tokenserver.os.environ,
                                 {"LOCALAPPDATA": r"C:\Users\erik\AppData\Local"}):
             self.assertEqual(
@@ -402,7 +476,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         SYSTEM) saknar LOCALAPPDATA — sökvägen ska ändå bli den rätta."""
         env = dict(tokenserver.os.environ)
         env.pop("LOCALAPPDATA", None)
-        with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+        with platform_is("windows"), \
                 mock.patch.dict(tokenserver.os.environ, env, clear=True), \
                 mock.patch.object(tokenserver.Path, "home",
                                   return_value=Path("/home/tester")):
@@ -411,7 +485,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 Path("/home/tester/AppData/Local/VibePulse"))
 
     def test_state_dir_is_unchanged_on_macos(self):
-        with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
+        """Befintliga Mac-installationer ska hitta sitt tillstånd där det
+        redan ligger — den här sökvägen får aldrig röra sig."""
+        with platform_is("macos"), \
                 mock.patch.object(tokenserver.Path, "home",
                                   return_value=Path("/Users/niclas")):
             self.assertEqual(
@@ -420,12 +496,147 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             self.assertEqual(
                 tokenserver._log_dir(), Path("/Users/niclas/Library/Logs"))
 
+    def test_state_dir_follows_xdg_on_linux(self):
+        # Sökvägen BYGGS för värden i stället för att skrivas som en
+        # POSIX-litteral: "/home/erik" saknar enhetsbokstav och är därför
+        # inte absolut på Windows, så _xdg_state_home förkastade den — helt
+        # riktigt — och testet mätte fallbacken i stället för det det
+        # påstod sig mäta.
+        base = Path(tempfile.gettempdir()).resolve() / "xdg-state"
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"XDG_STATE_HOME": str(base)}):
+            self.assertEqual(tokenserver._state_dir(), base / "vibepulse")
+            # XDG pekar ut state-katalogen för loggar också: ingen separat
+            # logg-konvention att följa, alltså inget separat träd.
+            self.assertEqual(tokenserver._log_dir(), base / "vibepulse")
+
+    def test_state_dir_falls_back_when_xdg_state_home_is_unset(self):
+        env = dict(tokenserver.os.environ)
+        env.pop("XDG_STATE_HOME", None)
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/erik")):
+            self.assertEqual(tokenserver._state_dir(),
+                             Path("/home/erik/.local/state/vibepulse"))
+
+    def test_relative_xdg_state_home_is_ignored(self):
+        """Specen säger att en relativ sökväg ska behandlas som osatt —
+        annars hamnar tillståndet relativt tjänstens arbetskatalog, som
+        under systemd inte är den användaren tror."""
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"XDG_STATE_HOME": "relative/state"}), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/erik")):
+            self.assertEqual(tokenserver._state_dir(),
+                             Path("/home/erik/.local/state/vibepulse"))
+
+    def test_windows_log_dir_sits_under_the_state_tree(self):
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"LOCALAPPDATA": r"C:\Users\erik\AppData\Local"}):
+            self.assertEqual(
+                tokenserver._log_dir(),
+                Path(r"C:\Users\erik\AppData\Local") / "VibePulse" / "Logs")
+
     def test_credentials_file_path_sits_under_home(self):
-        with mock.patch.object(tokenserver.Path, "home",
-                               return_value=Path("/home/tester")):
+        env = dict(tokenserver.os.environ)
+        env.pop("CLAUDE_CONFIG_DIR", None)
+        with mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/tester")):
             self.assertEqual(
                 tokenserver._credentials_file_path(),
                 Path("/home/tester/.claude/.credentials.json"))
+
+    def test_credentials_file_path_follows_claude_config_dir(self):
+        """CLAUDE_CONFIG_DIR ERSÄTTER ~/.claude — filen ligger direkt i den
+        utpekade katalogen, inte i ett .claude under den."""
+        with mock.patch.dict(tokenserver.os.environ,
+                             {"CLAUDE_CONFIG_DIR": "/opt/claude-config"}), \
+                mock.patch.object(tokenserver.Path, "home",
+                                  return_value=Path("/home/tester")):
+            self.assertEqual(
+                tokenserver._credentials_file_path(),
+                Path("/opt/claude-config/.credentials.json"))
+
+    def test_linux_reads_the_same_credentials_file_as_windows(self):
+        """Linux har lika lite nyckelring som Windows: samma fil, samma
+        post, samma gren. Nyckelringen är macOS-grenen, inte normalfallet."""
+        credentials = json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "linux-file-token",
+                "expiresAt": 1_900_000_000_000,
+            },
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / ".claude" / ".credentials.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(credentials, encoding="utf-8")
+
+            env = dict(tokenserver.os.environ)
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+            with platform_is("linux"), \
+                    mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(temp_dir)), \
+                    mock.patch.object(tokenserver.subprocess, "run",
+                                      side_effect=AssertionError(
+                                          "no subprocess off macOS")):
+                candidates = tokenserver._read_oauth_candidates()
+
+        self.assertEqual(candidates,
+                         [("linux-file-token", 1_900_000_000_000)])
+
+    def test_env_override_is_offered_before_the_file(self):
+        """Nödutgången: en värd vars lagring proben inte når ska kunna få
+        token angiven för hand. Filen faller INTE bort — en gammal variabel
+        i en långlivad miljö ska degradera till normalvägen, inte spika
+        proben vid en död token."""
+        credentials = json.dumps({
+            "claudeAiOauth": {"accessToken": "file-token", "expiresAt": 1},
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / ".claude" / ".credentials.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(credentials, encoding="utf-8")
+
+            env = dict(tokenserver.os.environ)
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = "env-token"
+            with platform_is("linux"), \
+                    mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(temp_dir)):
+                candidates = tokenserver._read_oauth_candidates()
+
+        self.assertEqual(candidates,
+                         [("env-token", None), ("file-token", 1)])
+
+    def test_env_override_matching_the_file_is_not_offered_twice(self):
+        """Samma token ur två källor är en kandidat, inte två — en dubblett
+        kostar en probecykel mot en delad bucket."""
+        credentials = json.dumps({
+            "claudeAiOauth": {"accessToken": "same-token", "expiresAt": 7},
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / ".claude" / ".credentials.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(credentials, encoding="utf-8")
+
+            env = dict(tokenserver.os.environ)
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = "same-token"
+            with platform_is("linux"), \
+                    mock.patch.dict(tokenserver.os.environ, env, clear=True), \
+                    mock.patch.object(tokenserver.Path, "home",
+                                      return_value=Path(temp_dir)):
+                candidates = tokenserver._read_oauth_candidates()
+
+        self.assertEqual(candidates, [("same-token", None)])
 
     def test_probe_falls_back_to_keychain_when_process_token_rejected(self):
         calls = []
@@ -486,6 +697,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(calls, ["Bearer dead-token"])
         self.assertEqual(status, "token_dead_awaiting_refresh")
 
+    @unittest.skipIf(fcntl is None,
+                     "flock är POSIX; msvcrt-grenen har sitt eget test")
     def test_probe_yields_when_another_instance_holds_the_lock(self):
         """Maskinvida enprobe-garantin: håller någon annan process låset gör
         cykeln INGEN nätaktivitet alls — extra instanser (worktree, manuell
@@ -706,10 +919,14 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertGreater(saved["cooldown_until"], time.time() + 500)
 
     def test_refresh_updates_failure_streak(self):
+        # Ett upstream-fel: API:t svarade och svaret dög inte. DET är vad
+        # backoffen finns för, så streaken ska växa.
         with mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
                 mock.patch.object(tokenserver, "_last_limits", None), \
                 mock.patch.object(tokenserver, "_last_probed", 0.0), \
                 mock.patch.object(tokenserver, "_limits_refreshing", False), \
+                mock.patch.object(tokenserver, "_probe_reached_upstream",
+                                  True), \
                 mock.patch.object(tokenserver, "_probe_limits",
                                   return_value=None):
             tokenserver._refresh_limits()
@@ -724,6 +941,54 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                                   return_value={"weekPct": 60.0}):
             tokenserver._refresh_limits()
             self.assertEqual(tokenserver._probe_failure_streak, 0)
+
+    def test_local_failure_does_not_widen_the_probe_interval(self):
+        """En utgången token är ett LOKALT besked — proben rör aldrig nätet.
+
+        Att glesa ut takten då sparar noll API-anrop och kostar bara tid:
+        det var precis vad som hände på Windows när `claude login` skrivit
+        en ny token medan tjänsten satt kvar i 960-sekunderssteget och
+        panelen stod mörk. Streaken ska stå still, så nästa probe ligger
+        en grundintervall bort.
+        """
+        for status in ("token_expired_20:54", "no_claude_oauth_token",
+                       "probe_held_by_other_instance"):
+            with self.subTest(status=status):
+                def local_only():
+                    tokenserver._probe_reached_upstream = False
+                    tokenserver._probe_status = status
+                    return None
+
+                with mock.patch.object(
+                            tokenserver, "_probe_failure_streak", 2), \
+                        mock.patch.object(tokenserver, "_last_limits", None), \
+                        mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                        mock.patch.object(
+                            tokenserver, "_limits_refreshing", False), \
+                        mock.patch.object(
+                            tokenserver, "_probe_reached_upstream", True), \
+                        mock.patch.object(tokenserver, "_probe_status", ""), \
+                        mock.patch.object(tokenserver, "_probe_limits",
+                                          side_effect=local_only):
+                    tokenserver._refresh_limits()
+                    self.assertEqual(tokenserver._probe_failure_streak, 2)
+                    self.assertEqual(tokenserver._probe_interval_s(),
+                                     tokenserver.LIMITS_EVERY_S * 4)
+
+    def test_probe_reports_how_old_its_verdict_is(self):
+        """GET / serverar ett sparat omdöme; åldern hör till svaret.
+
+        Utan den läses statussträngen som ett besked om nuet — och GET /
+        rör aldrig proben, så strängen kan vara godtyckligt gammal.
+        """
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        with mock.patch.object(tokenserver, "_last_probed", 0.0):
+            self.assertIsNone(handler._root_payload()["claudeProbeAgeS"])
+        with mock.patch.object(tokenserver, "_last_probed",
+                               time.monotonic() - 900):
+            age = handler._root_payload()["claudeProbeAgeS"]
+        self.assertGreaterEqual(age, 900)
+        self.assertLess(age, 960)
 
     def test_probe_gives_up_when_every_candidate_is_rejected(self):
         calls = []
@@ -900,6 +1165,214 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
              tokenserver._limits_refreshing) = previous
 
 
+class CodexCommandDiscoveryTests(unittest.TestCase):
+    """Att hitta `codex` är inte samma sak i ett skal som under en
+    tjänstehanterare — och det är under en tjänstehanterare den ska köra."""
+
+    def setUp(self):
+        env = dict(tokenserver.os.environ)
+        env.pop("VIBEPULSE_CODEX_BIN", None)
+        patcher = mock.patch.dict(tokenserver.os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_path_hit_wins_before_any_guessing(self):
+        with mock.patch.object(tokenserver.shutil, "which",
+                               return_value="/usr/bin/codex"):
+            self.assertEqual(tokenserver._codex_executable(),
+                             "/usr/bin/codex")
+
+    def test_macos_falls_back_to_the_chatgpt_bundle(self):
+        """ChatGPT.app buntar sin codex på en plats PATH aldrig når."""
+        bundled = "/Applications/ChatGPT.app/Contents/Resources/codex"
+        with platform_is("macos"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == bundled), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_executable(), bundled)
+
+    def test_the_desktop_apps_bundled_app_server_is_found(self):
+        """Skrivbordsappen utan CLI är inte ett kantfall — det är vad man
+        får när man installerar Codex utan att veta att ett CLI finns.
+        Binären den buntar svarar på account/rateLimits/read (verifierat på
+        Windows) men ligger under ~/.codex, alltså aldrig på PATH."""
+        expected = str(Path.home() / ".codex" / "plugins"
+                       / ".plugin-appserver" / "codex.exe")
+        with platform_is("windows"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected):
+            self.assertEqual(tokenserver._codex_executable(), expected)
+
+    def test_the_bundled_app_server_is_preferred_over_the_npm_guess(self):
+        """Buntad binär är en observation; npm-sökvägen är en konvention.
+        Finns båda ska den vi vet något om vinna."""
+        home = Path.home() / ".codex" / "plugins" / ".plugin-appserver"
+        bundled = str(home / "codex.exe")
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"APPDATA": r"C:\Users\erik\AppData\Roaming"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_executable(), bundled)
+
+    def test_windows_falls_back_to_the_npm_global_bin(self):
+        """Task Scheduler ärver inte användarens PATH; npm:s globala
+        bin-katalog är där binären faktiskt ligger."""
+        expected = str(Path(r"C:\Users\erik\AppData\Roaming") / "npm"
+                       / "codex.cmd")
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"APPDATA": r"C:\Users\erik\AppData\Roaming"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected):
+            self.assertEqual(tokenserver._codex_executable(), expected)
+
+    def test_windows_does_not_consult_the_execute_bit(self):
+        """os.access(X_OK) beskriver ingenting på Windows — frågan ska
+        inte ställas, så ett nekande svar får inte gömma en giltig fil."""
+        expected = str(Path(r"C:\Users\erik\AppData\Roaming") / "npm"
+                       / "codex.cmd")
+        with platform_is("windows"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"APPDATA": r"C:\Users\erik\AppData\Roaming"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=False):
+            self.assertEqual(tokenserver._codex_executable(), expected)
+
+    def test_linux_falls_back_to_the_user_bin(self):
+        expected = str(Path.home() / ".local" / "bin" / "codex")
+        with platform_is("linux"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  side_effect=lambda p: p == expected), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_executable(), expected)
+
+    def test_explicit_override_beats_a_path_hit(self):
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"VIBEPULSE_CODEX_BIN": "/opt/codex/codex"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value="/usr/bin/codex"), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=True), \
+                mock.patch.object(tokenserver.os, "access",
+                                  return_value=True):
+            self.assertEqual(tokenserver._codex_executable(),
+                             "/opt/codex/codex")
+
+    def test_broken_override_does_not_silence_a_working_path(self):
+        """En stavfel i variabeln ska kosta en varning, inte Codex-halvan."""
+        with platform_is("linux"), \
+                mock.patch.dict(tokenserver.os.environ,
+                                {"VIBEPULSE_CODEX_BIN": "/opt/typo/codex"}), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value="/usr/bin/codex"), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=False), \
+                self.assertLogs(tokenserver.log, level="WARNING") as logs:
+            self.assertEqual(tokenserver._codex_executable(),
+                             "/usr/bin/codex")
+        self.assertIn("VIBEPULSE_CODEX_BIN", "\n".join(logs.output))
+
+    def test_nothing_found_is_none_not_a_crash(self):
+        with platform_is("linux"), \
+                mock.patch.object(tokenserver.shutil, "which",
+                                  return_value=None), \
+                mock.patch.object(tokenserver.os.path, "isfile",
+                                  return_value=False):
+            self.assertIsNone(tokenserver._codex_executable())
+
+    def test_windows_kills_the_whole_process_tree(self):
+        """`codex` är normalt `codex.cmd` på Windows — npm:s omslagare runt
+        node. Dödar vi bara den vi startade lever node-barnet vidare med
+        sin ände av pipen öppen, och stängningen av stdout blockerar tills
+        barnet självdör. En hängd app-server skulle alltså hålla
+        hämtcykeln lika länge som den hänger."""
+        process = mock.Mock(pid=4242)
+        process.poll.return_value = None
+        with platform_is("windows"), \
+                mock.patch.object(tokenserver.subprocess, "run") as run:
+            tokenserver._terminate_app_server(process)
+
+        run.assert_called_once()
+        self.assertEqual(run.call_args[0][0],
+                         ["taskkill", "/F", "/T", "/PID", "4242"])
+        # Trädet är redan borta; ingen andra omgång behövs.
+        process.terminate.assert_not_called()
+
+    def test_posix_terminates_without_reaching_for_taskkill(self):
+        """Där `codex` är binären själv finns inget träd att jaga."""
+        process = mock.Mock(pid=17)
+        with platform_is("linux"), \
+                mock.patch.object(tokenserver.subprocess, "run") as run:
+            tokenserver._terminate_app_server(process)
+
+        run.assert_not_called()
+        process.terminate.assert_called_once()
+
+    def test_a_host_without_taskkill_still_terminates(self):
+        """Nödutgången: hittas inte taskkill ska nedstängningen bli exakt
+        den den var förut, inte ett undantag ur en finally-gren."""
+        process = mock.Mock(pid=99)
+        # Processen lever fortfarande — utan taskkill dog den ju inte.
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="wait", timeout=15), None]
+        with platform_is("windows"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=FileNotFoundError):
+            tokenserver._terminate_app_server(process)
+
+        process.terminate.assert_called_once()
+
+    def test_a_slow_taskkill_that_still_worked_needs_no_second_kill(self):
+        """Det uppmätta fallet: taskkill tog 7,66 s och lyckades. Med en
+        timeout under det övergavs anropet, trädet dog ändå i bakgrunden,
+        och koden trodde att den behövde slå igen. Utfallet avgör — inte
+        om verktyget hann svara."""
+        process = mock.Mock(pid=4242)
+        with platform_is("windows"), \
+                mock.patch.object(
+                    tokenserver.subprocess, "run",
+                    side_effect=subprocess.TimeoutExpired(
+                        cmd="taskkill", timeout=15)):
+            tokenserver._terminate_app_server(process)
+
+        # wait() returnerade: processen ÄR borta, trots att taskkill inte
+        # hann rapportera det.
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+
+    def test_argv_wraps_whatever_discovery_found(self):
+        """Hitta binären och bygga kommandoraden är två jobb. Det andra ska
+        se likadant ut oavsett vilket av det förstas svar som vann."""
+        with mock.patch.object(tokenserver, "_codex_executable",
+                               return_value="/opt/codex/codex"):
+            self.assertEqual(
+                tokenserver._codex_app_server_command(),
+                ["/opt/codex/codex", "app-server", "--listen", "stdio://"])
+
+    def test_argv_is_none_when_nothing_was_found(self):
+        with mock.patch.object(tokenserver, "_codex_executable",
+                               return_value=None):
+            self.assertIsNone(tokenserver._codex_app_server_command())
+
+
 class CodexLimitLogTests(unittest.TestCase):
     @staticmethod
     def _event(rate_limits, timestamp="2026-08-07T10:00:00Z"):
@@ -947,9 +1420,8 @@ class CodexLimitLogTests(unittest.TestCase):
         täckt — så select-bytet hade kunnat gå sönder tyst. Det här kör den
         på riktigt: process, pipe, tråd, kö.
         """
-        script = Path(temp_dir) / "codex"
+        script = Path(temp_dir) / "codex.py"
         script.write_text(
-            "#!/usr/bin/env python3\n"
             "import json, sys\n"
             "for line in sys.stdin:\n"
             "    try:\n"
@@ -962,8 +1434,9 @@ class CodexLimitLogTests(unittest.TestCase):
             "    elif got == 2:\n"
             f"        print(json.dumps({body!r}), flush=True)\n",
             encoding="utf-8")
-        script.chmod(0o755)
-        return str(script)
+        # No shebang, no execute bit: the interpreter is named explicitly so
+        # the same fixture runs on Windows, where neither concept exists.
+        return [sys.executable, str(script)]
 
     def test_app_server_read_talks_to_a_real_process(self):
         response = {"id": 2, "result": {"rateLimits": {
@@ -974,9 +1447,9 @@ class CodexLimitLogTests(unittest.TestCase):
         }}}
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            executable = self._fake_app_server(temp_dir, response)
+            command = self._fake_app_server(temp_dir, response)
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=executable):
+                                   return_value=command):
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=20)
 
@@ -987,15 +1460,14 @@ class CodexLimitLogTests(unittest.TestCase):
         """Deadlinen måste hålla utan select: en app-server som svarar
         aldrig får inte hänga probecykeln."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = Path(temp_dir) / "codex"
+            script = Path(temp_dir) / "codex.py"
             script.write_text(
-                "#!/usr/bin/env python3\n"
                 "import time\n"
                 "time.sleep(30)\n", encoding="utf-8")
-            script.chmod(0o755)
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=str(script)):
+                                   return_value=[sys.executable,
+                                                 str(script)]):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=1)
@@ -1008,14 +1480,13 @@ class CodexLimitLogTests(unittest.TestCase):
         """EOF-vakten: strömmen stängs direkt, och läsaren ska returnera på
         en gång i stället för att vänta ut hela sin deadline."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            script = Path(temp_dir) / "codex"
+            script = Path(temp_dir) / "codex.py"
             script.write_text(
-                "#!/usr/bin/env python3\n"
                 "raise SystemExit(1)\n", encoding="utf-8")
-            script.chmod(0o755)
 
             with mock.patch.object(tokenserver, "_codex_app_server_command",
-                                   return_value=str(script)):
+                                   return_value=[sys.executable,
+                                                 str(script)]):
                 started = time.monotonic()
                 found = tokenserver._read_codex_app_server_limits(
                     timeout_s=20)
@@ -1583,13 +2054,17 @@ class UsageSnapshotTests(unittest.TestCase):
                             "claude", "model_weekly"),
                     },
                     codex=self._live_codex(now_ts), quota_cache=cache)
-                self.assertTrue(cache_write.wait(timeout=1))
+                self.assertTrue(cache_write.wait(timeout=_THREAD_BARRIER_S))
 
             replace.assert_called_once()
             self.assertEqual(len(history.records), 4)
 
     def test_default_history_path_is_under_vibepulse_application_support(self):
+        # Plattformen pinnas: sökvägen nedan är macOS-konventionen, och utan
+        # pinningen läser testet värdens egen plattform i stället för den
+        # det påstår sig beskriva. _state_dir har egna tester per plattform.
         with tempfile.TemporaryDirectory() as temp_dir, \
+                platform_is("macos"), \
                 mock.patch.object(Path, "home", return_value=Path(temp_dir)):
             tokenserver._default_usage_history = None
 
@@ -1603,6 +2078,7 @@ class UsageSnapshotTests(unittest.TestCase):
 
     def test_default_quota_cache_path_is_under_vibepulse_support(self):
         with tempfile.TemporaryDirectory() as temp_dir, \
+                platform_is("macos"), \
                 mock.patch.object(Path, "home", return_value=Path(temp_dir)):
             tokenserver._default_quota_cache = None
             cache = tokenserver._get_quota_cache()
@@ -1658,7 +2134,7 @@ class UsageSnapshotTests(unittest.TestCase):
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts),
                     codex=self._live_codex(now_ts), quota_cache=cache)
-                self.assertTrue(persisted.wait(timeout=1))
+                self.assertTrue(persisted.wait(timeout=_THREAD_BARRIER_S))
             stale = self._snapshot(
                 StubHistory(), now_ts + 60,
                 claude={}, codex={}, quota_cache=cache)
@@ -1700,7 +2176,7 @@ class UsageSnapshotTests(unittest.TestCase):
                                       side_effect=make_thread):
                 caller = real_thread(target=serve)
                 caller.start()
-                self.assertTrue(write_started.wait(timeout=1))
+                self.assertTrue(write_started.wait(timeout=_THREAD_BARRIER_S))
                 self.assertTrue(snapshot_returned.wait(timeout=0.2))
                 for offset in range(1, 6):
                     self._snapshot(
@@ -1730,7 +2206,7 @@ class UsageSnapshotTests(unittest.TestCase):
                 self._snapshot(
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts), quota_cache=cache)
-                self.assertTrue(first_put.wait(timeout=1))
+                self.assertTrue(first_put.wait(timeout=_THREAD_BARRIER_S))
             with mock.patch(
                     "tools.tokenserver.quota_cache.os.replace",
                     wraps=os.replace) as replace:
@@ -1762,7 +2238,8 @@ class UsageSnapshotTests(unittest.TestCase):
                     StubHistory(), now_ts + 60,
                     claude=self._live_claude(now_ts + 60, pct=48.0),
                     quota_cache=cache)
-                self.assertTrue(changed_persisted.wait(timeout=1))
+                self.assertTrue(
+                    changed_persisted.wait(timeout=_THREAD_BARRIER_S))
 
             stale = self._snapshot(
                 StubHistory(), now_ts + 120, claude={}, quota_cache=cache)
@@ -1803,12 +2280,13 @@ class UsageSnapshotTests(unittest.TestCase):
                 self._snapshot(
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts), quota_cache=cache)
-                self.assertTrue(first_failed.wait(timeout=1))
+                self.assertTrue(first_failed.wait(timeout=_THREAD_BARRIER_S))
                 workers[0].join(timeout=1)
                 self._snapshot(
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts), quota_cache=cache)
-                self.assertTrue(retry_persisted.wait(timeout=1))
+                self.assertTrue(
+                    retry_persisted.wait(timeout=_THREAD_BARRIER_S))
                 workers[1].join(timeout=1)
 
             stale = self._snapshot(
@@ -1857,7 +2335,7 @@ class UsageSnapshotTests(unittest.TestCase):
 
             holder = real_thread(target=hold_cache_lock)
             holder.start()
-            self.assertTrue(lock_held.wait(timeout=1))
+            self.assertTrue(lock_held.wait(timeout=_THREAD_BARRIER_S))
             try:
                 with mock.patch.object(tokenserver.threading, "Thread",
                                        side_effect=make_thread):
@@ -2493,7 +2971,7 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
         store.save.side_effect = slow_save
 
         tokenserver._mark_max_tracker_dirty(store)
-        self.assertTrue(entered.wait(timeout=1))
+        self.assertTrue(entered.wait(timeout=_THREAD_BARRIER_S))
         for _ in range(5):  # burst while the writer is mid-save
             tokenserver._mark_max_tracker_dirty(store)
         release.set()
@@ -3014,6 +3492,42 @@ class ProbeTransitionLogTests(unittest.TestCase):
                 tokenserver._refresh_limits()
             self.assertIn("usage_http_401 -> usage_http_200 + ok",
                           "\n".join(captured.output))
+
+
+class PlatformPinningTests(unittest.TestCase):
+    """Vaktposten över hur plattform pinnas i den här filen.
+
+    Att patcha bara ``_IS_WINDOWS`` lämnar ``_IS_MACOS`` på värdens värde,
+    och testet beskriver då en plattform det inte kör på. Det har hänt två
+    gånger: först här (macOS-tester som i själva verket körde Linux-grenen
+    på ubuntu-köraren), sedan när en gren skriven mot den gamla
+    tvåvägsgrinden slogs ihop med treväg och gick grön överallt utom på
+    macOS. Bägge gångerna kostade en CI-runda att upptäcka.
+
+    ``platform_is`` sätter båda från ett namn. Den här regeln säger att den
+    är enda vägen dit.
+    """
+
+    def test_platform_flags_are_pinned_only_through_the_helper(self):
+        lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if line.startswith("def platform_is("))
+        end = next(i for i, line in enumerate(lines[start + 1:], start + 1)
+                   if line and not line[0].isspace())
+
+        # "patch.object" med i villkoret gör regeln precis — den handlar om
+        # att SÄTTA flaggorna, inte om att nämna dem. Utan det anmäler den
+        # sin egen rad, vilket den också gjorde första gången.
+        stray = [f"line {i + 1}: {line.strip()}"
+                 for i, line in enumerate(lines)
+                 if "patch.object" in line
+                 and ('"_IS_WINDOWS"' in line or '"_IS_MACOS"' in line)
+                 and not start <= i < end]
+
+        self.assertEqual(
+            stray, [],
+            "patcha plattformsflaggorna via platform_is('windows'/'macos'/"
+            "'linux') i stället — annars ärver den opatchade flaggan värden")
 
 
 if __name__ == "__main__":

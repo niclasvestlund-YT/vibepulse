@@ -1,4 +1,4 @@
-# tokenserver — VibePulse Mac-tjänst
+# tokenserver — VibePulse värdtjänst (macOS, Linux, Windows)
 
 > **English quickstart:** `python3 tokenserver.py`. Pure Python 3 stdlib,
 > nothing to install. It reads your local Claude Code/Codex logs and serves
@@ -8,10 +8,10 @@
 > `--claude-plan {pro,max5x,max20x}` and/or `--codex-plan
 > {plus,pro}` to show a plan badge on the Max Tracker pages; both flags are
 > optional and purely cosmetic (a display label, never used in any
-> percentage math). Autostart on login: `cp se.torget.tokenserver.plist
-> ~/Library/LaunchAgents/ && launchctl load
-> ~/Library/LaunchAgents/se.torget.tokenserver.plist` (edit the path inside
-> if the repo isn't at `~/Torget`). Privacy contract: only percentages and
+> percentage math). Runs on macOS, Linux and Windows; autostart files for
+> launchd, systemd and Task Scheduler sit beside this README (see
+> *Autostart* below — on Windows, add the firewall rule first). Privacy
+> contract: only percentages and
 > counts are ever served; no prompts, commands or file contents are stored.
 > Full details below in Swedish. Your agent translates.
 
@@ -28,10 +28,13 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    (`max_tokens: 0` — prefill utan output, i praktiken gratis) var 120:e
    sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
    5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
-   Tokenen lämnar aldrig Macen — skärmen får bara procenttal.
+   Tokenen lämnar aldrig värddatorn — skärmen får bara procenttal.
 3. **Codex tak** — tjänsten frågar Codex lokala, skrivskyddade app-server via
    `account/rateLimits/read`, alltså samma aktuella snapshot som Codex-panelen
-   visar. Om app-servern saknas används en passiv fallback: begränsad läsning
+   visar. Binären hittas via PATH, via skrivbordsappens medföljande
+   app-server under `~/.codex/plugins/.plugin-appserver/` (som aldrig ligger
+   på PATH — bara skrivbordsappen installerad räcker alltså), eller via
+   `VIBEPULSE_CODEX_BIN` när den bor någon annanstans. Om app-servern saknas används en passiv fallback: begränsad läsning
    av de 20 nyaste `~/.codex/sessions/**/rollout-*.jsonl` (högst den sista MiB
    per fil). Bara Codex faktiska `event_msg`/`token_count`-händelse med ett
    direkt `payload.rate_limits` accepteras i fallbacken.
@@ -236,11 +239,46 @@ någonsin behöver justeras.
 
 Claude Code har ingen nyckelringsintegration på Windows: `claude login`
 skriver i stället exakt samma `{"claudeAiOauth": {...}}`-post till en vanlig
-fil, `%USERPROFILE%\.claude\.credentials.json`. Kör tjänsten på Windows och
-den läser den filen — ingen dialog, ingen konfiguration, samma
-förtroendegräns som nyckelringsläsningen på Macen. Nyckelringen och Claude
-Desktops processtoken frågas inte alls där; `security` och `pgrep` finns
-ändå inte.
+fil, `%USERPROFILE%\.claude\.credentials.json` — eller, när
+`CLAUDE_CONFIG_DIR` är satt, `%CLAUDE_CONFIG_DIR%\.credentials.json` (hela
+konfigkatalogen flyttar, så filen ligger då direkt i den katalogen).
+Tjänsten följer variabeln precis som `claude login` gör. Kör tjänsten på
+Windows och den läser den filen — ingen dialog, ingen konfiguration.
+
+Var ärlig med vad det innebär: filen är klartext, skyddad av kontots
+filrättigheter men utan nyckelringens kryptering i vila. Det är Claude
+Codes egen avvägning på Windows och Linux, inte tjänstens — men den som
+byter från macOS ska veta att skyddsnivån inte är nyckelringens.
+Nyckelringen och Claude Desktops processtoken frågas inte alls där;
+`security` och `pgrep` finns ändå inte.
+
+Tokenet lever kort, och ingen förnyar det åt tjänsten. Posten har ett
+`expiresAt`, och tjänsten använder aldrig `refreshToken` — den rider på det
+Claude Code självt har lagrat och läser om filen vid varje probe. Claude
+Code skriver en ny token när DEN pratar med API:t, alltså när du kör den på
+maskinen. Tokenet lever ungefär åtta timmar, så en värd som bara serverar
+panelen visar streck för Claude-halvan tills någon kör `claude` där igen;
+kvoten kommer tillbaka av sig själv inom en probeintervall efteråt.
+`CLAUDE_CODE_OAUTH_TOKEN` med ett `claude setup-token`-värde är ingen
+ersättning: usage-endpointen svarar 403 på det (se felsökningstabellen i
+`docs/agent-setup.md`).
+
+Skrivbordsappen hjälper inte. Kontrollerat på Windows med appen
+installerad och inloggad (aug 2026, app 1.32352.1.0, MSIX-paketerad):
+
+| Källa | Utfall |
+|---|---|
+| Windows Credential Manager | Ingen post alls — `cmdkey /list` tom på Claude |
+| Appens processer | Bara Electron. Windows lämnar dessutom inte ut en annan process miljöblock utan `ReadProcessMemory` |
+| Paketets datakatalog | `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude` (samma träd som appen ser som `%APPDATA%\Claude` — MSIX omdirigerar, vilket är varför en titt i `%APPDATA%` ser tom ut). `.credentials.json` per lokal agentsession, men bara med `mcpOAuth`: sessionens MCP-tokens, inget om kontot |
+| En lokal session i appen | Startar den medföljande `claude-code\<version>\claude.exe` mot `%USERPROFILE%\.claude`, men skriver ingen token: appen injicerar den i processens miljö, så Claude Code har inget att spara |
+| `claude doctor` | Rör inte autentiseringen; `expiresAt` står stilla |
+| `claude setup-token` i `CLAUDE_CODE_OAUTH_TOKEN` | 403 på usage-endpointen (se felsökningstabellen) |
+
+Kvar står alltså `claude` från kommandoraden som enda källa som skriver
+filen; appen gör det aldrig, oavsett flik. På macOS finns en väg runt det
+— `ps eww` läser det injicerade tokenet ur processens miljö — och Linux
+skulle kunna göra samma sak via `/proc/<pid>/environ`. Windows kan inte.
 
 Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
 finns kvar på Windows: `fcntl` saknas där, så låset tas med
@@ -257,11 +295,16 @@ loggen bor under `%LOCALAPPDATA%\VibePulse\` i stället för macOS
 även förut — `Path.home()` löser ut — men lade ett `Library`-träd i
 användarprofilen som ingenting annat på maskinen känner igen.
 
-Kvar på Windows: **autostart**. launchd-plisten härintill har ingen
-motsvarighet; tjänsten måste startas för hand eller läggas i Task
-Scheduler. `smoke.py` känner till tillståndskatalogen men dess råd pratar
-fortfarande om `launchctl`. Se
-[#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3).
+På Linux bor samma filer under `$XDG_STATE_HOME/vibepulse` (annars
+`~/.local/state/vibepulse`) — XDG pekar ut state-katalogen för precis den
+här sortens tillstånd, loggar inräknade. En relativ `XDG_STATE_HOME`
+behandlas som osatt enligt specen; under systemd hade den annars räknats
+mot en arbetskatalog användaren inte valt.
+
+Autostart finns nu för alla tre: `se.torget.tokenserver.plist` (launchd),
+`vibepulse-tokenserver.service` (systemd) och `VibePulseTokenserver.xml`
+(Schemaläggaren) — se avsnittet längre ned. `smoke.py` anpassar sina råd
+efter värden i stället för att alltid säga `launchctl`.
 
 Svar (kontraktet appen parsar, `components/app_tokens/tokens_parse.c`;
 null = ärlig frånvaro, skärmen visar streck):
@@ -344,7 +387,15 @@ Peka skärmen hit i repytrotens `secrets.h`:
 Macens LAN-IP: `ipconfig getifaddr en0`. Ge gärna Macen fast DHCP-lease i
 routern — byter IP:t adress står skärmen med streck tills secrets.h flashas om.
 
-## Autostart via launchd
+## Autostart
+
+Tre filer, en per värd. Alla tre gör samma två saker: starta vid
+inloggning, och starta om efter en paus om processen dör — väntetiden
+är staketet mot respawn-loopar, inte en slump. Alla tre kör som DIN
+användare: hela jobbet är att läsa `~/.claude` och `~/.codex`, och ett
+tjänstekonto har inte de filerna.
+
+### macOS — launchd
 
 ```
 cp se.torget.tokenserver.plist ~/Library/LaunchAgents/
@@ -352,11 +403,110 @@ launchctl load ~/Library/LaunchAgents/se.torget.tokenserver.plist
 ```
 
 Plisten antar att repot bor i `~/Torget` och användaren `niclasvestlund` —
-redigera sökvägarna annars. Loggen hamnar i
-`~/Library/Logs/torget-tokenserver.log` (syns i Konsol-appen, överlever
-omstart; servern roterar den själv vid start om den vuxit förbi ~5 MB, med
-svansen bevarad i `.old`). Raderna har tidsstämplar och loggar övergångar,
-inte tillstånd: en frisk vecka är några rader, inte tusen.
+redigera sökvägarna annars.
+
+### Linux — systemd (användarenhet)
+
+```
+mkdir -p ~/.config/systemd/user
+cp vibepulse-tokenserver.service ~/.config/systemd/user/
+nano ~/.config/systemd/user/vibepulse-tokenserver.service   # WorkingDirectory
+systemctl --user daemon-reload
+systemctl --user enable --now vibepulse-tokenserver
+```
+
+`systemctl --user status vibepulse-tokenserver` visar läget,
+`journalctl --user -u vibepulse-tokenserver` enhetens egna rader. Ska
+tjänsten leva även när du inte är inloggad: `loginctl enable-linger $USER`.
+
+### Windows — Schemaläggaren
+
+Ändra `<UserId>` till ditt konto (`whoami`) och `<WorkingDirectory>` till
+din utcheckning först. **Kör PowerShell som administratör** — uppgiften
+registreras i schemaläggarens rot och `schtasks /create` nekas annars.
+
+Konvertera sedan till UTF-16 — `schtasks /xml` kräver det och svarar
+annars `ERROR: The task XML is malformed.` följt av
+`unable to switch the encoding`:
+
+```
+$utf16 = "$env:TEMP\vibepulse-task.xml"
+Get-Content -Raw VibePulseTokenserver.xml | Set-Content -Encoding Unicode $utf16
+schtasks /create /tn "VibePulse Tokenserver" /xml $utf16
+```
+
+Eller utan temporärfil, genom att skicka XML:en som en sträng:
+
+```
+Register-ScheduledTask -TaskName "VibePulse Tokenserver" `
+  -Xml (Get-Content -Raw VibePulseTokenserver.xml)
+```
+
+Filen är UTF-8 i git så att kommandoraden går att granska i en diff, och
+dess XML-deklaration saknar `encoding` med flit: det är det enda sättet
+att göra samma fil giltig både som UTF-8 här och som UTF-16 efter
+konverteringen.
+
+**Brandväggen är ett eget steg och måste göras FÖRE första starten.**
+Tjänsten lyssnar på LAN:et, och Windows Defender frågar bara interaktivt —
+under Schemaläggaren finns ingen som kan svara, så anropet blockeras tyst
+och panelen visar streck utan att något ser trasigt ut. Kör en gång, som
+administratör:
+
+```
+netsh advfirewall firewall add rule name="VibePulse Tokenserver" dir=in action=allow protocol=TCP localport=8737 profile=private
+```
+
+En rad med flit: `^` är cmd.exes radfortsättning och PowerShells är en
+bakåtfnutt, så en delad rad kör olika saker i de två skalen — och en
+halv brandväggsregel misslyckas tyst, precis som allt annat här.
+
+`profile=private` också med flit: regeln ska gälla hemnätet, inte ett kafés.
+
+Regeln gäller **Windows Defender-brandväggen**. Kör maskinen en annan
+brandvägg är det den som bestämmer, och `netsh` svarar `Ok.` medan den
+ändrar något som inte längre styr trafiken — tyst fel av samma sort som
+resten av det här avsnittet handlar om. Kolla vem som faktiskt gäller:
+
+```
+Get-NetFirewallProfile | Select-Object Name, Enabled
+```
+
+Är profilerna avstängda sköts filtreringen någon annanstans, och port 8737
+ska öppnas i det programmet i stället.
+
+Kontrollera efteråt:
+
+```
+netsh advfirewall firewall show rule name="VibePulse Tokenserver"
+```
+
+Beviset är dock inte att regeln finns, utan att någon annan maskin når
+porten. Från en annan dator på samma nät:
+
+```
+curl http://<windows-maskinens-ip>:8737/api/tokens
+```
+
+Före regeln tar den timeout; efter svarar den med JSON. `localhost` säger
+ingenting — den vägen har aldrig gått genom brandväggen.
+
+### Loggen
+
+Under macOS hamnar den i `~/Library/Logs/torget-tokenserver.log` (syns i
+Konsol-appen), under Windows i
+`%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log` och under Linux i
+`$XDG_STATE_HOME/vibepulse/torget-tokenserver.log`. Servern roterar den
+själv vid start om den vuxit förbi ~5 MB, med svansen bevarad i `.old`.
+Rotationen kräver att tjänstehanteraren faktiskt skickar stderr till just
+den filen — därför går både Windows-uppgiften (via `cmd.exe`) och
+systemd-enheten (via `/bin/sh`) genom ett skal som gör katalogen och
+omdirigerar i samma kommando. `StandardOutput=append:` duger inte:
+systemd öppnar filen innan `StateDirectory=` hunnit skapa katalogen, och
+enheten dör med `Failed to set up standard output: No such file or
+directory`. Raderna har tidsstämplar
+och loggar övergångar, inte tillstånd: en frisk vecka är några rader, inte
+tusen.
 
 Snabbaste hälsokollen är röktestet — kamrutinens steg 1–4 som ett kommando:
 

@@ -5,12 +5,17 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
 import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
+
+# Local rather than imported from tokenserver: this module is a leaf that
+# tokenserver imports, and reaching back the other way would make a cycle.
+_IS_WINDOWS = sys.platform == "win32"
 
 
 _PROVIDERS = {"claude", "codex"}
@@ -146,6 +151,24 @@ class QuotaCache:
         }
 
     def _fsync_parent(self) -> None:
+        """Make the rename durable, not merely visible.
+
+        POSIX needs the *directory* synced after a rename: the file's bytes
+        can be on disk while the name change still sits in the directory's
+        cache, and a power cut then leaves the old file — or none.
+
+        Windows has neither half of that. A directory cannot be opened as a
+        file handle, so there is nothing to fsync, and the attempt is not a
+        precaution but a guaranteed exception. That mattered more than it
+        looks: ``os.replace`` has already succeeded by the time we get
+        here, so the raised error rolled back a value that was *already
+        written* and reported the write as failed. Every ``put`` on Windows
+        returned False, the in-memory record was reverted to match a disk
+        state that no longer existed, and the quota cache could never keep
+        anything — which is most of what the panel's stale values rest on.
+        """
+        if _IS_WINDOWS:
+            return
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
         descriptor = os.open(self.path.parent, flags)
         try:

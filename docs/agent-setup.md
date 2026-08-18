@@ -36,16 +36,35 @@ are required, and the build gates on their absence:
 Confirm all five before touching anything. Ask the user for anything you
 cannot determine yourself.
 
-1. **macOS or Windows?** Both serve data. On Windows the Claude token comes
-   from `%USERPROFILE%\.claude\.credentials.json` instead of the keychain,
-   and state and logs live under `%LOCALAPPDATA%\VibePulse\` — but there is
-   **no autostart**, so the service must be started by hand or wired into
-   Task Scheduler, and `smoke.py`'s advice still names `launchctl`
-   ([#3](https://github.com/niclasvestlund-YT/vibepulse/issues/3)). On Linux
-   the firmware still builds and the simulator still runs, but the service
-   finds no Claude token at all — there is no keychain and the credential
-   file is read only on Windows
-   ([#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2)).
+1. **macOS, Linux or Windows?** All three serve data, with autostart, the
+   same state files and the same diagnostics. What differs is where the
+   Claude token comes from — the keychain on macOS, and the file `/login`
+   writes (`~/.claude/.credentials.json`, or `$CLAUDE_CONFIG_DIR`) on the
+   other two — and where state and logs live:
+   `~/Library/…` on macOS, `%LOCALAPPDATA%\VibePulse\` on Windows,
+   `$XDG_STATE_HOME/vibepulse` (else `~/.local/state/vibepulse`) on Linux.
+
+   Two host-specific gotchas worth naming up front:
+
+   - **Windows needs a firewall rule before the first start.** The service
+     listens on the LAN and Defender only ever asks interactively — under
+     Task Scheduler nobody is there to answer, so the panel is blocked
+     silently while everything looks healthy. See
+     `tools/tokenserver/README.md` → Autostart.
+   - **Signing into the desktop app is not enough for the Claude quota.**
+     Off macOS the probe reads the file `claude login` writes, and a
+     desktop-app-only login can leave that file holding its scopes with no
+     token in it — which looks exactly like "not signed in" while the user
+     plainly is. Run `claude login` in the CLI as well. (A `claude
+     setup-token` value in
+     `CLAUDE_CODE_OAUTH_TOKEN` is *not* a substitute — it authenticates and
+     is then refused with 403.)
+   - **`.local` addressing assumes the host answers mDNS.** macOS does via
+     Bonjour and most desktop Linux does via Avahi; Windows is inconsistent
+     about it. Where it does not resolve, use a DHCP-reserved IP in
+     `secrets.h` instead of the Bonjour name
+     ([#7](https://github.com/niclasvestlund-YT/vibepulse/issues/7) tracks
+     making this dependable).
 2. **Do they have the board?** Waveshare ESP32-S3-Touch-AMOLED-2.16. No
    board → skip to [Simulator only](#simulator-only-no-board).
 3. **Is their WiFi 2.4 GHz?** The ESP32-S3 cannot see 5 GHz at all. This is
@@ -64,8 +83,8 @@ cp secrets.h.example secrets.h
 Then edit `secrets.h`. Two separate things must be right:
 
 - `TG_WIFI_SSID` / `TG_WIFI_PASS` — their 2.4 GHz network.
-- **Replace `DIN-MAC` in `TK_VIBEPULSE_BASE_URL`** with their Mac's Bonjour
-  name.
+- **Replace `DIN-MAC` in `TK_VIBEPULSE_BASE_URL`** with the host's Bonjour
+  name — or its IP, if the host does not answer `.local` (see below).
 
 Those `#define`s ship active on purpose, with an obvious placeholder. Do not
 comment them out or delete them: `components/app_tokens/net.c` guards every
@@ -74,12 +93,21 @@ out entirely and the firmware then compiles cleanly, boots cleanly, connects
 to WiFi cleanly — and shows dashes forever, with no error anywhere to tell
 you why. A wrong hostname at least shows up in the serial log.
 
-Use the Bonjour name, not an IP, so the same binary works at home and on a
-phone hotspot:
+Prefer the Bonjour name over an IP, so the same binary works at home and on
+a phone hotspot:
 
 ```sh
-scutil --get LocalHostName     # e.g. "Niclas-MacBook" -> Niclas-MacBook.local
+scutil --get LocalHostName     # macOS: "Niclas-MacBook" -> Niclas-MacBook.local
+hostname                       # Linux with Avahi: <name>.local
 ```
+
+This only works if the host actually answers `.local` queries. macOS always
+does; desktop Linux usually does through Avahi; **Windows is inconsistent**
+— recent builds ship an mDNS responder, but firewall profiles and policy
+decide whether it answers, so it cannot be relied on. Where the name does
+not resolve, give the host a DHCP reservation in the router and put the IP
+in `TK_VIBEPULSE_BASE_URL` instead. The reservation is what keeps it from
+becoming the "screen went dark after a reboot" problem.
 
 **Verify:** `secrets.h` has a non-empty SSID, and
 
@@ -149,14 +177,16 @@ are not arriving:
 | `claudeProbe` | Meaning | What to do |
 |---|---|---|
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
-| `not_run` | Probe has not fired yet | It runs every 120 s — wait |
-| `no_claude_oauth_token` | No Claude Desktop / Claude Code token found | Have them sign in to Claude Code on this Mac |
-| `token_expired_…` | Token found but expired | Re-authenticate in Claude Code |
-| `usage_http_401` / `usage_http_403` | Every token source rejected (on macOS the probe tries Claude Desktop's process token, then the keychain, and falls back automatically; on Windows there is only `%USERPROFILE%\.claude\.credentials.json`) | Re-authenticate in Claude Code |
+| *(any value)* | `GET /` reports the **last recorded** verdict, and it never runs a probe itself — `claudeProbeAgeS` beside it says how old that verdict is. A stale string reads exactly like a current one without it | Request `/api/tokens` to make the probe re-evaluate, then read `/` again |
+| `not_run` | Probe has not fired yet | It runs every 240 s — wait |
+| `no_claude_oauth_token` | No token found in any source this host has | Sign in to Claude Code on this machine. Off macOS the file `/login` writes is the source, and a desktop-app-only login can leave it holding scopes but no token — verified on Windows |
+| `token_expired_…` | Token found but expired. Off macOS the only source is the file `claude login` writes, and only the CLI rewrites it — the desktop app never does. Tokens last about 8 h, so a host nobody runs `claude` on goes dark | Run `claude` on that host; the probe re-reads the file every cycle and quota returns within one interval (240 s — a local verdict like this no longer widens it). `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN` is not a workaround, see the 403 row |
+| `usage_http_401` | Every token source rejected as invalid (macOS tries Claude Desktop's process token, then the keychain; elsewhere the credential file, plus `CLAUDE_CODE_OAUTH_TOKEN` if set) | Re-authenticate in Claude Code |
+| `usage_http_403` | A token authenticated and was then **refused** — a different thing from 401. Seen on Windows with a `claude setup-token` value in `CLAUDE_CODE_OAUTH_TOKEN`: it is meant for CI and is not accepted at the usage endpoint | Use an interactive `claude login` instead, so the credential file holds a session token. The variable is still tried first, but the probe falls through to the file rather than stopping there |
 | `usage_http_200 + no_mapped_limits` | Authenticated, but nothing in the usage response mapped (a `; fallback_…` suffix records the header-probe outcome) | Plan may not expose limits; Codex half still works |
-| `usage_request_failed: …` | Network/DNS failure from the Mac | Check the Mac's own connectivity |
+| `usage_request_failed: …` | Network/DNS failure from the host | Check the host's own connectivity |
 | `usage_http_429 + backoff_until_HH:MM` | Rate-limited by the API; the probe rests until the shown time | Wait — it retries by itself |
-| `probe_crashed: <Type>` | The probe itself hit a bug (crash before it could classify the failure) | Read the traceback in `~/Library/Logs/torget-tokenserver.log`; worth filing |
+| `probe_crashed: <Type>` | The probe itself hit a bug (crash before it could classify the failure) | Read the traceback in the log file (see the paths table in [observability.md](observability.md)); worth filing |
 
 Codex is read separately from its local app-server, so a bad `claudeProbe`
 never explains missing Codex numbers, and vice versa.
@@ -214,7 +244,7 @@ Three things must line up — a device key, the bridge, and hooks.
    `--interactions` opens the held-hook endpoints and the signed answer path;
    `--interaction-detail` lets the command/question text reach the glass (leave
    it off to keep the panel to "something is waiting" only). Prove the whole
-   loop on the Mac alone first, before any hardware: `python3 tools/fake-panel.py`.
+   loop on the host alone first, before any hardware: `python3 tools/fake-panel.py`.
 
 3. **Hooks.** Point Claude Code's hooks at the bridge on loopback (Claude Code
    blocks http hooks that resolve to the LAN, which is why the bridge splits
