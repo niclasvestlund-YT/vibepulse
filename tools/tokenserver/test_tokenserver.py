@@ -29,6 +29,14 @@ except ImportError:  # Windows
     fcntl = None
 
 
+# Hur länge ett test väntar på att en bakgrundstråd ska hinna fram. Det är
+# en LIVLIGHETSGRÄNS, inte ett påstående om fart: testerna som verkligen
+# mäter latens (att ett svar inte blockerar på en skrivning) har egna, korta
+# gränser och rörs inte av den här. En sekund räckte tills windows-köraren
+# blev långsam nog att missa den — samma skrivning, samma tråd, bara en
+# lastad maskin — och ett flakigt körfält är värdelöst som grind.
+_THREAD_BARRIER_S = 10
+
 @contextlib.contextmanager
 def platform_is(name):
     """Kör kroppen som om värden vore ``windows``, ``macos`` eller ``linux``.
@@ -1994,7 +2002,7 @@ class UsageSnapshotTests(unittest.TestCase):
                             "claude", "model_weekly"),
                     },
                     codex=self._live_codex(now_ts), quota_cache=cache)
-                self.assertTrue(cache_write.wait(timeout=1))
+                self.assertTrue(cache_write.wait(timeout=_THREAD_BARRIER_S))
 
             replace.assert_called_once()
             self.assertEqual(len(history.records), 4)
@@ -2074,7 +2082,7 @@ class UsageSnapshotTests(unittest.TestCase):
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts),
                     codex=self._live_codex(now_ts), quota_cache=cache)
-                self.assertTrue(persisted.wait(timeout=1))
+                self.assertTrue(persisted.wait(timeout=_THREAD_BARRIER_S))
             stale = self._snapshot(
                 StubHistory(), now_ts + 60,
                 claude={}, codex={}, quota_cache=cache)
@@ -2116,7 +2124,7 @@ class UsageSnapshotTests(unittest.TestCase):
                                       side_effect=make_thread):
                 caller = real_thread(target=serve)
                 caller.start()
-                self.assertTrue(write_started.wait(timeout=1))
+                self.assertTrue(write_started.wait(timeout=_THREAD_BARRIER_S))
                 self.assertTrue(snapshot_returned.wait(timeout=0.2))
                 for offset in range(1, 6):
                     self._snapshot(
@@ -2146,7 +2154,7 @@ class UsageSnapshotTests(unittest.TestCase):
                 self._snapshot(
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts), quota_cache=cache)
-                self.assertTrue(first_put.wait(timeout=1))
+                self.assertTrue(first_put.wait(timeout=_THREAD_BARRIER_S))
             with mock.patch(
                     "tools.tokenserver.quota_cache.os.replace",
                     wraps=os.replace) as replace:
@@ -2178,7 +2186,8 @@ class UsageSnapshotTests(unittest.TestCase):
                     StubHistory(), now_ts + 60,
                     claude=self._live_claude(now_ts + 60, pct=48.0),
                     quota_cache=cache)
-                self.assertTrue(changed_persisted.wait(timeout=1))
+                self.assertTrue(
+                    changed_persisted.wait(timeout=_THREAD_BARRIER_S))
 
             stale = self._snapshot(
                 StubHistory(), now_ts + 120, claude={}, quota_cache=cache)
@@ -2219,12 +2228,13 @@ class UsageSnapshotTests(unittest.TestCase):
                 self._snapshot(
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts), quota_cache=cache)
-                self.assertTrue(first_failed.wait(timeout=1))
+                self.assertTrue(first_failed.wait(timeout=_THREAD_BARRIER_S))
                 workers[0].join(timeout=1)
                 self._snapshot(
                     StubHistory(), now_ts,
                     claude=self._live_claude(now_ts), quota_cache=cache)
-                self.assertTrue(retry_persisted.wait(timeout=1))
+                self.assertTrue(
+                    retry_persisted.wait(timeout=_THREAD_BARRIER_S))
                 workers[1].join(timeout=1)
 
             stale = self._snapshot(
@@ -2273,7 +2283,7 @@ class UsageSnapshotTests(unittest.TestCase):
 
             holder = real_thread(target=hold_cache_lock)
             holder.start()
-            self.assertTrue(lock_held.wait(timeout=1))
+            self.assertTrue(lock_held.wait(timeout=_THREAD_BARRIER_S))
             try:
                 with mock.patch.object(tokenserver.threading, "Thread",
                                        side_effect=make_thread):
@@ -2909,7 +2919,7 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
         store.save.side_effect = slow_save
 
         tokenserver._mark_max_tracker_dirty(store)
-        self.assertTrue(entered.wait(timeout=1))
+        self.assertTrue(entered.wait(timeout=_THREAD_BARRIER_S))
         for _ in range(5):  # burst while the writer is mid-save
             tokenserver._mark_max_tracker_dirty(store)
         release.set()
