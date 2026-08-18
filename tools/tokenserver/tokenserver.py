@@ -1131,7 +1131,7 @@ def _probe_limits_locked():
 
 
 def _probe_interval_s():
-    """Backa av vid upprepade misslyckanden: 120 → 240 → 480 s (tak).
+    """Backa av vid upprepade misslyckanden: 240 → 480 → 960 s (tak).
 
     En död token fick tidigare hamra API:t varannan minut i timmar — det
     mönstret utlöste en 429-straffruta. Lyckad probe återställer takten.

@@ -252,6 +252,20 @@ byter från macOS ska veta att skyddsnivån inte är nyckelringens.
 Nyckelringen och Claude Desktops processtoken frågas inte alls där;
 `security` och `pgrep` finns ändå inte.
 
+Tokenet lever kort, och ingen förnyar det åt tjänsten. Posten har ett
+`expiresAt`, och tjänsten använder aldrig `refreshToken` — den rider på det
+Claude Code självt har lagrat och läser om filen vid varje probe. Claude
+Code skriver en ny token när DEN pratar med API:t, alltså när du kör den på
+maskinen. En värd som bara serverar panelen får därför streck för
+Claude-halvan när tokenet gått ut: verifierat på Windows, där ett token
+stämplat 20:54 var dött när tjänsten startade 22:28. macOS har en andra
+källa som saknas här — Claude Desktops processtoken, som skrivbordsappen
+håller färsk — och `CLAUDE_CODE_OAUTH_TOKEN` med ett `claude
+setup-token`-värde är ingen ersättning: usage-endpointen svarar 403 på det
+(se felsökningstabellen i `docs/agent-setup.md`). I praktiken: kör Claude
+Code på värden, vilket är precis vad den som sätter upp panelen ändå gör.
+Kvoten kommer tillbaka av sig själv inom en probeintervall efteråt.
+
 Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
 finns kvar på Windows: `fcntl` saknas där, så låset tas med
 `msvcrt.locking` i stället. Samma icke-blockerande grind, annat systemanrop.
