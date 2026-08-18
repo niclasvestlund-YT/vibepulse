@@ -170,13 +170,14 @@ are not arriving:
 |---|---|---|
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
 | `not_run` | Probe has not fired yet | It runs every 120 s — wait |
-| `no_claude_oauth_token` | No Claude Desktop / Claude Code token found | Have them sign in to Claude Code on this Mac |
+| `no_claude_oauth_token` | No token found in any source this host has | Sign in to Claude Code on this machine. Off macOS the file `/login` writes is the source, and a desktop-app-only login can leave it holding scopes but no token — verified on Windows |
 | `token_expired_…` | Token found but expired | Re-authenticate in Claude Code |
-| `usage_http_401` / `usage_http_403` | Every token source rejected (on macOS the probe tries Claude Desktop's process token, then the keychain, and falls back automatically; on Windows there is only `%USERPROFILE%\.claude\.credentials.json`) | Re-authenticate in Claude Code |
+| `usage_http_401` | Every token source rejected as invalid (macOS tries Claude Desktop's process token, then the keychain; elsewhere the credential file, plus `CLAUDE_CODE_OAUTH_TOKEN` if set) | Re-authenticate in Claude Code |
+| `usage_http_403` | A token authenticated and was then **refused** — a different thing from 401. Seen on Windows with a `claude setup-token` value in `CLAUDE_CODE_OAUTH_TOKEN`: it is meant for CI and is not accepted at the usage endpoint | Use an interactive `claude login` instead, so the credential file holds a session token. The variable is still tried first, but the probe falls through to the file rather than stopping there |
 | `usage_http_200 + no_mapped_limits` | Authenticated, but nothing in the usage response mapped (a `; fallback_…` suffix records the header-probe outcome) | Plan may not expose limits; Codex half still works |
-| `usage_request_failed: …` | Network/DNS failure from the Mac | Check the Mac's own connectivity |
+| `usage_request_failed: …` | Network/DNS failure from the host | Check the host's own connectivity |
 | `usage_http_429 + backoff_until_HH:MM` | Rate-limited by the API; the probe rests until the shown time | Wait — it retries by itself |
-| `probe_crashed: <Type>` | The probe itself hit a bug (crash before it could classify the failure) | Read the traceback in `~/Library/Logs/torget-tokenserver.log`; worth filing |
+| `probe_crashed: <Type>` | The probe itself hit a bug (crash before it could classify the failure) | Read the traceback in the log file (see the paths table in [observability.md](observability.md)); worth filing |
 
 Codex is read separately from its local app-server, so a bad `claudeProbe`
 never explains missing Codex numbers, and vice versa.
