@@ -266,6 +266,22 @@ setup-token`-värde är ingen ersättning: usage-endpointen svarar 403 på det
 Code på värden, vilket är precis vad den som sätter upp panelen ändå gör.
 Kvoten kommer tillbaka av sig själv inom en probeintervall efteråt.
 
+Skrivbordsappen hjälper inte, och det är genomsökt en gång så att ingen
+behöver göra om det. På en Windows-maskin med appen installerad och
+inloggad (aug 2026, app 1.32352.1.0, MSIX-paketerad):
+
+| Källa | Utfall |
+|---|---|
+| Windows Credential Manager | Ingen post alls — `cmdkey /list` tom på Claude |
+| Appens processer | Bara Electron (`renderer`, `gpu-process`, `utility`). Ingen medföljande Claude Code-process att läsa miljön ur, vilket är exakt vad macOS-proben gör — och Windows lämnar ändå inte ut en annan process miljöblock utan `ReadProcessMemory` |
+| Paketets datakatalog | `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude`. Innehåller `.credentials.json` per lokal agentsession (99 stycken) — men den nyaste var fem dagar gammal OCH tom på token: inget `accessToken`, inget `refreshToken`, inga scopes |
+| `claude doctor` | Rör inte autentiseringen; `expiresAt` står stilla |
+| `claude setup-token` i `CLAUDE_CODE_OAUTH_TOKEN` | 403 på usage-endpointen (se felsökningstabellen) |
+
+Kvar står alltså CLI:ns egen fil, och den skrivs bara när CLI:t kör.
+Kör du dina sessioner via Remote Control är det ingen som rör den —
+värden autentiserar aldrig, och panelen slocknar när tokenet gått ut.
+
 Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
 finns kvar på Windows: `fcntl` saknas där, så låset tas med
 `msvcrt.locking` i stället. Samma icke-blockerande grind, annat systemanrop.
