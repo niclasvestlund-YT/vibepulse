@@ -29,6 +29,9 @@
     Register-ScheduledTask -TaskName "VibePulse Tokenserver" `
       -Xml (Get-Content -Raw VibePulseTokenserver.xml)
 
+  Importen kräver ett ADMINISTRATÖRSFÖNSTER: uppgiften registreras i
+  schemaläggarens rot, och utan förhöjd behörighet nekas den.
+
   TVÅ rader måste ändras först: <UserId> till ditt konto (`whoami`) och
   sökvägen till din utcheckning i <Arguments>.
 

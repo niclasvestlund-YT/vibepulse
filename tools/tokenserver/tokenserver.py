@@ -1195,6 +1195,12 @@ def get_limits():
 CODEX_SESSIONS = Path(os.path.expanduser("~/.codex/sessions"))
 CODEX_LIMITS_EVERY_S = 30
 CODEX_LIMIT_SCAN_BYTES = 1024 * 1024
+# Nedstängningen av app-servern på Windows. Femton sekunder är inte en
+# gissning: taskkill mättes till 7,66 s på en riktig burk (rc=0, hela
+# trädet dödat), och den gamla femsekunderstimeouten övergav alltså ett
+# anrop som lyckades. Vägen går i en bakgrundstråd, aldrig i HTTP-svaret,
+# så tålamod kostar ingen väntande begäran.
+_TASKKILL_TIMEOUT_S = 15
 _codex_limits_lock = threading.Lock()
 _last_codex_limits = None
 _last_codex_read = 0.0
@@ -1456,11 +1462,20 @@ def _terminate_app_server(process):
         try:
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                capture_output=True, timeout=5)
-            process.wait(timeout=2)
-            return
+                capture_output=True, timeout=_TASKKILL_TIMEOUT_S)
         except (OSError, subprocess.SubprocessError):
-            pass
+            pass  # saknas, hänger eller svarar inte — utfallet avgör nedan
+        # Fråga processen, inte taskkill. Uppmätt på en riktig Windows-burk:
+        # taskkill tog 7,66 s och lyckades (rc=0, båda processerna dödade).
+        # Med den gamla femsekunderstimeouten övergavs anropet i förtid och
+        # trädet dog ändå, i bakgrunden — rätt utfall av fel skäl. Det som
+        # betyder något är om processen är borta, inte om verktyget hann
+        # svara, så det är den frågan som ställs.
+        try:
+            process.wait(timeout=_TASKKILL_TIMEOUT_S)
+            return
+        except subprocess.TimeoutExpired:
+            pass  # trädet lever vidare: fall igenom till terminate/kill
     process.terminate()
     try:
         process.wait(timeout=1)

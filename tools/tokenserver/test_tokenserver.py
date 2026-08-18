@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 import os
+import subprocess
 import sys
 
 from tools.tokenserver import codex_usage, tokenserver
@@ -1241,12 +1242,33 @@ class CodexCommandDiscoveryTests(unittest.TestCase):
         """Nödutgången: hittas inte taskkill ska nedstängningen bli exakt
         den den var förut, inte ett undantag ur en finally-gren."""
         process = mock.Mock(pid=99)
+        # Processen lever fortfarande — utan taskkill dog den ju inte.
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="wait", timeout=15), None]
         with platform_is("windows"), \
                 mock.patch.object(tokenserver.subprocess, "run",
                                   side_effect=FileNotFoundError):
             tokenserver._terminate_app_server(process)
 
         process.terminate.assert_called_once()
+
+    def test_a_slow_taskkill_that_still_worked_needs_no_second_kill(self):
+        """Det uppmätta fallet: taskkill tog 7,66 s och lyckades. Med en
+        timeout under det övergavs anropet, trädet dog ändå i bakgrunden,
+        och koden trodde att den behövde slå igen. Utfallet avgör — inte
+        om verktyget hann svara."""
+        process = mock.Mock(pid=4242)
+        with platform_is("windows"), \
+                mock.patch.object(
+                    tokenserver.subprocess, "run",
+                    side_effect=subprocess.TimeoutExpired(
+                        cmd="taskkill", timeout=15)):
+            tokenserver._terminate_app_server(process)
+
+        # wait() returnerade: processen ÄR borta, trots att taskkill inte
+        # hann rapportera det.
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
 
     def test_argv_wraps_whatever_discovery_found(self):
         """Hitta binären och bygga kommandoraden är två jobb. Det andra ska

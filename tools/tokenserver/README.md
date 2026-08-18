@@ -391,8 +391,11 @@ tjänsten leva även när du inte är inloggad: `loginctl enable-linger $USER`.
 ### Windows — Schemaläggaren
 
 Ändra `<UserId>` till ditt konto (`whoami`) och `<WorkingDirectory>` till
-din utcheckning först. Konvertera sedan till UTF-16 — `schtasks /xml`
-kräver det och svarar annars `ERROR: The task XML is malformed.` följt av
+din utcheckning först. **Kör PowerShell som administratör** — uppgiften
+registreras i schemaläggarens rot och `schtasks /create` nekas annars.
+
+Konvertera sedan till UTF-16 — `schtasks /xml` kräver det och svarar
+annars `ERROR: The task XML is malformed.` följt av
 `unable to switch the encoding`:
 
 ```
