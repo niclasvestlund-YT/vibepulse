@@ -919,10 +919,14 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertGreater(saved["cooldown_until"], time.time() + 500)
 
     def test_refresh_updates_failure_streak(self):
+        # Ett upstream-fel: API:t svarade och svaret dög inte. DET är vad
+        # backoffen finns för, så streaken ska växa.
         with mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
                 mock.patch.object(tokenserver, "_last_limits", None), \
                 mock.patch.object(tokenserver, "_last_probed", 0.0), \
                 mock.patch.object(tokenserver, "_limits_refreshing", False), \
+                mock.patch.object(tokenserver, "_probe_reached_upstream",
+                                  True), \
                 mock.patch.object(tokenserver, "_probe_limits",
                                   return_value=None):
             tokenserver._refresh_limits()
@@ -937,6 +941,54 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                                   return_value={"weekPct": 60.0}):
             tokenserver._refresh_limits()
             self.assertEqual(tokenserver._probe_failure_streak, 0)
+
+    def test_local_failure_does_not_widen_the_probe_interval(self):
+        """En utgången token är ett LOKALT besked — proben rör aldrig nätet.
+
+        Att glesa ut takten då sparar noll API-anrop och kostar bara tid:
+        det var precis vad som hände på Windows när `claude login` skrivit
+        en ny token medan tjänsten satt kvar i 960-sekunderssteget och
+        panelen stod mörk. Streaken ska stå still, så nästa probe ligger
+        en grundintervall bort.
+        """
+        for status in ("token_expired_20:54", "no_claude_oauth_token",
+                       "probe_held_by_other_instance"):
+            with self.subTest(status=status):
+                def local_only():
+                    tokenserver._probe_reached_upstream = False
+                    tokenserver._probe_status = status
+                    return None
+
+                with mock.patch.object(
+                            tokenserver, "_probe_failure_streak", 2), \
+                        mock.patch.object(tokenserver, "_last_limits", None), \
+                        mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                        mock.patch.object(
+                            tokenserver, "_limits_refreshing", False), \
+                        mock.patch.object(
+                            tokenserver, "_probe_reached_upstream", True), \
+                        mock.patch.object(tokenserver, "_probe_status", ""), \
+                        mock.patch.object(tokenserver, "_probe_limits",
+                                          side_effect=local_only):
+                    tokenserver._refresh_limits()
+                    self.assertEqual(tokenserver._probe_failure_streak, 2)
+                    self.assertEqual(tokenserver._probe_interval_s(),
+                                     tokenserver.LIMITS_EVERY_S * 4)
+
+    def test_probe_reports_how_old_its_verdict_is(self):
+        """GET / serverar ett sparat omdöme; åldern hör till svaret.
+
+        Utan den läses statussträngen som ett besked om nuet — och GET /
+        rör aldrig proben, så strängen kan vara godtyckligt gammal.
+        """
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        with mock.patch.object(tokenserver, "_last_probed", 0.0):
+            self.assertIsNone(handler._root_payload()["claudeProbeAgeS"])
+        with mock.patch.object(tokenserver, "_last_probed",
+                               time.monotonic() - 900):
+            age = handler._root_payload()["claudeProbeAgeS"]
+        self.assertGreaterEqual(age, 900)
+        self.assertLess(age, 960)
 
     def test_probe_gives_up_when_every_candidate_is_rejected(self):
         calls = []

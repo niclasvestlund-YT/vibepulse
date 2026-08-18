@@ -538,6 +538,12 @@ _probe_headers = []
 _probe_unknown_buckets = []
 _probe_cooldown_until = 0.0
 _probe_failure_streak = 0
+# Rörde den SENASTE proben nätet? Backoffen finns för att inte hamra API:t,
+# så bara ett upstream-svar får glesa ut takten. Lokala orsaker — utgången
+# token, ingen token alls, en annan instans som håller låset — kostar noll
+# anrop, och att straffa dem betyder bara att panelen står mörk längre än
+# nödvändigt efter att orsaken är åtgärdad.
+_probe_reached_upstream = False
 _probe_status_logged = None  # senast loggade status — övergångar loggas, tillstånd inte
 # Döda tokens (värde → orsak): en kandidat som fått 401/403 skickas ALDRIG
 # igen. Det var mönstret bakom 429-straffrutan: nyckelringstokenen dog på
@@ -977,7 +983,8 @@ def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
     global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _probe_cooldown_until
+        _probe_cooldown_until, _probe_reached_upstream
+    _probe_reached_upstream = False
     _load_probe_state()
     if time.time() < _probe_cooldown_until:
         # I nedkylning efter 429 — statusen står kvar på backoff-strängen.
@@ -996,7 +1003,7 @@ def _probe_limits():
 
 def _probe_limits_locked():
     global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _probe_cooldown_until
+        _probe_cooldown_until, _probe_reached_upstream
     candidates = _read_oauth_candidates()
     if not candidates:
         _probe_status = "no_claude_oauth_token"
@@ -1020,6 +1027,7 @@ def _probe_limits_locked():
         # an active scoped weekly pool (for example Fable) and its reset
         # explicitly.
         try:
+            _probe_reached_upstream = True
             with urllib.request.urlopen(
                     _usage_request(candidate), timeout=15) as resp:
                 usage = json.load(resp)
@@ -1141,7 +1149,8 @@ def _probe_interval_s():
 
 def _refresh_limits():
     global _last_limits, _last_probed, _limits_refreshing, \
-        _probe_failure_streak, _probe_status_logged, _probe_status
+        _probe_failure_streak, _probe_status_logged, _probe_status, \
+        _probe_reached_upstream
     try:
         refreshed = _probe_limits()
     except Exception as e:
@@ -1163,7 +1172,13 @@ def _refresh_limits():
                  _probe_status_logged or "start", _probe_status)
         _probe_status_logged = _probe_status
     with _limits_lock:
-        _probe_failure_streak = 0 if refreshed else _probe_failure_streak + 1
+        if refreshed:
+            _probe_failure_streak = 0
+        elif _probe_reached_upstream:
+            _probe_failure_streak += 1
+        # Annars: proben kom aldrig till nätet. Takten ska stå kvar på
+        # grundintervallet så att en ny token syns inom en probe i stället
+        # för efter en utglesning ingen upstream bett om.
         _last_limits = refreshed
         _last_probed = time.monotonic()
         _limits_refreshing = False
@@ -2440,6 +2455,13 @@ class Handler(BaseHTTPRequestHandler):
                            if self.github_monitor is not None
                            else disabled_snapshot()),
                 "claudeProbe": _probe_status,
+                # Statussträngen är ett SPARAT omdöme, inte en läsning nu.
+                # Utan åldern läses "token_expired_20:54" som ett aktuellt
+                # besked när det i själva verket kan vara en kvart gammalt
+                # — och GET / rör aldrig proben, så det är först en
+                # /api/tokens som omprövar saken.
+                "claudeProbeAgeS": (None if _last_probed == 0.0 else
+                                    int(time.monotonic() - _last_probed)),
                 "ratelimitHeaders": _probe_headers,
                 "unknownRateLimitBuckets": _probe_unknown_buckets,
                 # GET / parsas aldrig av skärmen — fält kan läggas till
