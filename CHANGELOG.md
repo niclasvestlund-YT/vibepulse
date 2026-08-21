@@ -89,7 +89,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   budget: 192 writes when nothing happens, 400 at the ceiling, so two
   machines on one mailbox still fit. The arithmetic is in
   `tools/relay/README.md`, and a whole simulated day is a test.
-  **Redeploy the Worker (`wrangler deploy`) for the read-side half.**
+  **The read-side half needs a redeploy: `tools/relay/deploy.sh`** (new —
+  it runs the Worker's tests, prints which commit is going up, and smoke-
+  tests the mailbox afterwards, because a Worker that was never redeployed
+  looks exactly like one that was).
 
 - Open networks were refused in silence. Every network was applied with
   `threshold.authmode = WIFI_AUTH_WPA2_PSK`, so an open café or airport

@@ -40,8 +40,11 @@ the happy path. Derived-from-the-clock fields are not news. **Guards:**
 the countdowns at read time; `publisher.py` carries the full table and a
 `WriteBudget`; `test_publisher.py` simulates a whole day against the budget
 and `test.mjs` holds the index and ageing rules. **Watch for:** the Worker
-needs `wrangler deploy` for any of it to be true — the running one keeps
-the old code, the same gap the tokenserver's launchd service has.
+needs a redeploy for any of it to be true — the running one keeps the old
+code, the same gap the tokenserver's launchd service has, and it has no
+symptom at all. `tools/relay/deploy.sh` exists to close that gap; the
+two-fetch countdown check in `tools/relay/README.md` proves which code is
+actually serving.
 
 ## 2026-08-19 · `sdkconfig.defaults` did not migrate the existing LVGL pool
 

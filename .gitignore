@@ -20,3 +20,7 @@ sdkconfig.old
 platform/fonts/src/
 # Enhetens LAN-IP for tools/ota-flash.sh — miljospecifik, aldrig delad.
 .ota-device
+
+# Brevlådans wrangler.toml bär KV-namespacets id — miljospecifikt precis som
+# .ota-device, och skapas lokalt enligt tools/relay/README.md.
+tools/relay/wrangler.toml

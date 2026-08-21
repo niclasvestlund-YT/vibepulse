@@ -24,8 +24,12 @@ EOF
 
 python3 -c "import secrets; print(secrets.token_hex(32))"   # the secret
 wrangler secret put RELAY_SECRET            # paste the secret
-wrangler deploy                             # prints the workers.dev URL
+./deploy.sh                                 # prints the workers.dev URL
 ```
+
+`wrangler.toml` stays on your disk — it carries the KV namespace id, which
+is environment-specific the same way `.ota-device` is, so it is gitignored
+rather than committed.
 
 Your mailbox address is then:
 
@@ -50,6 +54,40 @@ python3 tools/tokenserver/tokenserver.py --publish "https://.../u/<secret>"
 #define TK_VIBEPULSE_RELAY_URL "https://.../u/<secret>"
 ```
 
+## Redeploy after changing `worker.js`
+
+```sh
+tools/relay/deploy.sh
+```
+
+Nothing you change in `worker.js` is true until this runs. The deployed
+Worker keeps serving the old code, and there is no symptom that says so —
+the mailbox answers exactly as before, and the only trace is a free tier
+that empties like it always did. That gap has bitten this project twice
+already (the tokenserver's launchd service, the archived OTA build), so
+the script runs `test.mjs` before it deploys and prints which commit is
+going up.
+
+`deploy.sh` also smoke-tests the mailbox afterwards, using the URL already
+in your `secrets.h`. That proves it still answers — not that the new code
+is the one answering. **To prove that**, fetch `/api/tokens` twice a little
+over a minute apart, with no publish in between (the heartbeat is 15 min,
+so most minutes are quiet):
+
+```sh
+curl -s https://.../u/<secret>/api/tokens | grep -o '"claudeWeekResetMin":[0-9]*'
+sleep 70
+curl -s https://.../u/<secret>/api/tokens | grep -o '"claudeWeekResetMin":[0-9]*'
+```
+
+The new Worker ages the countdown and answers one minute lower. The old one
+answers the same number twice.
+
+The write side lives in the service, not here: after changing
+`tools/tokenserver/publisher.py`, restart it
+(`launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`) or the
+running process keeps the old cadence.
+
 ## Verify
 
 ```sh
@@ -57,8 +95,8 @@ curl -s https://.../u/<secret>/api/tokens | head -c 200   # JSON within 30 s
 ```
 
 `wrangler tail` shows requests live. The `test.mjs` suite
-(`node --test tools/relay/test.mjs`) holds the merge logic still without
-any Cloudflare involvement.
+(`node --test tools/relay/test.mjs`) holds the merge logic, the publisher
+index and the countdown ageing still without any Cloudflare involvement.
 
 ## Free-tier arithmetic
 
@@ -103,6 +141,6 @@ read time**, not republished every minute — that is what lets the heartbeat
 be 15 minutes without the glass drifting. And the mailbox reads at most
 eight publishers per endpoint; a ninth is stored but never served.
 
-**Changed the Worker?** `wrangler deploy` again — the running Worker keeps
+**Changed the Worker?** `tools/relay/deploy.sh` — the running Worker keeps
 the old code, and the arithmetic above is only true once the deployed
 version is the one in this directory.
