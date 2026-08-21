@@ -102,9 +102,16 @@ Then:
   but the quota probe still presents itself as claude-cli. Changing that
   risks the probe against an undocumented endpoint and needs a live test —
   a deliberate, separate decision, not an oversight.
-- **Write economy is load-bearing.** Send-on-change + 5-minute heartbeat
-  keeps two publishers comfortably inside KV's 1 000 free writes/day.
-  A "simpler" always-send loop would exhaust it by mid-afternoon.
+- **Write economy is load-bearing, and so is read economy.** KV's free
+  tier bills write, delete *and list* from the same 1 000/day bucket —
+  only reads get the generous 100 000. Send-on-change was never enough on
+  its own: the payload carries countdowns that tick by themselves, so
+  "changed" was true every minute, and the read path listed once per poll
+  on top of that. Both are fixed and both are now bounded arithmetic
+  rather than a hope — the tables live in `tools/relay/README.md` and
+  `tools/tokenserver/publisher.py`. A "simpler" always-send loop, or a
+  `list()` back in the read path, would exhaust the day by mid-morning
+  (it did, 2026-08-21).
 - **The mailbox is disposable.** It holds only the latest few JSON bodies.
   Delete the Worker and the panel falls back to LAN-only behaviour;
   rotate the secret by redeploying and updating two places.

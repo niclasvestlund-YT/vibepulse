@@ -30,12 +30,81 @@
  *                      det den senast publicerande som syns.
  *   /api/github      — nyast vinner. Båda frågar samma publika API.
  *
+ * KV:S FRIA NIVÅ HAR TVÅ HINKAR, inte en: 100 000 läsningar per dygn, men
+ * bara 1 000 skrivningar OCH 1 000 LISTNINGAR (Cloudflares eget prisblad
+ * räknar write/delete/list i samma klass). Läsvägen fick därför aldrig
+ * lista: panelen pollar /api/tokens och /api/github var 30:e sekund och
+ * /api/max-tracker var 5:e minut, vilket är ~6 000 listningar per dygn mot
+ * en gräns på 1 000 — kontot slog i taket före lunch (2026-08-21, se
+ * docs/lessons.md). I stället håller varje endpoint ett eget INDEX över
+ * sina avsändare: en läsning i stället för en listning, och en skrivning
+ * bara när avsändarskaran faktiskt ändras.
+ *
  * Deploy: se README.md i den här katalogen. KV-bindningen heter VIBEPULSE.
  */
 
 const ENDPOINTS = ["/api/tokens", "/api/max-tracker", "/api/github"];
 const MAX_BODY_BYTES = 64 * 1024; // largest honest payload is ~8 kB
 const MAX_PUBLISHERS = 8;
+
+/*
+ * Indexnyckeln ligger under ett eget prefix, inte under "<endpoint>:", så
+ * den aldrig kan förväxlas med en avsändare som råkar heta något visst:
+ * avsändarnamn saneras till [A-Za-z0-9._-] och kan alltså aldrig innehålla
+ * ett "/", medan varje indexnyckel gör det.
+ */
+const INDEX_PREFIX = "index:";
+
+function indexKey(endpoint) {
+  return INDEX_PREFIX + endpoint;
+}
+
+/*
+ * Indexets enda regel, som ren funktion så testerna kan hålla den stilla.
+ * Returnerar den nya listan när den behöver skrivas, annars null — "null =
+ * ingen skrivning" är hela poängen med hinkarna ovan.
+ *
+ * En FULL brevlåda tar inte in fler. Det är ett medvetet val framför att
+ * knuffa ut den äldsta: en utknuffad avsändare hade lagts till igen vid
+ * nästa POST, knuffat ut nästa, och så vidare — en skrivstorm i exakt den
+ * hink vi försöker skydda. Gränsen är densamma som läsningen alltid haft
+ * (åtta dokument), bara ärlig nu: avsändare nio syns inte på glaset.
+ */
+export function indexAdd(names, publisher) {
+  const clean = (names || []).filter((n) => typeof n === "string" && n !== "");
+  if (clean.includes(publisher)) return null;
+  if (clean.length >= MAX_PUBLISHERS) return null;
+  return clean.concat([publisher]);
+}
+
+/*
+ * Nedräkningarna åldras vid LÄSNING, inte vid publicering.
+ *
+ * Payloaden bär "minuter kvar till nollning" (claudeWeekResetMin, ...) —
+ * ett tal som tickar av sig självt en gång i minuten utan att något
+ * verkligt hänt. Publiceras det som en förändring blir det 1 440 skrivningar
+ * per dygn av ren aritmetik. Brevlådan vet när dokumentet kom in, så den kan
+ * i stället räkna ned det själv: exakt samma subtraktion tjänsten hade gjort,
+ * och en nedräkning som stämmer på sekunden hur sällan avsändaren än hör av
+ * sig. En nedräkning som passerat noll blir null — samma svar tjänsten ger
+ * när fönstret redan nollats (och firmwarens reset_or_null visar streck).
+ */
+export function ageCountdowns(body, agedSeconds) {
+  if (!(agedSeconds > 0)) return body;
+  const minutes = Math.round(agedSeconds / 60);
+  if (minutes <= 0) return body;
+
+  let out = null;
+  for (const key of Object.keys(body)) {
+    if (!key.endsWith("ResetMin")) continue;
+    const value = body[key];
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (out === null) out = { ...body };
+    const left = value - minutes;
+    out[key] = left > 0 ? left : null;
+  }
+  return out === null ? body : out;
+}
 
 /*
  * Sammanslagningen för /api/tokens, som ren funktion så testerna kan hålla
@@ -94,14 +163,57 @@ function parsePath(url, secret) {
   return ENDPOINTS.includes(endpoint) ? endpoint : null;
 }
 
-async function readDocs(env, endpoint) {
+async function readIndex(env, endpoint) {
+  const raw = await env.VIBEPULSE.get(indexKey(endpoint));
+  if (raw === null) return null;
+  try {
+    const names = JSON.parse(raw);
+    if (!Array.isArray(names)) return null;
+    return names.filter((n) => typeof n === "string" && n !== "");
+  } catch {
+    return null; /* trasigt index behandlas som inget index */
+  }
+}
+
+/*
+ * Den enda listningen som finns kvar, och den körs bara när ett index
+ * saknas: en brevlåda som fylldes före den här versionen, eller en vars
+ * indexnyckel gått förlorad. POST:en nedan skriver då indexet, och det
+ * blir den sista listning endpointen någonsin gör.
+ */
+async function listPublishers(env, endpoint) {
   const listed = await env.VIBEPULSE.list({ prefix: `${endpoint}:` });
+  return listed.keys.map((k) => k.name.slice(endpoint.length + 1))
+                    .filter((n) => n !== "")
+                    .slice(0, MAX_PUBLISHERS);
+}
+
+async function notePublisher(env, endpoint, publisher) {
+  let names = await readIndex(env, endpoint);
+  if (names === null) names = await listPublishers(env, endpoint);
+  const updated = indexAdd(names, publisher);
+  if (updated === null) return;
+  // KV-läsningar cachas i upp till 60 s vid kanten, så den allra första
+  // avsändaren kan hinna skriva indexet ett par gånger innan skrivningen
+  // syns för nästa POST. Det är begränsat till en handfull skrivningar en
+  // gång per endpoints livstid — priset för att slippa listningen helt.
+  await env.VIBEPULSE.put(indexKey(endpoint), JSON.stringify(updated));
+}
+
+async function readDocs(env, endpoint, nowSeconds) {
+  let names = await readIndex(env, endpoint);
+  if (names === null) names = await listPublishers(env, endpoint);
+
   const docs = [];
-  for (const key of listed.keys.slice(0, MAX_PUBLISHERS)) {
-    const raw = await env.VIBEPULSE.get(key.name);
-    if (!raw) continue;
+  for (const name of names.slice(0, MAX_PUBLISHERS)) {
+    const raw = await env.VIBEPULSE.get(`${endpoint}:${name}`);
+    if (!raw) continue; /* en avsändare i indexet utan dokument: hoppa */
     try {
-      docs.push(JSON.parse(raw));
+      const doc = JSON.parse(raw);
+      if (doc && typeof doc.body === "object" && doc.body !== null &&
+          typeof doc.receivedAt === "number")
+        doc.body = ageCountdowns(doc.body, nowSeconds - doc.receivedAt);
+      docs.push(doc);
     } catch {
       /* ett korrupt dokument tystar inte de andra */
     }
@@ -136,11 +248,20 @@ export default {
       const doc = JSON.stringify({ receivedAt: Date.now() / 1000,
                                    publisher, body });
       await env.VIBEPULSE.put(`${endpoint}:${publisher}`, doc);
+      // Indexet får aldrig fälla en publicering som redan landat: ett
+      // misslyckat 200-svar hade fått avsändaren att skicka om SAMMA kropp
+      // vid nästa tick och betala en skrivning till. Utan index läser
+      // GET:en via listningen tills nästa POST lyckas skriva det.
+      try {
+        await notePublisher(env, endpoint, publisher);
+      } catch {
+        /* nästa POST försöker igen */
+      }
       return new Response("ok", { status: 200 });
     }
 
     if (request.method === "GET") {
-      const docs = await readDocs(env, endpoint);
+      const docs = await readDocs(env, endpoint, Date.now() / 1000);
       const merged = endpoint === "/api/tokens" ? mergeTokens(docs)
                                                 : newestBody(docs);
       if (merged === null)

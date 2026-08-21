@@ -21,6 +21,28 @@ point at the backlog item.
 
 ---
 
+## 2026-08-21 · The relay's free-tier arithmetic counted the wrong operations
+
+**What happened:** Cloudflare mailed "50 % of the daily Workers KV free
+tier" at 07:19, five hours into the UTC day — a pace that empties the
+allowance before lunch, after which the mailbox returns 429 and the panel
+shows dashes away from home. **Root cause:** two miscounts in the same
+arithmetic. The read path called `KV.list()` once per GET, and list is
+billed in the same 1 000/day class as writes, not the 100 000 read class —
+the panel's three pollers alone are ~6 000 listings/day. And "send only on
+change" was never true for `/api/tokens`: the payload carries `*ResetMin`
+countdowns that tick down by themselves, so every minute looked like a
+change, floor 1 440 writes/day before anything real moved. **The rule:**
+count every KV operation class a path touches, and bound the cost by
+construction — a floor, a heartbeat and a daily budget — not by describing
+the happy path. Derived-from-the-clock fields are not news. **Guards:**
+`tools/relay/worker.js` keeps a publisher index (no list on reads) and ages
+the countdowns at read time; `publisher.py` carries the full table and a
+`WriteBudget`; `test_publisher.py` simulates a whole day against the budget
+and `test.mjs` holds the index and ageing rules. **Watch for:** the Worker
+needs `wrangler deploy` for any of it to be true — the running one keeps
+the old code, the same gap the tokenserver's launchd service has.
+
 ## 2026-08-19 · `sdkconfig.defaults` did not migrate the existing LVGL pool
 
 **What happened:** v0.6 froze on any full redraw while the LVGL task held

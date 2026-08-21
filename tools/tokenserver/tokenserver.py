@@ -79,7 +79,7 @@ if __package__:
     from .github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from .interactions import InteractionStore
     from .max_tracker import MaxTrackerStore
-    from .publisher import Publisher
+    from .publisher import DAILY_WRITE_BUDGET, Publisher
     from .quota_cache import CachedQuota, QuotaCache
     from .usage_history import Forecast, UsageHistory
     from .vibepulse_config import (
@@ -102,7 +102,7 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from interactions import InteractionStore
     from max_tracker import MaxTrackerStore
-    from publisher import Publisher
+    from publisher import DAILY_WRITE_BUDGET, Publisher
     from quota_cache import CachedQuota, QuotaCache
     from usage_history import Forecast, UsageHistory
     from vibepulse_config import (
@@ -3126,8 +3126,9 @@ def main():
         })
         relay_publisher.start()
         log.info("publicerar siffror till reläet som \"%s\" (ändringar + "
-                 "hjärtslag var 5:e minut; agentstatus och Needs You "
-                 "publiceras ALDRIG)", machine)
+                 "hjärtslag, högst %d skrivningar per dygn — se "
+                 "publisher.py; agentstatus och Needs You publiceras "
+                 "ALDRIG)", machine, DAILY_WRITE_BUDGET)
 
     backfill_stop = threading.Event()
     backfill_thread = threading.Thread(

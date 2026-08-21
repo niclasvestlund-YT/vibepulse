@@ -74,6 +74,23 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **The relay burned through Cloudflare's KV free tier before lunch.** Half
+  the daily allowance was gone five hours into the day, and past 100 % the
+  mailbox answers 429 — dashes on the glass exactly when you are away from
+  home and the relay is the only source. Two miscounts, both fixed: the
+  read path called `KV.list()` on every GET, and list is billed in the same
+  1 000/day class as writes (~6 000/day from the panel's pollers alone), so
+  the Worker keeps a per-endpoint publisher index and reads it instead; and
+  "publish only on change" was never true for `/api/tokens`, whose
+  `*ResetMin` countdowns tick down by themselves and made every minute look
+  like news. The Worker now ages those countdowns when it serves them —
+  more accurate than republishing them, not less — and the publisher's day
+  is bounded by a floor per endpoint, a heartbeat above it and a hard daily
+  budget: 192 writes when nothing happens, 400 at the ceiling, so two
+  machines on one mailbox still fit. The arithmetic is in
+  `tools/relay/README.md`, and a whole simulated day is a test.
+  **Redeploy the Worker (`wrangler deploy`) for the read-side half.**
+
 - Open networks were refused in silence. Every network was applied with
   `threshold.authmode = WIFI_AUTH_WPA2_PSK`, so an open café or airport
   network — the common case on the road — was rejected before it was tried,

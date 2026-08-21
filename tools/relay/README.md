@@ -62,8 +62,47 @@ any Cloudflare involvement.
 
 ## Free-tier arithmetic
 
-The publisher sends only on change plus a 5-minute heartbeat
-(`tools/tokenserver/publisher.py`), which lands at a few hundred KV writes
-per day against the free tier's 1 000. The panel's reads (2 880/day at a
-30 s cadence) sit far under the 100 000-read allowance. Two publishers
-double the writes; still comfortable.
+KV's free tier is **three** allowances, not one, and only one of them is
+generous:
+
+| operation | free per day | what uses it |
+|---|---|---|
+| read | 100 000 | every panel poll, plus the publisher index |
+| write | 1 000 | every publish |
+| **list** | **1 000** | *nothing, now* — see below |
+
+The `list` line is the one that bites. Cloudflare bills write, delete and
+list in a single class, so a listing costs the same scarce operation a
+write does. The read path used to list once per GET, and the panel polls
+`/api/tokens` and `/api/github` every 30 s and `/api/max-tracker` every
+5 min: **~6 000 listings a day against an allowance of 1 000.** The Worker
+keeps a per-endpoint publisher index instead, so a GET is reads only, and
+the only listing left runs once per endpoint on a mailbox that predates
+the index.
+
+The write side is bounded by construction rather than by hope
+(`tools/tokenserver/publisher.py` carries the full table):
+
+| endpoint | floor between sends | heartbeat | quiet day |
+|---|---|---|---|
+| `/api/tokens` | 180 s | 15 min | 96 |
+| `/api/max-tracker` | 600 s | 30 min | 48 |
+| `/api/github` | 600 s | 30 min | 48 |
+
+That is 192 writes on a day where nothing happens, and a hard daily budget
+of **400** where a busy day stops — so two machines publishing to the same
+mailbox land at 800 of the 1 000. A third does not fit the free tier; give
+each a lower budget or move to the paid plan.
+
+Reads land at ~12 000/day for one publisher (an index read plus a document
+read per poll), comfortably inside 100 000.
+
+Two things the numbers depend on, worth knowing if you change either: the
+countdowns (`claudeWeekResetMin` and friends) are aged by the **Worker at
+read time**, not republished every minute — that is what lets the heartbeat
+be 15 minutes without the glass drifting. And the mailbox reads at most
+eight publishers per endpoint; a ninth is stored but never served.
+
+**Changed the Worker?** `wrangler deploy` again — the running Worker keeps
+the old code, and the arithmetic above is only true once the deployed
+version is the one in this directory.

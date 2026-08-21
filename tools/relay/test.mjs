@@ -1,14 +1,17 @@
 /*
- * Brevlådans sammanslagning, hållen stilla med node --test (ingen
+ * Brevlådans rena funktioner, hållna stilla med node --test (ingen
  * Cloudflare behövs): färskast vinner PER POOL för /api/tokens, nyast
  * dokument för resten, och döda/korrupta dokument tystar aldrig de andra.
+ * Dessutom de två som håller den fria nivån: avsändarindexet (som ersatte
+ * listningen i läsvägen) och nedräkningarnas åldrande vid läsning.
  *
  * Körs av test/run.sh när node finns; CI:s tokenserver-jobb kör den via
  * "node --test tools/relay/".
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeTokens, newestBody } from "./worker.js";
+import { ageCountdowns, indexAdd, mergeTokens, newestBody }
+  from "./worker.js";
 
 test("en ensam avsändare passerar orörd", () => {
   const doc = { receivedAt: 100, publisher: "mac",
@@ -68,4 +71,71 @@ test("newestBody är nyast mottagna, inget annat", () => {
   const b = { receivedAt: 200, publisher: "pc", body: { streak: 1 } };
   assert.equal(newestBody([a, b]).streak, 1);
   assert.equal(newestBody([]), null);
+});
+
+/* ---------------------------------------------------------------- index --
+ * Indexet finns för att läsvägen aldrig ska lista. Det enda som får kosta
+ * en skrivning är en avsändare som faktiskt är ny.
+ */
+
+test("en ny avsändare ger en lista att skriva", () => {
+  assert.deepEqual(indexAdd(null, "mac"), ["mac"]);
+  assert.deepEqual(indexAdd([], "mac"), ["mac"]);
+  assert.deepEqual(indexAdd(["mac"], "pc"), ["mac", "pc"]);
+});
+
+test("en känd avsändare kostar ingen skrivning", () => {
+  assert.equal(indexAdd(["mac", "pc"], "mac"), null);
+  assert.equal(indexAdd(["mac"], "mac"), null);
+});
+
+test("ett fullt index tar inte in fler — ingen skrivstorm", () => {
+  const full = ["a", "b", "c", "d", "e", "f", "g", "h"];
+  assert.equal(indexAdd(full, "i"), null,
+               "att knuffa ut den äldsta hade lagt tillbaka den vid nästa " +
+               "POST och skrivit i all evighet");
+  assert.equal(indexAdd(full, "c"), null);
+});
+
+test("skräp i indexet städas bort i stället för att skrivas vidare", () => {
+  assert.deepEqual(indexAdd(["mac", "", null, 7, "pc"], "ny"),
+                   ["mac", "pc", "ny"]);
+});
+
+/* ------------------------------------------------------- nedräkningarna --
+ * Åldrandet är samma subtraktion tjänsten hade gjort, gjord vid läsning i
+ * stället för vid publicering: det är det som gör att avsändaren kan tiga
+ * i en kvart utan att glaset ljuger om när kvoten nollas.
+ */
+
+test("nedräkningar räknas ned med dokumentets ålder", () => {
+  const body = { v: 2, claudeWeekResetMin: 600, codexSessionResetMin: 45 };
+  const aged = ageCountdowns(body, 10 * 60);
+  assert.equal(aged.claudeWeekResetMin, 590);
+  assert.equal(aged.codexSessionResetMin, 35);
+  assert.equal(body.claudeWeekResetMin, 600, "originalet ska inte muteras");
+});
+
+test("en färsk kropp lämnas orörd", () => {
+  const body = { v: 2, claudeWeekResetMin: 600 };
+  assert.equal(ageCountdowns(body, 0), body);
+  assert.equal(ageCountdowns(body, 25), body, "under en halv minut = noll");
+  assert.equal(ageCountdowns(body, -5), body, "klockan bakåt rör ingenting");
+});
+
+test("en passerad nedräkning blir null, inte ett negativt tal", () => {
+  const aged = ageCountdowns({ claudeSessionResetMin: 5 }, 20 * 60);
+  assert.equal(aged.claudeSessionResetMin, null);
+});
+
+test("bara ResetMin åldras — stämplar och prognoser är absoluta", () => {
+  const body = {
+    v: 2,
+    claudeWeekPct: 73,
+    weekObservedAt: 1_700_000_000,
+    claudeForecastAt: 1_700_003_600,
+    claudeForecastOffsetMin: -540,
+    claudeSessionResetMin: null,
+  };
+  assert.deepEqual(ageCountdowns(body, 30 * 60), body);
 });
