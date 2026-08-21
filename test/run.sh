@@ -283,6 +283,7 @@ cd ..
   tools.tokenserver.test_interaction_relay_integration \
   tools.tokenserver.test_interaction_relay_crypto \
   tools.tokenserver.test_publisher \
+  tools.tokenserver.test_install_launchd \
   tools.tokenserver.test_smoke -v
 
 # Båda molntjänsterna hålls av Node. CI måste ha Node 22; en lokal

@@ -2,8 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Tokenmätarens tjänst som launchd-agent: startar vid inloggning och
-     återstartas om den dör. Antar repot i ~/Torget och användaren
-     niclasvestlund; redigera bägge sökvägarna annars.
+     återstartas om den dör.
+
+     DEN HÄR FILEN ÄR EN MALL, inte något att kopiera rakt av. Sökvägarna
+     nedan är från när projektet hette Torget (~/Torget, användaren
+     niclasvestlund) och stämmer bara av en slump. Kopierar man den till en
+     klon som ligger någon annanstans pekar WorkingDirectory fel och
+     `launchctl kickstart` svarar "Could not find service" utan att säga
+     varför. Mallen saknar dessutom relä-flaggan (den skrivs inte ut här:
+     ett XML-kommentar får inte innehålla två bindestreck i rad), så en
+     tjänst installerad härifrån serverar LAN men publicerar ALDRIG till
+     reläet — och inget felar, brevlådan blir bara gammal.
+
+     Kör i stället tools/tokenserver/install-launchd.sh, som fyller i
+     sökvägarna från sin egen plats och tar relä-URL:en som argument
+     (macOS-motsvarigheten till install-windows-task.ps1).
      Interaction providers and detail come from the tokenserver's saved config;
      keep them out of ProgramArguments so setup changes cannot go stale here.
      Loggen bor i ~/Library/Logs (överlever omstart, syns i Konsol-appen;

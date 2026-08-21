@@ -48,6 +48,13 @@ secret store, in your `secrets.h`, and in the service's start command.
 python3 tools/tokenserver/tokenserver.py --publish "https://.../u/<secret>"
 ```
 
+That publishes until the terminal closes. To make it survive a logout, pass
+the same URL to the autostart installer instead —
+`tools/tokenserver/install-launchd.sh --publish "https://.../u/<secret>"` on
+macOS, `install-windows-task.ps1 -PublishUrl ...` on Windows. Installing the
+autostart *without* the URL is the quiet failure: the panel keeps working on
+the LAN, and only the mailbox goes stale.
+
 **Panel side** (`secrets.h`, then build + OTA once):
 
 ```c

@@ -8,10 +8,9 @@
 > `--claude-plan {pro,max5x,max20x}` and/or `--codex-plan
 > {plus,pro}` to show a plan badge on the Max Tracker pages; both flags are
 > optional and purely cosmetic (a display label, never used in any
-> percentage math). Autostart on login: `cp se.torget.tokenserver.plist
-> ~/Library/LaunchAgents/ && launchctl load
-> ~/Library/LaunchAgents/se.torget.tokenserver.plist` (edit the path inside
-> if the repo isn't at `~/Torget`). Default privacy contract: only percentages
+> percentage math). Autostart on login: `tools/tokenserver/install-launchd.sh`
+> on macOS (add `--publish "<your relay URL>"` to also fill the relay
+> mailbox), `install-windows-task.ps1` on Windows. Default privacy contract: only percentages
 > and counts are served. Optional local interactions can transiently serve
 > bounded detail, but prompts, commands and file contents are not stored.
 > Full details below in Swedish. Your agent translates.
@@ -426,12 +425,26 @@ routern — byter IP:t adress står skärmen med streck tills secrets.h flashas 
 ## Autostart via launchd
 
 ```
-cp se.torget.tokenserver.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/se.torget.tokenserver.plist
+tools/tokenserver/install-launchd.sh --publish "https://<brevlådan>/u/<hemlighet>"
+tools/tokenserver/install-launchd.sh              # utan relä, bara LAN
+tools/tokenserver/install-launchd.sh --uninstall
 ```
 
-Plisten antar att repot bor i `~/Torget` och användaren `niclasvestlund` —
-redigera sökvägarna annars. Loggen hamnar i
+Skriptet fyller i sökvägarna från sin egen plats, så agenten kan aldrig
+peka på en katalog som inte finns, och tar relä-URL:en som argument.
+Kör man om det utan `--publish` ärvs URL:en från den redan installerade
+agenten — att tappa den vid en ominstallation vore exakt det tysta
+bortfallet skriptet finns för att undvika.
+
+`se.torget.tokenserver.plist` i den här katalogen är MALLEN skriptet bygger
+på. Kopiera den inte för hand: sökvägarna är från när projektet hette
+Torget, och den saknar `--publish`. En agent installerad så serverar LAN men
+publicerar aldrig — inget felar, brevlådan blir bara gammal.
+
+Efter en ändring i `tools/tokenserver/` räcker det med
+`launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`; svarar den
+"Could not find service" är agenten inte installerad, kör skriptet ovan.
+Loggen hamnar i
 `~/Library/Logs/torget-tokenserver.log` (syns i Konsol-appen, överlever
 omstart; servern roterar den själv vid start om den vuxit förbi ~5 MB, med
 svansen bevarad i `.old`). Raderna har tidsstämplar och loggar övergångar,

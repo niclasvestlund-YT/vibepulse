@@ -94,6 +94,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   tests the mailbox afterwards, because a Worker that was never redeployed
   looks exactly like one that was).
 
+- **macOS autostart never published to the relay, and pointed at a path
+  that has not existed since the rename.** `se.torget.tokenserver.plist` is
+  a template with `/Users/niclasvestlund/Torget/...` baked in and no
+  `--publish` flag, and the README said to `cp` it into `~/LaunchAgents`.
+  Follow that and you get an agent launchd cannot find (`Could not find
+  service`, with nothing saying why) or, if the path happens to match, one
+  that serves the LAN and quietly never fills the mailbox. New
+  `tools/tokenserver/install-launchd.sh` is the macOS counterpart to
+  `install-windows-task.ps1`: it fills the paths in from its own location,
+  takes the relay URL as an argument, and inherits the URL from an already
+  installed agent so a re-run cannot silently stop the publishing.
+  `--print` renders the plist without touching anything, which is what
+  `test_install_launchd.py` reads.
+
 - Open networks were refused in silence. Every network was applied with
   `threshold.authmode = WIFI_AUTH_WPA2_PSK`, so an open café or airport
   network — the common case on the road — was rejected before it was tried,
