@@ -8,6 +8,12 @@ Two failures this file exists to prevent, both silent by nature:
     ~/Torget path in the checked-in template produces on any other clone.
   * An agent installed WITHOUT the relay URL. Nothing errors: the panel
     keeps working on the LAN and only the mailbox quietly goes stale.
+  * An agent that kept the relay URL but dropped the other flags.
+    ``--github-repo``, ``--claude-plan``, ``--codex-plan`` and ``--plan``
+    are CLI-only too -- none of them is saved in the service's config -- so
+    an installer that only understood ``--publish`` would darken the GitHub
+    page, both plan badges and the value multiple's denominator, and say
+    nothing about it.
 
 The script is plain sh + awk + sed, so ``--print`` renders the plist it
 would install without touching the machine, and these tests read that.
@@ -98,6 +104,84 @@ class InheritTests(unittest.TestCase):
             self._install_into(home, "--publish", awkward)
             args = render(home=home)["ProgramArguments"]
             self.assertEqual(args[args.index("--publish") + 1], awkward)
+
+
+REAL_WORLD = [
+    "--github-repo", "niclasvestlund-YT/vibepulse",
+    "--claude-plan", "max20x", "--codex-plan", "pro",
+    "--plan", "claude=200", "--plan", "codex=100",
+    "--publish", RELAY,
+]
+
+
+@unittest.skipIf(sys.platform == "win32", "sh installer is macOS/Linux only")
+class PassThroughTests(unittest.TestCase):
+    def test_everything_after_a_double_dash_is_kept_verbatim(self):
+        args = render("--", *REAL_WORLD)["ProgramArguments"]
+        self.assertEqual(args[3:], REAL_WORLD)
+
+    def test_a_bare_rerun_keeps_flags_the_installer_never_heard_of(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            agents = Path(home) / "Library" / "LaunchAgents"
+            agents.mkdir(parents=True)
+            (agents / f"{LABEL}.plist").write_bytes(subprocess.run(
+                ["/bin/sh", str(SCRIPT), "--print", "--",
+                 *REAL_WORLD, "--some-future-flag", "42"],
+                capture_output=True, check=True,
+                env={**os.environ, "HOME": home}).stdout)
+            self.assertEqual(render(home=home)["ProgramArguments"][3:],
+                             REAL_WORLD + ["--some-future-flag", "42"])
+
+    def test_publish_replaces_rather_than_duplicates(self):
+        args = render("--publish", "https://new.example/u/z", "--",
+                      *REAL_WORLD)["ProgramArguments"]
+        self.assertEqual(args.count("--publish"), 1)
+        self.assertEqual(args[args.index("--publish") + 1],
+                         "https://new.example/u/z")
+        self.assertIn("--github-repo", args)
+        self.assertEqual(args.count("--plan"), 2)
+
+
+@unittest.skipIf(sys.platform == "win32", "sh installer is macOS/Linux only")
+class FromRunningTests(unittest.TestCase):
+    """--from-running must capture a service, not anything naming the file.
+
+    The first version matched on `pgrep -f tokenserver.py` alone and
+    happily swallowed the test's own shell -- whose command line merely
+    mentioned the filename -- writing the entire script into the plist as
+    the service's arguments.
+    """
+
+    def test_a_process_that_only_mentions_the_name_is_not_a_service(self):
+        import tempfile
+        script = "true tokenserver.py"   # names it; is not python
+        with tempfile.TemporaryDirectory() as home:
+            proc = subprocess.Popen(["/bin/sh", "-c", f"{script}; sleep 30"])
+            try:
+                done = subprocess.run(
+                    ["/bin/sh", str(SCRIPT), "--print", "--from-running"],
+                    capture_output=True,
+                    env={**os.environ, "HOME": home})
+                self.assertNotEqual(done.returncode, 0, done.stdout[:400])
+                self.assertIn(b"hittar ingen", done.stderr)
+            finally:
+                proc.kill()
+                proc.wait()
+
+    def test_a_real_service_is_captured_verbatim(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            fake = Path(home) / "tokenserver.py"
+            fake.write_text("import time; time.sleep(30)\n")
+            proc = subprocess.Popen([sys.executable, "-u", str(fake),
+                                     *REAL_WORLD])
+            try:
+                plist = render("--from-running", home=home)
+                self.assertEqual(plist["ProgramArguments"][3:], REAL_WORLD)
+            finally:
+                proc.kill()
+                proc.wait()
 
 
 class TemplateTests(unittest.TestCase):

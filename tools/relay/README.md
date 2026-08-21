@@ -6,7 +6,10 @@ rationale and what may/may not cross it: [docs/relay.md](../../docs/relay.md).
 
 ## Deploy (once, ~10 minutes)
 
-Requires a free Cloudflare account and `wrangler` (`npm i -g wrangler`).
+Requires a free Cloudflare account and Node. `wrangler` may be installed
+globally (`npm i -g wrangler`); `deploy.sh` otherwise runs it through
+`npx` at the same version `tools/interaction-relay` pins, so both
+mailboxes deploy with the same tool.
 
 ```sh
 cd tools/relay
@@ -51,9 +54,10 @@ python3 tools/tokenserver/tokenserver.py --publish "https://.../u/<secret>"
 That publishes until the terminal closes. To make it survive a logout, pass
 the same URL to the autostart installer instead —
 `tools/tokenserver/install-launchd.sh --publish "https://.../u/<secret>"` on
-macOS, `install-windows-task.ps1 -PublishUrl ...` on Windows. Installing the
-autostart *without* the URL is the quiet failure: the panel keeps working on
-the LAN, and only the mailbox goes stale.
+macOS (or `--from-running` to adopt a service you already started by hand,
+flags and all), `install-windows-task.ps1 -PublishUrl ...` on Windows.
+Installing the autostart *without* the URL is the quiet failure: the panel
+keeps working on the LAN, and only the mailbox goes stale.
 
 **Panel side** (`secrets.h`, then build + OTA once):
 

@@ -425,16 +425,30 @@ routern — byter IP:t adress står skärmen med streck tills secrets.h flashas 
 ## Autostart via launchd
 
 ```
-tools/tokenserver/install-launchd.sh --publish "https://<brevlådan>/u/<hemlighet>"
-tools/tokenserver/install-launchd.sh              # utan relä, bara LAN
+# kör tjänsten redan för hand? ta över den precis som den står:
+tools/tokenserver/install-launchd.sh --from-running
+
+# eller ange flaggorna själv — allt efter -- går till tokenservern:
+tools/tokenserver/install-launchd.sh -- --github-repo ägare/repo \
+    --claude-plan max20x --publish "https://<brevlådan>/u/<hemlighet>"
+
+tools/tokenserver/install-launchd.sh              # ärver befintliga flaggor
 tools/tokenserver/install-launchd.sh --uninstall
 ```
 
 Skriptet fyller i sökvägarna från sin egen plats, så agenten kan aldrig
-peka på en katalog som inte finns, och tar relä-URL:en som argument.
-Kör man om det utan `--publish` ärvs URL:en från den redan installerade
-agenten — att tappa den vid en ominstallation vore exakt det tysta
-bortfallet skriptet finns för att undvika.
+peka på en katalog som inte finns, och använder den `python3` som ligger i
+PATH vid installationen (som absolut sökväg — launchd ärver inte PATH, och
+en tjänst som kör på Homebrews python ska inte tyst flyttas till systemets).
+
+ALLA flaggor följer med, inte bara `--publish`. `--github-repo`,
+`--claude-plan`, `--codex-plan` och `--plan` är CLI-only precis som
+`--publish`: inget av dem sparas i tjänstens config, så en ominstallation
+som tappade dem hade släckt GitHub-sidan, planmärkena och värdemultipelns
+nämnare utan att något felade. Därför ärvs hela argumentsvansen när man kör
+om skriptet utan att ange något, och `--from-running` tar den ordagrant från
+processen som kör (som dessutom slipper skriva relä-hemligheten en gång
+till).
 
 `se.torget.tokenserver.plist` i den här katalogen är MALLEN skriptet bygger
 på. Kopiera den inte för hand: sökvägarna är från när projektet hette

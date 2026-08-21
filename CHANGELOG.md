@@ -120,11 +120,17 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   service`, with nothing saying why) or, if the path happens to match, one
   that serves the LAN and quietly never fills the mailbox. New
   `tools/tokenserver/install-launchd.sh` is the macOS counterpart to
-  `install-windows-task.ps1`: it fills the paths in from its own location,
-  takes the relay URL as an argument, and inherits the URL from an already
-  installed agent so a re-run cannot silently stop the publishing.
-  `--print` renders the plist without touching anything, which is what
-  `test_install_launchd.py` reads.
+  `install-windows-task.ps1`: it fills the paths in from its own location
+  and carries the service's **whole** argument list, not just the relay URL.
+  `--github-repo`, `--claude-plan`, `--codex-plan` and `--plan` are CLI-only
+  too, so an installer that only knew `--publish` would have darkened the
+  GitHub page, both plan badges and the value multiple's denominator without
+  a word. Arguments come from `-- <flags>`, from `--from-running` (adopt a
+  service already started by hand, verbatim, without retyping the relay
+  secret), or inherited whole from the installed agent. `--print` renders
+  the plist without touching anything, which is what
+  `test_install_launchd.py` reads — including that `--from-running` refuses
+  a process that merely *names* `tokenserver.py` instead of running it.
 
 - Open networks were refused in silence. Every network was applied with
   `threshold.authmode = WIFI_AUTH_WPA2_PSK`, so an open café or airport

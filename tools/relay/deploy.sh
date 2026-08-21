@@ -20,10 +20,21 @@
 set -eu
 cd "$(dirname "$0")"
 
-command -v wrangler >/dev/null 2>&1 || {
-  echo "hittar inte wrangler — npm i -g wrangler" >&2
+# wrangler behöver inte vara globalt installerad. Den andra molntjänsten i
+# repot (tools/interaction-relay) kör den redan via npx mot en pinnad
+# version; samma pinne används här så båda brevlådorna deployas med samma
+# verktyg oavsett vad som råkar ligga i PATH.
+WRANGLER_PIN=4.124.0
+if command -v wrangler >/dev/null 2>&1; then
+  WRANGLER="wrangler"
+elif command -v npx >/dev/null 2>&1; then
+  WRANGLER="npx --yes wrangler@$WRANGLER_PIN"
+else
+  echo "hittar varken wrangler eller npx — installera Node, eller" >&2
+  echo "npm i -g wrangler" >&2
   exit 1
-}
+fi
+echo "wrangler: $WRANGLER"
 
 [ -f wrangler.toml ] || {
   echo "ingen wrangler.toml här — den bor bara på din disk (KV-namespacets" >&2
@@ -48,7 +59,7 @@ else
 fi
 echo "deployar worker.js ($STATE)"
 
-wrangler deploy
+$WRANGLER deploy
 
 # Röktest: svarar brevlådan fortfarande? URL:en bor redan i secrets.h, samma
 # ställe OTA-sändaren hämtar sin token från. Saknas den hoppas steget över —
