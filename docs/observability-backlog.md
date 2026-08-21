@@ -343,16 +343,24 @@ pointing at [observability.md](observability.md); correct the README
 claim; mention the monitor command + power caveat.
 
 ### OBS-24 · CI runs a fraction of the local gate
-`ci · M · open`
+`ci · M · done (2026-08-21)` — a `host-gate` CI job now runs
+`./test/run.sh --skip-js` on every push: all the C test binaries, the
+wiring/capacity tests, the Mbed TLS crypto vectors (compiled against a
+sparse clone of the IDF-pinned sources, same `IDF_VERSION` as the
+firmware job), and the SDL landmark captures under `xvfb-run`. The JS
+suites stay in their own jobs (the Worker suite in the npm-cached
+interaction-relay job, the relay mailbox one in the tokenserver job) —
+that skip is the gate's only CI difference. The tokenserver module list moved to
+`test/tokenserver-suite.txt`, shared by `run.sh` and CI, with a
+completeness guard in `run.sh` (every `tools/tokenserver/test_*.py` must
+be listed). The false "tracked as a follow-up issue" claim is gone from
+the `ci.yml` header. Original problem, for the record:
 CI = five tokenserver unittest modules + an ESP-IDF build. The 11 C test
 binaries, visual landmarks, hardware-registry checks, and skill-contract
 tests in `./test/run.sh` never run in CI — every parser-regression class
 from the lessons log is guarded only on the maintainer's Mac. The
 `ci.yml` header says the full gate "is tracked as a follow-up issue";
 **no such issue exists**.
-**Fix:** run `./test/run.sh` in CI minus the SDL-dependent captures
-(or with `xvfb`), and actually file the lane-3 issue so the claim in
-`ci.yml` is true.
 
 ### OBS-25 · No linting anywhere
 `hygiene · S · open`
@@ -416,7 +424,24 @@ underlying fallthrough is not.
 dated suffix dropped) and keep the map for exceptions only — then a new
 model is styled on arrival instead of on the next hand edit.
 
-### OBS-28 · Pin logging config on purpose
+### OBS-31 · A codex wire test is RST-flaky on Windows CI
+`test · S · open`
+`test_every_json_post_route_rejects_text_plain_before_parsing`
+(`test_codex_interactions.py`, subtest `/api/codex/permission`) failed
+once on the `windows-latest` tokenserver job with `None != 415` — the
+client read **no HTTP status at all** — then passed on the same commit
+in the re-run (run 32452343376, attempts 1→2; the run before, with
+identical tokenserver code, was green too). The shape is the classic
+WinSock race: a server that rejects early and closes without draining
+the request body can trigger a connection reset before the client reads
+the response — Linux and macOS deliver the buffered response anyway,
+Windows drops it. One occurrence in the suite's first two Windows runs
+of the full host-gate era; worth a signature here before it becomes a
+"CI is unreliable" impression.
+**Fix:** make the rejection path drain (or the test client tolerate one
+retry of) the unread body on early 4xx, and reproduce under load on a
+Windows box before trusting either — a wire test asserting a security
+boundary must not be loosened blindly.
 `firmware · S · open`
 `sdkconfig.defaults` deliberately pins flash, PSRAM, LVGL, and mbedTLS
 with reasoned comments — but nothing about logging: default level,

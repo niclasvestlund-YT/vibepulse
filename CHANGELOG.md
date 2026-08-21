@@ -72,6 +72,24 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   reason codes were already in the serial log; a shelf gadget nobody has a
   cable to could not show them.
 
+### Changed
+
+- **CI now runs the whole host gate**, not a subset (OBS-24). A `host-gate`
+  job executes the same `./test/run.sh` as the bench on every push — the C
+  test binaries, wiring and capacity tests, the Mbed TLS crypto vectors
+  (against a sparse clone of the IDF-pinned sources) and the SDL landmark
+  captures under `xvfb-run`. Only the JS suites are skipped (`--skip-js`);
+  their own jobs still run them — the Worker suite npm-cached in the
+  interaction-relay job, the relay mailbox test in the tokenserver job.
+  The tokenserver module list
+  moved to `test/tokenserver-suite.txt` — one list shared by `run.sh` and
+  CI, with a completeness guard so a new test module cannot silently stay
+  outside the gate (the PR #11 lesson, made structural). Two
+  `test_vibepulse_codex_plugin.py` cases learned Linux along the way: the
+  doctor-probe expectation now resolves `/bin/sh` (a dash symlink on
+  Debian-family runners), and the descendant-kill assertion accepts a
+  SIGKILLed orphan that pid 1 has not reaped yet.
+
 ### Fixed
 
 - **The relay burned through Cloudflare's KV free tier before lunch.** Half

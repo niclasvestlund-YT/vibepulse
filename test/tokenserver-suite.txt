@@ -1,0 +1,23 @@
+# Tokenservermodulerna för python -m unittest — EN lista, läst av både
+# test/run.sh och .github/workflows/ci.yml. Två listor som gled isär var
+# så en grön CI dolde en NameError i PR #11 (test_interactions saknades);
+# därför bor listan här och ingen annanstans. Rader som börjar med # är
+# kommentarer; konsumenterna kör tr -d '\r' | grep -v '^#' före bruk.
+tools.tokenserver.test_github_monitor
+tools.tokenserver.test_tokenserver
+tools.tokenserver.test_agent_status
+tools.tokenserver.test_usage_history
+tools.tokenserver.test_quota_cache
+tools.tokenserver.test_max_tracker
+tools.tokenserver.test_value_meter
+tools.tokenserver.test_update_prices
+tools.tokenserver.test_codex_usage
+tools.tokenserver.test_vibepulse_config
+tools.tokenserver.test_codex_interactions
+tools.tokenserver.test_interactions
+tools.tokenserver.test_interaction_relay
+tools.tokenserver.test_interaction_relay_integration
+tools.tokenserver.test_interaction_relay_crypto
+tools.tokenserver.test_publisher
+tools.tokenserver.test_install_launchd
+tools.tokenserver.test_smoke

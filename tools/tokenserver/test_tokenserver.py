@@ -3307,17 +3307,22 @@ class ArgumentParsingTests(unittest.TestCase):
 
 class RepositoryRunnerTests(unittest.TestCase):
     def test_default_runner_includes_config_and_codex_route_suites_once(self):
-        runner = (Path(__file__).resolve().parents[2] / "test" / "run.sh")
-        contents = runner.read_text(encoding="utf-8")
+        # The module list lives in test/tokenserver-suite.txt (one line per
+        # module), shared by test/run.sh and CI so the two can never drift.
+        root = Path(__file__).resolve().parents[2]
+        suite = (root / "test" / "tokenserver-suite.txt").read_text(
+            encoding="utf-8")
+        modules = [line.strip() for line in suite.splitlines()
+                   if line.strip() and not line.startswith("#")]
 
-        self.assertEqual(
-            contents.count("tools.tokenserver.test_vibepulse_config"), 1)
-        self.assertEqual(
-            contents.count("tools.tokenserver.test_codex_interactions"), 1)
-        self.assertEqual(
-            contents.count("tools.tokenserver.test_interaction_relay "), 1)
-        self.assertEqual(contents.count(
-            "tools.tokenserver.test_interaction_relay_integration"), 1)
+        for module in ("tools.tokenserver.test_vibepulse_config",
+                       "tools.tokenserver.test_codex_interactions",
+                       "tools.tokenserver.test_interaction_relay",
+                       "tools.tokenserver.test_interaction_relay_integration"):
+            self.assertEqual(modules.count(module), 1, module)
+
+        runner = (root / "test" / "run.sh").read_text(encoding="utf-8")
+        self.assertIn("test/tokenserver-suite.txt", runner)
 
 
 class InteractionRelayConfigTests(unittest.TestCase):

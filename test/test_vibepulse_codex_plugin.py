@@ -2130,7 +2130,11 @@ class RelaySetupTests(unittest.TestCase):
                 urlopen=lambda *_args, **_kwargs:
                     BytesResponse(healthy_diagnostics()),
                 stdout=output), 1)
-            self.assertEqual(runner.calls[0][0][0:2], ["/bin/sh", "-c"])
+            # The doctor probes the interpreter through Path.resolve(), so
+            # the expectation must resolve too: /bin/sh is itself on macOS
+            # but a symlink to dash on Debian-family CI runners.
+            self.assertEqual(runner.calls[0][0][0:2],
+                             [str(Path("/bin/sh").resolve()), "-c"])
             self.assertEqual(runner.calls[1][0], ["/codex", "--version"])
             self.assertTrue(all(call[1]["timeout"] <= 15
                                 and call[1]["shell"] is False
@@ -2925,6 +2929,28 @@ class RelaySetupTests(unittest.TestCase):
             self.assertEqual(setup.load_config(path), original)
             self.assertNotIn("PASS", output.getvalue())
 
+    def assert_process_tree_killed(self, pid):
+        # SIGKILL lands immediately, but reaping belongs to the reaper: on
+        # Linux an orphan killed via killpg stays a kill-proof zombie until
+        # pid 1 (or the nearest subreaper) collects it, and os.kill(pid, 0)
+        # succeeds on zombies. Killed therefore means: gone, or a zombie
+        # that can never run again — never a schedulable process.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            try:
+                stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+                state = stat.rsplit(")", 1)[1].split()[0]
+            except (OSError, IndexError):
+                state = ""
+            if state == "Z":
+                return
+            time.sleep(0.05)
+        self.fail(f"descendant {pid} still schedulable after tree kill")
+
     @unittest.skipUnless(os.name == "posix", "POSIX process-group behavior")
     def test_timeout_kills_descendant_that_inherits_output_pipes(self):
         setup = load_setup()
@@ -2944,8 +2970,7 @@ class RelaySetupTests(unittest.TestCase):
                 elapsed = time.monotonic() - started
             self.assertLess(elapsed, 2.0)
             descendant_pid = int(pid_path.read_text(encoding="utf-8"))
-            with self.assertRaises(ProcessLookupError):
-                os.kill(descendant_pid, 0)
+            self.assert_process_tree_killed(descendant_pid)
             recovered = setup._invoke(
                 [sys.executable, "-c", "print('after-tree-kill')"],
                 setup._AUTO)

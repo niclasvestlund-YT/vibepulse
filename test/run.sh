@@ -1,8 +1,21 @@
 #!/bin/sh
-# Hosttesterna för Torgets rena kärnor. Kräver clang (Xcode CLT) samt
-# Python 3.11+ med PyYAML 6.0.3 och Pillow 12.3.0.
+# Hosttesterna för Torgets rena kärnor. Kräver en C-kompilator (clang via
+# Xcode CLT, eller gcc) samt Python 3.11+ med PyYAML 6.0.3 och Pillow 12.3.0.
+#
+# Flaggor:
+#   --skip-js  hoppa över Node-lanen (relay + interaction-relay). Enbart för
+#              CI:s host-gate-jobb — CI kör dem i egna jobb (Worker-sviten
+#              npm-cachad). Lokalt körs hela grinden flagglöst: ./test/run.sh
 set -e
 cd "$(dirname "$0")"
+
+SKIP_JS=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-js) SKIP_JS=1 ;;
+    *) echo "Okänd flagga: $arg (känd: --skip-js)" >&2; exit 2 ;;
+  esac
+done
 
 PYTHON_BIN=${PYTHON_BIN:-python3}
 if ! "$PYTHON_BIN" -c \
@@ -266,29 +279,25 @@ cd ..
 "$PYTHON_BIN" test/test_token_body_capacity.py
 "$PYTHON_BIN" test/test_agent_status_body_capacity.py
 "$PYTHON_BIN" -m unittest tools.test_hardware_registry -v
+# Tokenservermodulerna listas i test/tokenserver-suite.txt — EN lista,
+# delad med CI:s tokenserverjobb (PR #11-läxan: två listor gled isär och
+# grön CI dolde en NameError). Vakten: varje test_*.py i tools/tokenserver/
+# måste stå i listan, så en ny modul inte tyst kan hamna utanför grinden.
+for suite_file in tools/tokenserver/test_*.py; do
+  suite_module="tools.tokenserver.$(basename "$suite_file" .py)"
+  if ! grep -qxF "$suite_module" test/tokenserver-suite.txt; then
+    echo "ERROR: $suite_module saknas i test/tokenserver-suite.txt" >&2
+    exit 1
+  fi
+done
 "$PYTHON_BIN" -m unittest \
-  tools.tokenserver.test_github_monitor \
-  tools.tokenserver.test_tokenserver \
-  tools.tokenserver.test_agent_status \
-  tools.tokenserver.test_usage_history \
-  tools.tokenserver.test_quota_cache \
-  tools.tokenserver.test_max_tracker \
-  tools.tokenserver.test_value_meter \
-  tools.tokenserver.test_update_prices \
-  tools.tokenserver.test_codex_usage \
-  tools.tokenserver.test_vibepulse_config \
-  tools.tokenserver.test_codex_interactions \
-  tools.tokenserver.test_interactions \
-  tools.tokenserver.test_interaction_relay \
-  tools.tokenserver.test_interaction_relay_integration \
-  tools.tokenserver.test_interaction_relay_crypto \
-  tools.tokenserver.test_publisher \
-  tools.tokenserver.test_install_launchd \
-  tools.tokenserver.test_smoke -v
+  $(tr -d '\r' < test/tokenserver-suite.txt | grep -v '^#') -v
 
 # Båda molntjänsterna hålls av Node. CI måste ha Node 22; en lokal
 # firmwareutvecklare utan Node får ett ärligt hopp i stället för falskt grönt.
-if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+if [ "$SKIP_JS" = 1 ]; then
+  echo "OBS: --skip-js — relayernas JS-tester körs i CI:s egna jobb"
+elif command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
   node --test tools/relay/test.mjs
   (cd tools/interaction-relay && npm ci && npm test && npm run typecheck)
 elif [ -n "${CI:-}" ]; then

@@ -1,6 +1,9 @@
-# CI: the headless lanes that are rock solid on hosted runners.
-# Lane 3 (the full host gate incl. SDL landmark captures) needs display
-# plumbing on CI and is tracked as a follow-up issue.
+# CI: the whole repository gate, not a subset. The host-gate job runs the
+# same ./test/run.sh a maintainer runs at the bench — C binaries, wiring
+# tests, the Mbed TLS crypto vectors (against the exact IDF-pinned sources)
+# and the SDL landmark captures under xvfb (OBS-24). Only the JS suites are
+# skipped inside run.sh (--skip-js): the npm-cached interaction-relay job
+# runs the Worker suite, and the tokenserver job runs the relay mailbox one.
 name: CI
 
 on:
@@ -18,7 +21,47 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # One version for the firmware build AND the Mbed TLS sources the host
+  # gate's C crypto vectors compile against — bump them together, or the
+  # vectors stop guarding the bytes the panel actually ships.
+  IDF_VERSION: v5.5.2
+
 jobs:
+  host-gate:
+    name: Host gate (./test/run.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned host-gate Python dependencies
+        run: >
+          python -m pip install -r requirements-dev.txt
+          -r requirements-interaction-relay.txt
+      - name: Install SDL2, Ninja and xvfb for the simulator landmarks
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          libsdl2-dev ninja-build xvfb
+      # The vectors test compiles the panel's AES-GCM/HKDF boundary against
+      # ESP-IDF's bundled Mbed TLS. Only those sources are needed — no
+      # xtensa toolchain — so a sparse clone (~70 MB, seconds) suffices.
+      - name: Fetch ESP-IDF's pinned Mbed TLS for the C crypto vectors
+        run: |
+          git clone --depth 1 --branch "$IDF_VERSION" --filter=blob:none \
+            --sparse https://github.com/espressif/esp-idf.git \
+            "$RUNNER_TEMP/esp-idf-mbedtls"
+          git -C "$RUNNER_TEMP/esp-idf-mbedtls" sparse-checkout set \
+            components/mbedtls
+          git -C "$RUNNER_TEMP/esp-idf-mbedtls" submodule update --init \
+            --depth 1 components/mbedtls/mbedtls
+      - name: Run the full host gate under a virtual display
+        env:
+          IDF_PATH: ${{ runner.temp }}/esp-idf-mbedtls
+        run: xvfb-run -a ./test/run.sh --skip-js
+
   interaction-relay:
     name: Encrypted interaction Worker
     runs-on: ubuntu-latest
@@ -51,27 +94,12 @@ jobs:
       - name: Run tokenserver unit tests
         shell: bash
         run: |
-          # Same seventeen modules as test/run.sh, same order. The lists
-          # drifting apart is how a green CI hid a runtime NameError in
-          # PR #11 (test_interactions was missing) — keep them in sync.
+          # The module list lives in test/tokenserver-suite.txt, shared with
+          # test/run.sh. Two lists drifting apart is how a green CI hid a
+          # runtime NameError in PR #11 (test_interactions was missing) —
+          # now one list exists and run.sh guards its completeness.
           python -m unittest \
-            tools.tokenserver.test_github_monitor \
-            tools.tokenserver.test_tokenserver \
-            tools.tokenserver.test_agent_status \
-            tools.tokenserver.test_usage_history \
-            tools.tokenserver.test_quota_cache \
-            tools.tokenserver.test_max_tracker \
-            tools.tokenserver.test_value_meter \
-            tools.tokenserver.test_update_prices \
-            tools.tokenserver.test_codex_usage \
-            tools.tokenserver.test_vibepulse_config \
-            tools.tokenserver.test_codex_interactions \
-            tools.tokenserver.test_interactions \
-            tools.tokenserver.test_interaction_relay \
-            tools.tokenserver.test_interaction_relay_integration \
-            tools.tokenserver.test_interaction_relay_crypto \
-            tools.tokenserver.test_publisher \
-            tools.tokenserver.test_smoke -v
+            $(tr -d '\r' < test/tokenserver-suite.txt | grep -v '^#') -v
       - name: Run relay mailbox merge tests
         shell: bash
         run: node --test tools/relay/test.mjs
@@ -92,6 +120,6 @@ jobs:
       - name: Build with ESP-IDF 5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.2
+          esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
           command: idf.py build

@@ -193,11 +193,15 @@ succeeding, their pages keep reading as live (OBS-09). Until fixed, a
 
 ### 6. CI logs
 
-GitHub Actions, two lanes: the six tokenserver unittest modules, and an
-ESP-IDF firmware build. **The local gate `./test/run.sh` is much bigger**
-(11 C test binaries, visual landmarks, hardware registries, skill
-contracts) and none of that extra coverage runs in CI (OBS-24). Green CI
-+ red `./test/run.sh` is possible; the local gate is the authority.
+GitHub Actions, four jobs: a `host-gate` job that runs the same
+`./test/run.sh` as the bench (C test binaries, visual landmarks under
+xvfb, crypto vectors, hardware registries, skill contracts, the
+tokenserver suite), the jobs covering the JS suites it skips via
+`--skip-js` (the npm-cached interaction-relay job runs the Worker suite;
+the tokenserver matrix job runs the relay mailbox one), and an ESP-IDF
+firmware build. Since OBS-24 closed (2026-08-21), red
+`./test/run.sh` means red CI too — the remaining gap is only
+platform-shaped (CI is Linux; macOS-only quirks still need the bench).
 
 ## Known bad signatures
 

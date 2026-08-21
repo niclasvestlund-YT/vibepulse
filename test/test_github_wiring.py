@@ -101,7 +101,10 @@ class GitHubWiringTests(unittest.TestCase):
         self.assertIn("TK_GITHUB_SCREEN_ENABLED 1", workflow)
         self.assertIn("TK_GITHUB_NOTIFICATIONS_ENABLED 1", workflow)
         self.assertIn("TK_GITHUB_SOUND_ENABLED 1", workflow)
-        self.assertIn("tools.tokenserver.test_github_monitor", workflow)
+        # CI's tokenserver module list lives in the shared suite file.
+        self.assertIn("test/tokenserver-suite.txt", workflow)
+        self.assertIn("tools.tokenserver.test_github_monitor",
+                      read("test/tokenserver-suite.txt"))
 
 
 if __name__ == "__main__":

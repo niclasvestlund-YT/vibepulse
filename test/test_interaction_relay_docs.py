@@ -101,12 +101,18 @@ assert "tools/interaction-relay" in workflow
 assert "requirements-interaction-relay.txt" in workflow
 for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
     assert runner in workflow, f"tokenserver CI is missing {runner}"
+# The module list CI runs lives in test/tokenserver-suite.txt, shared with
+# test/run.sh — assert the modules there, and that CI consumes the list.
+assert "test/tokenserver-suite.txt" in workflow, (
+    "tokenserver CI must consume the shared suite list"
+)
+suite = read("test/tokenserver-suite.txt")
 for module in (
     "test_vibepulse_config", "test_codex_interactions",
     "test_interaction_relay", "test_interaction_relay_integration",
     "test_interaction_relay_crypto",
 ):
-    assert f"tools.tokenserver.{module}" in workflow, (
+    assert f"tools.tokenserver.{module}" in suite, (
         f"tokenserver CI is missing {module} from the host contract"
     )
 
