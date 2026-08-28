@@ -230,11 +230,12 @@ hungriest and needs its own measured budget before anyone trusts 12 rows there.
    board, each validated against that board's registry dimensions, emitting
    `vibepulse_layout.<board>.generated.h`. The existing validator carries over
    for free — it already refuses off-screen and overlapping geometry.
-3. Author the four new profiles. This is design work, not typing:
-   - **466 round** — nearest sibling to today's, but the corners are gone. The
-     inscribed square is only ~329 px; the Max Tracker's 417 px grid and the
-     456 px pager row both fall outside a circle of radius 233. Expect a real
-     redesign of the tracker and the pager, not a shrink.
+3. Derive, then correct, the four new profiles. §3a below shows how much
+   a uniform scale actually buys per board; what it never buys is these:
+   - **466 round** — nearest sibling to today's, but the corners are gone.
+     See §3a: a uniform 0.971 shrink puts 8 of 13 element groups off the
+     glass, all of them full-width rows near the top or bottom edge. The fix
+     is narrowing rows toward the poles, not shrinking the page.
    - **368 × 448 portrait** — narrower and shorter. The 164 px hero must drop
      (≈120–128 px), the 4-column stat row wants 2 × 2, the Max Tracker needs
      fewer weeks or a smaller cell.
@@ -243,6 +244,59 @@ hungriest and needs its own measured budget before anyone trusts 12 rows there.
      both assume portrait-ish balance.
    - **240 × 536 strip** (if the 1.9 is the 1.91) — not a rescale. Probably one
      metric per screen and a different page model.
+
+### 3a · "Can we just scale the UI?"
+
+Worth answering with numbers, because it is the difference between authoring
+four layouts and generating them.
+
+**Not at runtime.** LVGL can affine-transform an object tree, but every font
+here is a pre-rasterised 4-bpp bitmap; scaling them resamples glyph bitmaps
+and the result is soft on a panel whose whole premise is a crisp number read
+from across a room. `.claude/skills/iterating-esp32-amoled-ui/SKILL.md` already
+forbids it in as many words ("Do not scale or recolor at runtime"), and a
+per-frame transform is exactly the wrong thing to add to a pipeline that is
+already watched for DMA starvation.
+
+**Yes at build time.** Regenerating the layout tokens *and* the fonts at a
+scale factor keeps every glyph native and costs nothing at runtime. Font size
+is not the obstacle people assume: all 24 rasters together are **~200 KB** of
+glyph data, and with one binary per board only that board's set links in.
+
+How far a uniform fit-inside scale actually gets each board:
+
+| Board | Panel | Aspect | Fit scale | Hero px | Panel area used | What scaling alone leaves |
+|---|---|---|---|---|---|---|
+| 2.16 | 480 × 480 | 1.00 | 1.000 | 164 | 100 % | baseline |
+| 1.75 | 466 × 466 | 1.00 | 0.971 | 159 | 100 % | geometry fits; **the round corners do not** |
+| 1.8 | 368 × 448 | 0.82 | 0.767 | 126 | 82 % | 80 px of dead height |
+| 2.41 | 600 × 450 | 1.33 | 0.938 | 154 | 75 % | **150 px of unused width** on the biggest panel |
+| 1.91? | 240 × 536 | 0.45 | 0.500 | 82 | 45 % | 296 px of dead height — not a layout, a different product |
+
+And on the 1.75 specifically, scaling every current element by 0.971 and
+testing each corner against the 233 px radius:
+
+| Element | Verdict at 466 round |
+|---|---|
+| percent hero, progress bar, pager dots, Max Tracker legend | fit (4–26 px margin) |
+| quota row, reset row, Max Tracker grid, Max Tracker stat row | **off glass by 4–34 px** |
+| content safe area, provider row, status block, header hairline, Wi-Fi badge | **off glass by 39–69 px** |
+
+Every failure is a full-width row sitting near the top or bottom pole, where a
+circle is narrowest — including the Wi-Fi badge at (426, 28), which lands 53 px
+outside the glass entirely. That is a systematic, fixable shape: a round panel
+needs a **circular** safe area, so row width must taper with distance from
+centre, and corner-anchored badges must move inboard.
+
+**So the plan is scale-then-reflow, not scale-or-author.** Give `design.py` a
+mode that derives a candidate profile from the 480 reference by scale factor,
+emit it, then hand-correct against the validator and the circle gate (WP7).
+That turns WP3 from "author four layouts" into "review four generated layouts",
+and it is roughly: 1.75 ≈ 90 % generated, 1.8 ≈ 60 %, 2.41 ≈ 40 %, 1.91 ≈ 0 %.
+
+This also argues for one extra token in the profile — `VP_SAFE_SHAPE`
+(`rect` | `circle`) — so the validator can check the right envelope instead of
+assuming a rectangle.
 
 ### WP4 · Fonts for the new profiles
 
