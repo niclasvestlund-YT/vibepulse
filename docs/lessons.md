@@ -21,6 +21,22 @@ point at the backlog item.
 
 ---
 
+## 2026-08-30 · One STALE label hid three different broken links
+
+**What happened:** repeated incidents were troubleshot from scratch because
+Claude-source failure, an old tokenserver checkout, and a live host with a
+stalled panel HTTP path all rendered as `STALE`. The Codex `SessionStart` hook
+existed but only injected static usage guidance; it measured no health. A
+wall-powered watchdog restart also left no evidence without USB serial.
+**The rule:** classify source, host provenance, and glass transport before
+choosing a repair, and make recovery observable on its normal power source.
+**Guards:** plugin 0.1.7 performs a bounded loopback startup classification,
+pins the matching tokenserver source fingerprint, and tests every fault class;
+firmware reports an exact content-free recovery-boot marker that tokenserver
+accepts only after two LAN polls. **Watch for:** treating the marker as a
+physical PASS, or expecting an already running Codex task to load a newly
+released plugin without update plus a new task.
+
 ## 2026-08-30 · A disconnect-only watchdog could not clear wedged HTTP state
 
 **What happened:** the first recovery candidate cleared `STALE` after boot,

@@ -213,6 +213,16 @@ future recovery risk. Start a new Claude Code CLI turn to refresh that saved
 fallback. The service notices locally within 15 seconds; it does not need a
 restart, call an undocumented refresh endpoint, or mutate the refresh token.
 
+Plugin `0.1.7` also performs a read-only startup classification from fixed
+loopback endpoints. `PROVIDER DATA STALE` means investigate Claude/Codex;
+`DEVICE PATH STALE` means provider data is already fresh and the next checks
+are panel power, network, discovery, and firmware; `SERVICE VERSION DRIFT`
+means the installed plugin and live tokenserver are from different checkout
+generations. `SERVER UNAVAILABLE` means the local service did not answer the
+sub-second probe. The hook never restarts a service, refreshes a credential,
+or treats its own timeout as approval. Run doctor plus smoke for the detailed
+evidence, then start a new Codex task after an explicit repair.
+
 Then check the endpoints the screen polls:
 
 ```sh
@@ -227,9 +237,11 @@ Optional plan badges: `--claude-plan {pro,max5x,max20x}`, `--codex-plan
 For autostart on login, see [../tools/tokenserver/README.md](../tools/tokenserver/README.md).
 Treat the launchd plist, Codex plugin, MCP registration, and marketplace as four
 separate absolute-path integrations: setup being enabled is not enough. They
-must resolve to one clean, durable checkout. After a move, reload launchd with
-`bootout` + `bootstrap`, run doctor and smoke against the configured port, and
-start a new Codex task. The smoke result must identify the expected live
+must resolve to one clean, durable checkout. On macOS, use
+`python3 tools/vibepulse_macos_service.py validate` and then the explicit
+`install` command instead of copying a hardcoded plist between worktrees. The
+installer reloads with `bootout` + `bootstrap`; then run doctor and smoke
+against the configured port and start a new Codex task. The smoke result must identify the expected live
 revision and source fingerprint; old log warnings are not new failures unless
 their timestamps are after the reload.
 Windows installers should follow the complete
@@ -455,7 +467,7 @@ workflow, consent model and troubleshooting live in [ota.md](ota.md).
 | Letters become boxes in project/status text | The UI selected an uppercase-only font | Use `plex_ui_21` for mixed-case/localized text and verify with `RÄKSMÖRGÅS` |
 | Panel shows stale quota / empty Fable weekly in the morning | The readable OAuth copy expired/rejected, or an upstream 429 penalty is active | Check `claudeProbe`, `claudeCredential`, `claudeLocalUsage`, and `/api/tokens` together. The named Fable/Opus pool requires a live OAuth source. Start a new Claude Code CLI turn, then allow the automatic 15-second local recheck; restart is not the first recovery step |
 | Panel shows stale while powered from the computer USB port | The Mac port cannot feed WiFi TX bursts — fetches time out | Expected on Mac USB; run from wall power. Logs stay valid on Mac USB, data does not |
-| Panel becomes stale again after initially working; host and relay are fresh and the panel still answers ping | Wi-Fi association survived while device-side application HTTP stopped | Current relay-configured firmware recycles Wi-Fi after 60 s, wakes the quota task, waits for a new IP before retrying, and restarts once after another 45 s without a real success. Cold boot stays disarmed to prevent outage loops. Power-cycle older firmware, then update; do not call the incident fixed until recent direct polling and a second physical question pass beyond the stale window |
+| Panel becomes stale again after initially working; host and relay are fresh and the panel still answers ping | Wi-Fi association survived while device-side application HTTP stopped | Current relay-configured firmware recycles Wi-Fi after 60 s, wakes the quota task, waits for a new IP before retrying, and restarts once after another 45 s without a real success. Cold boot stays disarmed to prevent outage loops. A recovered boot appears as `interactions.panel.httpStallRecoveryBoot: true` after confirmed polling, so wall-powered recovery remains observable without serial. Power-cycle older firmware, then update; do not call the incident fixed until recent direct polling and a second physical question pass beyond the stale window |
 | Numbers stay fresh but questions from this computer never appear; several VibePulse computers share the LAN | LAN discovery can bind the panel to a different healthy tokenserver because DNS-SD result order is not host intent | Enable the end-to-end encrypted interaction relay on every participating host and in this panel's firmware. Direct LAN remains a fast path, but question delivery no longer depends on which Mac/PC answered discovery first |
 | OTA boots always show state 0xffffffff and the health gate always rests | `sdkconfig` generated before the rollback line landed in `sdkconfig.defaults` (defaults only apply on fresh generation) | `grep BOOTLOADER_APP_ROLLBACK sdkconfig` — set `=y`, rebuild, and USB-flash ONCE (the bootloader carries the logic; OTA never writes it) |
 | No `/dev/cu.usbmodem*` or Windows `COM` port | Not in download mode | Hold BOOT, tap RESET, release BOOT |

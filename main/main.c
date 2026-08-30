@@ -18,6 +18,7 @@
 #include "freertos/task.h"
 
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -47,6 +48,7 @@
 #include "rotation.h"
 #include "secrets.h"
 #include "torget.h"
+#include "vibepulse_recovery.h"
 #include "wifi_creds.h"
 #include "wifi_setup.h"
 #include "wifi_setup_ui.h"
@@ -88,6 +90,15 @@ static EventGroupHandle_t s_net_events;
 /* Declared with the platform state because the public recovery hook reads it
  * before the Wi-Fi implementation section below. */
 static atomic_bool s_sta_paused;
+
+/* RTC no-init memory survives esp_restart(). The complemented marker makes a
+ * random power-on value fail closed. app_main also requires ESP_RST_SW before
+ * exposing it, so brownouts and ordinary power cycles can never masquerade
+ * as the bounded VibePulse recovery. */
+#define TG_HTTP_RECOVERY_MAGIC 0x56505231u
+RTC_NOINIT_ATTR static uint32_t s_http_recovery_magic;
+RTC_NOINIT_ATTR static uint32_t s_http_recovery_magic_inverse;
+static bool s_http_recovery_booted;
 
 /* Lock-free presentation input only. The network task owns radio sampling;
  * LVGL merely reads the last 0..3 value through torget_wifi_signal_bars(). */
@@ -140,7 +151,13 @@ void torget_net_restart_http_stall(void) {
     return;
   }
   ESP_LOGE(TAG, "HTTP-vakten eskalerar till kontrollerad omstart");
+  s_http_recovery_magic = TG_HTTP_RECOVERY_MAGIC;
+  s_http_recovery_magic_inverse = ~TG_HTTP_RECOVERY_MAGIC;
   esp_restart();
+}
+
+bool torget_net_http_stall_recovery_booted(void) {
+  return s_http_recovery_booted;
 }
 
 uint8_t torget_wifi_signal_bars(void) {
@@ -826,9 +843,19 @@ void app_main(void) {
    * Serverns motsvarighet är rev/startedAt på GET /. */
   const esp_app_desc_t *app = esp_app_get_description();
   esp_reset_reason_t rr = esp_reset_reason();
+  s_http_recovery_booted =
+      rr == ESP_RST_SW &&
+      s_http_recovery_magic == TG_HTTP_RECOVERY_MAGIC &&
+      s_http_recovery_magic_inverse == ~TG_HTTP_RECOVERY_MAGIC;
+  s_http_recovery_magic = 0;
+  s_http_recovery_magic_inverse = 0;
   ESP_LOGI(TAG, "boot: %s %s (byggd %s %s, IDF %s), omstartsorsak %s (%d)",
            app->project_name, app->version, app->date, app->time,
            app->idf_ver, reset_reason_name(rr), (int)rr);
+  if (s_http_recovery_booted) {
+    ESP_LOGW(TAG, "startup-health: föregående VibePulse HTTP-stall "
+                  "eskalerade till kontrollerad omstart");
+  }
 
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {

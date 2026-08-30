@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
+import re
 import signal
 import socket
 import subprocess
@@ -24,6 +27,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
+HOST_SOURCE_FINGERPRINT = "748b73594c1f"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -80,16 +84,7 @@ def directory_symlink_or_skip(link, target):
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def do_POST(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length)
-        self.server.requests.append((self.path, dict(self.headers), body))
-        self.server.request_times.append(time.monotonic())
-        behavior = self.server.behavior
-        if "sequence" in behavior:
-            sequence = behavior["sequence"]
-            behavior = sequence[min(len(self.server.requests) - 1,
-                                    len(sequence) - 1)]
+    def _send_behavior(self, behavior):
         if "raw_chunks" in behavior:
             for chunk in behavior["raw_chunks"]:
                 try:
@@ -125,6 +120,25 @@ class _Handler(BaseHTTPRequestHandler):
                 self.wfile.write(payload)
             except OSError:
                 return
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        self.server.requests.append((self.path, dict(self.headers), body))
+        self.server.request_times.append(time.monotonic())
+        behavior = self.server.behavior
+        if "sequence" in behavior:
+            sequence = behavior["sequence"]
+            behavior = sequence[min(len(self.server.requests) - 1,
+                                    len(sequence) - 1)]
+        self._send_behavior(behavior)
+
+    def do_GET(self):
+        self.server.requests.append((self.path, dict(self.headers), b""))
+        self.server.request_times.append(time.monotonic())
+        routes = self.server.behavior.get("routes", {})
+        behavior = routes.get(self.path, {"status": 404, "body": b"{}"})
+        self._send_behavior(behavior)
 
     def log_message(self, _format, *_args):
         pass
@@ -225,6 +239,15 @@ def load_timeout_helper():
     path = ROOT / "tools/codex_mcp_timeout.py"
     spec = importlib.util.spec_from_file_location(
         "vibepulse_codex_mcp_timeout_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_macos_service():
+    path = ROOT / "tools/vibepulse_macos_service.py"
+    spec = importlib.util.spec_from_file_location(
+        "vibepulse_macos_service_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -385,6 +408,7 @@ class BytesResponse:
 def healthy_diagnostics():
     return json.dumps({
         "service": "torget-tokenserver",
+        "srcFingerprint": HOST_SOURCE_FINGERPRINT,
         "interactions": {
             "claude": False,
             "codex": True,
@@ -758,19 +782,158 @@ class PermissionHookTests(unittest.TestCase):
 class SessionStartTests(unittest.TestCase):
     def test_context_is_bounded_provider_correct_and_fail_safe(self):
         payload = {"hook_event_name": "SessionStart", "session_id": "s"}
-        completed = run_script("session_start.py", compact(payload).encode())
+        completed = run_script(
+            "session_start.py", compact(payload).encode(), port=closed_port())
         self.assertEqual(completed.returncode, 0)
         body = json.loads(completed.stdout)
         self.assertEqual(body["hookSpecificOutput"]["hookEventName"], "SessionStart")
         context = body["hookSpecificOutput"]["additionalContext"]
-        self.assertLessEqual(len(context), 1400)
+        self.assertLessEqual(len(context), 1750)
         self.assertIn("mcp__vibepulse__ask", context)
         self.assertIn("2–3 option questions", context)
         self.assertIn("request_user_input", context)
         self.assertIn("unavailable, times out, or reports computer fallback", context)
         self.assertIn("Never treat silence, panel absence, or fallback as approval", context)
         self.assertIn("Permission decisions remain subject to Codex policy", context)
+        self.assertIn("VibePulse startup health: SERVER UNAVAILABLE", context)
         self.assertNotIn(str(ROOT), context)
+
+    def test_startup_health_separates_device_path_from_provider_stale(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {"status": "ready", "expiresInMin": 480},
+            "interactions": {
+                "claude": True, "codex": True,
+                "panel": {"status": "stale", "ageS": 60},
+            },
+        }
+        fresh = {
+            "claudeWeekStale": False,
+            "claudeModelWeekStale": False,
+            "codexWeekStale": False,
+        }
+        routes = {
+            "/": {"body": compact(root).encode()},
+            "/api/tokens": {"body": compact(fresh).encode()},
+        }
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("DEVICE PATH STALE", context)
+        self.assertIn("provider data is fresh", context)
+        self.assertNotIn("ageS", context)
+
+        stale = dict(fresh, claudeModelWeekStale=True)
+        routes["/api/tokens"] = {"body": compact(stale).encode()}
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("PROVIDER DATA STALE (Claude)", context)
+        self.assertIn("active Claude probe is live", context)
+        self.assertNotIn("DEVICE PATH STALE", context)
+
+    def test_startup_health_reports_ready_and_credential_risk_separately(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {"status": "expired", "expiresInMin": 0},
+            "interactions": {
+                "claude": True, "codex": False,
+                "panel": {"status": "ready", "ageS": 1},
+            },
+        }
+        tokens = {
+            "claudeWeekStale": False,
+            "claudeModelWeekStale": False,
+            "codexWeekStale": True,
+        }
+        routes = {
+            "/": {"body": compact(root).encode()},
+            "/api/tokens": {"body": compact(tokens).encode()},
+        }
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: HEALTHY", context)
+        self.assertIn("Saved Claude credential is expired", context)
+        self.assertNotIn("PROVIDER DATA STALE", context)
+
+    def test_startup_health_detects_plugin_host_version_drift(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": "000000000000",
+            "interactions": {"claude": True, "codex": True,
+                             "panel": {"status": "ready"}},
+        }
+        routes = {
+            "/": {"body": compact(root).encode()},
+            "/api/tokens": {"body": compact({
+                "claudeWeekStale": False,
+                "claudeModelWeekStale": False,
+                "codexWeekStale": False,
+            }).encode()},
+        }
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("SERVICE VERSION DRIFT", context)
+        self.assertNotIn("000000000000", context)
+
+    def test_startup_health_surfaces_confirmed_device_self_recovery(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {"status": "ready", "expiresInMin": 480},
+            "interactions": {
+                "claude": True, "codex": True,
+                "panel": {"status": "ready", "ageS": 1,
+                          "httpStallRecoveryBoot": True},
+            },
+        }
+        routes = {
+            "/": {"body": compact(root).encode()},
+            "/api/tokens": {"body": compact({
+                "claudeWeekStale": False,
+                "claudeModelWeekStale": False,
+                "codexWeekStale": False,
+            }).encode()},
+        }
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("HEALTHY AFTER DEVICE SELF-RECOVERY", context)
+
+    def test_plugin_expected_host_fingerprint_matches_checkout(self):
+        script = (SCRIPTS / "session_start.py").read_text(encoding="utf-8")
+        expected = re.search(
+            r'EXPECTED_HOST_SOURCE_FINGERPRINT = "([0-9a-f]{12})"', script)
+        self.assertIsNotNone(expected)
+        digest = hashlib.sha256()
+        source = ROOT / "tools/tokenserver"
+        for path in sorted(source.glob("*.py")):
+            if path.name.startswith("test_") or path.name == "smoke.py":
+                continue
+            digest.update(path.name.encode())
+            digest.update(path.read_bytes())
+        self.assertEqual(expected.group(1), digest.hexdigest()[:12])
 
     def test_invalid_or_oversized_input_is_empty_success(self):
         for body in (b"", b"\xff", b"[]", b"{", b'{"x":NaN}',
@@ -799,7 +962,7 @@ class McpServerTests(unittest.TestCase):
         initialized = responses[0]["result"]
         self.assertEqual(initialized["protocolVersion"], "2025-06-18")
         self.assertEqual(initialized["serverInfo"]["name"], "vibepulse")
-        self.assertEqual(initialized["serverInfo"]["version"], "0.1.6")
+        self.assertEqual(initialized["serverInfo"]["version"], "0.1.7")
         self.assertEqual(initialized["capabilities"], {"tools": {"listChanged": False}})
         self.assertEqual(responses[1]["result"], {})
         tools = responses[2]["result"]["tools"]
@@ -1291,7 +1454,7 @@ class PluginPackageTests(unittest.TestCase):
         self.assertRegex(
             manifest["version"], r"^(0|[1-9][0-9]*)\."
             r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
-        self.assertEqual(manifest["version"], "0.1.6")
+        self.assertEqual(manifest["version"], "0.1.7")
         self.assertEqual(manifest["author"]["name"], "Niclas Vestlund")
         self.assertNotIn("email", manifest["author"])
         self.assertEqual(manifest["license"], "MIT")
@@ -1500,6 +1663,136 @@ class PluginPackageTests(unittest.TestCase):
             self.assertIn("off by default", prose.lower())
             self.assertIn("preserves Claude, relay, GitHub, device-key, and "
                           "unrelated Codex settings", prose)
+
+
+class MacosServiceTests(unittest.TestCase):
+    def test_validate_detects_old_checkout_without_mutating_private_options(self):
+        service = load_macos_service()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plist_path = root / "Library/LaunchAgents/service.plist"
+            plist_path.parent.mkdir(parents=True)
+            old = {
+                "Label": service.LABEL,
+                "ProgramArguments": [
+                    "/old/python", "-u", "tokenserver.py",
+                    "--github-repo", "owner/repo",
+                    "--publish", "https://secret.invalid/mailbox",
+                ],
+                "WorkingDirectory": "/old/worktree/tools/tokenserver",
+                "EnvironmentVariables": {"PRIVATE_VALUE": "preserve-me"},
+            }
+            plist_path.write_bytes(plistlib.dumps(old))
+            runner = FakeRunner([result()])
+            venv_python = ROOT / ".venv/bin/python"
+
+            extras, environment = service._read_preserved(plist_path)
+            payload = service.build_plist(
+                ROOT, venv_python, root,
+                extra_arguments=extras, environment=environment)
+            self.assertEqual(payload["WorkingDirectory"], str(
+                (ROOT / "tools/tokenserver").resolve()))
+            self.assertEqual(payload["ProgramArguments"][:3], [
+                str(venv_python.absolute()), "-u",
+                str((ROOT / "tools/tokenserver/tokenserver.py").resolve()),
+            ])
+            self.assertEqual(payload["ProgramArguments"][3:],
+                             old["ProgramArguments"][3:])
+            self.assertEqual(payload["EnvironmentVariables"],
+                             old["EnvironmentVariables"])
+            with self.assertRaisesRegex(
+                    service.ServiceConfigError, "does not match"):
+                service.install(
+                    repo_root=ROOT, python=venv_python,
+                    plist_path=plist_path, home=root,
+                    validate_only=True, run=runner)
+            self.assertEqual(plistlib.loads(plist_path.read_bytes()), old)
+
+    def test_install_atomically_reloads_cached_launchd_configuration(self):
+        service = load_macos_service()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plist_path = root / "Library/LaunchAgents/service.plist"
+            runner = FakeRunner([result(), result(returncode=3), result()])
+            with mock.patch.object(service.sys, "platform", "darwin"), \
+                    mock.patch.object(service.os, "getuid", return_value=501):
+                service.install(
+                    repo_root=ROOT, python=Path(sys.executable),
+                    plist_path=plist_path, home=root,
+                    validate_only=False, run=runner)
+
+            payload = plistlib.loads(plist_path.read_bytes())
+            self.assertEqual(payload["Label"], service.LABEL)
+            self.assertEqual(runner.calls[1][0], [
+                "launchctl", "bootout", "gui/501/se.torget.tokenserver"])
+            self.assertEqual(runner.calls[2][0], [
+                "launchctl", "bootstrap", "gui/501", str(plist_path)])
+            self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
+
+    def test_failed_bootstrap_restores_previous_service(self):
+        service = load_macos_service()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plist_path = root / "Library/LaunchAgents/service.plist"
+            plist_path.parent.mkdir(parents=True)
+            old = {
+                "Label": service.LABEL,
+                "ProgramArguments": [
+                    "/old/python", "-u", "/old/tokenserver.py", "--port",
+                    "9876"],
+                "WorkingDirectory": "/old",
+            }
+            plist_path.write_bytes(plistlib.dumps(old))
+            runner = FakeRunner([
+                result(), result(returncode=0), result(returncode=5),
+                result(returncode=0)])
+            with mock.patch.object(service.sys, "platform", "darwin"), \
+                    mock.patch.object(service.os, "getuid", return_value=501), \
+                    self.assertRaisesRegex(
+                        service.ServiceConfigError, "previous service was restored"):
+                service.install(
+                    repo_root=ROOT, python=Path(sys.executable),
+                    plist_path=plist_path, home=root,
+                    validate_only=False, run=runner)
+            self.assertEqual(plistlib.loads(plist_path.read_bytes()), old)
+            self.assertEqual(runner.calls[3][0], [
+                "launchctl", "bootstrap", "gui/501", str(plist_path)])
+
+    def test_failed_first_bootstrap_removes_new_service_file(self):
+        service = load_macos_service()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plist_path = root / "Library/LaunchAgents/service.plist"
+            runner = FakeRunner([
+                result(), result(returncode=0), result(returncode=5)])
+            with mock.patch.object(service.sys, "platform", "darwin"), \
+                    mock.patch.object(service.os, "getuid", return_value=501), \
+                    self.assertRaisesRegex(
+                        service.ServiceConfigError, "service file was removed"):
+                service.install(
+                    repo_root=ROOT, python=Path(sys.executable),
+                    plist_path=plist_path, home=root,
+                    validate_only=False, run=runner)
+            self.assertFalse(plist_path.exists())
+
+    def test_foreign_or_unrecognized_existing_plist_is_never_overwritten(self):
+        service = load_macos_service()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plist_path = root / "service.plist"
+            for payload in (
+                    {"Label": "foreign", "ProgramArguments": ["x"]},
+                    {"Label": service.LABEL,
+                     "ProgramArguments": ["/bin/sh", "-c", "anything"]}):
+                with self.subTest(payload=payload):
+                    plist_path.write_bytes(plistlib.dumps(payload))
+                    before = plist_path.read_bytes()
+                    with self.assertRaises(service.ServiceConfigError):
+                        service.install(
+                            repo_root=ROOT, python=Path(sys.executable),
+                            plist_path=plist_path, home=root,
+                            validate_only=False, run=FakeRunner())
+                    self.assertEqual(plist_path.read_bytes(), before)
 
 
 class CodexMcpTimeoutConfigTests(unittest.TestCase):
@@ -2320,6 +2613,7 @@ class RelaySetupTests(unittest.TestCase):
                 self.limit = limit
                 return json.dumps({
                     "service": "torget-tokenserver",
+                    "srcFingerprint": HOST_SOURCE_FINGERPRINT,
                     "interactions": {"claude": False, "codex": True,
                                      "detail": False,
                                      "legacyClaudePanelV1": False,
@@ -2383,6 +2677,7 @@ class RelaySetupTests(unittest.TestCase):
                 legacy_claude_panel_v1=True))
             response = BytesResponse(json.dumps({
                 "service": "torget-tokenserver",
+                "srcFingerprint": HOST_SOURCE_FINGERPRINT,
                 "interactions": {
                     "claude": True, "codex": False, "detail": False,
                     "legacyClaudePanelV1": True,
@@ -2410,7 +2705,8 @@ class RelaySetupTests(unittest.TestCase):
     def test_doctor_reports_panel_lan_contact_without_failing_relay_only_use(self):
         setup = load_setup()
         cases = (
-            ("ready", {"route": "/api/tokens"},
+            ("ready", {"route": "/api/tokens",
+                       "httpStallRecoveryBoot": True},
              "PASS Panel LAN contact: recent confirmed poll via /api/tokens"),
             ("waiting", {},
              "WAIT Panel LAN contact: no confirmed direct poll"),
@@ -2440,6 +2736,9 @@ class RelaySetupTests(unittest.TestCase):
                     # waiting relay-only panel must not add another failure.
                     self.assertEqual(code, 1)
                     self.assertIn(expected, output.getvalue())
+                    if status == "ready":
+                        self.assertIn("PASS Panel self-recovery",
+                                      output.getvalue())
                     if status != "ready":
                         self.assertIn("relay-only use may still be healthy",
                                       output.getvalue())

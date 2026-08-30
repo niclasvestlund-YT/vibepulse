@@ -30,7 +30,11 @@ usage_screen = (
 kconfig = (root / "main/Kconfig.projbuild").read_text(encoding="utf-8")
 source_policy = root / "components/app_tokens/agent_status_source_policy.c"
 tokens_net = (root / "components/app_tokens/net.c").read_text(encoding="utf-8")
+torget_http = (root / "components/torget_net/torget_http.c").read_text(
+    encoding="utf-8")
 platform_header = (root / "platform/torget.h").read_text(encoding="utf-8")
+recovery_header = (root / "platform/vibepulse_recovery.h").read_text(
+    encoding="utf-8")
 target_main = (root / "main/main.c").read_text(encoding="utf-8")
 sim_main = (root / "sim/main.c").read_text(encoding="utf-8")
 
@@ -107,8 +111,10 @@ for recovery_guard in (
     )
 assert "bool torget_net_recover_http_stall(void);" in platform_header
 assert "void torget_net_restart_http_stall(void);" in platform_header
+assert "bool torget_net_http_stall_recovery_booted(void);" in recovery_header
 assert "bool torget_net_recover_http_stall(void)" in target_main
 assert "void torget_net_restart_http_stall(void)" in target_main
+assert "bool torget_net_http_stall_recovery_booted(void)" in target_main
 assert "esp_wifi_disconnect();" in target_main
 assert "esp_restart();" in target_main
 assert "NET_READY | WIFI_GOT_IP" in target_main
@@ -118,6 +124,8 @@ assert tokens_net.count("torget_net_wait();") >= 2, (
 )
 assert "bool torget_net_recover_http_stall(void) { return false; }" in sim_main
 assert "void torget_net_restart_http_stall(void) {}" in sim_main
+assert "bool torget_net_http_stall_recovery_booted(void) { return false; }" in sim_main
+assert '"X-VibePulse-Recovery-Boot", "http-stall-v1"' in torget_http
 assert re.search(
     r"tk_agent_source_note_lan\([^;]+;\s*"
     r"usage_screen_apply_agent\(snapshot, now_us\);", app, re.DOTALL

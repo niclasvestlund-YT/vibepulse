@@ -2538,6 +2538,7 @@ class HandlerPrivacyTests(unittest.TestCase):
             tokenserver.Handler.panel_poll_candidate_count,
             tokenserver.Handler.panel_last_seen_at,
             tokenserver.Handler.panel_last_seen_route,
+            tokenserver.Handler.panel_last_http_stall_recovery_boot,
         )
         self.addCleanup(setattr, tokenserver.Handler,
                         "claude_interactions", saved[0])
@@ -2565,6 +2566,8 @@ class HandlerPrivacyTests(unittest.TestCase):
                         "panel_last_seen_at", saved[11])
         self.addCleanup(setattr, tokenserver.Handler,
                         "panel_last_seen_route", saved[12])
+        self.addCleanup(setattr, tokenserver.Handler,
+                        "panel_last_http_stall_recovery_boot", saved[13])
         tokenserver.Handler.claude_interactions = False
         tokenserver.Handler.codex_interactions = True
         tokenserver.Handler.interaction_detail = True
@@ -2578,6 +2581,7 @@ class HandlerPrivacyTests(unittest.TestCase):
         tokenserver.Handler.panel_poll_candidate_count = 0
         tokenserver.Handler.panel_last_seen_at = None
         tokenserver.Handler.panel_last_seen_route = None
+        tokenserver.Handler.panel_last_http_stall_recovery_boot = False
 
         handler.do_GET()
 
@@ -2630,12 +2634,14 @@ class PanelStartupHealthTests(unittest.TestCase):
             self.cls.panel_poll_candidate_count,
             self.cls.panel_last_seen_at,
             self.cls.panel_last_seen_route,
+            self.cls.panel_last_http_stall_recovery_boot,
         )
         self.cls.panel_poll_candidate_host = None
         self.cls.panel_poll_candidate_at = None
         self.cls.panel_poll_candidate_count = 0
         self.cls.panel_last_seen_at = None
         self.cls.panel_last_seen_route = None
+        self.cls.panel_last_http_stall_recovery_boot = False
         self.addCleanup(self._restore)
 
     def _restore(self):
@@ -2643,13 +2649,16 @@ class PanelStartupHealthTests(unittest.TestCase):
          self.cls.panel_poll_candidate_at,
          self.cls.panel_poll_candidate_count,
          self.cls.panel_last_seen_at,
-         self.cls.panel_last_seen_route) = self.saved
+         self.cls.panel_last_seen_route,
+         self.cls.panel_last_http_stall_recovery_boot) = self.saved
 
     @staticmethod
     def _handler(host):
         handler = tokenserver.Handler.__new__(tokenserver.Handler)
         handler.client_address = (host, 12345)
         handler.path = "/api/agent-status"
+        handler.headers = mock.Mock()
+        handler.headers.get_all.return_value = []
         return handler
 
     def test_two_close_panel_polls_turn_health_ready_without_exposing_ip(self):
@@ -2664,7 +2673,8 @@ class PanelStartupHealthTests(unittest.TestCase):
             snapshot = handler._panel_health_snapshot()
         self.assertEqual(snapshot, {
             "status": "ready", "ageS": 1,
-            "route": "/api/agent-status"})
+            "route": "/api/agent-status",
+            "httpStallRecoveryBoot": False})
         self.assertIn("panelkontakt READY", "\n".join(captured.output))
         self.assertNotIn("192.0.2.40", json.dumps(snapshot))
 
@@ -2683,7 +2693,29 @@ class PanelStartupHealthTests(unittest.TestCase):
         self.cls.panel_last_seen_route = "/api/tokens"
         with mock.patch.object(tokenserver.time, "monotonic", return_value=116.0):
             self.assertEqual(self.cls._panel_health_snapshot(), {
-                "status": "stale", "ageS": 16, "route": "/api/tokens"})
+                "status": "stale", "ageS": 16, "route": "/api/tokens",
+                "httpStallRecoveryBoot": False})
+
+    def test_recovery_boot_header_is_content_free_and_requires_exact_value(self):
+        handler = self._handler("192.0.2.42")
+        handler.headers.get_all.return_value = ["http-stall-v1"]
+        with mock.patch.object(tokenserver.time, "monotonic",
+                               side_effect=(100.0, 101.0, 102.0)):
+            handler._record_panel_poll()
+            handler._record_panel_poll()
+            snapshot = handler._panel_health_snapshot()
+        self.assertEqual(snapshot["httpStallRecoveryBoot"], True)
+        self.assertNotIn("192.0.2.42", json.dumps(snapshot))
+
+        self.cls.panel_poll_candidate_count = 0
+        self.cls.panel_last_seen_at = None
+        handler.headers.get_all.return_value = ["http-stall-v1", "forged"]
+        with mock.patch.object(tokenserver.time, "monotonic",
+                               side_effect=(200.0, 201.0, 202.0)):
+            handler._record_panel_poll()
+            handler._record_panel_poll()
+            snapshot = handler._panel_health_snapshot()
+        self.assertFalse(snapshot["httpStallRecoveryBoot"])
 
 
 class HandlerErrorLoggingTests(unittest.TestCase):

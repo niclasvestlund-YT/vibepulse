@@ -42,6 +42,13 @@ After installation, open Codex, run `/hooks`, review the VibePulse
 **Start a new Codex task** so the hooks and MCP tool are freshly loaded. Doctor
 reports trust/setup problems but does not bypass review.
 
+From plugin `0.1.7`, the trusted `SessionStart` hook also makes a sub-second,
+read-only request to fixed loopback endpoints. It reports one sanitized fault
+class—provider data, device path, local service, or plugin/server source
+drift—instead of letting every failure collapse into the same `STALE` advice.
+It never restarts the service or treats a failed check as approval. Detailed
+repair still starts with `doctor` and `tools/tokenserver/smoke.py`.
+
 The same doctor path reads a content-free Claude credential guard from
 `GET /`: `ready`, `expiring`, `expired`, `unavailable`, or `unknown`, plus
 whole minutes remaining when known. It warns 30 minutes before expiry and
@@ -493,6 +500,24 @@ Windows LAN-IP: `ipconfig`; reservera den valda IPv4-adressen i routern.
 
 ## Autostart via launchd
 
+Install from the intended clean, durable checkout with the path-safe helper:
+
+```sh
+python3 tools/vibepulse_macos_service.py validate
+python3 tools/vibepulse_macos_service.py install
+```
+
+`validate` is read-only. `install` resolves the current checkout and its
+`.venv/bin/python`, writes the LaunchAgent atomically, preserves recognized
+existing runtime arguments and environment values without printing them, and
+uses `bootout` plus `bootstrap` so launchd cannot retain an older cached
+command. It refuses foreign, symlinked, malformed, or unrecognized existing
+plists. If the new service cannot be bootstrapped, the previous plist is
+restored and reloaded automatically. Python 3.11+ and the exact tokenserver
+source must exist before it changes anything.
+
+Manual installation remains available for unusual layouts:
+
 ```sh
 cp se.torget.tokenserver.plist ~/Library/LaunchAgents/
 plutil -lint ~/Library/LaunchAgents/se.torget.tokenserver.plist
@@ -500,7 +525,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/se.torget.tokenserver.plis
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/se.torget.tokenserver.plist
 ```
 
-Plisten antar att repot bor i `~/Torget`, att repots Python 3.11+-miljö finns
+Mallplisten antar att repot bor i `~/Torget`, att repots Python 3.11+-miljö finns
 i `.venv` och att användaren är `niclasvestlund` — redigera sökvägarna
 annars. Med krypterat interaktionsrelä aktiverat ska den miljön även ha
 `requirements-interaction-relay.txt` installerad. Loggen hamnar i
@@ -524,6 +549,14 @@ Efter installation eller flytt ska tre lager peka på samma källa:
    Ange den faktiskt konfigurerade porten om den inte är 8737.
 3. Starta en ny Codex-task efter att plugin/MCP har flyttats, så att den nya
    processen verkligen laddas. Tystnad eller en gammal task är inte bevis.
+
+En panel som startats om av den begränsade HTTP-stall-vakten skickar den fasta
+lokala headern `X-VibePulse-Recovery-Boot: http-stall-v1`. Efter två bekräftade
+LAN-pollar visar `GET /` endast booleanen
+`interactions.panel.httpStallRecoveryBoot`; ingen paneladress, firmwaretext,
+användare eller kvot följer med. Doctor och nästa Codex-start kan därför se en
+självläkning även på väggström utan seriell kabel. Markören är evidens om
+omstarten, inte ensam ett fysiskt PASS.
 
 Röktestets totalsiffror för tracebacks och starter omfattar bevarad historik.
 Efter en reparation ska även tidsstämplarna kontrolleras: exakt en ny start och

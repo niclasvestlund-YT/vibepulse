@@ -235,6 +235,25 @@ that the radio is wedged. A release PASS still requires recent direct polling
 and a repeated physical interaction after the stale window; either recovery
 action firing is evidence of recovery work, not health evidence by itself.
 
+When the final escalation calls `esp_restart()`, a complemented RTC marker
+survives exactly that software reset. The next boot validates both words and
+the ESP reset reason, clears the marker, and adds only
+`X-VibePulse-Recovery-Boot: http-stall-v1` to local HTTP requests. The
+tokenserver accepts only that exact single header after the normal two-poll
+panel confirmation and reports the content-free boolean as
+`GET /` → `interactions.panel.httpStallRecoveryBoot`. Power-on, brownout,
+malformed/duplicate headers, loopback requests, and a lone LAN request cannot
+claim it. This closes the wall-power observability gap, but it is still
+self-reported recovery evidence—not proof that the glass stayed fresh or that
+an interaction completed.
+
+The trusted Codex plugin `SessionStart` hook consumes this same local health
+surface plus `/api/tokens` under a sub-second bounded deadline. It emits only a
+fixed fault class: server/API unavailable, plugin-server version drift,
+provider stale, panel LAN waiting/device path stale, healthy, or healthy after
+self-recovery. It does not copy dynamic paths, revisions, addresses, account
+data, quotas, or probe strings into the task.
+
 ### 6. CI logs
 
 GitHub Actions, four jobs: a `host-gate` job that runs the same

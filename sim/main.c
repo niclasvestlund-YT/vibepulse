@@ -35,6 +35,7 @@
 #include "ota_ui.h"
 #include "tokens_parse.h"
 #include "torget.h"
+#include "vibepulse_recovery.h"
 #include "usage_screen.h"
 #include "wifi_setup_ui.h"
 
@@ -103,6 +104,7 @@ bool torget_ui_try_lock(uint32_t timeout_ms) { (void)timeout_ms; return true; }
 void torget_net_wait(void)  {}
 bool torget_net_recover_http_stall(void) { return false; }
 void torget_net_restart_http_stall(void) {}
+bool torget_net_http_stall_recovery_booted(void) { return false; }
 void torget_keep_awake(void) {} /* ljusrampen finns bara på panelen */
 void torget_data_alive(void) {}  /* bootskärmen drivs manuellt i QA:n */
 

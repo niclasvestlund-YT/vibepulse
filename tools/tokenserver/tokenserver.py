@@ -2278,6 +2278,7 @@ class Handler(BaseHTTPRequestHandler):
     panel_poll_candidate_count = 0
     panel_last_seen_at = None
     panel_last_seen_route = None
+    panel_last_http_stall_recovery_boot = False
     panel_confirm_window_s = 10.0
     panel_fresh_s = 15.0
     json_body_timeout_s = JSON_BODY_TIMEOUT_S
@@ -2328,6 +2329,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(host, str) or not host:
             return
         now = time.monotonic()
+        recovery_headers = self._header_values(
+            "X-VibePulse-Recovery-Boot")
+        recovery_boot = recovery_headers == ["http-stall-v1"]
         cls = type(self)
         became_ready = False
         with cls.panel_poll_lock:
@@ -2345,6 +2349,7 @@ class Handler(BaseHTTPRequestHandler):
                              now - cls.panel_last_seen_at <= cls.panel_fresh_s)
                 cls.panel_last_seen_at = now
                 cls.panel_last_seen_route = self.path
+                cls.panel_last_http_stall_recovery_boot = recovery_boot
                 became_ready = not was_fresh
         if became_ready:
             log.info("startup-health: panelkontakt READY via %s", self.path)
@@ -2355,6 +2360,7 @@ class Handler(BaseHTTPRequestHandler):
         with cls.panel_poll_lock:
             seen = cls.panel_last_seen_at
             route = cls.panel_last_seen_route
+            recovery_boot = cls.panel_last_http_stall_recovery_boot
         if seen is None:
             return {"status": "waiting"}
         age_s = max(0, int(now - seen))
@@ -2362,13 +2368,17 @@ class Handler(BaseHTTPRequestHandler):
             "status": "ready" if age_s <= cls.panel_fresh_s else "stale",
             "ageS": age_s,
             "route": route,
+            "httpStallRecoveryBoot": bool(recovery_boot),
         }
 
     def _header_values(self, name):
-        get_all = getattr(self.headers, "get_all", None)
+        headers = getattr(self, "headers", None)
+        get_all = getattr(headers, "get_all", None)
         if callable(get_all):
             return get_all(name) or []
-        value = self.headers.get(name)
+        if headers is None:
+            return []
+        value = headers.get(name)
         return [] if value is None else [value]
 
     def _has_valid_loopback_host(self):

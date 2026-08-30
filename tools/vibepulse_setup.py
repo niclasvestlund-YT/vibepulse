@@ -38,6 +38,7 @@ from tokenserver.vibepulse_config import (  # noqa: E402
     save_config,
 )
 from tokenserver.codex_command import resolve_codex_executable  # noqa: E402
+from tokenserver.tokenserver import _read_source_fingerprint  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1566,6 +1567,14 @@ def _doctor(
             fixes = True
         else:
             print("PASS Tokenserver", file=stdout)
+            if payload.get("srcFingerprint") != _read_source_fingerprint():
+                print("FIX Tokenserver source: the live service does not "
+                      "match this checkout; repair the launchd/Task Scheduler "
+                      "registration from one durable checkout", file=stdout)
+                fixes = True
+            else:
+                print("PASS Tokenserver source: live fingerprint matches "
+                      "this checkout", file=stdout)
             _doctor_panel_lan_contact(interactions, stdout)
             if config.claude_interactions and not _doctor_claude_quota(
                     payload, stdout):
@@ -1584,6 +1593,9 @@ def _doctor_panel_lan_contact(interactions: dict, stdout) -> None:
         suffix = f" via {route}" if isinstance(route, str) else ""
         print(f"PASS Panel LAN contact: recent confirmed poll{suffix}",
               file=stdout)
+        if panel.get("httpStallRecoveryBoot") is True:
+            print("PASS Panel self-recovery: this boot followed the bounded "
+                  "HTTP-stall restart", file=stdout)
         return
     if status == "stale":
         print("WAIT Panel LAN contact: the last confirmed direct poll is "

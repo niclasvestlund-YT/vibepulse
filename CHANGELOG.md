@@ -15,7 +15,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   disarmed until a real success, preventing restart loops during upstream
   outages. Reusable encrypted relay clients are reset on every failure exit
   instead of retaining a half-open transport.
-- The VibePulse Codex plugin advances to `0.1.6`. Doctor now surfaces recent
+- The VibePulse Codex plugin advances to `0.1.7`. Its bounded SessionStart
+  check now classifies the local server, plugin/server source drift, provider
+  freshness, saved Claude credential risk, and direct panel contact as
+  separate states. It injects only a content-free diagnosis into the task and
+  never treats startup silence as approval. Doctor now surfaces recent
   direct panel polling without misclassifying a healthy relay-only setup, and
   the skill distinguishes fresh provider data from the device-side
   power/network/firmware hop, including computer-USB power limits and
@@ -31,6 +35,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   emitted by current Codex clients during tool discovery and invocation, so
   the physical `APPROVE` question remains available instead of failing MCP
   startup or rejecting an otherwise valid call.
+- macOS now has a path-safe LaunchAgent installer/validator. It resolves the
+  requested durable checkout, atomically rewrites the plist, preserves
+  recognized private runtime configuration without printing it, and performs
+  a real `bootout` + `bootstrap` so launchd cannot retain an old worktree. A
+  failed bootstrap restores and reloads the previous service configuration.
 - Windows Task Scheduler installations can now persist the optional public
   GitHub source, named Claude/Codex plan labels, and explicit per-provider
   subscription costs. The background service no longer drops the GitHub Stars

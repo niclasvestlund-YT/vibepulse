@@ -14,6 +14,7 @@
 
 #include "net_source_policy.h"
 #include "service_discovery.h"
+#include "vibepulse_recovery.h"
 
 static const char *TAG = "torget-http";
 
@@ -94,6 +95,15 @@ static bool http_get_timeout(const char *url, char *buf, size_t cap,
 
   client = esp_http_client_init(&cfg);
   if (!client) goto done;
+
+  /* Content-free post-restart evidence for the local health endpoint. Never
+   * send it to a public relay, and never make data delivery depend on this
+   * optional diagnostic header. */
+  if (!cloud && torget_net_http_stall_recovery_booted() &&
+      esp_http_client_set_header(
+          client, "X-VibePulse-Recovery-Boot", "http-stall-v1") != ESP_OK) {
+    ESP_LOGW(TAG, "kunde inte märka HTTP-stall recovery-boot");
+  }
 
   esp_err_t err = esp_http_client_perform(client);
   int status = esp_http_client_get_status_code(client);

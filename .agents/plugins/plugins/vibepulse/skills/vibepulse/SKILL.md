@@ -46,6 +46,11 @@ future recovery risk, not the current stale cause. Start a new Claude Code CLI
 turn to refresh the saved fallback. VibePulse rereads local credentials every
 15 seconds, so do not prescribe a tokenserver restart first.
 
+On plugin 0.1.7+, read `VibePulse startup health`: provider stale routes to
+provider/credential checks; device path stale to panel power/network/discovery/
+firmware; version drift means plugin and host sources differ; server unavailable
+routes to service diagnostics. It is read-only and never approves.
+
 If the local API and configured numbers relay are fresh while the glass is
 stale, inspect `GET /` → `interactions.panel` for recent direct polling and
 read passive device logs. A `waiting` direct-poll state does not prove failure
@@ -75,6 +80,8 @@ waits for a new IP before retrying. If no real success follows within another
 real success, preventing a persistent upstream outage from becoming a restart
 loop. Either guard firing is recovery evidence, not a PASS by itself. LAN-only
 firmware deliberately does not recover merely because its host sleeps.
+After a guarded restart, `interactions.panel.httpStallRecoveryBoot` can prove
+the guard fired without serial, not that the stale window/question passed.
 
 Treat fresh numbers plus timed-out questions as a separate transport check.
 When more than one `_vibepulse._tcp` service is advertised on the same LAN,
@@ -86,8 +93,7 @@ the hosts and enable `TK_VIBEPULSE_INTERACTION_RELAY` in that panel's firmware.
 Do not claim the stale watchdog fixed question delivery, and do not flash the
 relay-enabled image without a fresh explicit authorization.
 
-Explain when asked that this skill is versioned with the plugin; it does not
-learn or update itself. New lessons reach installed Codex sessions only after
-the repository skill is changed, the plugin version is released/updated, and a
-new task loads that version.
+Explain that this versioned skill does not learn or update itself. New lessons
+reach Codex only after the repository skill and plugin are released/updated
+and a new task loads that version.
 Do not run install, disable, or uninstall without the user's explicit request.

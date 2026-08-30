@@ -184,6 +184,54 @@ class _LoopbackRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(request, fp, code, msg, headers, newurl)
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def get_json(url: str, *,
+             connect_timeout: float = CONNECT_TIMEOUT_SECONDS,
+             read_timeout: float = CONNECT_TIMEOUT_SECONDS):
+    """GET a bounded loopback JSON object without following redirects.
+
+    This is intentionally short-lived for startup diagnostics. Interactive
+    requests use :func:`post_json` and its much longer response deadline.
+    """
+    if not is_loopback_http_url(url):
+        return None
+    if not isinstance(connect_timeout, (int, float)) or connect_timeout <= 0:
+        return None
+    if not isinstance(read_timeout, (int, float)) or read_timeout <= 0:
+        return None
+    deadline = _ResponseDeadline(float(read_timeout))
+    try:
+        request = urllib.request.Request(
+            url, method="GET", headers={"Accept": "application/json"})
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _SplitTimeoutHTTPHandler(float(read_timeout), deadline),
+            _NoRedirectHandler(),
+        )
+        with opener.open(request, timeout=float(connect_timeout)) as response:
+            if response.status != 200:
+                return None
+            if not _has_json_content_type(response.headers):
+                return None
+            length = response.headers.get("Content-Length")
+            if length is not None and int(length) > MAX_BODY_BYTES:
+                return None
+            received = response.read(MAX_BODY_BYTES + 1)
+        if len(received) > MAX_BODY_BYTES:
+            return None
+        decoded = received.decode("utf-8", errors="strict")
+        result = strict_json_loads(decoded)
+        return result if isinstance(result, dict) else None
+    except Exception:
+        return None
+    finally:
+        deadline.finish()
+
+
 def post_json(url: str, value: object, *,
               connect_timeout: float = CONNECT_TIMEOUT_SECONDS,
               read_timeout: float = READ_TIMEOUT_SECONDS):

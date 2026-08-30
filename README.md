@@ -296,6 +296,11 @@ retrying. If no real success follows within another 45 seconds, the device resta
 wedged HTTP/TLS state. A reboot is disarmed until a new real success, so a real
 internet outage cannot become a restart loop. LAN-only installations never
 perform this automatic recovery just because their computer is asleep.
+After that controlled restart, the panel sends a fixed content-free recovery
+marker on local requests. `GET /` exposes it only as
+`interactions.panel.httpStallRecoveryBoot`; setup doctor and the next Codex
+startup can therefore distinguish a recovered wall-powered panel without a
+USB serial cable. It contains no hostname, address, account, or usage value.
 
 Run Claude only, or Codex only, and the other half simply shows dashes.
 
@@ -374,6 +379,24 @@ reported as current. Read that guard together with `claudeProbe` and the
 `/api/tokens` stale flags: a successful probe plus a fresh model-week flag
 means the current source is live even if the saved fallback is expired. That
 is a future recovery risk, not a reason to restart the tokenserver.
+
+Codex plugin `0.1.7` turns the trusted `SessionStart` hook into a real bounded
+health check. It reads only the two loopback JSON endpoints, follows no
+redirects, times out in under a second, and injects one content-free class into
+the new task:
+
+| Startup class | What it proves | First action |
+|---|---|---|
+| `HEALTHY` | Provider data and recent direct panel polling are fresh | None |
+| `HEALTHY AFTER DEVICE SELF-RECOVERY` | The same, after the bounded HTTP-stall restart | Keep observing past the stale window; this is evidence, not a physical PASS |
+| `PROVIDER DATA STALE` | Claude and/or Codex source data is stale | Run setup doctor and tokenserver smoke; inspect the named provider |
+| `DEVICE PATH STALE` / `PANEL LAN WAITING` | Host data is fresh but direct glass polling is stale or unconfirmed | Check panel power, network, discovery, and firmware before restarting a healthy host |
+| `SERVICE VERSION DRIFT` | The loaded plugin and live tokenserver came from different source revisions | Repair all integrations from one durable checkout and start a new task |
+| `SERVER UNAVAILABLE` / `LOCAL API DEGRADED` | The local service or its diagnostic contract is unavailable | Run setup doctor and tokenserver smoke |
+
+The hook diagnoses; it never approves, flashes, refreshes credentials, or
+silently rewrites service configuration. Firmware self-recovery remains
+bounded and fail-closed, while host repair remains an explicit setup action.
 
 ## What you need
 
@@ -465,7 +488,11 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
 
    Without that package the configured URL path works exactly as before.
 
-   Autostart on login: see [tools/tokenserver/README.md](tools/tokenserver/README.md).
+   On macOS, validate and install autostart from this durable checkout with
+   `python3 tools/vibepulse_macos_service.py validate` followed by the explicit
+   `install` command. It atomically rewrites and fully reloads the LaunchAgent,
+   so launchd cannot keep running a deleted PR worktree. Full details:
+   [tools/tokenserver/README.md](tools/tokenserver/README.md).
 
 ## Over-the-air updates
 
