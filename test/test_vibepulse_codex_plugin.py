@@ -1684,7 +1684,9 @@ class MacosServiceTests(unittest.TestCase):
             }
             plist_path.write_bytes(plistlib.dumps(old))
             runner = FakeRunner([result()])
-            venv_python = ROOT / ".venv/bin/python"
+            venv_python = root / "checkout/.venv/bin/python"
+            venv_python.parent.mkdir(parents=True)
+            venv_python.write_bytes(b"")
 
             extras, environment = service._read_preserved(plist_path)
             payload = service.build_plist(
