@@ -135,6 +135,12 @@ def _atomic_write(path: Path, payload):
                 pass
 
 
+def _launchd_domain():
+    if sys.platform != "darwin" or not hasattr(os, "getuid"):
+        raise ServiceConfigError("LaunchAgent installation requires macOS")
+    return f"gui/{os.getuid()}"
+
+
 def install(*, repo_root: Path, python: Path, plist_path: Path, home: Path,
             validate_only=False, run=subprocess.run):
     previous_payload = (_read_owned_plist(plist_path)
@@ -150,10 +156,8 @@ def install(*, repo_root: Path, python: Path, plist_path: Path, home: Path,
             raise ServiceConfigError(
                 "installed LaunchAgent does not match this checkout")
         return payload
-    if sys.platform != "darwin":
-        raise ServiceConfigError("LaunchAgent installation requires macOS")
+    domain = _launchd_domain()
     _atomic_write(plist_path, payload)
-    domain = f"gui/{os.getuid()}"
     run(["launchctl", "bootout", f"{domain}/{LABEL}"],
         capture_output=True, text=True, timeout=15, check=False)
     started = run(

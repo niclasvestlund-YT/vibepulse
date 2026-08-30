@@ -332,6 +332,11 @@ def _read_server_rev():
         return "unknown"
 
 
+def _normalized_source_bytes(path):
+    """Return UTF-8 source with platform checkout newlines normalized."""
+    return path.read_text(encoding="utf-8").encode("utf-8")
+
+
 def _read_source_fingerprint():
     """Innehållshash av tjänstens källfiler, tagen vid start. Rev räcker
     inte för "kör servern det som ligger här?": en smutsig worktree, eller
@@ -347,7 +352,9 @@ def _read_source_fingerprint():
             if f.name.startswith("test_") or f.name == "smoke.py":
                 continue
             digest.update(f.name.encode())
-            digest.update(f.read_bytes())
+            # Text mode normalizes CRLF/LF so one source revision has the
+            # same provenance fingerprint on Windows, macOS, and Linux.
+            digest.update(_normalized_source_bytes(f))
         return digest.hexdigest()[:12]
     except Exception:
         return "unknown"

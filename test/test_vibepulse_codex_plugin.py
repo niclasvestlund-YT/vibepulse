@@ -27,7 +27,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "748b73594c1f"
+HOST_SOURCE_FINGERPRINT = "4c3dc7ddef6c"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -932,7 +932,7 @@ class SessionStartTests(unittest.TestCase):
             if path.name.startswith("test_") or path.name == "smoke.py":
                 continue
             digest.update(path.name.encode())
-            digest.update(path.read_bytes())
+            digest.update(path.read_text(encoding="utf-8").encode("utf-8"))
         self.assertEqual(expected.group(1), digest.hexdigest()[:12])
 
     def test_invalid_or_oversized_input_is_empty_success(self):
@@ -1716,8 +1716,8 @@ class MacosServiceTests(unittest.TestCase):
             root = Path(tmp)
             plist_path = root / "Library/LaunchAgents/service.plist"
             runner = FakeRunner([result(), result(returncode=3), result()])
-            with mock.patch.object(service.sys, "platform", "darwin"), \
-                    mock.patch.object(service.os, "getuid", return_value=501):
+            with mock.patch.object(
+                    service, "_launchd_domain", return_value="gui/501"):
                 service.install(
                     repo_root=ROOT, python=Path(sys.executable),
                     plist_path=plist_path, home=root,
@@ -1748,8 +1748,8 @@ class MacosServiceTests(unittest.TestCase):
             runner = FakeRunner([
                 result(), result(returncode=0), result(returncode=5),
                 result(returncode=0)])
-            with mock.patch.object(service.sys, "platform", "darwin"), \
-                    mock.patch.object(service.os, "getuid", return_value=501), \
+            with mock.patch.object(
+                    service, "_launchd_domain", return_value="gui/501"), \
                     self.assertRaisesRegex(
                         service.ServiceConfigError, "previous service was restored"):
                 service.install(
@@ -1767,8 +1767,8 @@ class MacosServiceTests(unittest.TestCase):
             plist_path = root / "Library/LaunchAgents/service.plist"
             runner = FakeRunner([
                 result(), result(returncode=0), result(returncode=5)])
-            with mock.patch.object(service.sys, "platform", "darwin"), \
-                    mock.patch.object(service.os, "getuid", return_value=501), \
+            with mock.patch.object(
+                    service, "_launchd_domain", return_value="gui/501"), \
                     self.assertRaisesRegex(
                         service.ServiceConfigError, "service file was removed"):
                 service.install(

@@ -4145,6 +4145,16 @@ class LogRotationTests(unittest.TestCase):
 
 
 class SourceFingerprintTests(unittest.TestCase):
+    def test_fingerprint_normalizes_windows_and_posix_newlines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lf = Path(tmp) / "lf.py"
+            crlf = Path(tmp) / "crlf.py"
+            lf.write_bytes(b"one\ntwo\n")
+            crlf.write_bytes(b"one\r\ntwo\r\n")
+            self.assertEqual(
+                tokenserver._normalized_source_bytes(lf),
+                tokenserver._normalized_source_bytes(crlf))
+
     def test_fingerprint_is_stable_and_served_on_root(self):
         first = tokenserver._read_source_fingerprint()
         self.assertRegex(first, r"^[0-9a-f]{12}$")
