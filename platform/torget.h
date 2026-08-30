@@ -43,6 +43,13 @@ void torget_net_wait(void);
  * The simulator returns false. */
 bool torget_net_recover_http_stall(void);
 
+/* Escalation for the same guarded incident: if a successful station recycle
+ * still produces no fresh quota data, restart the device to discard wedged
+ * TLS/client task state. The caller only invokes this after an earlier real
+ * success and only when a redundant relay is configured, so a cold upstream
+ * outage cannot become a reboot loop. Simulator: no-op. */
+void torget_net_restart_http_stall(void);
+
 /* 0 disconnected, 1 weak, 2 medium, 3 strong. Never implies relay health. */
 uint8_t torget_wifi_signal_bars(void);
 

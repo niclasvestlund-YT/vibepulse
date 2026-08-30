@@ -102,6 +102,7 @@ void torget_ui_unlock(void) {}
 bool torget_ui_try_lock(uint32_t timeout_ms) { (void)timeout_ms; return true; }
 void torget_net_wait(void)  {}
 bool torget_net_recover_http_stall(void) { return false; }
+void torget_net_restart_http_stall(void) {}
 void torget_keep_awake(void) {} /* ljusrampen finns bara på panelen */
 void torget_data_alive(void) {}  /* bootskärmen drivs manuellt i QA:n */
 

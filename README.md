@@ -290,10 +290,12 @@ than silently drifting.
 On current firmware a wall-powered panel also protects itself against the
 specific failure where Wi-Fi still looks associated but application HTTP has
 stopped. Once the quota feed has worked at least once, and only when an
-independent numbers relay is configured, 150 seconds without a fresh response
-recycles the Wi-Fi transport. A ten-minute cooldown prevents a real internet
-outage from becoming a reconnect loop. LAN-only installations never perform
-this automatic recovery just because their computer is asleep.
+independent numbers relay is configured, 60 seconds without a fresh response
+recycles Wi-Fi and wakes the quota task, which waits for a new IP before
+retrying. If no real success follows within another 45 seconds, the device restarts once to clear
+wedged HTTP/TLS state. A reboot is disarmed until a new real success, so a real
+internet outage cannot become a restart loop. LAN-only installations never
+perform this automatic recovery just because their computer is asleep.
 
 Run Claude only, or Codex only, and the other half simply shows dashes.
 

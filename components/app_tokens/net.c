@@ -33,16 +33,26 @@ static const char *TAG = "tokens";
 #define FETCH_EVERY_MS 30000
 #define BODY_MAX 2048
 #define RECOVERY_CHECK_MS 5000
+#define TOKENS_STALE_AFTER_US (120LL * 1000000LL)
+
+/* Each state transition can be observed one watchdog tick late. Keep the
+ * worst-case staged deadline strictly inside the UI stale boundary. */
+#if TK_TOKENS_HTTP_STALL_US + TK_TOKENS_HTTP_RESTART_GRACE_US + \
+        (2LL * RECOVERY_CHECK_MS * 1000LL) >= TOKENS_STALE_AFTER_US
+#error "VibePulse HTTP recovery no longer fits before the stale boundary"
+#endif
 
 #ifdef TK_TOKENS_URL
 
 static _Atomic bool s_tokens_has_success;
 static _Atomic int64_t s_tokens_last_success_us;
 static _Atomic int64_t s_tokens_last_recovery_us;
+static TaskHandle_t s_tokens_task;
 static const char *const s_tokens_relay_url = TK_TOKENS_RELAY_URL;
 
 static void note_tokens_success(void) {
   atomic_store(&s_tokens_last_success_us, torget_now_us());
+  atomic_store(&s_tokens_last_recovery_us, 0);
   atomic_store(&s_tokens_has_success, true);
 }
 
@@ -58,15 +68,24 @@ static void recovery_task(void *arg) {
     int64_t now_us = torget_now_us();
     bool relay_configured =
         s_tokens_relay_url != NULL && s_tokens_relay_url[0] != '\0';
-    if (!tk_tokens_net_recovery_should_recover(
+    tk_tokens_net_recovery_action action =
+        tk_tokens_net_recovery_action_for(
             &state, now_us, torget_wifi_signal_bars() > 0,
-            relay_configured)) {
-      continue;
-    }
-    ESP_LOGW(TAG, "inga färska VibePulse-svar över stale-fönstret; "
-                  "återställer WiFi-transporten");
-    if (torget_net_recover_http_stall()) {
-      atomic_store(&s_tokens_last_recovery_us, now_us);
+            relay_configured);
+    if (action == TK_TOKENS_NET_RECOVERY_RECYCLE_WIFI) {
+      ESP_LOGW(TAG, "inga färska VibePulse-svar; återställer "
+                    "WiFi-transporten före stale-gränsen");
+      if (torget_net_recover_http_stall()) {
+        atomic_store(&s_tokens_last_recovery_us, now_us);
+        /* Wake the quota task as soon as disconnect has unwound its current
+         * attempt. Its loop waits for live IP before retrying, rather than
+         * spending most of the remaining freshness margin asleep. */
+        if (s_tokens_task != NULL) xTaskNotifyGive(s_tokens_task);
+      }
+    } else if (action == TK_TOKENS_NET_RECOVERY_RESTART_DEVICE) {
+      ESP_LOGE(TAG, "WiFi-recycle gav ingen färsk VibePulse-data; "
+                    "startar om enheten en gång");
+      torget_net_restart_http_stall();
     }
   }
 }
@@ -85,6 +104,10 @@ static void net_task(void *arg) {
   vTaskDelay(pdMS_TO_TICKS(10000));
 
   for (;;) {
+    /* The recovery wake can arrive before reassociation completes. Wait for
+     * live IP here on every pass so the immediate retry is not spent while
+     * the station is still disconnected. */
+    torget_net_wait();
     tk_tokens t;
     if (torget_http_get_service("/api/tokens", TK_TOKENS_URL,
                                 TK_TOKENS_RELAY_URL,
@@ -106,7 +129,10 @@ static void net_task(void *arg) {
     /* Misslyckad hämtning gör ingenting: appens tick tänder stale efter
      * två minuter — Macen kan ju vara avstängd, det är inte ett fel. */
 
-    vTaskDelay(pdMS_TO_TICKS(FETCH_EVERY_MS));
+    /* The recovery task can interrupt this sleep after a station recycle.
+     * A notification delivered while HTTP is still unwinding is retained and
+     * makes the next retry immediate. */
+    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(FETCH_EVERY_MS));
   }
 }
 
@@ -169,7 +195,10 @@ void tokens_net_start(void) {
   atomic_store(&s_tokens_has_success, false);
   atomic_store(&s_tokens_last_success_us, 0);
   atomic_store(&s_tokens_last_recovery_us, 0);
-  if (xTaskCreate(net_task, "tokens", 6144, NULL, 5, NULL) != pdPASS) {
+  s_tokens_task = NULL;
+  if (xTaskCreate(net_task, "tokens", 6144, NULL, 5,
+                  &s_tokens_task) != pdPASS) {
+    s_tokens_task = NULL;
     ESP_LOGE(TAG, "VibePulse-hämttasken kunde inte starta");
   }
   if (s_tokens_relay_url != NULL && s_tokens_relay_url[0] != '\0' &&

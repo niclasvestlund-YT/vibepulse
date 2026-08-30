@@ -113,7 +113,11 @@ bool torget_ui_try_lock(uint32_t timeout_ms) {
 int64_t torget_now_us(void) { return esp_timer_get_time(); }
 
 void torget_net_wait(void) {
-  xEventGroupWaitBits(s_net_events, NET_READY, pdFALSE, pdTRUE, portMAX_DELAY);
+  /* NET_READY is the one-time clock gate; WIFI_GOT_IP is the live station
+   * gate. Keeping both here lets an app task safely call this again after a
+   * recovery disconnect instead of racing its retry against reassociation. */
+  xEventGroupWaitBits(s_net_events, NET_READY | WIFI_GOT_IP,
+                      pdFALSE, pdTRUE, portMAX_DELAY);
 }
 
 bool torget_net_recover_http_stall(void) {
@@ -128,6 +132,15 @@ bool torget_net_recover_http_stall(void) {
     return false;
   }
   return true;
+}
+
+void torget_net_restart_http_stall(void) {
+  if (atomic_load(&s_sta_paused) ||
+      (xEventGroupGetBits(s_net_events) & WIFI_GOT_IP) == 0) {
+    return;
+  }
+  ESP_LOGE(TAG, "HTTP-vakten eskalerar till kontrollerad omstart");
+  esp_restart();
 }
 
 uint8_t torget_wifi_signal_bars(void) {

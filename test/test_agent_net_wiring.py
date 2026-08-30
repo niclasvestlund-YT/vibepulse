@@ -94,19 +94,30 @@ assert "if (client) esp_http_client_cleanup(client);" in source, (
 assert "torget_service_note_result(client_source, client_url, host_ok);" in source
 assert "remember_direct_origin(client_url);" in source
 for recovery_guard in (
-    "tk_tokens_net_recovery_should_recover(",
+    "tk_tokens_net_recovery_action_for(",
     "s_tokens_relay_url != NULL",
     "torget_net_recover_http_stall()",
+    "torget_net_restart_http_stall()",
+    "xTaskNotifyGive(s_tokens_task)",
+    "ulTaskNotifyTake(pdTRUE",
     'xTaskCreate(recovery_task, "tokens-recovery"',
 ):
     assert recovery_guard in tokens_net, (
         f"missing sustained VibePulse recovery guard: {recovery_guard}"
     )
 assert "bool torget_net_recover_http_stall(void);" in platform_header
+assert "void torget_net_restart_http_stall(void);" in platform_header
 assert "bool torget_net_recover_http_stall(void)" in target_main
+assert "void torget_net_restart_http_stall(void)" in target_main
 assert "esp_wifi_disconnect();" in target_main
+assert "esp_restart();" in target_main
+assert "NET_READY | WIFI_GOT_IP" in target_main
 assert "esp_wifi_set_ps(WIFI_PS_NONE);" in target_main
+assert tokens_net.count("torget_net_wait();") >= 2, (
+    "the recovery retry must wait for reassociation before spending its attempt"
+)
 assert "bool torget_net_recover_http_stall(void) { return false; }" in sim_main
+assert "void torget_net_restart_http_stall(void) {}" in sim_main
 assert re.search(
     r"tk_agent_source_note_lan\([^;]+;\s*"
     r"usage_screen_apply_agent\(snapshot, now_us\);", app, re.DOTALL

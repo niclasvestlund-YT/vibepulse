@@ -68,10 +68,13 @@ the board still answers ping while direct panel polling ages out, the local and
 numbers-relay payloads remain fresh, and the repeated question times out,
 record a device-side application-HTTP stall rather than blaming provider data.
 Current relay-configured firmware has a bounded self-recovery guard: after an
-initial quota success, 150 seconds without progress while Wi-Fi still reports
-association recycles the station transport; a ten-minute cooldown prevents
-loops. The guard firing is recovery evidence, not a PASS by itself. LAN-only
-firmware deliberately does not recycle Wi-Fi merely because its host sleeps.
+initial quota success, 60 seconds without progress while Wi-Fi still reports
+association recycles the station transport and wakes the quota task, which
+waits for a new IP before retrying. If no real success follows within another
+45 seconds, the device performs one controlled restart. Cold boot stays disarmed until a new
+real success, preventing a persistent upstream outage from becoming a restart
+loop. Either guard firing is recovery evidence, not a PASS by itself. LAN-only
+firmware deliberately does not recover merely because its host sleeps.
 
 Treat fresh numbers plus timed-out questions as a separate transport check.
 When more than one `_vibepulse._tcp` service is advertised on the same LAN,

@@ -6,7 +6,7 @@ around them (2026-08-13). How these get found and worked is described in
 [observability.md](observability.md); stories behind them live in
 [lessons.md](lessons.md).
 
-**Last combed: 2026-08-30 (fresh feed / stale glass transport incident).**
+**Last combed: 2026-08-30 (persistent panel HTTP-stall incident).**
 
 Rules of the file:
 
@@ -223,8 +223,22 @@ Cloudflare `403` that the panel-compatible User-Agent did not. Doctor now
 surfaces `ready`/`waiting`/`stale` direct-poll evidence without calling a
 relay-only network broken, and the versioned skill requires separate checks of
 source, LAN, real-client relay, power, and firmware generation. The installed
-unit still needs a separately authorized physical update and wall-powered
-runtime verification; silence from passive serial remains non-evidence.
+unit received a separately authorized firmware candidate, but it later failed
+sustained dedicated-power operation; OBS-34 records the bounded escalation
+added from that result. Silence from passive serial remains non-evidence.
+
+### OBS-34 · A disconnect-only recovery had no hard-stop evidence
+`firmware · S · done (2026-08-30)` — the first watchdog candidate could
+recycle Wi-Fi after a sustained quota stall, but had no second level if the
+HTTP/TLS task did not make a real success afterward. The physical panel became
+stale again while the host and relay stayed fresh and the board answered ICMP;
+the exact lower-level trigger was unavailable without serial on dedicated
+power. The policy now recycles at 60 seconds, wakes the quota task, waits for a
+new IP before retrying, and escalates to one device restart after a further 45
+seconds. Success resets
+the incident; a reboot is disarmed until a new success, preventing a persistent
+upstream outage from becoming a restart loop. Host tests pin every transition.
+Physical dedicated-power acceptance remains separate evidence.
 
 ---
 

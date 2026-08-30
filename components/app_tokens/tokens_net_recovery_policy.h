@@ -4,11 +4,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* The UI declares quota data stale after 120 seconds. Give the ordinary
- * 30-second poll one extra attempt before recycling the transport. */
-#define TK_TOKENS_HTTP_STALL_US (150LL * 1000000LL)
-/* A real upstream outage must not turn into a reconnect loop. */
-#define TK_TOKENS_HTTP_RECOVERY_COOLDOWN_US (10LL * 60LL * 1000000LL)
+/* The UI declares quota data stale after 120 seconds. Intervene after 60
+ * seconds so a recycled station gets one bounded retry before the
+ * glass crosses that boundary. */
+#define TK_TOKENS_HTTP_STALL_US (60LL * 1000000LL)
+/* A disconnect is not guaranteed to unwind a wedged TLS/client task. If no
+ * real success follows the recycle, restart the process state as a second and
+ * final recovery level. Cold boot is fail-closed until a new success, so a
+ * real upstream outage cannot become a reboot loop. */
+#define TK_TOKENS_HTTP_RESTART_GRACE_US (45LL * 1000000LL)
+
+typedef enum {
+  TK_TOKENS_NET_RECOVERY_NONE = 0,
+  TK_TOKENS_NET_RECOVERY_RECYCLE_WIFI,
+  TK_TOKENS_NET_RECOVERY_RESTART_DEVICE,
+} tk_tokens_net_recovery_action;
 
 typedef struct {
   bool has_success;
@@ -26,7 +36,7 @@ void tk_tokens_net_recovery_note_recovery(
  * gone quiet, the station must still claim to be associated, and the build
  * must have a redundant numbers relay. A LAN-only installation may
  * legitimately have a sleeping computer and is never recycled for that. */
-bool tk_tokens_net_recovery_should_recover(
+tk_tokens_net_recovery_action tk_tokens_net_recovery_action_for(
     const tk_tokens_net_recovery_state *state, int64_t now_us,
     bool wifi_associated, bool redundant_path_configured);
 

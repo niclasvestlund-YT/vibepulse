@@ -225,12 +225,15 @@ succeeding, their pages keep reading as live (OBS-09). Until fixed, a
 
 Current relay-configured firmware has a separate recovery guard for this quota
 clock. It arms only after a real success and only while Wi-Fi still reports an
-association. At 150 seconds without another quota success it recycles the
-station transport, then waits at least ten minutes before another recovery.
-LAN-only builds deliberately do not arm the guard: a sleeping host is normal,
-not proof that the radio is wedged. A release PASS still requires recent
-direct polling and a repeated physical interaction after the stale window;
-the watchdog firing is recovery evidence, not health evidence by itself.
+association. At 60 seconds without another quota success it recycles the
+station transport and wakes the quota task, which waits for a new IP before
+retrying. If no real success follows within another 45 seconds, it restarts the device once to
+discard wedged HTTP/TLS task state. A reboot starts disarmed until a new real
+success, so a persistent upstream outage cannot become a reboot loop. LAN-only
+builds deliberately do not arm the guard: a sleeping host is normal, not proof
+that the radio is wedged. A release PASS still requires recent direct polling
+and a repeated physical interaction after the stale window; either recovery
+action firing is evidence of recovery work, not health evidence by itself.
 
 ### 6. CI logs
 

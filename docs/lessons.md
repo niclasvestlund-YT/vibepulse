@@ -21,6 +21,24 @@ point at the backlog item.
 
 ---
 
+## 2026-08-30 · A disconnect-only watchdog could not clear wedged HTTP state
+
+**What happened:** the first recovery candidate cleared `STALE` after boot,
+then the wall-powered panel became stale again. Claude, the local API, and the
+ESP32-compatible relay request remained fresh, the board answered ICMP, and
+two later questions ended in computer fallback/timeout. **Confirmed failure
+boundary:** the firmware's one Wi-Fi disconnect had no escalation when no real
+quota success followed; the exact lower-level TLS/client trigger was not
+captured without serial on wall power. **The rule:** recovery must be staged
+and a real data success—not a reconnect attempt—must close the incident.
+**Guards:** after an initial success, relay-configured firmware recycles Wi-Fi
+at 60 seconds, wakes the quota task, waits for a new IP before retrying, and
+restarts once after a further 45 seconds without success. Cold boot, LAN-only,
+disconnected, and clock-regression states stay fail-closed; host tests pin the
+transitions.
+**Watch for:** calling the hard-recovery candidate fixed before it passes the
+dedicated-power stale window and a repeated physical question.
+
 ## 2026-08-30 · First DNS-SD result was not the user's active computer
 
 **What happened:** after the HTTP watchdog image kept quota data fresh beyond
@@ -50,12 +68,12 @@ default modem-sleep policy and had no bounded transport recovery. **The rule:** 
 PASS must outlive the stale window and repeat the interactive round trip.
 **Guards:** the quota transport now records last success and, only after an
 initial success, only while associated, and only when a redundant numbers
-relay is configured, recycles Wi-Fi after 150 seconds without progress. A
-ten-minute cooldown prevents loops during a real upstream outage. Target Wi-Fi
-disables modem sleep because this is a wall-powered live display. The policy
-is host-tested and fail-closed for cold start, LAN-only installs, disconnects,
-clock regression, and cooldown. **Watch for:** calling ping, fresh server JSON,
-or a single post-boot interaction proof that the panel will stay fresh.
+relay is configured, begins a bounded staged recovery before the glass becomes
+stale. Target Wi-Fi disables modem sleep because this is a wall-powered live
+display. The policy is host-tested and fail-closed for cold start, LAN-only
+installs, disconnects, and clock regression. **Watch for:** calling ping,
+fresh server JSON, or a single post-boot interaction proof that the panel will
+stay fresh.
 
 ## 2026-08-30 · A fresh feed did not prove fresh glass
 
