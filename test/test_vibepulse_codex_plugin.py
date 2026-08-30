@@ -1729,7 +1729,8 @@ class MacosServiceTests(unittest.TestCase):
                 "launchctl", "bootout", "gui/501/se.torget.tokenserver"])
             self.assertEqual(runner.calls[2][0], [
                 "launchctl", "bootstrap", "gui/501", str(plist_path)])
-            self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
+            if os.name != "nt":
+                self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
 
     def test_failed_bootstrap_restores_previous_service(self):
         service = load_macos_service()
