@@ -464,6 +464,15 @@ from one clean, durable checkout, run setup doctor, verify live `rev` and
 Historical tracebacks remain in the bounded log, so a post-repair verdict must
 also prove that no new error appeared after the new timestamp.
 
+**2026-08-30 install recurrence:** the first atomic replacement restored the
+old service after `launchctl bootstrap` transiently failed; an identical second
+bootstrap then succeeded. The installer now retries that narrow post-`bootout`
+race on a fixed short schedule and still restores the previous service after
+the bound. During the same physical gate, ESP-IDF refreshed `dependencies.lock`
+from `esp-nn` 1.3.0 to 1.3.1. The candidate was not flashed while the checkout
+was dirty; the resolved version is committed so the source label, lockfile,
+host advertisement, and physical image can identify one exact build.
+
 ## 2026-08-13 · Stale data replayed as breaking news
 
 **What happened:** after a tokenserver outage, the revived agent feed's

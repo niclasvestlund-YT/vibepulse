@@ -512,9 +512,10 @@ python3 tools/vibepulse_macos_service.py install
 existing runtime arguments and environment values without printing them, and
 uses `bootout` plus `bootstrap` so launchd cannot retain an older cached
 command. It refuses foreign, symlinked, malformed, or unrecognized existing
-plists. If the new service cannot be bootstrapped, the previous plist is
-restored and reloaded automatically. Python 3.11+ and the exact tokenserver
-source must exist before it changes anything.
+plists. A short, bounded retry absorbs launchd's transient post-`bootout`
+bootstrap race. If every new-service attempt fails, the previous plist is
+restored and reloaded with the same bounded retry. Python 3.11+ and the exact
+tokenserver source must exist before it changes anything.
 
 Manual installation remains available for unusual layouts:
 

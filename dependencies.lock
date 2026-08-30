@@ -24,7 +24,7 @@ dependencies:
       type: service
     version: 0.5.3
   espressif/esp-nn:
-    component_hash: 83eca824ef501eb0d8ac7d090970d8a2997ac369e5edb86366a5943e4368d5a5
+    component_hash: 003bfc494fd3faf73088b62dc5f565a3c61b9e36494d90e8cbf5f238ff2b98fe
     dependencies:
     - name: idf
       require: private
@@ -32,7 +32,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.3.0
+    version: 1.3.1
   espressif/esp-tflite-micro:
     component_hash: 22fc501ab0b1bd39377048d608e6fce0e7b55cd07d244cbf41044b24d9b7db2e
     dependencies:
@@ -419,6 +419,6 @@ direct_dependencies:
 - lvgl/lvgl
 - waveshare/esp32_s3_touch_amoled_2_16
 - waveshare/qmi8658
-manifest_hash: 7c8e739b247b6f6ffabbe5c5fd6538a7bfe816e61652c1f47cedca4b4f2e388b
+manifest_hash: f65dca1bf4d9546bfa1c41f945ff799791474d6e33a0a3c07c89777db9971446
 target: esp32s3
 version: 2.0.0

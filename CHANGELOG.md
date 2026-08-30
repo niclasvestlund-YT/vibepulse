@@ -40,6 +40,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   recognized private runtime configuration without printing it, and performs
   a real `bootout` + `bootstrap` so launchd cannot retain an old worktree. A
   failed bootstrap restores and reloads the previous service configuration.
+- The LaunchAgent installer now retries only the short, observed post-`bootout`
+  bootstrap race before rolling back; permanent failures remain fail-closed.
+- The ESP-IDF dependency lock now records the exact resolver result used by the
+  verified ESP32-S3 build, keeping flash candidates reproducible and clean.
 - Windows Task Scheduler installations can now persist the optional public
   GitHub source, named Claude/Codex plan labels, and explicit per-provider
   subscription costs. The background service no longer drops the GitHub Stars

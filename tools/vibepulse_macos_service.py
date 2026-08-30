@@ -10,12 +10,14 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+import time
 
 
 LABEL = "se.torget.tokenserver"
 PLIST_NAME = f"{LABEL}.plist"
 PYTHON_PROBE = (
     "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)")
+BOOTSTRAP_RETRY_DELAYS = (0.25, 0.75)
 
 
 class ServiceConfigError(ValueError):
@@ -141,8 +143,23 @@ def _launchd_domain():
     return f"gui/{os.getuid()}"
 
 
+def _bootstrap(domain: str, plist_path: Path, *, run, sleep):
+    """Bound launchd's short post-bootout race without hiding hard failures."""
+    command = ["launchctl", "bootstrap", domain, str(plist_path)]
+    started = run(
+        command, capture_output=True, text=True, timeout=15, check=False)
+    for delay in BOOTSTRAP_RETRY_DELAYS:
+        if started.returncode == 0:
+            break
+        sleep(delay)
+        started = run(
+            command, capture_output=True, text=True, timeout=15,
+            check=False)
+    return started
+
+
 def install(*, repo_root: Path, python: Path, plist_path: Path, home: Path,
-            validate_only=False, run=subprocess.run):
+            validate_only=False, run=subprocess.run, sleep=time.sleep):
     previous_payload = (_read_owned_plist(plist_path)
                         if plist_path.exists() else None)
     extras, environment = _read_preserved(plist_path)
@@ -160,9 +177,8 @@ def install(*, repo_root: Path, python: Path, plist_path: Path, home: Path,
     _atomic_write(plist_path, payload)
     run(["launchctl", "bootout", f"{domain}/{LABEL}"],
         capture_output=True, text=True, timeout=15, check=False)
-    started = run(
-        ["launchctl", "bootstrap", domain, str(plist_path)],
-        capture_output=True, text=True, timeout=15, check=False)
+    started = _bootstrap(
+        domain, plist_path, run=run, sleep=sleep)
     if started.returncode != 0:
         if previous_payload is None:
             try:
@@ -172,9 +188,8 @@ def install(*, repo_root: Path, python: Path, plist_path: Path, home: Path,
             raise ServiceConfigError(
                 "launchctl bootstrap failed; new service file was removed")
         _atomic_write(plist_path, previous_payload)
-        restored = run(
-            ["launchctl", "bootstrap", domain, str(plist_path)],
-            capture_output=True, text=True, timeout=15, check=False)
+        restored = _bootstrap(
+            domain, plist_path, run=run, sleep=sleep)
         if restored.returncode != 0:
             raise ServiceConfigError(
                 "launchctl bootstrap failed and previous service could not "

@@ -1732,6 +1732,28 @@ class MacosServiceTests(unittest.TestCase):
             if os.name != "nt":
                 self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
 
+    def test_install_retries_transient_launchd_bootstrap_failure(self):
+        service = load_macos_service()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plist_path = root / "Library/LaunchAgents/service.plist"
+            runner = FakeRunner([
+                result(), result(returncode=0), result(returncode=5),
+                result(returncode=0)])
+            delays = []
+            with mock.patch.object(
+                    service, "_launchd_domain", return_value="gui/501"):
+                service.install(
+                    repo_root=ROOT, python=Path(sys.executable),
+                    plist_path=plist_path, home=root,
+                    validate_only=False, run=runner, sleep=delays.append)
+
+            bootstraps = [
+                call[0] for call in runner.calls
+                if call[0][:2] == ["launchctl", "bootstrap"]]
+            self.assertEqual(len(bootstraps), 2)
+            self.assertEqual(delays, [service.BOOTSTRAP_RETRY_DELAYS[0]])
+
     def test_failed_bootstrap_restores_previous_service(self):
         service = load_macos_service()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1747,7 +1769,9 @@ class MacosServiceTests(unittest.TestCase):
             }
             plist_path.write_bytes(plistlib.dumps(old))
             runner = FakeRunner([
-                result(), result(returncode=0), result(returncode=5),
+                result(), result(returncode=0),
+                result(returncode=5), result(returncode=5),
+                result(returncode=5),
                 result(returncode=0)])
             with mock.patch.object(
                     service, "_launchd_domain", return_value="gui/501"), \
@@ -1756,9 +1780,9 @@ class MacosServiceTests(unittest.TestCase):
                 service.install(
                     repo_root=ROOT, python=Path(sys.executable),
                     plist_path=plist_path, home=root,
-                    validate_only=False, run=runner)
+                    validate_only=False, run=runner, sleep=lambda _delay: None)
             self.assertEqual(plistlib.loads(plist_path.read_bytes()), old)
-            self.assertEqual(runner.calls[3][0], [
+            self.assertEqual(runner.calls[5][0], [
                 "launchctl", "bootstrap", "gui/501", str(plist_path)])
 
     def test_failed_first_bootstrap_removes_new_service_file(self):
@@ -1767,7 +1791,9 @@ class MacosServiceTests(unittest.TestCase):
             root = Path(tmp)
             plist_path = root / "Library/LaunchAgents/service.plist"
             runner = FakeRunner([
-                result(), result(returncode=0), result(returncode=5)])
+                result(), result(returncode=0),
+                result(returncode=5), result(returncode=5),
+                result(returncode=5)])
             with mock.patch.object(
                     service, "_launchd_domain", return_value="gui/501"), \
                     self.assertRaisesRegex(
@@ -1775,7 +1801,7 @@ class MacosServiceTests(unittest.TestCase):
                 service.install(
                     repo_root=ROOT, python=Path(sys.executable),
                     plist_path=plist_path, home=root,
-                    validate_only=False, run=runner)
+                    validate_only=False, run=runner, sleep=lambda _delay: None)
             self.assertFalse(plist_path.exists())
 
     def test_foreign_or_unrecognized_existing_plist_is_never_overwritten(self):

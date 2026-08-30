@@ -491,7 +491,8 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
    On macOS, validate and install autostart from this durable checkout with
    `python3 tools/vibepulse_macos_service.py validate` followed by the explicit
    `install` command. It atomically rewrites and fully reloads the LaunchAgent,
-   so launchd cannot keep running a deleted PR worktree. Full details:
+   retries launchd's short post-`bootout` race within a fixed bound, and keeps
+   launchd from running a deleted PR worktree. Full details:
    [tools/tokenserver/README.md](tools/tokenserver/README.md).
 
 ## Over-the-air updates
