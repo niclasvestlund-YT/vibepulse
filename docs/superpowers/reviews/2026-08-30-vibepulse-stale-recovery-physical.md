@@ -2,8 +2,9 @@
 
 ## Outcome
 
-**FIRST REMEDIATION FAILED SUSTAINED DEDICATED-POWER ACCEPTANCE; HARD-RECOVERY
-CANDIDATE BUILT BUT NOT FLASHED.**
+**FIRST REMEDIATION FAILED; HARD-RECOVERY DATA PATH AND CANONICAL APPROVE NOW
+PASS BEYOND THE RECOVERY WINDOW. DEDICATED-POWER AND LITERAL-STALE GATES REMAIN
+NOT TESTED FOR THE FINAL IMAGE.**
 The physical unit `torget-home-01` now runs
 `v1.0.0-25-g054db68`, built from the stale-recovery branch for PR #58. The
 previous `v1.0.0-18-g3a131a2` checkpoint was byte-identical to merged `main`
@@ -44,20 +45,35 @@ not close the separate sustained dedicated-5-V stale-recovery gate: the panel
 became stale again, and two later interaction checks ended in computer
 fallback and timeout rather than a panel answer.
 
-A second candidate now adds bounded escalation to the first watchdog. At 60
+A second candidate adds bounded escalation to the first watchdog. At 60
 seconds without a real quota success it recycles Wi-Fi and wakes the quota
 task, which waits for a new IP before retrying; after another 45 seconds
 without success it performs one controlled restart. A reboot is disarmed until
-a new real success. Host policy
-tests, wiring tests, and an ESP32-S3 build pass, but this image has not been
-flashed. It remains **NOT TESTED** on the physical stale-window gate.
+a new real success. Host policy tests, wiring tests, and full ESP32-S3 CI pass.
 
-The live macOS tokenserver also reports an older source revision because its
-launchd job still points at a historical validation worktree. Its active Claude
-probe, saved credential, and all served stale flags are healthy, so that
-provenance drift does not explain this glass-only stale incident. It is still a
-host-hygiene warning: release validation must restart the service from the
-intended merged checkout rather than silently accepting an old process.
+The final merged image `v1.0.0-30-g000ebe4` was then built from a clean
+checkout, matched the live service's `otaAvailableVersion`, and was written to
+the identified ESP32-S3. Esptool hash-verified bootloader, partition table,
+OTA initial data, and app; NVS was outside every write range. On computer USB,
+serial evidence reported a successful token fetch at approximately 415 seconds
+of uptime—well beyond the 105-second recycle-plus-restart window—with stable
+heap. The exact `Ser du APPROVE?` question also passed with a visible human
+`Ja` and returned `answered`, option index 0. A later literal-STALE question
+timed out to computer fallback, so silence was discarded and the final image's
+literal `STALE` absence is still **NOT TESTED**. The final image was not moved
+to dedicated 5 V during this checkpoint; sustained dedicated-power acceptance
+also remains **NOT TESTED**.
+
+The macOS LaunchAgent now runs the durable checkout at merge `000ebe4`; doctor
+accepted the live source fingerprint, discovery was ready, the Claude
+credential was ready, and Claude week, Fable/model week, and Codex week stale
+flags were all false. The first atomic replacement encountered a transient
+`launchctl bootstrap` failure and automatically restored the old service; an
+identical retry succeeded. PR #60 adds a bounded retry for that observed race
+while retaining fail-closed rollback. Its complete duplicated CI matrix passed.
+The new startup's historical log scan took 211 seconds, during which the light
+health endpoint remained responsive but `/api/tokens` requests timed out. That
+startup-latency boundary is operational evidence, not a panel PASS.
 
 No credential, account identifier, quota value, private address, relay route,
 device key, or private URL is recorded here.
@@ -75,6 +91,7 @@ device key, or private URL is recorded here.
 | Recovery behavior | PASS | Automatic reset could not enter the ROM loader; the documented BOOT + RESET sequence did, before any write occurred |
 | Watchdog image flash | PASS | `v1.0.0-24-ga16512a` booted after a hash-verified write of bootloader, partition table, OTA initial data, and app; NVS remained outside the write ranges |
 | Relay-enabled app flash | PASS | `v1.0.0-25-g054db68` booted after a hash-verified app-only write; NVS, partition table, and other data partitions remained outside the write range |
+| Final hard-recovery flash | PASS | Clean `v1.0.0-30-g000ebe4` matched the service advertisement; full ESP32-S3 build had 61% app-partition headroom; all four written images were hash-verified and NVS was untouched |
 
 ## Runtime evidence
 
@@ -87,7 +104,7 @@ device key, or private URL is recorded here.
 | Initial direct panel contact | PASS | Root health changed from `waiting` to `ready` after two confirmed panel polls |
 | Sustained direct panel contact | **FAIL** | The last confirmed `/api/agent-status` poll aged past five minutes and was not renewed |
 | Provider freshness | PASS | Claude weekly, Fable/model-week, and Codex weekly stale flags were all false |
-| Host runtime provenance | WARN | The live launchd service runs an older validation-worktree revision; current data is fresh, but current-main validation remains pending |
+| Host runtime provenance | PASS | Durable checkout, live service revision, source fingerprint, and advertised firmware version matched `000ebe4` / `v1.0.0-30-g000ebe4` |
 | Physical APPROVE | PASS | Exact question `Ser du APPROVE?`; visible-state instruction required APPROVE; human tapped `Ja`; returned `answered`, option index 0, answer `Ja` |
 | Initial literal `STALE` absence | PASS, transient | Computer fallback was discarded; the user then directly inspected the main view and confirmed that `STALE` was gone |
 | Repeated physical interaction | **FAIL** | The follow-up panel request timed out; silence and computer fallback were not counted as approval |
@@ -95,7 +112,11 @@ device key, or private URL is recorded here.
 | New watchdog diagnostic runtime | PASS, bounded | Quota HTTP completed repeatedly beyond the former failure point, through approximately 6 minutes 19 seconds, without a heap collapse |
 | Disconnect-only watchdog dedicated-power runtime | **FAIL** | The relay-enabled image later became stale again while local and relay data stayed fresh and the board remained reachable |
 | Hard-recovery candidate build | PASS, host only | Staged recycle/wake/restart policy and target wiring pass host tests; the ESP32-S3 image builds successfully |
-| Hard-recovery candidate physical runtime | **NOT TESTED** | The second candidate has not been flashed; no glass result may be inferred from its build |
+| Final hard-recovery data runtime | PASS, bounded on computer USB | Serial reported a successful token fetch at about 415 seconds, beyond the 105-second hard-recovery window, with stable heap |
+| Final hard-recovery dedicated-power runtime | **NOT TESTED** | The final image was not moved to dedicated 5 V during this checkpoint; computer USB is not accepted as the operating-power gate |
+| Final canonical physical APPROVE | PASS | Exact `Ser du APPROVE?`; visible human `Ja`; returned `answered`, option index 0, answer `Ja` |
+| Final literal `STALE` absence | **NOT TESTED** | The follow-up question timed out to computer fallback; silence was not treated as proof of the glass state |
+| Final direct-LAN polling | WAIT | No direct panel poll was confirmed after the service restart; the successful data and question evidence used the relay-capable firmware paths |
 | Relay-disabled multi-host question routing | **FAIL, superseded** | Two VibePulse DNS-SD services were present; the relay-disabled image could select a different healthy host, and the canonical question timed out |
 | Relay-enabled multi-host question routing | **PASS, immediate** | The canonical question showed APPROVE and returned the human's `Ja` response as `answered`, option index 0 |
 
@@ -120,6 +141,11 @@ device key, or private URL is recorded here.
 8. Fresh numbers do not prove correct question routing. On a LAN with several
    VibePulse hosts, first-result DNS-SD selection is not user intent; use the
    encrypted interaction relay for a shared panel.
+9. A valid LaunchAgent can hit a short post-`bootout` bootstrap race. Retry
+   within a fixed small bound, then restore the prior service; never loop.
+10. Near-zero host disk space can break atomic state writes and greatly extend
+    startup work. Clean only regenerable build output after recording the
+    flashed hashes, and keep light health separate from the heavy quota scan.
 
 ## First candidate — failed sustained acceptance
 
@@ -137,7 +163,7 @@ checks did not reach answer buttons. Direct LAN discovery alone still cannot
 prove which host owns a question on this LAN; the encrypted interaction relay
 remains required for the shared-panel setup.
 
-## Second candidate — host verified, physical gate pending
+## Second candidate — bounded physical data and APPROVE pass
 
 The replacement policy intervenes before the 120-second glass freshness
 boundary: recycle at 60 seconds, wake the quota task, retry after a new IP,
@@ -148,7 +174,9 @@ clock-regression states remain fail-closed, and after a restart the guard does
 not arm again until a new success, so a persistent upstream outage cannot form
 a reboot loop.
 
-The host policy and wiring tests pass and the firmware builds. No physical
-claim is made yet. Full acceptance requires explicit flash authorization, the
-same dedicated-power stale-window test, recent direct polling, literal absence
-of `STALE`, and a repeated canonical question returning the human's `Ja`.
+The host policy and wiring tests pass, the firmware builds, the final merged
+image was hash-verified on the target, a real token fetch succeeded beyond the
+recovery window, and the canonical physical question returned the human's
+`Ja`. Full acceptance still requires the same dedicated-power stale-window
+test plus literal absence of `STALE`; direct polling must be reported
+separately rather than inferred from healthy relay traffic.
