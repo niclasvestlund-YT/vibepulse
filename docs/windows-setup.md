@@ -20,7 +20,23 @@ git --version
 py -3 -c "import sys; print(sys.version); raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
 ```
 
-VibePulse requires Git and Python 3.11 or newer. Clone the repository into a
+VibePulse requires Git and Python 3.11 or newer. If either command fails,
+install the missing tool with the Windows package manager (`winget`, present
+on Windows 10 1809 and later), then open a new PowerShell window so the
+updated `PATH` applies:
+
+```powershell
+winget install --id Git.Git -e
+winget install --id Python.Python.3.12 -e
+```
+
+Without `winget`, download the installers from
+[git-scm.com/download/win](https://git-scm.com/download/win) and
+[python.org/downloads/windows](https://www.python.org/downloads/windows/);
+tick *Add python.exe to PATH* in the Python installer. Rerun the two
+verification commands above before continuing.
+
+Clone the repository into a
 stable path that will still exist after the next sign-in:
 
 ```powershell

@@ -718,8 +718,12 @@ class CodexRouteTests(unittest.TestCase):
         result = {}
 
         def post():
-            result["status"], result["raw"] = self.request(
-                "POST", path, payload, headers=headers)
+            try:
+                result["status"], result["raw"] = self.request(
+                    "POST", path, payload, headers=headers,
+                    early_reject=True)
+            except OSError as exc:  # keep the failure legible, never silent
+                result["error"] = repr(exc)
 
         thread = threading.Thread(target=post, daemon=True)
         thread.start()
@@ -730,7 +734,8 @@ class CodexRouteTests(unittest.TestCase):
         thread.join(timeout=5)
 
         self.assertFalse(thread.is_alive())
-        self.assertEqual(result.get("status"), expected_status)
+        self.assertEqual(result.get("status"), expected_status,
+                         result.get("error") or result.get("raw"))
         self.assertIsNone(shown)
 
     def test_codex_question_parks_and_returns_exact_structured_answer(self):

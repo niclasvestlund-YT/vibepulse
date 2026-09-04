@@ -21,6 +21,34 @@ point at the backlog item.
 
 ---
 
+## 2026-09-04 · A rejected request lost its answer on Windows
+
+**What happened:** three `CodexRouteTests` wire tests failed on the Windows
+CI runner with `None != 415` / `None != 403` while the same commit passed the
+same job in a parallel run and on Linux and macOS. **Root cause:** the tests
+prove that the server rejects on the headers alone, before parsing the body.
+The test client wrote headers and body in one go, so when the server
+answered and closed, the body was still unread in its socket; Windows treats
+a close with unread data as an abort (`WinError 10053`) and discards the
+response already sent, so `getresponse()` raised instead of returning the
+status. **The rule:** a client that expects an early rejection must not
+leave unread bytes behind it, and must not let timing decide — advertise
+the body in `Content-Length`, never write it, and half-close the write side
+so the server can still reply. A grace period that sends the body when no
+answer arrived was tried first and rejected: it only makes the abort rarer,
+because a loaded runner can miss any deadline. **Guards:**
+`headers_first_request` in `test_interactions.py`, opted into with
+`early_reject=True` by the tests that expect a rejection on the headers
+alone (it cannot be the default: a route that parks a question expects its
+body within the server's 50 ms first-byte deadline), and a legible failure
+message carrying the socket error in `assert_wire_rejected`. The server
+already drains the request before its 503 in `_reject_busy` for exactly this
+reason; extending that drain to the 403/415/404 early rejections is the
+product-side follow-up. **Watch for:** the same abort in
+real Windows hook clients that get a 403/415 from the tokenserver before
+their body is read; if a hook on Windows reports a connection abort where a
+status was expected, this is the mechanism.
+
 ## 2026-08-30 · Local activity was rendered as no active agent
 
 **What happened:** the local `/api/agent-status` reported the current Codex

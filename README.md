@@ -41,6 +41,23 @@ the room, no window to switch to, no menu bar to squint at.
 > active, optional integrations remain opt-in, and every platform claim stays
 > tied to its recorded evidence.
 
+## Start here
+
+VibePulse is built for vibecoders — people who build with Claude Code or
+Codex. You do not need to read this whole page:
+
+1. **Have the board?** Check [What you need](#what-you-need), then follow
+   [Setup, the vibecoder way](#setup-the-vibecoder-way): your coding agent
+   does the setup with you, one verified step at a time.
+2. **No board yet?** [Run the simulator](#no-hardware-run-the-simulator).
+   Same pixels, on your computer.
+3. **The core is your Claude/Codex usage on the glass.** Answering from the
+   panel, the relays, and GitHub are add-ons, each off by default and opted
+   into separately: today through the setup command, `secrets.h`, and the
+   table under [Independent switches](#independent-switches). A settings
+   page on the glass is planned, not built (see the spec in
+   `docs/superpowers/specs/`). Sound has no verified backend yet.
+
 ## Latest release: v1.0.0
 
 The first major release makes Windows a first-class VibePulse host and records
@@ -400,39 +417,87 @@ bounded and fail-closed, while host repair remains an explicit setup action.
 
 ## What you need
 
-- **[Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm)**
-  (~$30). No soldering, just a USB-C cable. It's the same board Clawdmeter
-  uses, so if you already own one you're 10 minutes away.
-- **A Mac or Windows PC** running the tokenserver. Claude and Codex quota
-  collection are supported on both. Direct LAN mode needs the panel to reach
-  that computer; the optional relays remove the same-WiFi requirement. The
-  exact support/evidence boundary is maintained in
-  **[Host platform support](docs/platform-support.md)**; Windows release
-  installation and recovery use the public
-  **[Windows host runbook](docs/windows-setup.md)**, while release candidates
-  use the reproducible
-  **[Windows validation gate](docs/windows-validation.md)**. “Host supported”
-  does not mean every later candidate has passed the physical Windows loop;
-  the v1 runtime's latest sanitized checkpoint is a
-  **[FULL PASS](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)**,
-  while future runtime revisions require a fresh run rather than inheriting
-  that result.
-- **Claude Code and/or Codex.** Either alone is fine.
-- **2.4 GHz WiFi.** The ESP32-S3 can't see 5 GHz networks.
+Four things. All four are required for the core — your usage on the glass.
+No VibePulse account, no cloud service, no API key — you sign in to
+Claude Code or Codex as you already do, and nothing else. The **service on
+your computer** needs only
+Git and Python; the [Windows host runbook](docs/windows-setup.md) has the
+`winget` commands and download links for both. Putting the firmware on the
+board is the one step that needs more, and row 1 says what.
+
+| | You need | Because |
+|---|---|---|
+| **1. A screen** | One of the boards below, a USB-C cable, and **its own USB power supply**. Flashing it also needs the **ESP-IDF 5.5 toolchain** with CMake and Ninja, one time | a computer USB port usually cannot feed the running AMOLED; the firmware is built from source until the browser installer lands |
+| **2. A computer** | A Mac or a Windows PC with **Git** and **Python 3.11+**, awake whenever you want fresh numbers | the VibePulse service runs here and reads your agents' local usage |
+| **3. An agent on that computer** | **Claude Code and/or Codex, installed and signed in.** Either alone is fine | that is where the numbers come from |
+| **4. WiFi** | A **2.4 GHz** network that both the screen and the computer can reach | the ESP32-S3 cannot see 5 GHz; the optional relay lifts the same-network rule later |
+
+Flashing the firmware currently also needs
+[ESP-IDF 5.5](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/index.html)
+on the computer — see [Setup](#setup-the-vibecoder-way). A browser-based
+installer is planned so that this step disappears.
+
+### Supported screens
+
+| Board | Display | Status |
+|---|---|---|
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Every frame in this README is an exact 480×480 render of the pixels it shows. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
+
+More boards are added here as they pass on a real unit, never from a
+datasheet. What the current board can and cannot do is recorded in
+[`spec/hardware.md`](spec/hardware.md).
+
+### Supported computers
+
+| Computer | Status | Autostart |
+|---|---|---|
+| macOS | **Supported.** Daily development and physical panel reviews. macOS ships an older Python; `brew install python` gives you 3.11+ | launchd |
+| Windows | **Supported.** v1 core, the physical answer loop, and the sign-in/sleep/reboot lifecycle verified on a real PC | Task Scheduler |
+| Linux | **Not yet.** Tracked in [#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2) | — |
+
+"Supported" means the computer service; it does not claim that every
+developer builds or flashes the firmware from that OS. The evidence behind
+each row is maintained in **[Host platform support](docs/platform-support.md)**.
+Windows installation and recovery use the
+**[Windows host runbook](docs/windows-setup.md)**, and release candidates go
+through the reproducible **[Windows validation gate](docs/windows-validation.md)**.
+"Supported" also does not mean every later candidate has passed the physical
+Windows loop: the v1 runtime's latest sanitized checkpoint is a
+**[FULL PASS](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)**,
+and future runtime revisions require a fresh run rather than inheriting it.
 
 ## Setup, the vibecoder way
 
-Clone the repo, open your coding agent inside it (Claude Code, Codex,
-Cursor, whatever you run), and say:
+You do not set VibePulse up by hand. Your coding agent does it with you,
+step by step, verifying as it goes. Clone the repo and start the agent you
+already use, in that folder. The same three lines work in a Mac or Linux
+shell and in Windows PowerShell 5.1 and 7:
 
-> Set up VibePulse for me: help me fill in secrets.h, build and flash the
-> board over USB, and start the tokenserver on this Mac or Windows PC.
+**Claude Code**
 
-The repo is built for this. `CLAUDE.md` and `AGENTS.md` point your agent
+```
+git clone https://github.com/niclasvestlund-YT/vibepulse.git
+cd vibepulse
+claude "Set up VibePulse for me: help me fill in secrets.h, build and flash the board over USB, and start the tokenserver on this computer."
+```
+
+**Codex**
+
+```
+git clone https://github.com/niclasvestlund-YT/vibepulse.git
+cd vibepulse
+codex "Set up VibePulse for me: help me fill in secrets.h, build and flash the board over USB, and start the tokenserver on this computer."
+```
+
+Any other agent (Cursor, Copilot, …): open the folder and paste the same
+sentence.
+
+The repo is built for this. `CLAUDE.md` and `AGENTS.md` point the agent
 straight at **[docs/agent-setup.md](docs/agent-setup.md)** — an English
 runbook written for agents, with a verification after every step, the traps
-that actually cost people an evening, and a symptom→fix table. That's the
-whole onboarding.
+that actually cost people an evening, and a symptom→fix table. The agent
+asks before it flashes the board; nothing is written to the screen without
+your go-ahead. That's the whole onboarding.
 
 Reading rather than running? That runbook is also the fastest way to
 understand how the pieces fit together.
@@ -637,6 +702,18 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 ```
 
 (On Debian/Ubuntu: `apt-get install libsdl2-dev cmake ninja-build` instead.)
+
+Headless or behind a proxy (CI containers, cloud agent sessions): if the
+LVGL tarball download is blocked, clone the same tag and point CMake at it
+and run the full configure and build with the override:
+
+```
+git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git /tmp/lvgl
+cmake -S sim -B sim/build -G Ninja -DFETCHCONTENT_SOURCE_DIR_LVGL=/tmp/lvgl && ninja -C sim/build
+```
+
+Without a display, run the simulator and its tests with
+`SDL_VIDEODRIVER=offscreen`.
 
 Same code, same fonts, same pixels as the device — it builds the real
 platform and VibePulse against the real LVGL, and feeds it the recorded

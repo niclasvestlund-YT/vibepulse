@@ -26,6 +26,47 @@ SECRET = "a" * 64
 _NO_BODY = object()
 
 
+
+def headers_first_request(port, method, path, body, headers,
+                          timeout=30.0):
+    """Send the headers with the body advertised but never written.
+
+    Callers opt into this for routes that must reject on the headers
+    alone (wrong Host, Origin, Content-Type, a disabled route) before the
+    body is parsed or anything is parked. A client that writes headers
+    and body in one go leaves that body unread in the server's socket
+    when the server answers and closes; Windows treats a close with
+    unread data as an abort (WinError 10053) and discards the response
+    that was already on its way, so the test sees an exception instead of
+    the status.
+
+    The body is therefore never sent: the request advertises its
+    Content-Length, then the write side is half-closed so the server can
+    still reply. Nothing is left unread on any platform, and no timing
+    window decides the outcome, so a loaded runner cannot make these
+    tests intermittent. A route that wrongly waits for the body reads EOF
+    and fails closed, which is a real regression and should fail the
+    test rather than pass quietly.
+    """
+    merged = dict(headers)
+    if not any(name.lower() == "host" for name in merged):
+        merged["Host"] = f"127.0.0.1:{port}"
+    merged["Content-Length"] = str(len(body))
+    merged.setdefault("Connection", "close")
+    head = (f"{method} {path} HTTP/1.1\r\n" +
+            "".join(f"{name}: {value}\r\n"
+                    for name, value in merged.items()) + "\r\n")
+    client = socket.create_connection(("127.0.0.1", port),
+                                      timeout=timeout)
+    try:
+        client.sendall(head.encode("latin-1"))
+        client.shutdown(socket.SHUT_WR)
+        response = http.client.HTTPResponse(client)
+        response.begin()
+        return response.status, response.read()
+    finally:
+        client.close()
+
 class Clock:
     def __init__(self, value=1000.0):
         self.value = value
@@ -1361,13 +1402,20 @@ class HttpEndToEndTests(unittest.TestCase):
         self.handler.legacy_claude_panel_v1 = \
             self._saved["legacy_claude_panel_v1"]
 
-    def request(self, method, path, payload=_NO_BODY, headers=None):
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+    def request(self, method, path, payload=_NO_BODY, headers=None,
+                early_reject=False):
         body = (None if payload is _NO_BODY else
                 json.dumps(payload).encode())
         request_headers = ({"Content-Type": "application/json"}
                            if body else {})
         request_headers.update(headers or {})
+        if body is not None and early_reject:
+            # The route must answer on the headers alone, so the body is
+            # advertised but never written and the server never closes on
+            # unread bytes (see headers_first_request).
+            return headers_first_request(self.port, method, path, body,
+                                         request_headers)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
         conn.request(method, path, body=body, headers=request_headers)
         response = conn.getresponse()
         raw = response.read()
@@ -1635,7 +1683,7 @@ class HttpEndToEndTests(unittest.TestCase):
     def test_post_is_404_when_interactions_are_off(self):
         self.handler.interaction_store = None
         status, _ = self.request("POST", "/api/hook/question",
-                                 question_event())
+                                 question_event(), early_reject=True)
         self.assertEqual(status, 404)
 
     def test_non_loopback_hooks_are_refused(self):
