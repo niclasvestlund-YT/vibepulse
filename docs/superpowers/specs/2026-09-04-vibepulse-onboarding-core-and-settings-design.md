@@ -348,10 +348,14 @@ pairing window keeps all three and puts nothing persistent on the glass:
 2. **Binding to this computer** — while the window is open the glass shows
    a short-lived **pairing code** (proposal: six digits, random per window,
    valid only for that window). The pairing command must present it. In
-   step 4 that command is the checkout form the repository already uses,
-   `python3 tools/vibepulse_setup.py pair <code>` — there is no `vibepulse`
-   console entry point yet and no packaging in the tree, so the PAIR screen
-   shows that spelling. The short `vibepulse pair <code>` arrives with the
+   step 4 that command is the checkout form the repository already uses —
+   `python3 tools/vibepulse_setup.py pair <code>` on macOS and Linux,
+   `py -3 tools\vibepulse_setup.py pair <code>` on Windows, which is how
+   `docs/windows-setup.md` invokes Python throughout because the standard
+   Windows installer does not guarantee a `python3` on PATH. The PAIR
+   screen shows the spelling for the platform the panel most recently
+   polled from, and *Manual setup* shows both. There is no `vibepulse`
+   console entry point yet and no packaging in the tree. The short `vibepulse pair <code>` arrives with the
    Homebrew tap and the Windows one-liner in step 6, and the screen's text
    follows the packaging rather than preceding it. Everything below applies
    to both spellings.
@@ -418,6 +422,15 @@ pairing window keeps all three and puts nothing persistent on the glass:
    `--device <id>`. It never asks the panel which credential to load, so
    an impostor endpoint cannot name another panel's id and collect that
    panel's bearer.
+   **The pairing record is required only for a runtime credential.** A
+   panel that has never been paired has no record, and demanding one would
+   break the flow this spec promises to leave alone: an existing panel
+   built with `TG_OTA_TOKEN`, updated by `tools/ota-flash.sh <ip>` from a
+   checkout. So when the credential is a compiled one — `secrets.h` in a
+   checkout, or `VIBEPULSE_OTA_TOKEN_COMPILED` — the uploader targets the
+   address it was given and does not consult the store at all. The record
+   lookup, and its refusal, apply to runtime credentials, which are the
+   ones whose slot decides whether a secret may go on the wire.
    **Addresses change; identities do not.** The panel adds its non-secret
    device id and its running firmware version to every poll as
    `X-VibePulse-Device` and `X-VibePulse-Version` headers, next to the
@@ -614,9 +627,14 @@ reverted alone.
 1. README prerequisites. **Done 2026-09-04.**
 2. README front door for vibecoders, `.gitignore` hygiene, this spec.
    **This change.**
-3. Settings page and NVS switches. Firmware only; defaults equal today.
-   The `#if TK_GITHUB_*` guards become runtime checks seeded by the
-   macros, with the flag-0 toggle test and a re-measured RAM budget.
+3. Settings page and NVS switches. Defaults equal today, and no host code
+   changes. The `#if TK_GITHUB_*` guards become runtime checks seeded by
+   the macros, with the flag-0 toggle test and a re-measured RAM budget.
+   **The docs ship in the same step**, because the KEY3 hold stops opening
+   OTA and Wi-Fi directly and starts opening Settings: `README.md`,
+   `docs/ota.md`, `docs/wifi.md`, and `docs/agent-setup.md` all describe
+   the old gesture, and maintenance and recovery instructions that no
+   longer match the device are worse than none.
 4. Runtime configuration: DNS-SD default, the PAIR window with the
    PAKE-derived OTA token (never transmitted), **and the PAIR screen that
    shows its code and the panel's IP** — the code has to be readable off
