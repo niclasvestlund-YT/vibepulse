@@ -129,6 +129,12 @@ CLAUDE_PLAN_USAGE_FRESH_S = 20 * 60
 CLAUDE_PLAN_USAGE_MAX_BYTES = 2 * 1024 * 1024
 HTTP_MAX_WORKERS = 32
 JSON_BODY_TIMEOUT_S = 2.0
+# Tömning av en oläst, annonserad kropp före ett tidigt avslag. Delar
+# deadline med _reject_busy (0.05 s), men inte bytetaket: den tömmer som
+# mest 8 KiB *huvuden* och stannar vid \r\n\r\n, medan den här tömningen
+# gäller den annonserade kroppen och har ett eget, större tak.
+REQUEST_DRAIN_LIMIT = 64 * 1024
+REQUEST_DRAIN_TIMEOUT_S = 0.05
 
 # Vilka token-källor och systemanrop som finns beror på plattformen, inte på
 # konfiguration. Testerna patchar konstanten för att köra Windows-grenarna
@@ -2289,8 +2295,79 @@ class Handler(BaseHTTPRequestHandler):
     panel_confirm_window_s = 10.0
     panel_fresh_s = 15.0
     json_body_timeout_s = JSON_BODY_TIMEOUT_S
+    request_drain_limit = REQUEST_DRAIN_LIMIT
+    request_drain_timeout_s = REQUEST_DRAIN_TIMEOUT_S
+
+    def handle_one_request(self):
+        # Ny begäran, ny bokföring: kroppen är oläst tills _read_json_body
+        # säger något annat.
+        self._request_body_consumed = False
+        super().handle_one_request()
+
+    def _advertised_body_length(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (AttributeError, TypeError, ValueError):
+            return 0
+        return length if length > 0 else 0
+
+    def _drain_request_body(self):
+        """Töm en oläst, annonserad kropp innan svaret skickas.
+
+        Ett tidigt avslag (403 fel Host/Origin, 415 fel Content-Type, 404
+        avstängd rutt) svarar på huvudena ensamma och stänger sedan — med
+        kroppen kvar oläst i sockeln. Windows behandlar en stängning med
+        olästa byte som en abort (WSAECONNABORTED, WinError 10053) och
+        kastar bort svaret som redan skickats, så en riktig hookklient ser
+        ett avbrott där ett 403/415/404 var meningen.
+
+        Samma idé som BoundedThreadingHTTPServer._reject_busy använder före
+        sin 503, men inte samma tak: den tömmer som mest 8 KiB *huvuden* och
+        stannar vid huvudenas slut, medan den här tömningen gäller den
+        annonserade kroppen. Gemensam är deadlinen (0.05 s). Två tak gäller
+        här: som mest request_drain_limit byte OCH som mest
+        request_drain_timeout_s totalt (en egen deadline, inte bara en
+        socket-timeout per läsning — annars kan en motpart som droppar en
+        byte i taget hålla oss kvar i det oändliga). En långsam eller
+        fientlig motpart kostar alltså aldrig mer än det. Byten kastas
+        oöppnade — de parsas aldrig och loggas aldrig.
+
+        Returnerar antalet tömda byte (0 när det inte fanns något att göra),
+        vilket bara testerna bryr sig om.
+        """
+        if getattr(self, "_request_body_consumed", False):
+            return 0
+        # Bara ett försök per begäran, oavsett hur det gick.
+        self._request_body_consumed = True
+        remaining = min(self._advertised_body_length(),
+                        self.request_drain_limit)
+        if remaining <= 0:
+            return 0
+        try:
+            previous_timeout = self.connection.gettimeout()
+            self.connection.settimeout(self.request_drain_timeout_s)
+        except (AttributeError, OSError):
+            return 0
+        drained = 0
+        deadline = time.monotonic() + self.request_drain_timeout_s
+        try:
+            while remaining > 0 and time.monotonic() < deadline:
+                chunk = self.rfile.read1(min(4096, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                drained += len(chunk)
+        except (AttributeError, OSError, ValueError):
+            pass
+        finally:
+            try:
+                self.connection.settimeout(previous_timeout)
+            except OSError:
+                pass
+        return drained
 
     def _send(self, code, payload):
+        self._drain_request_body()
         body = json.dumps(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -2306,6 +2383,7 @@ class Handler(BaseHTTPRequestHandler):
         payload we cannot display, a timeout, LEAVE IT, a bug in here — lands
         on it and the terminal simply behaves as it always did.
         """
+        self._drain_request_body()
         self.send_response(200)
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -2463,6 +2541,9 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         if len(raw) != length:
             return None
+        # Hela den annonserade kroppen ligger nu i minnet, inget kvar i
+        # sockeln — _drain_request_body har ingenting att göra.
+        self._request_body_consumed = True
         try:
             return json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError, ValueError,

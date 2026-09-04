@@ -7,6 +7,22 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- The tokenserver now drains an unread request body before an early
+  rejection, so a real Windows hook client sees the `403`/`415`/`404` it was
+  sent instead of a connection abort. Rejections on the headers alone (a
+  non-loopback `Host`, a disallowed `Origin`, a non-JSON `Content-Type`, a
+  disabled route) previously closed the socket with the advertised body still
+  unread, and Windows discards an already-sent response when a connection is
+  closed that way (`WinError 10053`). It applies the idea the existing `503`
+  path already used, on the same 50 ms deadline but not the same byte cap:
+  `_reject_busy` drains at most 8 KiB of *headers* and stops at the end of
+  them, whereas this drains the advertised *body* under its own 64 KiB cap.
+  The bytes are never parsed or logged, so
+  rejections still happen before any parsing and nothing is parked. That cap is
+  deliberate and it is also the limit of the fix: a body larger than 64 KiB is
+  drained only up to the cap, so an early rejection of an over-cap body can
+  still abort on Windows. Draining without a bound would hand any peer a
+  denial-of-service lever, so the residue is accepted rather than chased.
 - A successfully parsed ESP32 quota response now clears the transport-level
   `STALE` state synchronously, rather than waiting for a later LVGL timer tick.
   The refresh is deliberately unconditional so display and app bookkeeping
