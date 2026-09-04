@@ -1348,6 +1348,17 @@ CODEX_LIMIT_SCAN_BYTES = 1024 * 1024
 CODEX_WEEK_MINUTES = 10080
 _codex_limits_lock = threading.Lock()
 _last_codex_limits = None
+
+
+def _any_provider_dir(projects_dir):
+    """Sant när minst en av leverantörernas kataloger finns.
+
+    Starten väntar på detta i stället för på Claude ensam: endera
+    leverantören räcker för att tjänsten ska ha något att servera.
+    """
+    return projects_dir.is_dir() or CODEX_SESSIONS.is_dir()
+
+
 _last_codex_read = 0.0
 _codex_refreshing = False
 
@@ -3298,20 +3309,34 @@ def main():
     Handler.github_monitor = github_monitor
 
     Handler.projects_dir = Path(args.dir)
-    if not Handler.projects_dir.is_dir():
+    if not _any_provider_dir(Handler.projects_dir):
         # Var: SystemExit. Under launchd (KeepAlive utan ThrottleInterval)
         # blev det en tyst respawn var ~10:e sekund som fyllde loggen.
-        # Vänta i stället — katalogen dyker upp när Claude Code körts en
-        # första gång på maskinen.
-        log.warning("hittar inte %s — finns Claude Code på den här "
-                    "maskinen? Väntar på att katalogen dyker upp "
-                    "(Ctrl-C avbryter).", Handler.projects_dir)
+        # Vänta i stället — katalogen dyker upp när agenten körts en första
+        # gång på maskinen.
+        #
+        # Vänta på BÅDA leverantörerna, inte bara Claude. Codex-siffrorna
+        # läses ur CODEX_SESSIONS och behöver inte projects_dir alls, så en
+        # Codex-only-maskin har allt den behöver — väntade vi på Claude där
+        # skulle porten aldrig öppnas, inget annonseras över DNS-SD, och
+        # panelen hitta en dator den inte kan fråga. Förutsättningen i
+        # README är "Claude Code och/eller Codex"; endera räcker.
+        log.warning("hittar varken %s eller %s — finns Claude Code eller "
+                    "Codex på den här maskinen? Väntar på att någon av dem "
+                    "dyker upp (Ctrl-C avbryter).",
+                    Handler.projects_dir, CODEX_SESSIONS)
         try:
-            while not Handler.projects_dir.is_dir():
+            while not _any_provider_dir(Handler.projects_dir):
                 time.sleep(30)
         except KeyboardInterrupt:
             raise SystemExit(1)
-        log.info("%s finns nu — fortsätter starten.", Handler.projects_dir)
+        log.info("hittade en leverantörskatalog — fortsätter starten.")
+    if not Handler.projects_dir.is_dir():
+        # Startar ändå: Path.glob på en katalog som inte finns ger tomt
+        # resultat utan att kasta, så Claude-siffrorna blir noll i stället
+        # för ett fel. Codex-only är ett fullgott läge, inte ett halvtrasigt.
+        log.info("%s saknas — kör vidare utan Claude-siffror (Codex hittad).",
+                 Handler.projects_dir)
 
     # Förstaskanningen är en uppvärmning plus en loggrad — /api/tokens gör om
     # get_snapshot per request ändå, och HTTP-trådarna kör den redan

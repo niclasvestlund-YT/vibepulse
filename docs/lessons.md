@@ -21,6 +21,30 @@ point at the backlog item.
 
 ---
 
+## 2026-09-04 · A Codex-only computer could never start the service
+
+**What happened:** the tokenserver waited — before binding its HTTP port —
+in a 30-second loop until `~/.claude/projects` existed. On a machine with
+Codex and no Claude Code the port never opened, nothing was advertised over
+DNS-SD, and the panel found a computer it could not poll. **Root cause:**
+the readiness check was written when Claude was the only provider and was
+never revisited when Codex arrived. Codex usage is read from
+`~/.codex/sessions` and needs the Claude directory not at all, so the wait
+was gating on a directory the running configuration did not require. The
+README prerequisite already said "Claude Code and/or Codex" — true on the
+setup page, false in the code. **The rule:** a readiness gate names what
+the service actually needs to serve, not what it needed when it was first
+written; when a second provider is added, every "is the provider here?"
+check is part of that change. And the gate stays a *wait*: a `SystemExit`
+here is what once made launchd respawn every ten seconds and flood the log,
+so the condition changed and the behaviour did not. **Guards:**
+`_any_provider_dir` and `test_provider_gate.py` (Codex-only, Claude-only,
+both, neither, and a file that is not a directory), plus a test that a
+snapshot with no Claude directory is zero rather than an error —
+`Path.glob` on a missing directory yields nothing, which is what makes
+Codex-only a serviceable state and not a half-broken one. **Watch for:** the
+same assumption in anything else keyed to one provider's directory.
+
 ## 2026-09-04 · A rejected request lost its answer on Windows
 
 **What happened:** three `CodexRouteTests` wire tests failed on the Windows
