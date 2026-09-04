@@ -692,6 +692,12 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 
 (On Debian/Ubuntu: `apt-get install libsdl2-dev cmake ninja-build` instead.)
 
+Headless or behind a proxy (CI containers, cloud agent sessions): if the
+LVGL tarball download is blocked, clone the same tag and point CMake at it
+with `git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git
+/tmp/lvgl && cmake … -DFETCHCONTENT_SOURCE_DIR_LVGL=/tmp/lvgl`; without a
+display, run the simulator and its tests with `SDL_VIDEODRIVER=offscreen`.
+
 Same code, same fonts, same pixels as the device — it builds the real
 platform and VibePulse against the real LVGL, and feeds it the recorded
 fixtures in `sim-fixtures/` through the same parsers the board runs. Every
