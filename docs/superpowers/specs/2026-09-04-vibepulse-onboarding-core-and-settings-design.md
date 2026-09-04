@@ -180,11 +180,18 @@ meaningful stages and a static physical review before any motion, per
 | Rung | What the user does | Needs | Unlocks |
 |---|---|---|---|
 | **0 · Usage** | one install command, once | Python 3.11+ (brought by the package manager) | Claude / Codex quota pages; the panel finds the computer by itself |
-| **1 · Needs You** | `vibepulse_setup.py install` → Claude, Codex, both | hooks / Codex plugin reviewed, device pairing | answer questions and permissions from the panel |
+| **1 · Needs You** | `vibepulse_setup.py install` → Claude, Codex, both | hooks / Codex plugin reviewed, device pairing, **and a firmware built with `TK_VIBEPULSE_DEVICE_KEY` until step 7** | answer questions and permissions from the panel |
 | **2 · Away from home** | `vibepulse_setup.py relay install` | a Cloudflare account | numbers, and optionally answers and live status, on any Wi-Fi |
 | **3 · Extras** | one flag each | nothing new | GitHub stars, plan cost on the value page, later Home Assistant |
 
-Rungs 1–3 exist. Rung 0 today is five steps (install Python, clone, install
+Rungs 1–3 exist, with one timing caveat: `needs_you_net.c` compiles the
+answer sender out when `TK_VIBEPULSE_DEVICE_KEY` is absent and logs
+*Needs You är display-only*, so between step 4 and step 7 rung 1 needs a
+source build carrying that key. On a release binary every tap stays
+display-only until step 7 provisions the key through the PAIR window, and
+the setup page must say so rather than promise answers it cannot deliver.
+
+Rung 0 today is five steps (install Python, clone, install
 the discovery dependency, run `tokenserver.py`, install autostart) and is
 the computer-side equivalent of the `secrets.h` wall.
 
@@ -326,7 +333,14 @@ pairing window keeps all three and puts nothing persistent on the glass:
    on the device, and it opens a ten-minute window like the Wi-Fi window.
 2. **Binding to this computer** — while the window is open the glass shows
    a short-lived **pairing code** (proposal: six digits, random per window,
-   valid only for that window). `vibepulse pair <code>` must present it.
+   valid only for that window). The pairing command must present it. In
+   step 4 that command is the checkout form the repository already uses,
+   `python3 tools/vibepulse_setup.py pair <code>` — there is no `vibepulse`
+   console entry point yet and no packaging in the tree, so the PAIR screen
+   shows that spelling. The short `vibepulse pair <code>` arrives with the
+   Homebrew tap and the Windows one-liner in step 6, and the screen's text
+   follows the packaging rather than preceding it. Everything below applies
+   to both spellings.
    This is the same model as the Wi-Fi window's access-point password:
    whoever cannot see the screen cannot enrol. The code is not the token
    and expires with the window, so showing it exposes nothing durable.
