@@ -283,7 +283,7 @@ Rules:
 |---|---|---|---|
 | Wi-Fi networks | `secrets.h` + NVS | NVS first | compiled networks stay as the immutable floor (already true) |
 | Service address | `TK_VIBEPULSE_BASE_URL`, required | DNS-SD by default; optional URL via *Manual setup* | a compiled URL is still honoured as the fallback |
-| OTA token | `TG_OTA_TOKEN` | generated **on the computer** by `vibepulse pair`, handed to the panel over LAN inside a device-opened pairing window, stored in NVS. **Never rendered on the glass**: not in ABOUT, not in a QR, not in a log | a compiled token is still honoured; pairing fills an empty slot and never replaces a compiled token |
+| OTA token | `TG_OTA_TOKEN` | **derived independently on both sides** from a password-authenticated key exchange seeded by the on-glass pairing code, inside a device-opened PAIR window (see *The pairing window*). Neither the code nor the token is ever transmitted. Stored in the panel's NVS runtime slot and in the computer's per-user credential file. **Never rendered on the glass**: not in ABOUT, not in a QR, not in a log | two slots: the compiled token is an immutable floor that pairing never touches; the runtime slot is **replaced** by each new physically opened, code-authenticated pairing |
 | Needs You device key | `TK_VIBEPULSE_DEVICE_KEY` | the same pairing window, later step (*Sequencing* 7) | a compiled key is still honoured |
 | Relay configuration | `secrets.h` plus Kconfig. The relay clients are **compiled out** unless `CONFIG_TK_VIBEPULSE_INTERACTION_RELAY` / `…_AGENT_STATUS_RELAY` and their build-time secrets are set (`components/app_tokens/CMakeLists.txt`) | later step (*Sequencing* 7): clients compiled into the release image and gated at runtime, settings provisioned through the pairing window | until then a relay user builds from source exactly as today |
 | GitHub / sound flags | compile-time | FEATURES switch with the flag as floor | unchanged |
@@ -321,7 +321,16 @@ pairing window keeps all three and puts nothing persistent on the glass:
    closes. The panel completes **one** exchange per window, stores the
    derived token in NVS, and never displays, logs, or re-transmits it; a
    second attempt after a success is refused. The computer stores the same
-   derived token where `tools/ota-flash.sh` reads it today.
+   derived token in a **per-user credential file**, following the device
+   key's existing precedent: `~/.vibepulse-ota-token`, mode 0600, with a
+   `VIBEPULSE_OTA_TOKEN` environment override. Today `tools/ota-flash.sh`
+   parses `TG_OTA_TOKEN` from the repository-root `secrets.h` and nothing
+   else, which a package install (Homebrew, no checkout) does not have, and
+   a file inside a Homebrew Cellar would vanish on upgrade. Step 4 therefore
+   changes the uploader — `tools/ota-flash.sh` and the packaged
+   `vibepulse update` alike — to look up the token in this order:
+   environment, per-user file, then `secrets.h` when a checkout exists, so
+   the existing developer flow keeps working unchanged.
    *Scope note:* at upload time the bearer still travels as `docs/ota.md`
    specifies today; this spec changes enrolment only and does not claim to
    improve the upload path. Making the upload prove possession without
@@ -405,7 +414,8 @@ reverted alone.
    The `#if TK_GITHUB_*` guards become runtime checks seeded by the
    macros, with the flag-0 toggle test and a re-measured RAM budget.
 4. Runtime configuration: DNS-SD default, the PAIR window with the
-   computer-generated OTA token, compiled values honoured as floor.
+   PAKE-derived OTA token (never transmitted), the per-user credential
+   file and the uploader's lookup order, compiled values honoured as floor.
    Immediate-open Wi-Fi window on an empty panel.
 5. The `AGENTS.md` release-rule change as its own maintainer decision; only
    then the CI release binary from an empty `secrets.h`, the secret gate,
@@ -464,6 +474,10 @@ Recorded so the cleanup is a decision, not an accident.
   failures close the window; that a second exchange after success is
   refused; that a new pairing invalidates the previous runtime token; and
   that pairing never touches the compiled token.
+- Uploader credential lookup: a test that `tools/ota-flash.sh` and the
+  packaged updater read the token from the environment, then
+  `~/.vibepulse-ota-token`, then `secrets.h`, and that the per-user file
+  path works from a directory that is not a checkout.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; and a recorded
