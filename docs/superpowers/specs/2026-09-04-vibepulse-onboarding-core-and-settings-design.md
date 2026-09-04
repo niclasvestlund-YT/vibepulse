@@ -193,7 +193,11 @@ dependency, autostart, and the network advert together, with nothing to
 configure.
 
 - **macOS:** a Homebrew tap. `brew install <tap>/vibepulse` brings Python;
-  `brew services start vibepulse` is launchd. The existing
+  `brew services start vibepulse` is launchd. **Homebrew itself is not
+  assumed:** the setup page's macOS command is a shell one-liner that
+  installs Homebrew from its official bootstrap when `brew` is missing and
+  then runs those two commands, so a fresh Mac needs no prior tooling. A
+  user who declines that is offered the checkout path instead. The existing
   `tools/vibepulse_macos_service.py` remains the path for people who run
   from a checkout.
 - **Windows:** a PowerShell one-liner that installs Python via `winget` when
@@ -204,8 +208,10 @@ configure.
 
 The setup page (the URL behind the panel's QR) detects the OS from the
 browser and shows that command first, with tabs for the other. It states
-the one real prerequisite above the command: *Claude Code and/or Codex must
-be installed and signed in on this computer.*
+the one thing the command cannot supply, above the command itself: *Claude
+Code and/or Codex must be installed and signed in on this computer.*
+Everything else the command needs — Homebrew on macOS, Python on either
+platform — it installs itself.
 
 Two decisions this rung needs:
 

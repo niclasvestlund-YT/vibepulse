@@ -418,13 +418,14 @@ bounded and fail-closed, while host repair remains an explicit setup action.
 ## What you need
 
 Four things. All four are required for the core — your usage on the glass.
-Nothing else: no account, no cloud, no API key. Git and Python are the only
-tools, and the [Windows host runbook](docs/windows-setup.md) has the
-`winget` commands and download links for both.
+No account, no cloud, no API key. The **service on your computer** needs only
+Git and Python; the [Windows host runbook](docs/windows-setup.md) has the
+`winget` commands and download links for both. Putting the firmware on the
+board is the one step that needs more, and row 1 says what.
 
 | | You need | Because |
 |---|---|---|
-| **1. A screen** | One of the boards below, a USB-C cable, and **its own USB power supply** | a computer USB port usually cannot feed the running AMOLED |
+| **1. A screen** | One of the boards below, a USB-C cable, and **its own USB power supply**. Flashing it also needs the **ESP-IDF 5.5 toolchain** with CMake and Ninja, one time | a computer USB port usually cannot feed the running AMOLED; the firmware is built from source until the browser installer lands |
 | **2. A computer** | A Mac or a Windows PC with **Git** and **Python 3.11+**, awake whenever you want fresh numbers | the VibePulse service runs here and reads your agents' local usage |
 | **3. An agent on that computer** | **Claude Code and/or Codex, installed and signed in.** Either alone is fine | that is where the numbers come from |
 | **4. WiFi** | A **2.4 GHz** network that both the screen and the computer can reach | the ESP32-S3 cannot see 5 GHz; the optional relay lifts the same-network rule later |
