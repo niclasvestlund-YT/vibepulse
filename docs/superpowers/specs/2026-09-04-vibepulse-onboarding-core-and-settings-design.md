@@ -371,8 +371,11 @@ pairing window keeps all three and puts nothing persistent on the glass:
    `X-VibePulse-Device` and `X-VibePulse-Version` headers, next to the
    `X-VibePulse-Recovery-Boot` header `torget_http.c` already sets (a
    repository-wide search finds no version header on polls today, so both
-   are new). The recent-panels registry maps id to *current* address and
-   running version as long as the panel keeps polling. The uploader resolves the address for a record in
+   are new). After an update the first polls also carry the opaque
+   `X-VibePulse-Boot-Proof` described under *The paired upload never sends
+   the token*. The recent-panels registry maps id to *current* address and
+   running version, and stores the boot proof verbatim without verifying
+   it, as long as the panel keeps polling. The uploader resolves the address for a record in
    this order: `--device <id> --at <ip>` when given explicitly; the
    registry's current address for that id; the record's last-known
    address. A bare `.ota-device` IP matches a record either by last-known
@@ -419,11 +422,30 @@ pairing window keeps all three and puts nothing persistent on the glass:
       the slot that matched. The uploader verifies it against its own token
       before reporting anything, so an unpaired endpoint that accepted the
       bytes cannot fabricate a success. Following the honesty invariant,
-      the uploader reports **delivered** only on a valid ack and
-      **running** only once the panel's next poll — which carries its
-      device id and its running version in `X-VibePulse-Version` — reports
-      the version the ack named; a panel that never reports it is shown as
-      *delivered, not confirmed*, never as updated.
+      the uploader has exactly three states and none of them is guessed:
+      - **unknown** — no ack, or an ack that fails verification. Nothing
+        proves the selected panel received anything. Never shown as
+        delivered.
+      - **delivered** — a valid ack. The paired panel holds the image;
+        whether it boots it is not yet known.
+      - **running** — an **authenticated boot proof**, never a bare poll.
+        The panel stores the update nonce in NVS next to the pending image
+        (the boot-health gate already keeps state there across a reboot),
+        and on its first polls after booting the new image adds
+        `X-VibePulse-Boot-Proof = HMAC-SHA256(token, "vibepulse-boot-v2" ‖
+        device id ‖ nonce ‖ running version)`, keyed by the slot that
+        authenticated the upload. The service holds no token: the
+        recent-panels registry stores that header verbatim as an opaque
+        value, and `vibepulse update` verifies it against its own token
+        and the nonce it issued. The proof is single-use; the panel clears
+        the nonce once it has sent it for a bounded number of polls. A
+        LAN peer that polls with the public device id and version but no
+        valid proof never produces *running*, and a panel that rolled back
+        sends no valid proof and stays *delivered, not running*.
+      A panel with only a compiled token, updated over the legacy bearer
+      path, gets none of this: the updater reports *sent* and shows the
+      version the panel later polls with as *reported by the panel,
+      unauthenticated*, exactly as honest as today.
 
    What a relay gains: nothing durable. Forwarding the exchange to the real
    panel installs exactly the image the user chose on exactly the panel they
@@ -617,15 +639,19 @@ Recorded so the cleanup is a decision, not an accident.
   id; that a captured request replayed after its nonce is consumed is
   rejected; that a panel with both slots accepts a MAC keyed by either
   token; that the uploader reports success only on a valid keyed ack and
-  treats a missing or wrong ack as *delivered, not confirmed*; that the
+  treats a missing or wrong ack as *unknown* and never as delivered; that the
   legacy bearer upload still works with a compiled token; and that the
   challenge endpoint is absent outside the window.
-- Poll identity and version headers: a test that every panel poll carries
-  `X-VibePulse-Device` with the device id and `X-VibePulse-Version` with
-  the running firmware version, that the registry keys entries by the id
-  and records the version, that the updater's *running* state appears only
-  when the registry's version for that id equals the version the ack
-  named, and that neither header ever carries a token or code.
+- Poll identity, version, and boot proof: a test that every panel poll
+  carries `X-VibePulse-Device` with the device id and `X-VibePulse-Version`
+  with the running firmware version; that the registry keys entries by the
+  id, records the version, and stores `X-VibePulse-Boot-Proof` verbatim
+  without verifying it; that the updater's *running* state appears only
+  when a boot proof verifies against its token and the nonce it issued;
+  that a poll with the correct id and version but no proof, a wrong proof,
+  or a proof for an earlier nonce never produces *running*; that a panel
+  that rolled back stays *delivered, not running*; and that none of the
+  headers ever carries a token or code.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; that a build with a flag at
