@@ -402,6 +402,16 @@ pairing window keeps all three and puts nothing persistent on the glass:
       slots stay usable when they coexist — consumes the nonce, and applies
       the image only on a match. The existing image checks in `docs/ota.md`
       then run exactly as today.
+   5. **The result is authenticated too.** The panel answers with
+      `X-VibePulse-Ack = HMAC-SHA256(token, "vibepulse-ota-ack-v2" ‖ device
+      id ‖ nonce ‖ SHA-256(image) ‖ result ‖ version written)`, keyed by
+      the slot that matched. The uploader verifies it against its own token
+      before reporting anything, so an unpaired endpoint that accepted the
+      bytes cannot fabricate a success. Following the honesty invariant,
+      the uploader reports **delivered** only on a valid ack and
+      **running** only once the panel's next poll — which carries its
+      device id — reports the new version; a panel that never reports it
+      is shown as *delivered, not confirmed*, never as updated.
 
    What a relay gains: nothing durable. Forwarding the exchange to the real
    panel installs exactly the image the user chose on exactly the panel they
@@ -583,8 +593,10 @@ Recorded so the cleanup is a decision, not an accident.
   different image, a reused nonce, an expired nonce, and a wrong device
   id; that a captured request replayed after its nonce is consumed is
   rejected; that a panel with both slots accepts a MAC keyed by either
-  token; that the legacy bearer upload still works with a compiled token;
-  and that the challenge endpoint is absent outside the window.
+  token; that the uploader reports success only on a valid keyed ack and
+  treats a missing or wrong ack as *delivered, not confirmed*; that the
+  legacy bearer upload still works with a compiled token; and that the
+  challenge endpoint is absent outside the window.
 - Poll identity header: a test that every panel poll carries
   `X-VibePulse-Device` with the device id, that the registry keys entries
   by it, and that the header never carries a token or code.

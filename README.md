@@ -465,19 +465,22 @@ and future runtime revisions require a fresh run rather than inheriting it.
 
 You do not set VibePulse up by hand. Your coding agent does it with you,
 step by step, verifying as it goes. Clone the repo and start the agent you
-already use, in that folder, with one line:
+already use, in that folder. The same three lines work in a Mac or Linux
+shell and in Windows PowerShell 5.1 and 7:
 
 **Claude Code**
 
-```sh
-git clone https://github.com/niclasvestlund-YT/vibepulse.git && cd vibepulse
+```
+git clone https://github.com/niclasvestlund-YT/vibepulse.git
+cd vibepulse
 claude "Set up VibePulse for me: help me fill in secrets.h, build and flash the board over USB, and start the tokenserver on this computer."
 ```
 
 **Codex**
 
-```sh
-git clone https://github.com/niclasvestlund-YT/vibepulse.git && cd vibepulse
+```
+git clone https://github.com/niclasvestlund-YT/vibepulse.git
+cd vibepulse
 codex "Set up VibePulse for me: help me fill in secrets.h, build and flash the board over USB, and start the tokenserver on this computer."
 ```
 
