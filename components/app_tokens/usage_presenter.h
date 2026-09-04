@@ -50,9 +50,17 @@ typedef enum {
   USAGE_QUOTA_CODEX_WEEK,
 } usage_quota_scope;
 
+/* The right-hand stat counts down to the moment the percentage above stops
+ * moving. That is the reset by default -- but when the forecast says the
+ * window empties before it resets, the wall arrives first and the countdown
+ * says so instead. The caption travels with the number because the digits
+ * alone cannot say which of the two they are counting. */
 typedef struct {
   usage_provider provider;
   usage_card_view quota;
+  char countdown_text[USAGE_CARD_SHORT_CAP];
+  char countdown_caption[USAGE_CARD_LABEL_CAP];
+  int counts_to_empty;
 } usage_quota_page_view;
 
 typedef struct {

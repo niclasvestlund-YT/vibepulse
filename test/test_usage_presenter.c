@@ -74,9 +74,73 @@ int main(void) {
         strcmp(page.quota.pct_text, "57%") == 0 &&
         strcmp(page.quota.reset_short_text, "1D 12H") == 0);
 
+  /* The countdown fold-in. Without a forecast the right-hand stat is the
+     reset, exactly as before -- the caption is what says so. */
+  usage_presenter_build_quota_page(&tokens, USAGE_QUOTA_CODEX_WEEK, &page);
+  check("no forecast leaves the stat counting to the reset",
+        strcmp(page.countdown_text, "1D 12H") == 0 &&
+        strcmp(page.countdown_caption, "TO RESET") == 0 &&
+        !page.counts_to_empty);
+
+  tk_tokens deadline = tokens;
+  deadline.codex_forecast.state = TK_FORECAST_EXHAUSTS;
+  deadline.codex_forecast.offset_min = -540;
+  deadline.codex_forecast.has_offset_min = 1;
+  usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CODEX_WEEK, &page);
+  check("an early exhaustion counts down to the wall, not the reset",
+        strcmp(page.countdown_text, "1D 3H") == 0 &&
+        strcmp(page.countdown_caption, "TO EMPTY") == 0 &&
+        page.counts_to_empty);
+  check("the percentage above the countdown is untouched",
+        strcmp(page.quota.pct_text, "57%") == 0 &&
+        strcmp(page.quota.reset_short_text, "1D 12H") == 0);
+
+  /* The service forecasts the weekly windows only. Lending that deadline to
+     the model-week percentage would caption a number it does not measure. */
+  deadline.claude_forecast = deadline.codex_forecast;
+  usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CLAUDE_MODEL,
+                                   &page);
+  check("the model week keeps its reset -- nothing forecasts that window",
+        strcmp(page.countdown_text, "2D 4H") == 0 &&
+        strcmp(page.countdown_caption, "TO RESET") == 0 &&
+        !page.counts_to_empty);
+
+  /* Exhaustion AT the reset, or after it, means the reset is the wall. The
+     default caption already tells that truth, so nothing swaps. */
+  deadline.codex_forecast.offset_min = 0;
+  usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CODEX_WEEK, &page);
+  check("exhaustion at reset keeps the reset caption",
+        strcmp(page.countdown_caption, "TO RESET") == 0 &&
+        !page.counts_to_empty);
+
+  deadline.codex_forecast.offset_min = 90;
+  usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CODEX_WEEK, &page);
+  check("a window that outlasts its reset never claims a deadline",
+        strcmp(page.countdown_caption, "TO RESET") == 0 &&
+        !page.counts_to_empty);
+
+  /* A deadline already behind us is not a countdown. */
+  deadline.codex_forecast.offset_min = -2210;
+  usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CODEX_WEEK, &page);
+  check("a deadline already passed falls back to the reset",
+        strcmp(page.countdown_text, "1D 12H") == 0 &&
+        strcmp(page.countdown_caption, "TO RESET") == 0 &&
+        !page.counts_to_empty);
+
+  deadline.codex_forecast.state = TK_FORECAST_COLLECTING;
+  deadline.codex_forecast.offset_min = -540;
+  usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CODEX_WEEK, &page);
+  check("a forecast still learning promises no deadline",
+        strcmp(page.countdown_caption, "TO RESET") == 0 &&
+        !page.counts_to_empty);
+
   tk_tokens missing = {0};
   usage_presenter_build_quota_page(&missing, USAGE_QUOTA_CLAUDE_MODEL,
                                    &page);
+  check("a page without usage counts down to nothing",
+        strcmp(page.countdown_text, "–") == 0 &&
+        strcmp(page.countdown_caption, "TO RESET") == 0 &&
+        !page.counts_to_empty);
   check("missing model quota remains truthful",
         strcmp(page.quota.label, "FABLE · WEEK") == 0 &&
         strcmp(page.quota.pct_text, "–") == 0 &&
