@@ -289,20 +289,31 @@ true only once step 7 ships, and the README must not say it before.
 
 `docs/ota.md` requires three independent factors before firmware can be
 written: physical presence, knowledge of the token, and a time window. The
-pairing window keeps all three and adds nothing to the glass:
+pairing window keeps all three and puts nothing persistent on the glass:
 
 1. **Presence** — PAIR is a Settings entry, reachable only by the KEY3 hold
    on the device, and it opens a ten-minute window like the Wi-Fi window.
-2. **Knowledge** — the token is generated and kept on the pairing computer
-   by `vibepulse pair`. The panel receives it over LAN inside the window,
-   stores it in NVS, and never displays, logs, or re-transmits it. Anyone
-   with brief access to the panel learns nothing they can use later.
-3. **Time** — the window closes on its own; outside it the pairing endpoint
-   does not exist, following the lazy-surface rule the Wi-Fi window uses.
+2. **Binding to this computer** — while the window is open the glass shows
+   a short-lived **pairing code** (proposal: six digits, random per window,
+   valid only for that window). `vibepulse pair <code>` must present it.
+   This is the same model as the Wi-Fi window's access-point password:
+   whoever cannot see the screen cannot enrol. The code is not the token
+   and expires with the window, so showing it exposes nothing durable.
+3. **Knowledge** — the token is generated and kept on the pairing computer.
+   The panel accepts **one** submission per window, compares the code in
+   constant time, closes the window after three wrong codes, stores the
+   token in NVS on success, and never displays, logs, or re-transmits it.
+   A LAN peer without the code cannot fill the slot, and a second
+   submission after a success is refused.
+4. **Time and confirmation** — on success the glass shows
+   **PAIRED · \<origin of the computer\>** and the window closes at once;
+   the computer treats only the panel's success response as success.
+   Outside a window the pairing endpoint does not exist, following the
+   lazy-surface rule the Wi-Fi window uses.
 
-Rotating the token is pairing again, which again requires presence. A panel
-whose build carries a compiled token keeps it; pairing fills only an empty
-slot.
+Rotating the token is pairing again, which again requires presence and a
+fresh code. A panel whose build carries a compiled token keeps it; pairing
+fills only an empty slot.
 
 ### Release binary and the rule about `torget.bin`
 
@@ -314,8 +325,9 @@ in order: first a separate `AGENTS.md` change, approved by the maintainer in
 its own PR, that rewrites the rule as *a binary built with a populated
 `secrets.h` is never published*; only after that may CI build a release
 binary from the checked-in `secrets.h.example` with every value empty and
-publish `vibepulse-<tag>.bin` plus the ESP Web Tools `manifest.json`, with a
-gate that fails the release if any secret macro in the build is non-empty.
+publish the complete flash set described under *Web installer* plus the ESP
+Web Tools `manifest.json`, with a gate that fails the release if any secret
+macro in the build is non-empty.
 Until that rule change is merged, releases stay source-only and the web
 installer cannot ship.
 
@@ -326,6 +338,18 @@ Tools button pointing at the release manifest. Chrome and Edge only; the
 page says so and points Safari and Firefox users to the manual path. The
 page shows the BOOT + RESET sequence for download mode, because on this
 board that step is not optional.
+
+**A fresh board needs more than the app image.** `partitions.csv` is an A/B
+layout (`nvs`, `otadata`, `phy_init`, `ota_0`, `ota_1`); the first USB flash
+writes the bootloader, the partition table, the OTA initial-data image, and
+the application into `ota_0`, each at its own offset. An ESP Web Tools
+manifest cannot conjure the missing regions from an application binary, so
+the release publishes either one merged factory image produced with
+`esptool.py merge_bin`, or every offset-specific part as a multi-part
+manifest. In both cases the parts and offsets come from the build's
+`flasher_args.json`, never from hand-typed numbers, and the secret gate
+covers every published part. OTA afterwards keeps using the application
+image alone, exactly as today.
 
 ## Repository structure: core and add-ons
 
@@ -402,7 +426,12 @@ Recorded so the cleanup is a decision, not an accident.
   macro is empty, publish the binary and manifest.
 - Pairing: a test that no capture and no label in the rendered tree ever
   contains the OTA token, that the pairing endpoint is absent outside the
-  window, and that pairing refuses to replace a compiled token.
+  window, that a submission without the current code is rejected and three
+  wrong codes close the window, that a second submission after success is
+  refused, and that pairing refuses to replace a compiled token.
+- Release manifest: a test that every part in the build's
+  `flasher_args.json` is present in the published manifest (or merged
+  image) at the same offset, so a fresh board boots from the web installer.
 - Discovery: a wiring test that the DNS-SD instance label survives
   `select_result()` and is exposed through the endpoint API.
 
