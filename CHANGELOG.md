@@ -7,6 +7,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- The usage service now starts on a computer that has Codex but not Claude
+  Code. Its readiness check waited — before binding the HTTP port — until
+  `~/.claude/projects` existed, so on a Codex-only machine the port never
+  opened, nothing was advertised over DNS-SD, and the panel found a computer
+  it could not poll. Codex usage is read from `~/.codex/sessions` and does not
+  need that directory at all. Either provider is now enough to start, and the
+  service waits only when neither is present.
 - The tokenserver now drains an unread request body before an early
   rejection, so a real Windows hook client sees the `403`/`415`/`404` it was
   sent instead of a connection abort. Rejections on the headers alone (a
