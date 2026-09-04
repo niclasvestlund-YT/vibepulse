@@ -311,15 +311,22 @@ pairing window keeps all three and puts nothing persistent on the glass:
    This is the same model as the Wi-Fi window's access-point password:
    whoever cannot see the screen cannot enrol. The code is not the token
    and expires with the window, so showing it exposes nothing durable.
-   **How the command finds the panel:** no new discovery protocol. By the
-   time PAIR is useful the panel has already found the computer over
-   DNS-SD and polled it, and the service records the address of every
-   recent panel poll (`_record_panel_poll` in `tokenserver.py`). `vibepulse
-   pair` asks the local service for the panel that polled most recently;
-   when several panels polled recently it lists them and requires
-   `--device`; and `--device <ip>` is always accepted, which is why the
-   PAIR screen shows the panel's IP next to the code. The panel's pairing
-   endpoint exists only while its window is open.
+   **How the command finds the panel:** no new discovery protocol, but a
+   small new registry. By the time PAIR is useful the panel has already
+   found the computer over DNS-SD and polled it. Today the service keeps
+   only a transient candidate host in `_record_panel_poll` and then the
+   last-seen time and route; `_panel_health_snapshot` deliberately omits
+   the address, and nothing lists panels. Step 4 adds a bounded in-memory
+   **recent-panels registry** to the service (address, first and last seen,
+   poll count; at most eight entries; an entry expires after the existing
+   panel-fresh window) and a **loopback-only local route** that lists it,
+   using the `_is_loopback` check the service already applies to its
+   plugin endpoints. Addresses only, never a secret. `vibepulse pair` reads
+   that route and picks the panel seen most recently; when more than one
+   is fresh it lists them and refuses to guess; and `--device <ip>` is
+   always accepted, which is why the PAIR screen shows the panel's IP next
+   to the code. The panel's pairing endpoint exists only while its window
+   is open.
 3. **Knowledge, without the token ever crossing the LAN** — the code is not
    sent and the token is not sent. Both sides run a password-authenticated
    key exchange seeded by the code (proposal: SRP6a, which ESP-IDF ships as
@@ -348,12 +355,22 @@ pairing window keeps all three and puts nothing persistent on the glass:
    checkout) does not have, and a file inside a Homebrew Cellar would
    vanish on upgrade. Step 4 therefore changes the uploader —
    `tools/ota-flash.sh` and the packaged `vibepulse update` alike — to
-   resolve the credential by target: it asks the panel at `--device
-   <ip>` (or the `.ota-device` file) for its non-secret device id on the
-   maintenance endpoint, then looks up the token in this order:
-   environment, the per-panel store, then `secrets.h` when a checkout
-   exists. A single-panel user never sees the map; the developer flow
-   keeps working unchanged.
+   resolve the credential **from the pairing record, never from the
+   network**: the record is selected by `--device <id>`, or by the target
+   address (`--device <ip>` or the `.ota-device` file) matching the
+   last-known address of exactly one record; with no unique match the
+   uploader refuses and asks for `--device <id>`. It never asks the panel
+   which credential to load, so an impostor endpoint cannot name another
+   panel's id and collect that panel's bearer. Before the bearer is sent,
+   the uploader requires a **proof of possession**: it sends a random
+   nonce to the panel's maintenance endpoint, the panel answers with
+   HMAC-SHA256 keyed by its runtime (or compiled) token over that nonce,
+   and the uploader verifies in constant time against the stored token and
+   aborts on mismatch. Only then does the upload proceed as today. The
+   endpoint exists only inside the UPDATE window, like the upload itself.
+   Lookup order for the token is environment, the per-panel store, then
+   `secrets.h` when a checkout exists. A single-panel user never sees the
+   map; the developer flow keeps working unchanged.
    *Scope note:* at upload time the bearer still travels as `docs/ota.md`
    specifies today; this spec changes enrolment only and does not claim to
    improve the upload path. Making the upload prove possession without
@@ -504,9 +521,18 @@ Recorded so the cleanup is a decision, not an accident.
   `secrets.h`; that two panels paired from one account get distinct
   entries and the uploader picks the right one; and that the store works
   from a directory that is not a checkout.
+- Recent-panels registry: a test that the service records up to eight
+  distinct polling addresses with first/last seen and count, expires them
+  after the panel-fresh window, exposes them only to loopback callers, and
+  never includes a token or code.
 - Pairing target: a test that `vibepulse pair` selects the most recently
-  polling panel from the service's recorded polls, lists and refuses to
-  guess when several polled recently, and accepts `--device <ip>`.
+  seen panel from that registry, lists and refuses to guess when several
+  are fresh, and accepts `--device <ip>`.
+- Credential selection and possession proof: a test that the uploader
+  selects the record by id or by a unique last-known address and refuses
+  otherwise; that it never sends a bearer before a valid HMAC over its
+  nonce; that a wrong or missing HMAC aborts the upload with nothing
+  secret sent; and that the proof endpoint is absent outside the window.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; and a recorded
