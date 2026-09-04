@@ -211,7 +211,15 @@ configure.
   `winget` when either is missing, **clones the repository to a durable
   path** (`$HOME\vibepulse`, the same path the Windows host runbook uses,
   pulling instead of cloning when it already exists), and then runs the
-  shipped `tools/tokenserver/install-windows-task.ps1` from that checkout.
+  shipped `tools/tokenserver/install-windows-task.ps1` from that checkout,
+  and finally **opens the firewall port the panel has to reach**. That last
+  step is not optional: the installer only registers the scheduled task, so
+  without it DNS-SD advertises a computer the panel then cannot poll — a
+  service that looks healthy from the host and is invisible from the shelf.
+  The one-liner therefore elevates for that step alone and creates exactly
+  the rule the Windows host runbook specifies, TCP 8737 inbound on the
+  **Private** profile only, after checking that no VibePulse rule already
+  exists. The Public profile is never opened.
   The clone is not optional: that installer derives the repository root
   from `$PSScriptRoot` and registers `tokenserver.py` and
   `run-windows-task.ps1` at those paths in Task Scheduler, so the files
@@ -431,9 +439,17 @@ pairing window keeps all three and puts nothing persistent on the glass:
    built with `TG_OTA_TOKEN`, updated by `tools/ota-flash.sh <ip>` from a
    checkout. So when the credential is a compiled one — `secrets.h` in a
    checkout, or `VIBEPULSE_OTA_TOKEN_COMPILED` — the uploader targets the
-   address it was given and does not consult the store at all. The record
-   lookup, and its refusal, apply to runtime credentials, which are the
-   ones whose slot decides whether a secret may go on the wire.
+   address it was given and does not consult the store **for the
+   credential**. The record lookup, and its refusal, apply to runtime
+   credentials, which are the ones whose slot decides whether a secret may
+   go on the wire.
+   **The capability pin is never bypassed.** Whichever credential is in
+   play, the uploader still reads the store to ask one question: has this
+   panel — by id, or by the address in a record — answered a challenge
+   before? A pin found there refuses `--legacy-bearer`, and a compiled
+   upload that bypassed the credential lookup must not be able to bypass
+   that refusal too, or the plaintext downgrade would be one `--device
+   <ip>` away from any modern panel.
    **Addresses change; identities do not.** The panel adds its non-secret
    device id and its running firmware version to every poll as
    `X-VibePulse-Device` and `X-VibePulse-Version` headers, next to the
@@ -776,6 +792,12 @@ Recorded so the cleanup is a decision, not an accident.
   token; that the uploader reports success only on a valid keyed ack and
   treats a missing or wrong ack as *unknown*, and a valid ack carrying a
   failure result as *failed*, never as delivered; that the
+  uploader consults the capability pin even when the credential lookup is
+  bypassed, so `--legacy-bearer` is refused against a panel pinned as
+  challenge-capable no matter how it is addressed; that the Windows rung-0
+  command creates the Private-profile TCP 8737 rule and never a Public one,
+  and that a host without it is reported as reachable-by-discovery but not
+  pollable rather than healthy; that the
   uploader asks for a challenge whichever typed slot it holds; that an
   unanswered challenge is an error naming `--legacy-bearer` rather than an
   automatic downgrade, so a peer that suppresses the challenge cannot
