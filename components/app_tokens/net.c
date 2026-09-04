@@ -121,12 +121,22 @@ static void net_task(void *arg) {
       torget_update_available(
           t.has_ota_available_version ? t.ota_available_version : NULL);
       note_tokens_success();
-      ESP_LOGI(TAG,
-               "hämtning ok (%.2f Mtok idag, %d sessioner; "
-               "stale claude=%d fable=%d codex=%d)",
-               t.day_tokens / 1e6, t.day_sessions,
-               t.claude_week.stale, t.claude_model_week.stale,
-               t.codex_week.stale);
+      /* Utan Claude-källa är volymsiffrorna nollor som inte är mätningar.
+       * Loggen säger det i stället för att skriva ut "0.00 Mtok idag",
+       * som läses som en dag utan arbete. */
+      if (t.claude_source_present) {
+        ESP_LOGI(TAG,
+                 "hämtning ok (%.2f Mtok idag, %d sessioner; "
+                 "stale claude=%d fable=%d codex=%d)",
+                 t.day_tokens / 1e6, t.day_sessions,
+                 t.claude_week.stale, t.claude_model_week.stale,
+                 t.codex_week.stale);
+      } else {
+        ESP_LOGI(TAG,
+                 "hämtning ok (ingen Claude-källa på datorn — volym "
+                 "okänd, inte noll; stale codex=%d)",
+                 t.codex_week.stale);
+      }
     } else {
       ESP_LOGW(TAG, "hämtningen avvisad, värden står kvar");
     }

@@ -632,6 +632,51 @@ int main(void) {
           v.value.state == TK_VALUE_UNAVAILABLE);
   }
 
+  /* claudeSourcePresent: additiv, valfri, och defaulten måste vara
+   * "närvarande". En Codex-only-maskin skickar false och volymsiffrorna
+   * är då nollor som inte är mätningar — flaggan är det enda som skiljer
+   * dem från en riktig nolldag. */
+  {
+    tk_tokens v;
+    char payload[512];
+
+    snprintf(payload, sizeof payload,
+             "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+             "\"daySessions\":1,\"monthTokens\":1," BASE_NULLS "}");
+    check("utan claudeSourcePresent parsas", PARSE(payload, &v));
+    check("utan claudeSourcePresent antas källan finnas",
+          v.claude_source_present == 1);
+
+    snprintf(payload, sizeof payload,
+             "{\"v\":2,\"dayTokens\":0,\"dayTokensPerHour\":0,"
+             "\"daySessions\":0,\"monthTokens\":0,"
+             "\"claudeSourcePresent\":false," BASE_NULLS "}");
+    check("claudeSourcePresent false parsas", PARSE(payload, &v));
+    check("claudeSourcePresent false bevaras",
+          v.claude_source_present == 0);
+
+    snprintf(payload, sizeof payload,
+             "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+             "\"daySessions\":1,\"monthTokens\":1,"
+             "\"claudeSourcePresent\":true," BASE_NULLS "}");
+    check("claudeSourcePresent true parsas", PARSE(payload, &v));
+    check("claudeSourcePresent true bevaras",
+          v.claude_source_present == 1);
+
+    /* Sträng eller siffra i stället för boolean: avvisa hellre än tolka. */
+    snprintf(payload, sizeof payload,
+             "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+             "\"daySessions\":1,\"monthTokens\":1,"
+             "\"claudeSourcePresent\":0," BASE_NULLS "}");
+    check("claudeSourcePresent som siffra avvisas", !PARSE(payload, &v));
+
+    snprintf(payload, sizeof payload,
+             "{\"v\":2,\"dayTokens\":1,\"dayTokensPerHour\":0,"
+             "\"daySessions\":1,\"monthTokens\":1,"
+             "\"claudeSourcePresent\":\"false\"," BASE_NULLS "}");
+    check("claudeSourcePresent som sträng avvisas", !PARSE(payload, &v));
+  }
+
   if (failures == 0) { printf("OK: alla tokens-tester gröna\n"); return 0; }
   printf("%d test föll\n", failures);
   return 1;

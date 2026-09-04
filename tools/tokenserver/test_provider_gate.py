@@ -152,5 +152,89 @@ class CodexOnlySnapshotTest(unittest.TestCase):
         codex_usage.reset_cache()
 
 
+class CodexOnlyEndToEndTest(unittest.TestCase):
+    """Hela vägen: en Codex-only-maskin ska ge ett serverbart svar.
+
+    Grindtesten ovan bevisar logiken; det här bevisar att en riktig
+    ``/api/tokens``-förfrågan går igenom ``Handler.do_GET`` med en
+    Claude-katalog som inte finns och en Codex-katalog som gör det.
+
+    Det ersätter inte en riktig Codex-only-dator — ingen har sett porten
+    öppnas, DNS-SD annonsera och panelen fråga på en färsk installation.
+    Det stänger den del som CI faktiskt kan bevisa: att svaret blir 200,
+    att Claudes procenttal är null (streck på skärmen, inte nollor), och
+    att ``claudeSourcePresent`` säger varför volymsiffrorna är noll.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.claude_absent = root / "claude" / "projects"   # skapas aldrig
+        self.codex_sessions = root / "codex" / "sessions"
+        self.codex_sessions.mkdir(parents=True)
+        self.addCleanup(codex_usage.reset_cache)
+
+    def _tokens_payload(self):
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        handler.path = "/api/tokens"
+        handler.projects_dir = self.claude_absent
+        handler.max_tracker_store = None
+        handler.agent_status = mock.Mock()
+        handler._send = mock.Mock()
+
+        with mock.patch.object(codex_usage, "DEFAULT_SESSIONS_DIR",
+                               self.codex_sessions), \
+                mock.patch.object(tokenserver, "CODEX_SESSIONS",
+                                  self.codex_sessions), \
+                mock.patch.object(tokenserver, "get_limits",
+                                  return_value={}), \
+                mock.patch.object(tokenserver, "_read_codex_limits",
+                                  return_value={}), \
+                mock.patch.object(tokenserver,
+                                  "_persist_quota_records_async"):
+            tokenserver._last_result = None
+            tokenserver._last_computed = 0.0
+            handler.do_GET()
+
+        handler._send.assert_called_once()
+        code, payload = handler._send.call_args.args
+        return code, payload
+
+    def test_serves_200_with_no_claude_directory(self):
+        code, payload = self._tokens_payload()
+        self.assertEqual(code, 200)
+        # v=2 är kontraktet tokens_parse.c kräver (`v != 2.0` avvisar).
+        self.assertEqual(payload["v"], 2)
+
+    def test_claude_percentages_are_null_so_the_panel_shows_dashes(self):
+        """Ärlighetsinvarianten där den syns: procenttalen blir null, och
+        ``pct_or_null`` i tokens_parse.c gör null till has_pct=0, vilket
+        presentern renderar som "–" och "USAGE UNAVAILABLE"."""
+        _, payload = self._tokens_payload()
+        for key in ("claudeSessionPct", "claudeWeekPct",
+                    "claudeModelWeekPct"):
+            self.assertIsNone(payload[key], key)
+
+    def test_volume_zeroes_are_marked_as_an_absent_source(self):
+        """De fyra räknarna kan inte bli null utan att äldre paneler slutar
+        parsa, så flaggan bär sanningen i stället."""
+        _, payload = self._tokens_payload()
+        self.assertFalse(payload["claudeSourcePresent"])
+        self.assertEqual(payload["dayTokens"], 0)
+        self.assertEqual(payload["monthTokens"], 0)
+
+    def test_a_present_claude_directory_reports_the_source_as_present(self):
+        """Kontrollen åt andra hållet: flaggan följer katalogen, den är
+        inte hårdkodad till false av testuppsättningen."""
+        self.claude_absent.mkdir(parents=True)
+        _, payload = self._tokens_payload()
+        self.assertTrue(payload["claudeSourcePresent"])
+
+    def tearDown(self):
+        tokenserver._last_result = None
+        tokenserver._last_computed = 0.0
+
+
 if __name__ == "__main__":
     unittest.main()

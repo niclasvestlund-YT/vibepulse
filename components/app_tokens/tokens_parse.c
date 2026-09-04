@@ -206,7 +206,7 @@ static bool known_top_level_key(const char *key) {
       "claudeForecastOffsetMin", "codexForecastState",
       "codexForecastPctAtReset", "codexForecastPaceFactor",
       "codexForecastAt", "codexForecastOffsetMin",
-      "otaAvailableVersion", "value",
+      "otaAvailableVersion", "value", "claudeSourcePresent",
   };
   for (size_t index = 0; index < sizeof keys / sizeof keys[0]; index++) {
     if (strcmp(key, keys[index]) == 0) return true;
@@ -390,6 +390,10 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
 
   bool ok = false;
   tk_tokens t = {0};
+  /* Frånvarande nyckel betyder närvarande källa (äldre tjänst), så
+   * defaulten måste sättas här — {0} skulle annars säga "saknas" om varje
+   * payload som inte nämner den. */
+  t.claude_source_present = 1;
   double v = 0, day = 0, per_hour = 0, sessions = 0, month = 0;
   raw_json_string_scan strings = {0};
   if (!scan_raw_json_strings(json, len, &strings) || strings.nul_key ||
@@ -407,6 +411,18 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
   if (!num(root, "dayTokensPerHour", &per_hour)) goto done;
   if (!num(root, "daySessions", &sessions)) goto done;
   if (!num(root, "monthTokens", &month)) goto done;
+
+  /* Additiv, valfri: saknas den är källan närvarande (äldre tjänst). Bara
+   * en riktig false stänger av — allt annat än en boolean avvisas hellre
+   * än tolkas, samma stränghet som resten av kontraktet. */
+  {
+    const cJSON *source = cJSON_GetObjectItemCaseSensitive(
+        root, "claudeSourcePresent");
+    if (source) {
+      if (!cJSON_IsBool(source)) goto done;
+      t.claude_source_present = cJSON_IsTrue(source) ? 1 : 0;
+    }
+  }
 
   if (!limit_pair(root, "claudeSessionPct", "claudeSessionResetMin",
                   &t.claude_session)) goto done;

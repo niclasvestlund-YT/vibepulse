@@ -649,6 +649,16 @@ def _compute(projects_dir: Path, max_tracker_store=None):
         "dayTokensPerHour": hour_tokens,  # senaste timmen = takt per timme
         "daySessions": len(day_sessions),
         "monthTokens": month_tokens,
+        # Ärlighetsinvarianten, API-sidan: på en Codex-only-maskin finns
+        # ingen Claude-katalog, och de fyra räknarna ovan blir nollor som
+        # inte är mätningar. Procenttalen säger redan sanningen (de blir
+        # null och skärmen visar streck), men räknarna kan inte bli null
+        # utan att äldre paneler slutar parsa payloaden helt
+        # (tokens_parse.c: `if (!num(root, "dayTokens", &day)) goto done;`).
+        # Den här flaggan säger i stället vad nollorna betyder, så ingen
+        # läsare — logg, panel eller framtida konsument — behöver gissa.
+        # Additiv nyckel, samma mönster som "value" nedan.
+        "claudeSourcePresent": projects_dir.is_dir(),
         # Additive key: tokens_parse.c:219 skips unknown top-level keys, so
         # already-flashed screens ignore it instead of failing to parse.
         "value": value_meter.build_payload(

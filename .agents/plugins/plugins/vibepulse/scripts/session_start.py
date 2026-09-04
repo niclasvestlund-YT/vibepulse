@@ -15,7 +15,7 @@ DEFAULT_PORT = 8737
 HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
-EXPECTED_HOST_SOURCE_FINGERPRINT = "3ed0068168fe"
+EXPECTED_HOST_SOURCE_FINGERPRINT = "8ab819afb029"
 CONTEXT = (
     "For short, non-secret, single-choice 2–3 option questions or "
     "recommendations, use mcp__vibepulse__ask. Mark at most one option "

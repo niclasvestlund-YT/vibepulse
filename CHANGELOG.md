@@ -7,6 +7,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- `/api/tokens` no longer reports a Codex-only computer's Claude counters as
+  measured zeros. A new additive `claudeSourcePresent` flag says when the
+  Claude directory is absent, so the zeros are not mistaken for a day with no
+  work — by the panel's log, by the simulator, or by a future reader. The
+  percentages already came over as `null` and rendered as dashes; this closes
+  the same invariant at the API and log boundaries. Flashed panels are
+  unaffected: unknown keys are skipped, and an absent flag means present.
 - The usage service now starts on a computer that has Codex but not Claude
   Code. Its readiness check waited — before binding the HTTP port — until
   `~/.claude/projects` existed, so on a Codex-only machine the port never
