@@ -353,9 +353,12 @@ pairing window keeps all three and puts nothing persistent on the glass:
    `py -3 tools\vibepulse_setup.py pair <code>` on Windows, which is how
    `docs/windows-setup.md` invokes Python throughout because the standard
    Windows installer does not guarantee a `python3` on PATH. The PAIR
-   screen shows the spelling for the platform the panel most recently
-   polled from, and *Manual setup* shows both. There is no `vibepulse`
-   console entry point yet and no packaging in the tree. The short `vibepulse pair <code>` arrives with the
+   screen shows **both spellings**, one per line. It cannot pick one for
+   the user: nothing tells the panel which platform the host runs —
+   `tokenserver.py`'s panel-facing payloads carry no OS field and
+   `net.c` consumes no platform identity — and inventing that transport
+   to save one line of glass would be a poor trade. There is no
+   `vibepulse` console entry point yet and no packaging in the tree. The short `vibepulse pair <code>` arrives with the
    Homebrew tap and the Windows one-liner in step 6, and the screen's text
    follows the packaging rather than preceding it. Everything below applies
    to both spellings.
@@ -491,8 +494,13 @@ pairing window keeps all three and puts nothing persistent on the glass:
       - **unknown** — no ack, or an ack that fails verification. Nothing
         proves the selected panel received anything. Never shown as
         delivered.
-      - **delivered** — a valid ack. The paired panel holds the image;
-        whether it boots it is not yet known.
+      - **delivered** — a valid ack **whose result is success**. The
+        paired panel holds the image; whether it boots it is not yet
+        known.
+      - **failed** — a valid ack whose result is failure (the streamed
+        digest differed, or an image check rejected it). The panel is
+        authentic and has told the truth about refusing the image, which
+        is not delivery and must never be shown as one.
       - **running** — an **authenticated boot proof**, never a bare poll.
         The panel stores the update nonce in NVS next to the pending image
         (the boot-health gate already keeps state there across a reboot),
@@ -511,12 +519,19 @@ pairing window keeps all three and puts nothing persistent on the glass:
         succeeded, which is exactly the moment the image stops being
         revocable. Polls before that carry the device id and version as
         usual and prove nothing.
-        Alongside the nonce the panel stores **which slot authenticated the
-        upload** — the label `runtime` or `compiled`, never the token —
-        because the reboot would otherwise discard it and a panel with both
-        slots populated could not know which key the proof must use. The
-        header carries that label too, so the uploader verifies with the
-        token it actually holds and either upload path reaches *running*.
+        Alongside the nonce the panel stores a **proof key derived from
+        the token that authenticated the upload** —
+        `HKDF(authenticating token, "vibepulse-boot-key-v2" ‖ nonce)` — plus
+        the slot label `runtime` or `compiled`. It stores the derived key
+        rather than only the label because the compiled token lives inside
+        the image being replaced: an update that changes `TG_OTA_TOKEN`
+        would leave the label pointing at a different key after the reboot,
+        and that path could never reach *running*. The derived key is bound
+        to one nonce, is useless for anything else, and is cleared with it.
+        The uploader derives the same key from the token it used, so both
+        upload paths reach *running* and a compiled-token rotation is not a
+        special case. The header carries the slot label too, so the
+        uploader knows which of its own tokens to derive from.
         The service holds no token: the recent-panels registry stores that
         header verbatim as an opaque value, and `vibepulse update` verifies
         it against its own token and the nonce it issued. The proof is
@@ -736,7 +751,8 @@ Recorded so the cleanup is a decision, not an accident.
   id; that a captured request replayed after its nonce is consumed is
   rejected; that a panel with both slots accepts a MAC keyed by either
   token; that the uploader reports success only on a valid keyed ack and
-  treats a missing or wrong ack as *unknown* and never as delivered; that the
+  treats a missing or wrong ack as *unknown*, and a valid ack carrying a
+  failure result as *failed*, never as delivered; that the
   legacy bearer upload still works with a compiled token; and that the
   challenge endpoint is absent outside the window.
 - Poll identity, version, and boot proof: a test that every panel poll
@@ -749,9 +765,10 @@ Recorded so the cleanup is a decision, not an accident.
   or a proof for an earlier nonce never produces *running*; that no proof
   is emitted while the running partition is `PENDING_VERIFY`, so a panel
   whose health gate later rolls back stays *delivered, not running*; that a
-  panel with both slots populated persists the authenticating slot label
-  across the reboot and keys the proof with that slot, so either upload
-  path reaches *running*; and that none of the headers ever carries a token
+  panel with both slots populated persists the derived proof key and slot
+  label across the reboot, so either upload path reaches *running*; that an
+  update which changes the compiled `TG_OTA_TOKEN` still reaches *running*,
+  because the proof key was derived before the image was replaced; and that none of the headers ever carries a token
   or code.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
