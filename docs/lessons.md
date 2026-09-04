@@ -67,11 +67,35 @@ alone (it cannot be the default: a route that parks a question expects its
 body within the server's 50 ms first-byte deadline), and a legible failure
 message carrying the socket error in `assert_wire_rejected`. The server
 already drains the request before its 503 in `_reject_busy` for exactly this
-reason; extending that drain to the 403/415/404 early rejections is the
-product-side follow-up. **Watch for:** the same abort in
-real Windows hook clients that get a 403/415 from the tokenserver before
-their body is read; if a hook on Windows reports a connection abort where a
-status was expected, this is the mechanism.
+reason. **Outcome:** that drain is now central. `Handler._drain_request_body`
+runs from `_send` and `_send_no_decision` whenever the request advertised a
+body that `_read_json_body` never took off the wire, bounded to
+`REQUEST_DRAIN_LIMIT` (64 KiB) and `REQUEST_DRAIN_TIMEOUT_S` (50 ms) — a byte
+cap *and* its own deadline, so a peer dripping one byte per read cannot hold a
+worker. The bytes are discarded unparsed and unlogged, and the flag is set
+where the body is actually read, so a parsed request never drains twice and
+`test_partial_advertised_body_hits_short_deadline_and_never_parks` still fails
+closed well inside its second. In `test_codex_interactions.py`,
+`test_early_rejections_answer_even_when_the_body_is_written` deliberately
+writes the body on the plain `http.client` path — the shape a real hook
+client has — so the product-side drain, not the test-side helper, is what
+keeps it green.
+**The bound is also the limit of the fix:** only the first
+`REQUEST_DRAIN_LIMIT` bytes are taken, so an early rejection of a body larger
+than 64 KiB still leaves a residue unread and can still abort on Windows. The
+reachable case is a real hook client posting an over-cap payload to a disabled
+route (404) — a legitimate client sends a loopback `Host`, an allowed `Origin`
+and `application/json`, so it cannot trip the 403 or the 415. This is accepted,
+not overlooked: an unbounded drain hands any peer a denial-of-service lever.
+`_read_json_body` refuses an over-cap body without consuming it, so that path
+carries the same residue. **The 503 path is not the same bound:** `_reject_busy`
+shares the 50 ms deadline but drains at most 8 KiB of *headers*, stopping at the
+end of them — it never touches the advertised body, so only the idea is shared,
+not the cap.
+**Watch for:** the same abort anywhere else a response precedes an unread
+body; if a hook on Windows reports a connection abort where a status was
+expected, this is the mechanism — and if it reports one on a request that was
+answered, check the body size against the drain cap before looking further.
 
 ## 2026-08-30 · Local activity was rendered as no active agent
 
