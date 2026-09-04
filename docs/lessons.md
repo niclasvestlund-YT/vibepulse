@@ -32,8 +32,11 @@ answered and closed, the body was still unread in its socket; Windows treats
 a close with unread data as an abort (`WinError 10053`) and discards the
 response already sent, so `getresponse()` raised instead of returning the
 status. **The rule:** a client that expects an early rejection must not
-leave unread bytes behind it — send the headers, wait briefly for the
-answer, and send the body only when none came. **Guards:**
+leave unread bytes behind it, and must not let timing decide — advertise
+the body in `Content-Length`, never write it, and half-close the write side
+so the server can still reply. A grace period that sends the body when no
+answer arrived was tried first and rejected: it only makes the abort rarer,
+because a loaded runner can miss any deadline. **Guards:**
 `headers_first_request` in `test_interactions.py`, opted into with
 `early_reject=True` by the tests that expect a rejection on the headers
 alone (it cannot be the default: a route that parks a question expects its

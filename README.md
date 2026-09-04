@@ -419,7 +419,8 @@ bounded and fail-closed, while host repair remains an explicit setup action.
 
 Four things. All four are required for the core — your usage on the glass.
 Nothing else: no account, no cloud, no API key. Git and Python are the only
-tools; the Windows runbook shows where to get both.
+tools, and the [Windows host runbook](docs/windows-setup.md) has the
+`winget` commands and download links for both.
 
 | | You need | Because |
 |---|---|---|
