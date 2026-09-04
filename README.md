@@ -418,7 +418,9 @@ bounded and fail-closed, while host repair remains an explicit setup action.
 ## What you need
 
 Four things. All four are required for the core — your usage on the glass.
-No account, no cloud, no API key. The **service on your computer** needs only
+No VibePulse account, no cloud service, no API key — you sign in to
+Claude Code or Codex as you already do, and nothing else. The **service on
+your computer** needs only
 Git and Python; the [Windows host runbook](docs/windows-setup.md) has the
 `winget` commands and download links for both. Putting the firmware on the
 board is the one step that needs more, and row 1 says what.

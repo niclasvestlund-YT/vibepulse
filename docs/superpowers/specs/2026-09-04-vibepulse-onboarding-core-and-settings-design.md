@@ -504,9 +504,10 @@ pairing window keeps all three and puts nothing persistent on the glass:
       - **running** — an **authenticated boot proof**, never a bare poll.
         The panel stores the update nonce in NVS next to the pending image
         (the boot-health gate already keeps state there across a reboot),
-        and adds `X-VibePulse-Boot-Proof = HMAC-SHA256(token,
+        and adds `X-VibePulse-Boot-Proof = HMAC-SHA256(proof key,
         "vibepulse-boot-v2" ‖ device id ‖ nonce ‖ running version)`, keyed
-        by the slot that authenticated the upload.
+        by the **derived proof key** stored with that nonce — not by the
+        token itself, which the update may have replaced.
         **The proof waits for the health gate, not for the first poll.**
         On a freshly updated image the partition is `PENDING_VERIFY` and
         `boot_health.c` decides between acceptance and rollback no earlier
@@ -540,10 +541,10 @@ pairing window keeps all three and puts nothing persistent on the glass:
         device id and version but no valid proof never produces *running*,
         and a panel that rolled back never marked itself valid, so it sends
         no proof and stays *delivered, not running*.
-      A panel with only a compiled token, updated over the legacy bearer
-      path, gets none of this: the updater reports *sent* and shows the
-      version the panel later polls with as *reported by the panel,
-      unauthenticated*, exactly as honest as today.
+      A panel too old to offer the challenge endpoint, updated over the
+      legacy bearer path, gets none of this: the updater reports *sent* and
+      shows the version the panel later polls with as *reported by the
+      panel, unauthenticated*, exactly as honest as today.
 
    What a relay gains: nothing durable. Forwarding the exchange to the real
    panel installs exactly the image the user chose on exactly the panel they
@@ -551,15 +552,22 @@ pairing window keeps all three and puts nothing persistent on the glass:
    and no second use. The impostor ends up holding no token and no reusable
    credential.
 
-   **Legacy path, unchanged.** An upload carrying `Authorization: Bearer
-   <compiled token>` keeps working exactly as today, so existing panels and
-   the developer flow are untouched; it keeps the plaintext-bearer exposure
-   `docs/ota.md` already documents. `tools/ota-flash.sh` and the packaged
-   `vibepulse update` use the authenticated request whenever they hold a
-   runtime token and fall back to the bearer only for a compiled one. This
-   *does* change the upload path for paired panels, deliberately: step 4
+   **The authenticated path is tried for either slot; the bearer is the
+   fallback.** `tools/ota-flash.sh` and the packaged `vibepulse update`
+   always ask for a challenge first, whichever typed credential they hold,
+   and authenticate with it. A compiled token is not a reason to send a
+   secret in plaintext — it is only the *older* secret, and a panel new
+   enough to offer the challenge endpoint verifies it just as well. That is
+   also what makes the compiled slot's HMAC and the compiled-token rotation
+   proof reachable at all, rather than paths no uploader would ever take.
+   Only when the target does not answer the challenge — a panel running
+   firmware from before step 4 — does the uploader fall back to
+   `Authorization: Bearer <compiled token>`, which keeps working exactly as
+   today with the plaintext exposure `docs/ota.md` already documents. A
+   **runtime** token is never sent that way: a pre-step-4 panel has no
+   runtime slot by definition, so the uploader stops and says so. Step 4
    updates `docs/ota.md` so the *Knowledge* factor reads "proven, never
-   transmitted" for a paired panel.
+   transmitted" wherever the challenge exists.
    Lookup order for the token is unchanged: environment, the per-panel
    store, then `secrets.h` when a checkout exists. A single-panel user
    never sees the map; the developer flow keeps working unchanged.
@@ -753,8 +761,12 @@ Recorded so the cleanup is a decision, not an accident.
   token; that the uploader reports success only on a valid keyed ack and
   treats a missing or wrong ack as *unknown*, and a valid ack carrying a
   failure result as *failed*, never as delivered; that the
-  legacy bearer upload still works with a compiled token; and that the
-  challenge endpoint is absent outside the window.
+  uploader asks for a challenge whichever typed slot it holds and falls
+  back to the bearer only when the target offers no challenge endpoint;
+  that it refuses rather than sending a runtime token as a bearer; that the
+  legacy bearer upload still works with a compiled token against a
+  pre-step-4 panel; and that the challenge endpoint is absent outside the
+  window.
 - Poll identity, version, and boot proof: a test that every panel poll
   carries `X-VibePulse-Device` with the device id and `X-VibePulse-Version`
   with the running firmware version; that the registry keys entries by the
