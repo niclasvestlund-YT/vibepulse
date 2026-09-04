@@ -17,7 +17,8 @@ short version; this is the reference.
 │ tools/ota-flash.sh waits │          │                             │
 │  for the window...       │          │  YOU consent:               │
 │                          │          │   · tap UPDATE pill, or     │
-│                          │          │   · hold KEY3 ~3 s          │
+│                          │          │   · hold KEY3 ~3 s, then    │
+│                          │          │     pick UPDATE in SETTINGS │
 │  └─ POST firmware ─────────────────►│  window open 10 min         │
 │     (token + SHA-256)    │          │  RECEIVING → VERIFYING →    │
 │                          │          │  RESTARTING → reboot into   │
@@ -31,21 +32,29 @@ short version; this is the reference.
 Nothing can write firmware to the screen without three independent factors:
 
 1. **Physical presence** — the maintenance window opens only from the
-   device itself: a ~3 s KEY3 hold, or a tap on the UPDATE pill when the
-   UPDATE READY takeover is showing. A script, a LAN neighbour, or a
-   compromised Mac cannot open it remotely. On the takeover, the UPDATE
-   pill is the *only* yes — a tap anywhere else (including LATER)
-   snoozes, so an accidental touch always lands on the safe side.
+   device itself: a ~3 s KEY3 hold followed by **UPDATE** in the SETTINGS
+   menu, or a tap on the UPDATE pill when the UPDATE READY takeover is
+   showing. A script, a LAN neighbour, or a compromised Mac cannot open
+   it remotely. On the takeover, the UPDATE pill is the *only* yes — a
+   tap anywhere else (including LATER) snoozes, so an accidental touch
+   always lands on the safe side.
 
-   Since the WiFi setup window landed (`docs/wifi.md`), the hold opens
-   *the window that can actually help*: **with an IP** it opens this OTA
-   window, exactly as always; **without an IP** it opens the WiFi setup
-   window instead, because an OTA window with no network can never
-   receive an upload. A **second full 3 s hold** while this window is
-   open switches to the WiFi setup window (hold–hold: update window,
-   then network window); any release before three seconds still just
-   closes. The consent model is unchanged — both windows open only from
-   the device.
+   The hold used to guess which window you wanted from whether the panel
+   had an IP. It now opens **SETTINGS** and lets you say, which changes
+   nothing about consent: the menu is reachable only from the device, so
+   physical presence is still required, and the token and the ten-minute
+   window are untouched. Two consequences worth knowing:
+
+   - **Without an IP, UPDATE is greyed out and cannot be picked.** An OTA
+     window with no address can never receive an upload, so the menu does
+     not offer one; WIFI is the lit row, and ABOUT shows the address as a
+     dash so the reason is visible.
+   - A **second full 3 s hold** while the update window is open still
+     switches to the WiFi setup window (hold–hold), unchanged. Any
+     release before three seconds still just closes — that escape exists
+     because a ~2 s press once left a window stuck.
+
+   The SETTINGS menu itself closes on **any** KEY3 release.
 2. **Knowledge** — the upload must carry `Authorization: Bearer <token>`,
    64 lowercase hex from `secrets.h` (`TG_OTA_TOKEN`), never committed.
 3. **Time** — the window closes itself after ten minutes; a short KEY3

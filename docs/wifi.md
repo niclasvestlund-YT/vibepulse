@@ -13,7 +13,7 @@ new place, panel finds nothing
         ├─ 60 s ─► the glass says WHY (network hunted, radio's own reason)
         │
         ├─ 90 s ─► the panel raises VibePulse-setup and shows a clean QR screen
-        │          (a 3 s KEY3 hold opens the same window immediately)
+        │          (3 s KEY3 hold → SETTINGS → WIFI opens it at once)
         │
         ├─ from a phone:    scan the QR, portal opens ← normal path
         └─ optional Mac:    tools/wifi-here.sh        ← one-command shortcut
@@ -144,11 +144,20 @@ wiring test asserts no OTA symbol ever appears in `wifi_setup.c`.
 
 ### What KEY3 means now
 
-A 3 s hold opens **the window that can actually help**:
+A 3 s hold opens **SETTINGS**, and you pick:
 
-- **With an IP** → the OTA maintenance window, exactly as before.
-- **Without an IP** → the WiFi setup window. An OTA window with no network
-  could never receive an upload anyway.
+```
+hold KEY3 ~3 s
+  ├─ UPDATE   the OTA maintenance window, unchanged
+  ├─ WIFI     this setup window, unchanged
+  └─ ABOUT    firmware version, address, whether the computer was found
+```
+
+The hold used to guess from network state; now it asks. **Without an IP,
+UPDATE is greyed out and cannot be picked** — an OTA window with no
+address could never receive an upload — so WIFI is the lit row, which is
+exactly where a stranded panel needs to go. ABOUT shows the address as a
+dash, so the reason is on the glass rather than implied.
 
 **Hold again to switch windows.** A second full 3 s hold while the update
 window is open closes it and opens WIFI SETUP instead. That is how you
@@ -160,7 +169,9 @@ the two HTTP servers never collide.
 While either window owns the glass, *any* KEY3 release before three
 seconds closes it — the same escape hatch the OTA window grew after
 2026-08-16. Only a deliberate, completed hold switches; you cannot fail
-to close by pressing.
+to close by pressing. SETTINGS inherits the same rule, and goes further:
+*any* KEY3 event closes the menu, completed hold included, so it can
+never stack on top of itself.
 
 ## Where the credentials live
 

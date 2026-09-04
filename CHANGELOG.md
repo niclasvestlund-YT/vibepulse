@@ -5,6 +5,22 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Added
+
+- A **SETTINGS** menu on a 3 s KEY3 hold. The hold used to derive which
+  window you wanted from whether the panel had an IP; it now opens a menu
+  with UPDATE, WIFI and ABOUT and lets you say. The consent model is
+  unchanged — the menu is reachable only from the device, so physical
+  presence is still required for UPDATE, and the token and the ten-minute
+  window are untouched. Without an address UPDATE is greyed out and cannot
+  be picked, because an update window with no address could never receive
+  an upload; WIFI is then the one lit row. ABOUT shows firmware version,
+  address and whether the computer was found, with a dash for anything
+  missing. Any KEY3 release closes the menu, the same escape the two
+  windows have. FEATURES and PAIR from the design spec are not in this
+  step: FEATURES needs the internal-RAM budget re-measured on the unit,
+  and PAIR belongs to a later step.
+
 ### Fixed
 
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as
