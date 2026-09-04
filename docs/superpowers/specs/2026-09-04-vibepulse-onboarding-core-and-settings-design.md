@@ -250,10 +250,20 @@ hold KEY3 ~3 s
 Rules:
 
 - Defaults equal today's behaviour, so an existing panel is unchanged.
-- A compile-time flag set to 1 in a build sets that switch's **default** to
-  on for that build. The flags become the floor, exactly like the Wi-Fi
-  floor. They are not removed and not renamed; new switches may add
-  `TK_LABS_*` names alongside.
+- The compile-time flags stop deciding what is *compiled* and only seed
+  each switch's **default**. Today `#if TK_GITHUB_SCREEN_ENABLED` and
+  `#if TK_GITHUB_NOTIFICATIONS_ENABLED` in `usage_screen.c`, the
+  `TK_GITHUB_URL` guard in `github_net.c`, and `#if TK_GITHUB_SOUND_ENABLED`
+  in `project_star_chime.c` omit the page, popup, fetch task, and chime
+  from a flag-0 build, and no NVS value can bring back code that was never
+  compiled. Step 3 turns those guards into runtime checks, so every image
+  carries the features and the macro only sets the default. A flag set to
+  1 in a build is then the floor for that switch, exactly like the Wi-Fi
+  floor. The flags are not removed and not renamed; new switches may add
+  `TK_LABS_*` names alongside. Because the GitHub page and its fetch task
+  are then always resident, the internal-RAM budget is re-measured on the
+  unit before step 3 ships (display, TLS, and Wi-Fi already compete for
+  it, per `spec/hardware-capabilities.yaml`).
 - A switch whose feature needs the computer (GitHub needs a repository
   configured on the service, the value page needs a plan cost) shows
   *set up on your computer* next to the switch. The states already exist:
@@ -299,21 +309,42 @@ pairing window keeps all three and puts nothing persistent on the glass:
    This is the same model as the Wi-Fi window's access-point password:
    whoever cannot see the screen cannot enrol. The code is not the token
    and expires with the window, so showing it exposes nothing durable.
-3. **Knowledge** — the token is generated and kept on the pairing computer.
-   The panel accepts **one** submission per window, compares the code in
-   constant time, closes the window after three wrong codes, stores the
-   token in NVS on success, and never displays, logs, or re-transmits it.
-   A LAN peer without the code cannot fill the slot, and a second
-   submission after a success is refused.
+3. **Knowledge, without the token ever crossing the LAN** — the code is not
+   sent and the token is not sent. Both sides run a password-authenticated
+   key exchange seeded by the code (proposal: SRP6a, which ESP-IDF ships as
+   `protocomm` security 2, or SPAKE2+; the choice is made at implementation
+   by what the panel and the host's pinned crypto can both run) and derive
+   the token from the resulting session key with HKDF. A passive observer
+   of the exchange — a sniffing or ARP-spoofing LAN peer included — learns
+   nothing that yields the token; an active peer without the code fails
+   the exchange and burns one of three attempts, after which the window
+   closes. The panel completes **one** exchange per window, stores the
+   derived token in NVS, and never displays, logs, or re-transmits it; a
+   second attempt after a success is refused. The computer stores the same
+   derived token where `tools/ota-flash.sh` reads it today.
+   *Scope note:* at upload time the bearer still travels as `docs/ota.md`
+   specifies today; this spec changes enrolment only and does not claim to
+   improve the upload path. Making the upload prove possession without
+   sending the bearer is a candidate for a later step, not part of this
+   one.
 4. **Time and confirmation** — on success the glass shows
    **PAIRED · \<origin of the computer\>** and the window closes at once;
    the computer treats only the panel's success response as success.
    Outside a window the pairing endpoint does not exist, following the
    lazy-surface rule the Wi-Fi window uses.
 
-Rotating the token is pairing again, which again requires presence and a
-fresh code. A panel whose build carries a compiled token keeps it; pairing
-fills only an empty slot.
+Two token slots exist and the panel accepts a bearer matching either:
+
+- the **compiled** slot (`TG_OTA_TOKEN`), the immutable floor: pairing
+  never reads, replaces, or removes it;
+- the **runtime** slot in NVS, which pairing fills, and which a fresh
+  physically opened, code-authenticated window **replaces**. The previous
+  runtime token is invalid the moment the new exchange completes.
+
+That is how rotation and recovery work: a compromised runtime token, or a
+lost paired computer, is fixed by opening PAIR again and pairing again,
+with no NVS erase and no USB. A panel with only a compiled token behaves
+exactly as today.
 
 ### Release binary and the rule about `torget.bin`
 
@@ -371,6 +402,8 @@ reverted alone.
 2. README front door for vibecoders, `.gitignore` hygiene, this spec.
    **This change.**
 3. Settings page and NVS switches. Firmware only; defaults equal today.
+   The `#if TK_GITHUB_*` guards become runtime checks seeded by the
+   macros, with the flag-0 toggle test and a re-measured RAM budget.
 4. Runtime configuration: DNS-SD default, the PAIR window with the
    computer-generated OTA token, compiled values honoured as floor.
    Immediate-open Wi-Fi window on an empty panel.
@@ -425,10 +458,16 @@ Recorded so the cleanup is a decision, not an accident.
 - CI release gate: build from `secrets.h.example`, assert every secret
   macro is empty, publish the binary and manifest.
 - Pairing: a test that no capture and no label in the rendered tree ever
-  contains the OTA token, that the pairing endpoint is absent outside the
-  window, that a submission without the current code is rejected and three
-  wrong codes close the window, that a second submission after success is
-  refused, and that pairing refuses to replace a compiled token.
+  contains the OTA token; that the pairing endpoint is absent outside the
+  window; that a captured transcript of the exchange contains neither the
+  code nor the token; that an exchange with a wrong code fails and three
+  failures close the window; that a second exchange after success is
+  refused; that a new pairing invalidates the previous runtime token; and
+  that pairing never touches the compiled token.
+- Feature switches: a simulator test that a build with every GitHub flag
+  at 0 creates the GitHub page, the star popup, and the fetch task once the
+  NVS switches are on, and omits them when off; and a recorded
+  internal-RAM measurement on the unit with the features resident.
 - Release manifest: a test that every part in the build's
   `flasher_args.json` is present in the published manifest (or merged
   image) at the same offset, so a fresh board boots from the web installer.
