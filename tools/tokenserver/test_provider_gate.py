@@ -116,12 +116,22 @@ class CodexOnlySnapshotTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             absent = Path(temp_dir) / "claude-har-aldrig-körts"
             self.assertFalse(absent.exists())
+            # ``_compute`` når ``codex_usage.month_value()`` UTAN katalog, som
+            # då faller tillbaka på den riktiga ``~/.codex/sessions``. Utan
+            # den här seamen skannar testet utvecklarens egen rollout-historik
+            # rekursivt: långsamt, beroende av privat maskintillstånd, och det
+            # lämnar codex_usage-cachen varm åt nästa testfil. Peka den på en
+            # tom temporär katalog i stället.
+            codex_root = Path(temp_dir) / "no-codex-here"
+            codex_root.mkdir()
 
             # ``_compute`` mockas medvetet INTE — det är just den som ska
             # möta den frånvarande katalogen. Bara det som rör nät och CLI
             # stubbas.
-            with mock.patch.object(tokenserver, "get_limits",
-                                   return_value={}), \
+            with mock.patch.object(codex_usage, "DEFAULT_SESSIONS_DIR",
+                                   codex_root), \
+                    mock.patch.object(tokenserver, "get_limits",
+                                      return_value={}), \
                     mock.patch.object(tokenserver, "_read_codex_limits",
                                       return_value={}), \
                     mock.patch.object(
@@ -136,9 +146,10 @@ class CodexOnlySnapshotTest(unittest.TestCase):
             self.assertEqual(snapshot.get("monthTokens"), 0)
 
     def tearDown(self):
-        # Cachen är modulglobal: lämna den inte varm åt nästa testfil.
+        # Båda cacharna är modulglobala: lämna dem inte varma åt nästa testfil.
         tokenserver._last_result = None
         tokenserver._last_computed = 0.0
+        codex_usage.reset_cache()
 
 
 if __name__ == "__main__":
