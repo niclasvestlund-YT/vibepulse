@@ -61,6 +61,7 @@ add_executable(torget-sim
   ../platform/torget_ui.c
   ../platform/wifi_status_assets.c
   ../platform/boot_screen.c
+  ../platform/settings_menu.c
   ../main/registry.c
   ../components/app_tokens/app.c
   ../components/app_tokens/tokens_parse.c

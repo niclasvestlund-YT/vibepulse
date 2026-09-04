@@ -38,6 +38,7 @@
 #include "vibepulse_recovery.h"
 #include "usage_screen.h"
 #include "wifi_setup_ui.h"
+#include "settings_menu.h"
 
 /* VibePulse är det här repots app och ligger ALLTID först i registret, så
  * launchern och den obevakade rundan pekar på samma index oavsett vilka
@@ -1273,6 +1274,17 @@ static int run_vibepulse_static_qa(void) {
   dump_overlay_frame("wifi-failed-password");
   torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
 
+  /* SETTINGS: vad ett tresekundershåll på KEY3 öppnar. Menyn och ABOUT i
+   * båda tillstånd som skiljer sig materiellt — hittad dator och inte. */
+  torget_settings_set_about("v0.2.1-16-g9f9af53", "192.168.1.42", true);
+  torget_settings_open();
+  dump_overlay_frame("settings-menu");
+  torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
+  dump_overlay_frame("settings-about-found");
+  torget_settings_set_about("v0.2.1-16-g9f9af53", NULL, false);
+  dump_overlay_frame("settings-about-missing");
+  torget_settings_close();
+
   /* Value multiple. Every state the parser can hand the page gets its own
    * raster, because the whole design premise is that a wrong figure here is
    * worse than no figure — the dashes need proving as much as the number. */
@@ -1463,6 +1475,8 @@ int main(int argc, char **argv) {
   /* OTA-ringen på topplagret, dold tills QA-dumparna väcker den — samma
    * ordning som targetets app_main (overlay EFTER det delade UI:t). */
   torget_ota_ui_create();
+  /* SETTINGS-menyn på samma topplager. Skapas dold; QA-dumparna öppnar den. */
+  torget_settings_create();
 
   if (argc == 2 &&
       strcmp(argv[1], "--vibepulse-needs-you-render-qa") == 0) {

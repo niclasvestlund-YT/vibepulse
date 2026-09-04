@@ -31,6 +31,7 @@ idf_component_register(
        "../platform/torget_ui.c"
        "../platform/wifi_status_assets.c"
        "../platform/boot_screen.c"
+       "../platform/settings_menu.c"
   # ".." ger `#include "secrets.h"` (gitignorad, kopieras ur secrets.h.example)
   INCLUDE_DIRS "." ".." "../platform"
   REQUIRES ${TORGET_MAIN_REQUIRES}

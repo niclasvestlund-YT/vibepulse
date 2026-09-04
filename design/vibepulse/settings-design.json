@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "deviceCapability": "display.amoled",
+  "canvas": {
+    "width": 480,
+    "height": 480
+  },
+  "menu": {
+    "wordY": 24,
+    "rowX": 74,
+    "rowWidth": 332,
+    "rowHeight": 84,
+    "rowGap": 16,
+    "firstRowY": 120,
+    "rowRadius": 28,
+    "rowBorderWidth": 2,
+    "footerY": 442
+  },
+  "rows": [
+    "UPDATE",
+    "WIFI",
+    "ABOUT"
+  ],
+  "about": {
+    "wordY": 24,
+    "labelX": 74,
+    "firstLineY": 108,
+    "lineGap": 62,
+    "backY": 308,
+    "footerY": 442
+  },
+  "fonts": {
+    "word": 52,
+    "row": 21,
+    "aboutLabel": 21,
+    "aboutValue": 27,
+    "footer": 21
+  }
+}
