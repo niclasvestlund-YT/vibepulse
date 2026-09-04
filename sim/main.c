@@ -1032,6 +1032,38 @@ static int run_vibepulse_static_qa(void) {
   tokens_apply(&quota_truth);
   dump_frame("vibepulse-claude-fable-no-data");
 
+  /* The forecast folded into the reset stat. One wire state, three pages:
+   * both weekly pages count down to the wall because the service forecasts
+   * their windows, and the model-week page keeps counting to its reset
+   * because nothing forecasts THAT percentage. */
+  tk_tokens deadline = {0};
+  deadline.claude_week = forecast_limit(78, 300);
+  deadline.claude_week.delta_pct = 14;
+  deadline.claude_week.has_delta = 1;
+  deadline.claude_forecast.state = TK_FORECAST_EXHAUSTS;
+  deadline.claude_forecast.offset_min = -120;
+  deadline.claude_forecast.at_epoch = 1786158000;
+  deadline.claude_forecast.has_offset_min = 1;
+  deadline.claude_forecast.has_at_epoch = 1;
+  deadline.codex_week = forecast_limit(64, 2210);
+  deadline.codex_week.delta_pct = 9;
+  deadline.codex_week.has_delta = 1;
+  deadline.codex_forecast = deadline.claude_forecast;
+  deadline.codex_forecast.offset_min = -540;
+  deadline.claude_model_week = forecast_limit(73, 3120);
+  deadline.claude_model_week.delta_pct = 12;
+  deadline.claude_model_week.has_delta = 1;
+  snprintf(deadline.claude_model_week_label,
+           sizeof deadline.claude_model_week_label, "FABLE · WEEK");
+  deadline.has_claude_model_week_label = 1;
+  tokens_apply(&deadline);
+  tokens_show_view(VIEW_CLAUDE_ALL);
+  dump_frame("vibepulse-claude-all-to-empty");
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("vibepulse-codex-weekly-to-empty");
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("vibepulse-claude-fable-keeps-reset");
+
   feed_forecast_outcomes();
   tokens_show_view(VIEW_BURN_RATE);
   dump_frame("vibepulse-burn-speed-up");
