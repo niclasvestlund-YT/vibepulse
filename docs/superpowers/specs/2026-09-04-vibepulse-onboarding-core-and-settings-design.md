@@ -215,10 +215,24 @@ configure.
   The clone is not optional: that installer derives the repository root
   from `$PSScriptRoot` and registers `tokenserver.py` and
   `run-windows-task.ps1` at those paths in Task Scheduler, so the files
-  must live somewhere that survives sign-out. No new installer logic — the
-  one-liner only acquires what the existing installer already expects. A
-  Windows package that removes the checkout is a later option, not a
-  prerequisite for rung 0.
+  must live somewhere that survives sign-out.
+  Two details the one-liner cannot skip. **`winget` does not change the
+  running shell's `PATH`**, which is why the runbook tells a human to open
+  a new PowerShell window; a script cannot do that, so after installing it
+  re-reads the machine and user `Path` values into its own process (or
+  invokes the new executables by absolute path) before cloning. And
+  **`install-windows-task.ps1` registers the service without installing
+  the discovery dependency**: the runbook has a separate
+  `py -3 -m pip install -r requirements-discovery.txt` step, and without
+  `zeroconf` the service never advertises `_vibepulse._tcp.local`. A
+  release binary built from an empty `secrets.h` has no compiled host URL
+  to fall back on, so the panel would never find an otherwise healthy
+  service. The one-liner therefore installs that requirement **with the
+  exact interpreter the scheduled task will run** before registering the
+  task.
+  No new installer logic — the one-liner only acquires what the existing
+  installer already expects. A Windows package that removes the checkout is
+  a later option, not a prerequisite for rung 0.
 - **Linux:** the setup page says *not yet*, matching
   `docs/platform-support.md` and issue #2.
 
@@ -376,8 +390,17 @@ pairing window keeps all three and puts nothing persistent on the glass:
    the device key's precedent of a git-ignored file in the home directory:
    `~/.vibepulse/ota-tokens.json` (directory 0700, file 0600), a map from
    the panel's **device id** to its token and last known address, with a
-   `VIBEPULSE_OTA_TOKEN` environment override that applies to whatever
-   target is named. The device id is stable and non-secret — derived from
+   **typed** environment overrides, `VIBEPULSE_OTA_TOKEN_RUNTIME` and
+   `VIBEPULSE_OTA_TOKEN_COMPILED`, that apply to whatever target is named.
+   The type is not decoration: a runtime token is only ever used through
+   the authenticated request, while the legacy plaintext bearer is allowed
+   for a compiled token alone. An untyped override could not tell them
+   apart, and guessing either way is a real fault — read as compiled it
+   would put a runtime secret on the wire against a target with no
+   challenge endpoint; read as runtime it would break legitimate
+   compiled-token updates. A bare `VIBEPULSE_OTA_TOKEN` is therefore
+   refused with a message naming the two typed variables, rather than
+   assumed. The device id is stable and non-secret — derived from
    the SoC's factory MAC (`esp_efuse_mac_get_default`; silicon-provided,
    the firmware wiring is new) — shown in ABOUT, and sent by the panel
    inside the PAKE-protected exchange so the computer files the token
@@ -665,8 +688,10 @@ Recorded so the cleanup is a decision, not an accident.
   that pairing never touches the compiled token.
 - Uploader credential lookup: a test that `tools/ota-flash.sh` and the
   packaged updater resolve the credential by the target panel's device id
-  from the environment, then `~/.vibepulse/ota-tokens.json`, then
-  `secrets.h`; that two panels paired from one account get distinct
+  from the typed environment variables, then `~/.vibepulse/ota-tokens.json`,
+  then `secrets.h`; that a bare untyped `VIBEPULSE_OTA_TOKEN` is refused
+  with a message naming the typed variables rather than guessed at; that a
+  runtime token is never sent as a plaintext bearer; that two panels paired from one account get distinct
   entries and the uploader picks the right one; and that the store works
   from a directory that is not a checkout.
 - Recent-panels registry: a test that the service records up to eight
