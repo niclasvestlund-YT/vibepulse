@@ -259,10 +259,14 @@ Rules:
   in `project_star_chime.c` omit the page, popup, fetch task, and chime
   from a flag-0 build, and no NVS value can bring back code that was never
   compiled. Step 3 turns those guards into runtime checks, so every image
-  carries the features and the macro only sets the default. A flag set to
-  1 in a build is then the floor for that switch, exactly like the Wi-Fi
-  floor. The flags are not removed and not renamed; new switches may add
-  `TK_LABS_*` names alongside. Because the GitHub page and its fetch task
+  carries the features and the macro only sets the default. **Feature
+  macros are defaults, not floors:** when NVS holds no value for a switch
+  the switch equals the macro; an explicit saved value overrides the macro
+  in both directions, so a user can turn off a feature a build turned on.
+  The word *floor* is reserved for credentials that must never be removed
+  (Wi-Fi networks, tokens) and does not apply to feature switches. The
+  flags are not removed and not renamed; new switches may add `TK_LABS_*`
+  names alongside. Because the GitHub page and its fetch task
   are then always resident, the internal-RAM budget is re-measured on the
   unit before step 3 ships (display, TLS, and Wi-Fi already compete for
   it, per `spec/hardware-capabilities.yaml`).
@@ -288,7 +292,7 @@ Rules:
 | OTA token | `TG_OTA_TOKEN` | **derived independently on both sides** from a password-authenticated key exchange seeded by the on-glass pairing code, inside a device-opened PAIR window (see *The pairing window*). Neither the code nor the token is ever transmitted. Stored in the panel's NVS runtime slot and in the computer's per-user, per-panel credential store. **Never rendered on the glass**: not in ABOUT, not in a QR, not in a log | two slots: the compiled token is an immutable floor that pairing never touches; the runtime slot is **replaced** by each new physically opened, code-authenticated pairing |
 | Needs You device key | `TK_VIBEPULSE_DEVICE_KEY` | the same pairing window, later step (*Sequencing* 7) | a compiled key is still honoured |
 | Relay configuration | `secrets.h` plus Kconfig. The relay clients are **compiled out** unless `CONFIG_TK_VIBEPULSE_INTERACTION_RELAY` / `…_AGENT_STATUS_RELAY` and their build-time secrets are set (`components/app_tokens/CMakeLists.txt`) | later step (*Sequencing* 7): clients compiled into the release image and gated at runtime, settings provisioned through the pairing window | until then a relay user builds from source exactly as today |
-| GitHub / sound flags | compile-time | FEATURES switch with the flag as floor | unchanged |
+| GitHub / sound flags | compile-time | FEATURES switch; the macro seeds the default and an explicit saved value overrides it | unchanged |
 
 The decisive consequence: a build from an **empty** `secrets.h` becomes a
 useful panel **for rung 0** — Wi-Fi, discovery, the usage pages, and OTA
@@ -357,17 +361,34 @@ pairing window keeps all three and puts nothing persistent on the glass:
    `tools/ota-flash.sh` and the packaged `vibepulse update` alike — to
    resolve the credential **from the pairing record, never from the
    network**: the record is selected by `--device <id>`, or by the target
-   address (`--device <ip>` or the `.ota-device` file) matching the
-   last-known address of exactly one record; with no unique match the
-   uploader refuses and asks for `--device <id>`. It never asks the panel
-   which credential to load, so an impostor endpoint cannot name another
-   panel's id and collect that panel's bearer. Before the bearer is sent,
-   the uploader requires a **proof of possession**: it sends a random
-   nonce to the panel's maintenance endpoint, the panel answers with
-   HMAC-SHA256 keyed by its runtime (or compiled) token over that nonce,
-   and the uploader verifies in constant time against the stored token and
-   aborts on mismatch. Only then does the upload proceed as today. The
-   endpoint exists only inside the UPDATE window, like the upload itself.
+   address (`--device <ip>` or the `.ota-device` file) matching exactly one
+   record; with no unique match the uploader refuses and asks for
+   `--device <id>`. It never asks the panel which credential to load, so
+   an impostor endpoint cannot name another panel's id and collect that
+   panel's bearer.
+   **Addresses change; identities do not.** The panel adds its non-secret
+   device id to every poll as an `X-VibePulse-Device` header, next to the
+   `X-VibePulse-Recovery-Boot` header `torget_http.c` already sets, so the
+   recent-panels registry maps id to *current* address as long as the
+   panel keeps polling. The uploader resolves the address for a record in
+   this order: `--device <id> --at <ip>` when given explicitly; the
+   registry's current address for that id; the record's last-known
+   address. A bare `.ota-device` IP matches a record either by last-known
+   address or by the id the registry reports for that address, so DHCP
+   churn needs neither re-pairing nor hand-editing the store. Any address
+   obtained this way is only a place to *try*: the possession proof below
+   decides whether the panel there is the paired one, and after a
+   successful proof the record's last-known address is updated.
+   Before the bearer is sent, the uploader requires a **proof of
+   possession**: it sends a random nonce to the panel's maintenance
+   endpoint, and the panel answers with one labelled HMAC-SHA256 over that
+   nonce **per populated token slot** — `runtime` and/or `compiled`,
+   omitting an empty slot — so both slots stay usable when they coexist
+   and an uploader that fell back to `secrets.h` can still pass with the
+   compiled token. The uploader verifies its own token against the proof
+   with the matching label in constant time and aborts on mismatch or on a
+   missing label. Only then does the upload proceed as today. The endpoint
+   exists only inside the UPDATE window, like the upload itself.
    Lookup order for the token is environment, the per-panel store, then
    `secrets.h` when a checkout exists. A single-panel user never sees the
    map; the developer flow keeps working unchanged.
@@ -529,14 +550,24 @@ Recorded so the cleanup is a decision, not an accident.
   seen panel from that registry, lists and refuses to guess when several
   are fresh, and accepts `--device <ip>`.
 - Credential selection and possession proof: a test that the uploader
-  selects the record by id or by a unique last-known address and refuses
-  otherwise; that it never sends a bearer before a valid HMAC over its
-  nonce; that a wrong or missing HMAC aborts the upload with nothing
-  secret sent; and that the proof endpoint is absent outside the window.
+  selects the record by id or by a unique address match and refuses
+  otherwise; that `--device <id>` resolves the current address from the
+  registry when the panel's IP has changed, then the last-known address,
+  and that `--at <ip>` overrides both; that a successful proof updates the
+  record's last-known address; that it never sends a bearer before a valid
+  labelled HMAC over its nonce; that a panel with both slots answers with
+  both labels and an uploader holding either token passes; that a wrong or
+  missing proof aborts the upload with nothing secret sent; and that the
+  proof endpoint is absent outside the window.
+- Poll identity header: a test that every panel poll carries
+  `X-VibePulse-Device` with the device id, that the registry keys entries
+  by it, and that the header never carries a token or code.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
-  NVS switches are on, and omits them when off; and a recorded
-  internal-RAM measurement on the unit with the features resident.
+  NVS switches are on, and omits them when off; that a build with a flag at
+  1 and a saved 0 keeps the feature off; that an absent value follows the
+  macro; and a recorded internal-RAM measurement on the unit with the
+  features resident.
 - Release manifest: a test that every part in the build's
   `flasher_args.json` is present in the published manifest (or merged
   image) at the same offset, so a fresh board boots from the web installer.
