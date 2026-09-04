@@ -1,7 +1,6 @@
 import http.client
 import hashlib
 import json
-import select
 import socket
 import threading
 import time
@@ -29,21 +28,25 @@ _NO_BODY = object()
 
 
 def headers_first_request(port, method, path, body, headers,
-                          grace=0.2, timeout=30.0):
-    """Send the headers, wait briefly for an answer, then the body.
+                          timeout=30.0):
+    """Send the headers with the body advertised but never written.
 
-    Many routes under test reject on the headers alone (wrong Host,
-    Origin, Content-Type, a disabled route) before reading the body. A
-    client that writes headers and body in one go leaves that body
-    unread in the server's socket when the server answers and closes;
-    Windows treats a close with unread data as an abort
-    (WinError 10053) and discards the response that was already on its
-    way, so the test sees an exception instead of the status. Sending
-    the body only when no response arrived within the grace period
-    keeps every assertion exact and the socket clean on every platform.
-    Opt-in only: a route that parks a question expects its body within
-    the server's 50 ms first-byte deadline, so the ordinary client stays
-    the default for everything else.
+    Callers opt into this for routes that must reject on the headers
+    alone (wrong Host, Origin, Content-Type, a disabled route) before the
+    body is parsed or anything is parked. A client that writes headers
+    and body in one go leaves that body unread in the server's socket
+    when the server answers and closes; Windows treats a close with
+    unread data as an abort (WinError 10053) and discards the response
+    that was already on its way, so the test sees an exception instead of
+    the status.
+
+    The body is therefore never sent: the request advertises its
+    Content-Length, then the write side is half-closed so the server can
+    still reply. Nothing is left unread on any platform, and no timing
+    window decides the outcome, so a loaded runner cannot make these
+    tests intermittent. A route that wrongly waits for the body reads EOF
+    and fails closed, which is a real regression and should fail the
+    test rather than pass quietly.
     """
     merged = dict(headers)
     if not any(name.lower() == "host" for name in merged):
@@ -57,9 +60,7 @@ def headers_first_request(port, method, path, body, headers,
                                       timeout=timeout)
     try:
         client.sendall(head.encode("latin-1"))
-        readable, _, _ = select.select([client], [], [], grace)
-        if not readable:
-            client.sendall(body)
+        client.shutdown(socket.SHUT_WR)
         response = http.client.HTTPResponse(client)
         response.begin()
         return response.status, response.read()
@@ -1409,8 +1410,8 @@ class HttpEndToEndTests(unittest.TestCase):
                            if body else {})
         request_headers.update(headers or {})
         if body is not None and early_reject:
-            # The route is expected to answer on the headers alone. Send
-            # the body only if it does not, so the server never closes on
+            # The route must answer on the headers alone, so the body is
+            # advertised but never written and the server never closes on
             # unread bytes (see headers_first_request).
             return headers_first_request(self.port, method, path, body,
                                          request_headers)

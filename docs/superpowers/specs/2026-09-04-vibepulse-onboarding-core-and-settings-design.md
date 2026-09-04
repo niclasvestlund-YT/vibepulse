@@ -560,15 +560,21 @@ reverted alone.
    The `#if TK_GITHUB_*` guards become runtime checks seeded by the
    macros, with the flag-0 toggle test and a re-measured RAM budget.
 4. Runtime configuration: DNS-SD default, the PAIR window with the
-   PAKE-derived OTA token (never transmitted), the per-panel credential
-   store keyed by device id, the uploader resolving the credential by
-   target, compiled values honoured as floor.
-   Immediate-open Wi-Fi window on an empty panel.
+   PAKE-derived OTA token (never transmitted), **and the PAIR screen that
+   shows its code and the panel's IP** — the code has to be readable off
+   the glass for `vibepulse pair <code>` to exist at all, so that screen
+   ships with the window, not later. Also the per-panel credential store
+   keyed by device id, the uploader resolving the credential by target,
+   compiled values honoured as floor, and the immediate-open Wi-Fi window
+   on an empty panel.
 5. The `AGENTS.md` release-rule change as its own maintainer decision; only
    then the CI release binary from an empty `secrets.h`, the secret gate,
    and the web installer.
-6. Pairing screen on the glass, setup page, discovery retaining the
-   instance label (with test), Homebrew tap and Windows one-liner.
+6. The computer-pairing screen from *Onboarding on the glass* (the
+   **Install VibePulse on your computer** QR, *Looking for your
+   computer…*, *Found*), the setup page behind that QR, discovery
+   retaining the instance label (with test), Homebrew tap and Windows
+   one-liner.
 7. Runtime provisioning for the device key and the relay settings through
    the PAIR window; relay clients compiled into the release image and gated
    at runtime. Only after this does one binary serve every rung.
@@ -607,8 +613,9 @@ Recorded so the cleanup is a decision, not an accident.
 - Settings copy tests in the style of `test/test_wifi_setup_wiring.py`:
   menu entries, the *set up on your computer* and *not verified on this
   unit* strings, the *applies on next boot* line.
-- A simulator unit test for the NVS switch round trip: absent → default,
-  written → read back, compile-time floor → default on.
+- A simulator unit test for the NVS switch round trip: absent → the
+  macro's value, written → read back, and a saved `0` overriding a macro
+  set to `1` (macros are defaults, never floors, for feature switches).
 - A discovery wiring test for a build with no compiled service URL: the
   fetch task exists and polls DNS-SD; today an undefined URL compiles the
   fetch out entirely.
