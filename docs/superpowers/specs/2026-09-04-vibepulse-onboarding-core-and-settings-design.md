@@ -24,8 +24,11 @@ on the shelf that shows their usage, without reading a runbook:
    *(new screen; the discovery behind it is built)*
 
 Everything else — burn rate, Max Tracker, the value page, GitHub, answering
-Needs You from the panel, the relays, sound — stays in the firmware and is
-turned on from a settings page on the glass or a command on the computer.
+Needs You from the panel, the relays, sound — stays available and is turned
+on from a settings page on the glass or a command on the computer. Two of
+them, Needs You answering and the relays, need panel-side provisioning that
+is a later step (*Sequencing* 7) before they work on a release binary; until
+then they work exactly as today, from a build with `secrets.h` filled in.
 
 ## The one rule: nothing is removed
 
@@ -59,7 +62,8 @@ feature should treat that sentence as a mistake in the document.
   can: Wi-Fi QR, computer QR, "looking for…", "found…", and honest copy
   when something is missing.
 - Optional features are switches, not builds. One release binary serves
-  every user.
+  every user **for the core (rung 0)**; *Runtime configuration* says what a
+  release binary cannot do until step 7.
 - Existing panels behave identically after every step of this plan.
 
 ## Non-goals
@@ -151,9 +155,15 @@ QR, one line of instruction, one secondary control):
 
 ### 3. Found
 
-The header names the computer it pinned to: the service already advertises
-itself as `VibePulse-<hostname>`, so the name costs nothing new. The usage pages appear. This is the same
-tileview as today.
+The header names the computer it pinned to — once discovery can supply the
+name. The service advertises itself as `VibePulse-<hostname>`, but the
+firmware's discovery client keeps only the `IP:port` origin today
+(`select_result()` in `components/torget_net/service_discovery.c`; NVS
+persists the origin alone). Step 6 therefore includes retaining the instance
+label in discovery state and exposing it through the endpoint API, with a
+test, before the header may show a name. Until then the header shows the
+origin it is polling, never a name it did not receive. The usage pages
+appear. This is the same tileview as today.
 
 ### 4. Settings (KEY3 hold)
 
@@ -214,7 +224,9 @@ hold KEY3 ~3 s
   ├─ UPDATE      the existing OTA maintenance window, unchanged
   ├─ WIFI        the existing Wi-Fi setup window, unchanged
   ├─ FEATURES    on/off switches, saved in NVS
-  └─ ABOUT       firmware version, IP, computer found, device identity
+  ├─ PAIR        opens a timed pairing window for the computer (OTA token;
+  │              later the device key and relay settings)
+  └─ ABOUT       firmware version, IP, computer found. Never a secret.
 ```
 
 - **Consent model unchanged.** The menu is reachable only from the device,
@@ -261,23 +273,51 @@ Rules:
 |---|---|---|---|
 | Wi-Fi networks | `secrets.h` + NVS | NVS first | compiled networks stay as the immutable floor (already true) |
 | Service address | `TK_VIBEPULSE_BASE_URL`, required | DNS-SD by default; optional URL via *Manual setup* | a compiled URL is still honoured as the fallback |
-| OTA token | `TG_OTA_TOKEN` | generated on the device at first boot, shown in ABOUT, entered once on the computer | a compiled token is still honoured |
-| Needs You device key | `TK_VIBEPULSE_DEVICE_KEY` | rung 1 pairing; out of scope for phase 1 | unchanged |
-| Relay configuration | `secrets.h` | rung 2; out of scope for phase 1 | unchanged |
+| OTA token | `TG_OTA_TOKEN` | generated **on the computer** by `vibepulse pair`, handed to the panel over LAN inside a device-opened pairing window, stored in NVS. **Never rendered on the glass**: not in ABOUT, not in a QR, not in a log | a compiled token is still honoured; pairing fills an empty slot and never replaces a compiled token |
+| Needs You device key | `TK_VIBEPULSE_DEVICE_KEY` | the same pairing window, later step (*Sequencing* 7) | a compiled key is still honoured |
+| Relay configuration | `secrets.h` plus Kconfig. The relay clients are **compiled out** unless `CONFIG_TK_VIBEPULSE_INTERACTION_RELAY` / `…_AGENT_STATUS_RELAY` and their build-time secrets are set (`components/app_tokens/CMakeLists.txt`) | later step (*Sequencing* 7): clients compiled into the release image and gated at runtime, settings provisioned through the pairing window | until then a relay user builds from source exactly as today |
 | GitHub / sound flags | compile-time | FEATURES switch with the flag as floor | unchanged |
 
 The decisive consequence: a build from an **empty** `secrets.h` becomes a
-useful panel. That is what allows one release binary.
+useful panel **for rung 0** — Wi-Fi, discovery, the usage pages, and OTA
+after pairing. It does not yet cover Needs You answering (device key) or any
+relay; those need the runtime provisioning in step 7, and until it lands a
+relay user rebuilds from source as today. "One binary serves every user" is
+true only once step 7 ships, and the README must not say it before.
+
+### The pairing window and the OTA consent model
+
+`docs/ota.md` requires three independent factors before firmware can be
+written: physical presence, knowledge of the token, and a time window. The
+pairing window keeps all three and adds nothing to the glass:
+
+1. **Presence** — PAIR is a Settings entry, reachable only by the KEY3 hold
+   on the device, and it opens a ten-minute window like the Wi-Fi window.
+2. **Knowledge** — the token is generated and kept on the pairing computer
+   by `vibepulse pair`. The panel receives it over LAN inside the window,
+   stores it in NVS, and never displays, logs, or re-transmits it. Anyone
+   with brief access to the panel learns nothing they can use later.
+3. **Time** — the window closes on its own; outside it the pairing endpoint
+   does not exist, following the lazy-surface rule the Wi-Fi window uses.
+
+Rotating the token is pairing again, which again requires presence. A panel
+whose build carries a compiled token keeps it; pairing fills only an empty
+slot.
 
 ### Release binary and the rule about `torget.bin`
 
 `AGENTS.md` says `torget.bin` is never attached to a release because it
-contains the user's Wi-Fi credentials and device key. That rule is correct
-and stays. It becomes precise instead of absolute: **a binary built with a
-populated `secrets.h` is never published.** CI builds the release binary from
-the checked-in `secrets.h.example` with every value empty and publishes
-`vibepulse-<tag>.bin` plus the ESP Web Tools `manifest.json`. A gate in CI
-fails the release if any secret macro in the build is non-empty.
+contains the user's Wi-Fi credentials and device key. **That rule stands as
+written until the maintainer changes it, and this spec does not change it.**
+Renaming the artifact would not satisfy it. Step 5 is therefore two decisions
+in order: first a separate `AGENTS.md` change, approved by the maintainer in
+its own PR, that rewrites the rule as *a binary built with a populated
+`secrets.h` is never published*; only after that may CI build a release
+binary from the checked-in `secrets.h.example` with every value empty and
+publish `vibepulse-<tag>.bin` plus the ESP Web Tools `manifest.json`, with a
+gate that fails the release if any secret macro in the build is non-empty.
+Until that rule change is merged, releases stay source-only and the web
+installer cannot ship.
 
 ### Web installer
 
@@ -307,13 +347,18 @@ reverted alone.
 2. README front door for vibecoders, `.gitignore` hygiene, this spec.
    **This change.**
 3. Settings page and NVS switches. Firmware only; defaults equal today.
-4. Runtime configuration: DNS-SD default, device-generated OTA token,
-   compiled values honoured as floor. Immediate-open Wi-Fi window on an
-   empty panel.
-5. CI release binary from an empty `secrets.h`, secret gate, web installer.
-6. Pairing screen on the glass, setup page, Homebrew tap and Windows
-   one-liner.
-7. Later and separately: leaner defaults for fresh installs; `docs/labs/`
+4. Runtime configuration: DNS-SD default, the PAIR window with the
+   computer-generated OTA token, compiled values honoured as floor.
+   Immediate-open Wi-Fi window on an empty panel.
+5. The `AGENTS.md` release-rule change as its own maintainer decision; only
+   then the CI release binary from an empty `secrets.h`, the secret gate,
+   and the web installer.
+6. Pairing screen on the glass, setup page, discovery retaining the
+   instance label (with test), Homebrew tap and Windows one-liner.
+7. Runtime provisioning for the device key and the relay settings through
+   the PAIR window; relay clients compiled into the release image and gated
+   at runtime. Only after this does one binary serve every rung.
+8. Later and separately: leaner defaults for fresh installs; `docs/labs/`
    index; Home Assistant as an add-on.
 
 ## Branch hygiene (snapshot 2026-09-04)
@@ -355,6 +400,11 @@ Recorded so the cleanup is a decision, not an accident.
   fetch out entirely.
 - CI release gate: build from `secrets.h.example`, assert every secret
   macro is empty, publish the binary and manifest.
+- Pairing: a test that no capture and no label in the rendered tree ever
+  contains the OTA token, that the pairing endpoint is absent outside the
+  window, and that pairing refuses to replace a compiled token.
+- Discovery: a wiring test that the DNS-SD instance label survives
+  `select_result()` and is exposed through the endpoint API.
 
 ### Exact 480 × 480 simulator captures
 
