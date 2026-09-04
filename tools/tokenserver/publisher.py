@@ -163,11 +163,14 @@ class Publisher:
 
     def start(self):
         def run():
+            # The first producer pass can scan large local histories.  Keep
+            # it off the startup thread so the LAN server can bind at once.
+            self.publish_once()
             while not self._stop.wait(CHECK_EVERY_S):
                 self.publish_once()
-        # First pass immediately: the mailbox should be warm within one
-        # cadence of service start, not one heartbeat.
-        self.publish_once()
+        # Start the first pass immediately, but asynchronously: the mailbox
+        # still warms without waiting one cadence and local startup stays
+        # independent of producer cost or relay latency.
         self._thread = threading.Thread(target=run, name="relay-publisher",
                                         daemon=True)
         self._thread.start()

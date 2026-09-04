@@ -7,6 +7,15 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **Startup health for Needs You.** Every new Codex task now checks the local
+  bridge, saved Codex route, relay state, and a content-free proof that the
+  panel has polled recently. Two close LAN polls are required before the
+  result can turn green; one curl, USB enumeration, silence, or relay setup
+  alone never claims the glass is reachable. It and the general setup doctor
+  now also flag saved Codex modes (`never`, `auto_review`, or
+  `danger-full-access`) that suppress user permission cards. The doctor
+  includes the relay/device-key pairing checks too, and finds an installed
+  Python 3.11+ instead of falsely stopping at macOS's older system Python.
 - **The panel travels.** It remembers six places in NVS and joins the one
   that worked most recently; arriving somewhere new no longer means editing
   `secrets.h`, rebuilding and flashing over USB — which OTA could never fix,
@@ -92,6 +101,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- Hook review instructions now say where `/hooks` actually exists: inside the
+  interactive Codex CLI in a terminal, not in the desktop task composer. The
+  doctor and setup output use the same wording, so "no commands" in the
+  desktop composer is no longer misdiagnosed as a missing VibePulse hook.
 - Open networks were refused in silence. Every network was applied with
   `threshold.authmode = WIFI_AUTH_WPA2_PSK`, so an open café or airport
   network — the common case on the road — was rejected before it was tried,

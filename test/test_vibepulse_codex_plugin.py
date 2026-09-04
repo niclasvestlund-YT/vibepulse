@@ -69,6 +69,20 @@ def compact(value):
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def do_GET(self):
+        self.server.requests.append((self.path, dict(self.headers), b""))
+        behavior = self.server.behavior
+        status = behavior.get("status", 200)
+        payload = behavior.get("body", b"{}")
+        self.send_response(status)
+        if "location" in behavior:
+            self.send_header("Location", behavior["location"])
+        for content_type in behavior.get("content_types", ["application/json"]):
+            self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
@@ -366,6 +380,8 @@ def healthy_diagnostics():
             "legacyClaudePanelV1": False,
             "relay": {"status": "off"},
             "agentStatusRelay": {"status": "off"},
+            "panel": {"status": "ready", "ageS": 1,
+                      "route": "/api/agent-status"},
             "transport": "lan",
         },
     }).encode()
@@ -506,6 +522,25 @@ class LoopbackTests(unittest.TestCase):
         self.assertEqual(path, "/api")
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(body, compact({"word": "räv"}).encode("utf-8"))
+
+    def test_get_health_is_bounded_loopback_only_and_ignores_proxy(self):
+        loopback = load_loopback()
+        with LocalServer(body=b'{"service":"torget-tokenserver"}') as target, \
+                LocalServer(body=b'{"service":"forged"}') as proxy:
+            old_proxy = os.environ.get("HTTP_PROXY")
+            os.environ["HTTP_PROXY"] = f"http://127.0.0.1:{proxy.port}"
+            try:
+                result = loopback.get_json(
+                    f"http://127.0.0.1:{target.port}/")
+            finally:
+                if old_proxy is None:
+                    os.environ.pop("HTTP_PROXY", None)
+                else:
+                    os.environ["HTTP_PROXY"] = old_proxy
+        self.assertEqual(result, {"service": "torget-tokenserver"})
+        self.assertEqual(len(proxy.requests), 0)
+        self.assertEqual(target.requests[0][0], "/")
+        self.assertEqual(target.requests[0][1]["Accept"], "application/json")
 
     def test_request_and_response_caps_are_limit_plus_one(self):
         loopback = load_loopback()
@@ -703,7 +738,8 @@ class PermissionHookTests(unittest.TestCase):
 class SessionStartTests(unittest.TestCase):
     def test_context_is_bounded_provider_correct_and_fail_safe(self):
         payload = {"hook_event_name": "SessionStart", "session_id": "s"}
-        completed = run_script("session_start.py", compact(payload).encode())
+        completed = run_script(
+            "session_start.py", compact(payload).encode(), port=closed_port())
         self.assertEqual(completed.returncode, 0)
         body = json.loads(completed.stdout)
         self.assertEqual(body["hookSpecificOutput"]["hookEventName"], "SessionStart")
@@ -715,7 +751,117 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("unavailable, times out, or reports computer fallback", context)
         self.assertIn("Never treat silence, panel absence, or fallback as approval", context)
         self.assertIn("Permission decisions remain subject to Codex policy", context)
+        self.assertIn("startup health: FIX", context)
+        self.assertIn("local bridge unavailable", context)
         self.assertNotIn(str(ROOT), context)
+
+    def test_startup_health_reports_ready_only_with_recent_panel_evidence(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        diagnostics = compact({
+            "service": "torget-tokenserver",
+            "interactions": {
+                "codex": True,
+                "relay": {"status": "ready"},
+                "panel": {"status": "ready", "ageS": 1,
+                          "route": "/api/agent-status"},
+            },
+        }).encode()
+        with LocalServer(body=diagnostics) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: READY", context)
+        self.assertIn("recent panel polling", context)
+        self.assertIn("LAN and encrypted relay", context)
+
+    def test_startup_health_warns_before_claude_credential_expires(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        diagnostics = compact({
+            "service": "torget-tokenserver",
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {
+                "status": "expiring", "expiresInMin": 18},
+            "interactions": {
+                "claude": True,
+                "codex": True,
+                "relay": {"status": "ready"},
+                "panel": {"status": "ready", "ageS": 1,
+                          "route": "/api/agent-status"},
+            },
+        }).encode()
+        with LocalServer(body=diagnostics) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: READY", context)
+        self.assertIn("Claude quota health: FIX", context)
+        self.assertIn("expires in 18 min", context)
+        self.assertIn("new Claude Code CLI turn", context)
+
+    def test_startup_health_rejects_saved_codex_modes_that_hide_cards(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        diagnostics = compact({
+            "service": "torget-tokenserver",
+            "interactions": {
+                "codex": True,
+                "relay": {"status": "off"},
+                "panel": {"status": "ready", "ageS": 1,
+                          "route": "/api/agent-status"},
+            },
+        }).encode()
+        cases = (
+            ('approval_policy = "never"\n'
+             'sandbox_mode = "workspace-write"\n',
+             "approval_policy is never"),
+            ('approval_policy = "on-request"\n'
+             'approvals_reviewer = "auto_review"\n'
+             'sandbox_mode = "workspace-write"\n',
+             "routed to auto_review"),
+            ('approval_policy = "on-request"\n'
+             'approvals_reviewer = "user"\n'
+             'sandbox_mode = "danger-full-access"\n',
+             "sandbox_mode is danger-full-access"),
+        )
+        for saved_config, expected in cases:
+            with self.subTest(expected=expected), \
+                    tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, "config.toml").write_text(
+                    saved_config, encoding="utf-8")
+                with LocalServer(body=diagnostics) as server:
+                    completed = run_script(
+                        "session_start.py", compact(payload).encode(),
+                        port=server.port, env={"CODEX_HOME": tmp})
+                context = json.loads(completed.stdout)["hookSpecificOutput"][
+                    "additionalContext"]
+                self.assertIn("startup health: FIX", context)
+                self.assertIn(expected, context)
+
+    def test_startup_health_never_turns_old_or_unproven_diagnostics_green(self):
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        cases = (
+            ({"codex": True, "relay": {"status": "ready"}},
+             "diagnostics are too old"),
+            ({"codex": True, "relay": {"status": "ready"},
+              "panel": {"status": "waiting"}},
+             "relay-only reachability is not proven"),
+            ({"codex": False, "relay": {"status": "off"},
+              "panel": {"status": "ready"}},
+             "Codex routing is off"),
+        )
+        for interactions, expected in cases:
+            with self.subTest(expected=expected), LocalServer(body=compact({
+                    "service": "torget-tokenserver",
+                    "interactions": interactions,
+                    }).encode()) as server:
+                completed = run_script(
+                    "session_start.py", compact(payload).encode(),
+                    port=server.port)
+            context = json.loads(completed.stdout)["hookSpecificOutput"][
+                "additionalContext"]
+            self.assertIn("startup health: FIX", context)
+            self.assertIn(expected, context)
 
     def test_invalid_or_oversized_input_is_empty_success(self):
         for body in (b"", b"\xff", b"[]", b"{", b'{"x":NaN}',
@@ -774,19 +920,21 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual([response["error"]["code"] for response in responses],
                          [-32602, -32602])
 
-    def test_current_codex_initialize_with_title_and_elicitation_lists_tools(self):
+    def test_current_codex_handshake_with_request_metadata_lists_tools(self):
         completed, responses = run_mcp([
             rpc("initialize", 1, {
                 "protocolVersion": "2025-06-18",
-                "capabilities": {"elicitation": {}},
+                "capabilities": {"elicitation": {"form": {}, "url": {}}},
                 "clientInfo": {
                     "name": "codex-mcp-client",
                     "title": "Codex",
-                    "version": "0.92.0",
+                    "version": "0.150.0-alpha.8",
                 },
             }),
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            rpc("tools/list", 2),
+            rpc("tools/list", 2, {
+                "_meta": {"progressToken": 0},
+            }),
         ])
         self.assertEqual(completed.returncode, 0)
         self.assertEqual([response["id"] for response in responses], [1, 2])
@@ -800,7 +948,11 @@ class McpServerTests(unittest.TestCase):
                     "answer": "Use the trusted hook"}
         with LocalServer(body=compact(answered).encode()) as server:
             completed, responses = run_mcp([
-                rpc("tools/call", 7, {"name": "ask", "arguments": QUESTION})
+                rpc("tools/call", 7, {
+                    "name": "ask",
+                    "arguments": QUESTION,
+                    "_meta": {"progressToken": "call-7"},
+                })
             ], port=server.port, env={
                 "VIBEPULSE_CWD": "/tmp/project",
                 "VIBEPULSE_SESSION_ID": "session-123",
@@ -1291,7 +1443,8 @@ class PluginPackageTests(unittest.TestCase):
             for command in commands:
                 self.assertIn(command, text, f"{name} must show {command}")
             self.assertIn("/hooks", prose, f"{name} must require hook review")
-            self.assertIn("Start a new Codex task", prose)
+            self.assertIn("Start a new Codex desktop task", prose)
+            self.assertIn("not a command in the desktop task composer", prose)
             self.assertIn("computer fallback", prose.lower())
             self.assertIn("safe-command tier", prose.lower())
             self.assertIn("legacy Claude v1 is insecure", prose)
@@ -1299,8 +1452,31 @@ class PluginPackageTests(unittest.TestCase):
             self.assertIn("preserves Claude, relay, GitHub, device-key, and "
                           "unrelated Codex settings", prose)
 
+    def test_user_guides_document_the_codex_approval_switch(self):
+        for path in (ROOT / "README.md", ROOT / "README.sv.md",
+                     ROOT / "docs/agent-setup.md"):
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn('approval_policy = "on-request"', text)
+                self.assertIn('approvals_reviewer = "user"', text)
+                self.assertIn('sandbox_mode = "workspace-write"', text)
+                self.assertIn('approval_policy = "never"', text)
+
 
 class SetupPlanTests(unittest.TestCase):
+    def test_auto_python_prefers_installed_supported_runtime_over_system_39(self):
+        setup = load_setup()
+
+        def which(name):
+            return "/opt/homebrew/bin/python3.12" if name == "python3.12" else None
+
+        with mock.patch.object(setup.sys, "version_info", (3, 9)), \
+                mock.patch.object(setup.sys, "executable", "/usr/bin/python3"), \
+                mock.patch.object(setup.shutil, "which", side_effect=which):
+            python, codex = setup._resolve_executables(setup._AUTO, None)
+        self.assertEqual(python, Path("/opt/homebrew/bin/python3.12"))
+        self.assertIsNone(codex)
+
     def test_disable_preserves_unrelated_switches_and_clears_legacy_with_claude(self):
         setup = load_setup()
         saved = setup.VibePulseConfig(
@@ -1550,8 +1726,11 @@ class RelaySetupTests(unittest.TestCase):
 
             def run(argv, **kwargs):
                 self.assertFalse(kwargs["shell"])
-                if "bulk" in argv:
-                    secret_file = Path(argv[-1])
+                self.assertEqual(
+                    kwargs["timeout"], setup.CLOUD_COMMAND_TIMEOUT_SECONDS)
+                if "--secrets-file" in argv:
+                    secret_file = Path(
+                        argv[argv.index("--secrets-file") + 1])
                     observed["secret_path"] = secret_file
                     observed["secret_mode"] = (
                         secret_file.stat().st_mode & 0o777)
@@ -1586,9 +1765,8 @@ class RelaySetupTests(unittest.TestCase):
             })
             self.assertFalse(observed["secret_path"].exists())
             self.assertEqual(observed["calls"], [
-                [str(wrangler), "--cwd", str(service), "secret", "bulk",
-                 str(observed["secret_path"])],
-                [str(wrangler), "--cwd", str(service), "deploy", "--var",
+                [str(wrangler), "--cwd", str(service), "deploy",
+                 "--secrets-file", str(observed["secret_path"]), "--var",
                  "MAILBOX_ID:vp_" + self.MAILBOX_SUFFIX],
             ])
             contents = secrets_h.read_text(encoding="utf-8")
@@ -1599,6 +1777,36 @@ class RelaySetupTests(unittest.TestCase):
             self.assertTrue(backup.exists())
             self.assertNotIn(self.MAC_TOKEN, output.getvalue())
             self.assertNotIn(self.PANEL_TOKEN, output.getvalue())
+
+    def test_relay_install_does_not_delete_worker_when_bootstrap_fails(self):
+        setup = load_setup()
+        with tempfile.TemporaryDirectory(prefix="relay-bootstrap-fail-") as tmp:
+            config, token, secrets_h, service, wrangler = self.make_paths(tmp)
+            saved = setup.VibePulseConfig(
+                claude_interactions=True, interaction_detail=True)
+            setup.save_config(config, saved)
+            runner = FakeRunner([result(returncode=1)])
+            output = io.StringIO()
+
+            self.assertEqual(setup.main(
+                ["relay", "install", "--url", self.URL,
+                 "--yes-e2e-cloud"], config_path=config,
+                relay_token_path=token, secrets_path=secrets_h,
+                interaction_relay_dir=service,
+                token_urlsafe=self.random_values(), run=runner,
+                stdout=output, stdin_isatty=False), 1)
+            self.assertEqual(len(runner.calls), 1)
+            command = runner.calls[0][0]
+            self.assertEqual(command[:4], [
+                str(wrangler), "--cwd", str(service), "deploy"])
+            self.assertIn("--secrets-file", command)
+            self.assertEqual(command[-2:], [
+                "--var", "MAILBOX_ID:vp_" + self.MAILBOX_SUFFIX])
+            self.assertNotIn("delete", command)
+            self.assertEqual(setup.load_config(config), saved)
+            self.assertFalse(token.exists())
+            self.assertNotIn("VIBEPULSE INTERACTION RELAY",
+                             secrets_h.read_text(encoding="utf-8"))
 
     def test_status_relay_requires_consent_and_proves_mac_ownership(self):
         setup = load_setup()
@@ -1938,6 +2146,88 @@ class RelaySetupTests(unittest.TestCase):
                 (config.read_bytes(), token.read_bytes(),
                  secrets_h.read_bytes()), snapshots)
 
+    def test_general_doctor_includes_panel_contact_and_relay_pairing(self):
+        setup = load_setup()
+        with tempfile.TemporaryDirectory(prefix="general-doctor-") as tmp:
+            config, token, secrets_h, service, _wrangler = self.make_paths(tmp)
+            saved = setup.VibePulseConfig(
+                claude_interactions=True, interaction_detail=True,
+                interaction_relay=True,
+                interaction_relay_url=self.URL,
+                interaction_mailbox="vp_" + self.MAILBOX_SUFFIX)
+            setup.save_config(config, saved)
+            token.parent.mkdir(parents=True, exist_ok=True)
+            token.write_text(self.MAC_TOKEN + "\n", encoding="ascii")
+            token.chmod(0o600)
+            diagnostics = json.dumps({
+                "service": "torget-tokenserver",
+                "claudeProbe": "usage_http_200 + ok",
+                "claudeCredential": {
+                    "status": "ready", "expiresInMin": 480},
+                "interactions": {
+                    "claude": True,
+                    "codex": False,
+                    "detail": True,
+                    "legacyClaudePanelV1": False,
+                    "relay": {"status": "ready"},
+                    "agentStatusRelay": {"status": "off"},
+                    "panel": {"status": "waiting"},
+                    "transport": "lan+encrypted-relay",
+                },
+            }).encode()
+            output = io.StringIO()
+            self.assertEqual(setup.main(
+                ["doctor"], repo_root=ROOT, config_path=config,
+                python=Path(sys.executable), codex=None,
+                relay_token_path=token, secrets_path=secrets_h,
+                interaction_relay_dir=service,
+                run=FakeRunner([python_probe_ok()]),
+                urlopen=lambda *_args, **_kwargs: BytesResponse(diagnostics),
+                stdout=output), 1)
+            text = output.getvalue()
+            self.assertIn("FIX Panel contact: no recent direct poll", text)
+            self.assertIn("PASS Claude quota credential", text)
+            self.assertIn(
+                "FIX Relay matching panel relay block and device key", text)
+
+    def test_general_doctor_fails_early_when_claude_credential_is_expiring(self):
+        setup = load_setup()
+        with tempfile.TemporaryDirectory(prefix="claude-expiry-doctor-") as tmp:
+            config = Path(tmp) / "config.json"
+            setup.save_config(config, setup.VibePulseConfig(
+                claude_interactions=True))
+            diagnostics = json.dumps({
+                "service": "torget-tokenserver",
+                "claudeProbe": "usage_http_200 + ok",
+                "claudeCredential": {
+                    "status": "expiring", "expiresInMin": 12},
+                "interactions": {
+                    "claude": True,
+                    "codex": False,
+                    "detail": False,
+                    "legacyClaudePanelV1": False,
+                    "relay": {"status": "off"},
+                    "agentStatusRelay": {"status": "off"},
+                    "panel": {"status": "ready", "ageS": 1,
+                              "route": "/api/agent-status"},
+                    "transport": "lan",
+                },
+            }).encode()
+            output = io.StringIO()
+
+            code = setup.main(
+                ["doctor"], config_path=config,
+                python=Path(sys.executable), codex=None,
+                run=FakeRunner([python_probe_ok()]),
+                urlopen=lambda *_args, **_kwargs: BytesResponse(diagnostics),
+                stdout=output)
+
+            self.assertEqual(code, 1)
+            text = output.getvalue()
+            self.assertIn("FIX Claude quota credential", text)
+            self.assertIn("expires in 12 min", text)
+            self.assertIn("new Claude Code CLI turn", text)
+
     def test_doctor_uses_exact_json_evidence_and_never_claims_hook_trust(self):
         setup = load_setup()
         secret = "DO_NOT_PRINT_f4390c"
@@ -1961,6 +2251,8 @@ class RelaySetupTests(unittest.TestCase):
                                      "legacyClaudePanelV1": False,
                                      "relay": {"status": "off"},
                                      "agentStatusRelay": {"status": "off"},
+                                     "panel": {"status": "ready", "ageS": 1,
+                                               "route": "/api/agent-status"},
                                      "transport": "lan"},
                     "secret": secret,
                 }).encode()
@@ -1992,7 +2284,9 @@ class RelaySetupTests(unittest.TestCase):
             self.assertIn("PASS Codex plugin", text)
             self.assertIn("PASS Codex MCP", text)
             self.assertIn("PASS Tokenserver", text)
-            self.assertIn("FIX hooks: open /hooks and review VibePulse", text)
+            self.assertIn("FIX hooks: run /hooks in the interactive Codex "
+                          "CLI", text)
+            self.assertIn("not the desktop composer", text)
             self.assertIn("not machine-readable", text)
             self.assertNotIn("PASS Hook", text)
             self.assertNotIn(secret, text)
@@ -2019,11 +2313,16 @@ class RelaySetupTests(unittest.TestCase):
                 legacy_claude_panel_v1=True))
             response = BytesResponse(json.dumps({
                 "service": "torget-tokenserver",
+                "claudeProbe": "usage_http_200 + ok",
+                "claudeCredential": {
+                    "status": "ready", "expiresInMin": 480},
                 "interactions": {
                     "claude": True, "codex": False, "detail": False,
                     "legacyClaudePanelV1": True,
                     "relay": {"status": "off"},
                     "agentStatusRelay": {"status": "off"},
+                    "panel": {"status": "ready", "ageS": 1,
+                              "route": "/api/agent-status"},
                     "transport": "lan",
                 },
             }).encode())

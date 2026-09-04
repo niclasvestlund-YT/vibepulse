@@ -144,6 +144,12 @@ Returns live server state, added after real debugging nights:
   `usage_http_401`, `usage_http_429 + backoff_until_HH:MM`,
   `usage_request_failed: <Type>`, `probe_crashed: <Type>` (the probe
   itself hit a bug — the log has the traceback).
+- `claudeCredential` — a content-free pre-expiry guard for the saved Claude
+  Code credential: `ready`, `expiring`, `expired`, `unavailable`, or
+  `unknown`, plus whole `expiresInMin` when known. It never contains an access
+  token, refresh token, account id, or Keychain body. Startup, doctor, and the
+  smoke test warn 30 minutes before expiry instead of waiting for Fable to go
+  stale.
 - `ratelimitHeaders` / `unknownRateLimitBuckets` — header names seen by
   the fallback probe. A non-empty `unknownRateLimitBuckets` means
   Anthropic added a bucket we don't map yet: file it.
@@ -155,6 +161,12 @@ Returns live server state, added after real debugging nights:
 - `interactions.relay` / `interactions.agentStatusRelay` — independent saved readiness for
   encrypted approvals and encrypted live rows. `off` is the safe default;
   `disabled` includes a content-free reason, never agent/project text.
+- `interactions.panel` — content-free startup reachability evidence. `ready`
+  requires two close requests from the same non-loopback client and expires
+  after 15 seconds; `waiting` and `stale` never become green merely because an
+  ESP32 enumerates over USB or a relay is configured. Client addresses are not
+  returned or logged. The Codex `SessionStart` hook consumes this field and
+  tells the agent to use the computer fallback when readiness is unproven.
 
 The firmware relay diagnostic snapshot is also content-free. Its
 `status_polls_ok`, `status_applied`, and `status_cleared` counters distinguish

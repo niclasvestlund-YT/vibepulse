@@ -148,6 +148,38 @@ mutating, secret-bearing, or text that does not fit stays on the computer;
 silence never means approval. Recommended questions are equally strict: Codex
 must mark one of two or three options itself. VibePulse never guesses.
 
+#### The Codex approval switch
+
+VibePulse can display a Codex permission card only after Codex creates a
+permission request. The recommended saved mode in `~/.codex/config.toml` is:
+
+```toml
+approval_policy = "on-request"
+approvals_reviewer = "user"
+sandbox_mode = "workspace-write"
+```
+
+`approval_policy = "never"` disables approval prompts, while
+`sandbox_mode = "danger-full-access"` removes the normal workspace boundary;
+in either case the panel may be connected and healthy but receive no
+**APPROVE / DENY** event. VibePulse setup deliberately does not change these
+global Codex security switches. After changing them, restart Codex, review and
+trust both VibePulse hooks by starting the interactive `codex` CLI in a
+terminal and running `/hooks` there, then start a new desktop task. `/hooks`
+is a CLI command; it is not available in the desktop task composer. Startup
+health and `python3 tools/vibepulse_setup.py doctor` report saved modes that
+suppress permission cards. See OpenAI's
+[approval](https://learn.chatgpt.com/docs/agent-approvals-security) and
+[hook trust](https://learn.chatgpt.com/docs/hooks) documentation.
+
+The same startup/doctor path guards Claude's separate Fable quota source.
+`GET /` exposes only `claudeCredential.status` and whole minutes remaining—
+never an access or refresh token. It warns 30 minutes before the saved Claude
+Code credential expires, because a long-running Claude Desktop process can
+stay logged in while its exported credential silently ages out. Start a new
+Claude Code CLI turn when warned, then rerun doctor; stale data is never
+reported as current.
+
 ### Independent switches
 
 VibePulse is open source, so installing one part never silently enables
@@ -602,6 +634,11 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
   [#4](https://github.com/niclasvestlund-YT/vibepulse/issues/4).
 - **Just Claude, no Codex (or vice versa)?** Works. The other half shows
   dashes.
+- **Panel is online but Codex APPROVE / DENY disappeared?** Check that
+  `approval_policy = "never"` or `sandbox_mode = "danger-full-access"` was
+  not saved in `~/.codex/config.toml`. Restore the documented
+  `on-request` / `workspace-write` mode, restart Codex, run `/hooks` in the
+  interactive Codex CLI—not the desktop composer—and start a new desktop task.
 - **Does it need internet?** No. The board talks to one host on your LAN.
 
 ## License

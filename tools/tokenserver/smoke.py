@@ -204,6 +204,25 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
     else:
         results.append((VARN, f"claude-proben: {probe} — se tabellen i "
                               f"docs/agent-setup.md"))
+    credential = root.get("claudeCredential")
+    if isinstance(credential, dict):
+        credential_status = credential.get("status")
+        remaining = credential.get("expiresInMin")
+        if credential_status == "ready" and isinstance(remaining, int):
+            results.append((OK, f"claude-credential: {remaining} min kvar"))
+        elif credential_status == "expiring" and isinstance(remaining, int):
+            results.append((VARN, f"claude-credential går ut om {remaining} "
+                                  "min — starta en ny Claude Code CLI-turn "
+                                  "innan dess"))
+        elif credential_status == "expired":
+            results.append((VARN, "claude-credential har gått ut — en ny "
+                                  "Claude Code CLI-turn måste förnya den"))
+        else:
+            results.append((VARN, "claude-credential kan inte "
+                                  "utgångsbevakas — kör setup doctor"))
+    else:
+        results.append((VARN, "claude-credential saknas i diagnostiken — "
+                              "starta om tokenservern med aktuell kod"))
     unknown = root.get("unknownRateLimitBuckets") or []
     if unknown:
         results.append((VARN, f"okända rate-limit-buckets: {unknown} — "

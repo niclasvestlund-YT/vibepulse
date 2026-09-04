@@ -163,7 +163,7 @@ are not arriving:
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
 | `not_run` | Probe has not fired yet | It runs every 120 s — wait |
 | `no_claude_oauth_token` | No Claude Desktop / Claude Code token found | Have them sign in to Claude Code on this Mac |
-| `token_expired_…` | Token found but expired | Re-authenticate in Claude Code |
+| `token_expired_…` | Token found but expired; Claude may still say logged in because login state and the exported usage credential are different | Start a **new Claude Code CLI turn** and send one short message so Claude's supported client refreshes Keychain, then `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver` (Windows: restart the VibePulse task) |
 | `usage_http_401` / `usage_http_403` | Every token source rejected (on macOS the probe tries Claude Desktop's process token, then the keychain, and falls back automatically; on Windows there is only `%USERPROFILE%\.claude\.credentials.json`) | Re-authenticate in Claude Code |
 | `usage_http_200 + no_mapped_limits` | Authenticated, but nothing in the usage response mapped (a `; fallback_…` suffix records the header-probe outcome) | Plan may not expose limits; Codex half still works |
 | `usage_request_failed: …` | Network/DNS failure from the Mac | Check the Mac's own connectivity |
@@ -172,6 +172,16 @@ are not arriving:
 
 Codex is read separately from its local app-server, so a bad `claudeProbe`
 never explains missing Codex numbers, and vice versa.
+
+Also read `claudeCredential` on the same `GET /` response. It contains only a
+safe status and whole minutes remaining—never either OAuth token. `expiring`
+starts 30 minutes before failure; `expired` is actionable even when
+`claude auth status` still says logged in. `python3 tools/vibepulse_setup.py
+doctor` and Codex `SessionStart` consume this guard, and
+`python3 tools/tokenserver/smoke.py` reports it during a general health check.
+Anthropic documents secure credential storage and normal Claude Code login,
+but no supported refresh-only CLI command; VibePulse therefore does not call
+an undocumented OAuth endpoint or mutate the refresh token itself.
 
 Then check the endpoints the screen polls:
 
@@ -290,11 +300,43 @@ legacy alias for Claude only. Current installations should use the setup tool.
 
 ### 3. Review hooks instead of bypassing trust
 
-For Codex, open Codex and run `/hooks`. Review the VibePulse `SessionStart` and
-`PermissionRequest` command hooks and explicitly trust them. Then **Start a new
-Codex task** so the newly trusted hooks, skill, and MCP tool are loaded. Run
+Codex must be allowed to create interactive permission requests before a
+permission card can reach VibePulse. Keep the user-controlled global switches
+explicit in `~/.codex/config.toml`:
+
+```toml
+approval_policy = "on-request"
+approvals_reviewer = "user"
+sandbox_mode = "workspace-write"
+```
+
+`approval_policy = "never"` suppresses every approval prompt and
+`sandbox_mode = "danger-full-access"` removes the normal workspace boundary.
+The panel, bridge, plugin, and MCP can therefore all be healthy while no
+**APPROVE / DENY** event exists. The VibePulse installer never edits these
+unrelated global Codex security settings. After changing them, fully restart
+Codex before reviewing the hooks below. For the current semantics, see
+OpenAI's [agent approval](https://learn.chatgpt.com/docs/agent-approvals-security)
+and [hook](https://learn.chatgpt.com/docs/hooks) documentation.
+
+Open a terminal, start the interactive Codex CLI with `codex`, and run `/hooks`
+inside that CLI. `/hooks` is not a command in the desktop task composer; the
+desktop composer correctly shows no matching command. Review the VibePulse
+`SessionStart` and `PermissionRequest` command hooks and explicitly trust them.
+Then exit the CLI and **Start a new Codex desktop task** so the newly trusted
+hooks, skill, and MCP tool are loaded. Run
 `python3 tools/vibepulse_setup.py doctor` again; doctor reports the review
 state but never bypasses it.
+
+Each newly started Codex task also performs a sub-second, read-only health
+check. A green result requires an interactive saved Codex permission mode, the
+tokenserver, the saved Codex route, and two recent direct panel polls. A USB
+device appearing in macOS is not treated as proof that its firmware, Wi-Fi,
+and polling loop are alive. If only the encrypted relay can reach the panel,
+startup says that panel presence is not provable instead of inventing a green
+status. Run the general `doctor` command for the full local setup, saved Codex
+approval-mode, and relay/device-key pairing report; the separate `relay doctor`
+command remains available for relay-only detail.
 
 Codex permissions use a narrow safe-command tier. Only recognized read-only,
 test, and build commands can offer **ALLOW ONCE**. Unknown commands, mutations,
@@ -363,6 +405,7 @@ workflow, consent model and troubleshooting live in [ota.md](ota.md).
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Panel polls and the bridge is green, but Codex never shows APPROVE / DENY | Codex has `approval_policy = "never"`, `approvals_reviewer = "auto_review"`, or `sandbox_mode = "danger-full-access"`; no user permission event reaches the hook | Restore the documented `on-request` / `user` / `workspace-write` mode, restart Codex, start the interactive `codex` CLI in a terminal, review `/hooks` there—not in the desktop composer—start a new desktop task, then run `python3 tools/vibepulse_setup.py doctor` |
 | Screen boots, everything is dashes, forever | `DIN-MAC` never replaced in `secrets.h`, or the `TK_*` defines were removed | Set the real Bonjour name, rebuild, reflash |
 | Dashes, and the Mac's URL is set | tokenserver not running, or Mac asleep, or firewall | Start it; check `curl localhost:8737/` |
 | Dashes only for Claude, Codex fine (or vice versa) | That provider's source is unavailable | Check `claudeProbe`; the other half working is by design |
@@ -371,7 +414,7 @@ workflow, consent model and troubleshooting live in [ota.md](ota.md).
 | `wifi-here.sh` cannot join the setup AP | The window is closed, or `TG_OTA_TOKEN` is missing so the password is random | Check the glass says WIFI SETUP; without a token run `TG_AP_PASS=<what the glass shows> tools/wifi-here.sh` |
 | Panel joined the venue WiFi but still shows dashes | Client isolation, or a captive portal the panel cannot pass | Not fixable on the device. Use the phone hotspot instead |
 | "This project has no OTA" / partitions.csv shows one factory partition | Reading a tree from before the OTA foundation (A/B slots + otadata + `components/torget_ota/`) | Check which branch/commit the checkout is on; read `partitions.csv` in THAT tree before concluding. OTA workflow: `tools/ota-flash.sh <ip>` + a 3 s KEY3 hold |
-| Panel shows stale quota / empty Fable weekly in the morning | Upstream 429 penalty from the shared account bucket | Self-heals: dead tokens are never resent, the penalty persists across restarts, deltas serve from cache. Check `claudeProbe` on `curl localhost:8737/` |
+| Panel shows stale quota / empty Fable weekly | Either the saved Claude credential expired while Desktop stayed logged in, or the shared account bucket returned 429 | Check both `claudeCredential` and `claudeProbe` on `curl localhost:8737/`. For `expired`, start a new Claude Code CLI turn and restart tokenserver; for `usage_http_429`, wait—the persisted backoff self-heals and must not be restarted |
 | Panel shows stale while powered from the computer USB port | The Mac port cannot feed WiFi TX bursts — fetches time out | Expected on Mac USB; run from wall power. Logs stay valid on Mac USB, data does not |
 | OTA boots always show state 0xffffffff and the health gate always rests | `sdkconfig` generated before the rollback line landed in `sdkconfig.defaults` (defaults only apply on fresh generation) | `grep BOOTLOADER_APP_ROLLBACK sdkconfig` — set `=y`, rebuild, and USB-flash ONCE (the bootloader carries the logic; OTA never writes it) |
 | No `/dev/cu.usbmodem*` | Not in download mode | Hold BOOT, tap RESET, release BOOT |

@@ -43,8 +43,13 @@ TOKEN_SERVER_URL = "http://127.0.0.1:8737/"
 MAX_DIAGNOSTIC_BYTES = 16 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 16 * 1024
 COMMAND_TIMEOUT_SECONDS = 15
+CLOUD_COMMAND_TIMEOUT_SECONDS = 60
 NETWORK_TIMEOUT_SECONDS = 2
 PIPE_JOIN_TIMEOUT_SECONDS = 1
+CODEX_CONFIG_MAX_BYTES = 64 * 1024
+_CODEX_STRING_SETTING = re.compile(
+    r'^[ \t]*(approval_policy|approvals_reviewer|sandbox_mode)[ \t]*='
+    r'[ \t]*(["\'])([^"\']*)\2[ \t]*(?:#.*)?$')
 _AUTO = object()
 _RELAY_BLOCK_BEGIN = "/* VIBEPULSE INTERACTION RELAY BEGIN */"
 _RELAY_BLOCK_END = "/* VIBEPULSE INTERACTION RELAY END */"
@@ -91,6 +96,59 @@ def default_config_path() -> Path:
         return base / "VibePulse" / "config.json"
     return (Path.home() / "Library" / "Application Support" / "VibePulse" /
             "config.json")
+
+
+def default_codex_config_path() -> Path:
+    """Return the saved Codex configuration path without changing it."""
+    codex_home = os.environ.get("CODEX_HOME")
+    return ((Path(codex_home) if codex_home else Path.home() / ".codex") /
+            "config.toml")
+
+
+def _codex_permission_config_status(path: Path) -> tuple[bool | None, str]:
+    """Describe whether saved Codex settings can surface permission cards."""
+    try:
+        raw = Path(path).read_bytes()
+        if len(raw) > CODEX_CONFIG_MAX_BYTES:
+            raise ValueError("oversized config")
+        text = raw.decode("utf-8", errors="strict")
+    except FileNotFoundError:
+        return (None, "CHECK Codex approvals: no saved config.toml; verify "
+                "that /permissions is interactive")
+    except (OSError, UnicodeError, ValueError):
+        return (False, "FIX Codex approvals: saved config.toml is unreadable")
+
+    config = {}
+    for line in text.splitlines():
+        if line.lstrip().startswith("["):
+            break
+        match = _CODEX_STRING_SETTING.fullmatch(line)
+        if match is not None:
+            config[match.group(1)] = match.group(3)
+
+    if config.get("approval_policy") == "never":
+        return (False, "FIX Codex approvals: approval_policy=never prevents "
+                "permission cards; use on-request")
+    if config.get("approvals_reviewer") == "auto_review":
+        return (False, "FIX Codex approvals: approvals_reviewer=auto_review "
+                "routes decisions away from the user; use user")
+    if config.get("sandbox_mode") == "danger-full-access":
+        return (False, "FIX Codex approvals: sandbox_mode=danger-full-access "
+                "bypasses workspace permission boundaries; use "
+                "workspace-write")
+
+    policy = config.get("approval_policy")
+    reviewer = config.get("approvals_reviewer")
+    sandbox = config.get("sandbox_mode")
+    if (isinstance(policy, str) and
+            policy in {"on-request", "untrusted"} and
+            (reviewer is None or reviewer == "user") and
+            isinstance(sandbox, str) and
+            sandbox in {"workspace-write", "read-only"}):
+        return (True, "PASS Codex approvals: saved policy can surface "
+                "permission cards")
+    return (None, "CHECK Codex approvals: verify the active mode with "
+            "/permissions")
 
 
 def plan_codex_install(
@@ -532,7 +590,9 @@ def _capture_chunk(captured: dict[str, bytearray], label: str,
         captured[label].extend(chunk[:remaining])
 
 
-def _bounded_posix_process(argv: Sequence[str]) -> _CommandResult | None:
+def _bounded_posix_process(
+        argv: Sequence[str], timeout_seconds: float | None = None,
+        ) -> _CommandResult | None:
     """Capture raw pipes without ever waiting for inherited-writer EOF."""
     captured = {"stdout": bytearray(), "stderr": bytearray()}
     reads: dict[int, str] = {}
@@ -569,7 +629,9 @@ def _bounded_posix_process(argv: Sequence[str]) -> _CommandResult | None:
             except OSError:
                 pass
 
-    deadline = time.monotonic() + COMMAND_TIMEOUT_SECONDS
+    timeout = (COMMAND_TIMEOUT_SECONDS if timeout_seconds is None
+               else timeout_seconds)
+    deadline = time.monotonic() + timeout
     try:
         while True:
             now = time.monotonic()
@@ -647,7 +709,9 @@ def _bounded_posix_process(argv: Sequence[str]) -> _CommandResult | None:
     return _decode_command_result(returncode, captured)
 
 
-def _bounded_thread_process(argv: Sequence[str]) -> _CommandResult | None:
+def _bounded_thread_process(
+        argv: Sequence[str], timeout_seconds: float | None = None,
+        ) -> _CommandResult | None:
     """Windows fallback: bounded daemon readers; never close under a reader."""
     process = None
     threads: list[threading.Thread] = []
@@ -690,7 +754,9 @@ def _bounded_thread_process(argv: Sequence[str]) -> _CommandResult | None:
             thread.start()
             threads.append(thread)
         try:
-            returncode = process.wait(timeout=COMMAND_TIMEOUT_SECONDS)
+            timeout = (COMMAND_TIMEOUT_SECONDS if timeout_seconds is None
+                       else timeout_seconds)
+            returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             _terminate_process_tree(process)
             return None
@@ -718,20 +784,28 @@ def _bounded_thread_process(argv: Sequence[str]) -> _CommandResult | None:
     return _decode_command_result(returncode, captured, reader_errors)
 
 
-def _bounded_process(argv: Sequence[str]) -> _CommandResult | None:
+def _bounded_process(
+        argv: Sequence[str], *, timeout_seconds: float | None = None,
+        ) -> _CommandResult | None:
     """Run one argv with bounded time and retained output."""
+    timeout = (COMMAND_TIMEOUT_SECONDS if timeout_seconds is None
+               else timeout_seconds)
     if os.name == "posix":
-        return _bounded_posix_process(argv)
-    return _bounded_thread_process(argv)
+        return _bounded_posix_process(argv, timeout)
+    return _bounded_thread_process(argv, timeout)
 
 
-def _invoke(argv: Sequence[str], run) -> _CommandResult | None:
+def _invoke(
+        argv: Sequence[str], run, *, timeout_seconds: float | None = None,
+        ) -> _CommandResult | None:
+    timeout = (COMMAND_TIMEOUT_SECONDS if timeout_seconds is None
+               else timeout_seconds)
     if run is _AUTO:
-        return _bounded_process(argv)
+        return _bounded_process(argv, timeout_seconds=timeout)
     try:
         completed = run(
             [str(value) for value in argv], capture_output=True, text=True,
-            timeout=COMMAND_TIMEOUT_SECONDS, check=False, shell=False)
+            timeout=timeout, check=False, shell=False)
     except (OSError, subprocess.SubprocessError):
         return None
     returncode = getattr(completed, "returncode", None)
@@ -878,16 +952,21 @@ def _relay_install(
                 ).encode("ascii") + b"\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            commands = (
-                [str(wrangler), "--cwd", str(service_dir),
-                 "secret", "bulk", str(secret_temp)],
-                [str(wrangler), "--cwd", str(service_dir),
-                 "deploy", "--var", f"MAILBOX_ID:{mailbox}"],
-            )
+            # Upload the first Worker version and its required secrets in one
+            # request.  `wrangler secret bulk` cannot create a missing Worker,
+            # while a secret-less bootstrap is rejected by `secrets.required`.
+            commands = ([
+                str(wrangler), "--cwd", str(service_dir), "deploy",
+                "--secrets-file", str(secret_temp),
+                "--var", f"MAILBOX_ID:{mailbox}",
+            ],)
             for command in commands:
-                cloud_touched = True
-                if not _command_ok(_invoke(command, run), command):
+                if not _command_ok(_invoke(
+                        command, run,
+                        timeout_seconds=CLOUD_COMMAND_TIMEOUT_SECONDS),
+                        command):
                     raise ConfigError("Cloudflare relay deployment failed")
+                cloud_touched = True
 
             backup = path.parent / "secrets.h.before-interaction-relay"
             _atomic_private_write(backup, secrets_raw)
@@ -909,7 +988,8 @@ def _relay_install(
                 pass
             if cloud_touched:
                 _invoke([str(wrangler), "--cwd", str(service_dir),
-                         "delete", "--force"], run)
+                         "delete", "--force"], run,
+                        timeout_seconds=CLOUD_COMMAND_TIMEOUT_SECONDS)
             print("FIX Relay install failed; local secrets and routing were "
                   "not enabled", file=stdout)
             return False
@@ -1030,7 +1110,9 @@ def _relay_uninstall(
                 return False
             command = [str(wrangler), "--cwd", str(service_dir),
                        "delete", "--force"]
-            if not _command_ok(_invoke(command, run), command):
+            if not _command_ok(_invoke(
+                    command, run,
+                    timeout_seconds=CLOUD_COMMAND_TIMEOUT_SECONDS), command):
                 print("FIX Worker deletion failed; local credentials were "
                       "kept so it can be retried", file=stdout)
                 return False
@@ -1386,7 +1468,7 @@ def _response_content_type(response) -> bool:
 def _doctor(
         config: VibePulseConfig, *, python: Path | None, codex: Path | None,
         repo_root: Path, run: Callable[..., object],
-        urlopen: Callable[..., object], stdout,
+        urlopen: Callable[..., object], codex_config_path: Path, stdout,
         ) -> bool:
     fixes = False
 
@@ -1451,8 +1533,14 @@ def _doctor(
             fixes = True
 
     if config.codex_interactions:
-        print("FIX hooks: open /hooks and review VibePulse; trust status is "
-              "not machine-readable", file=stdout)
+        approval_ok, approval_message = _codex_permission_config_status(
+            codex_config_path)
+        print(approval_message, file=stdout)
+        if approval_ok is False:
+            fixes = True
+        print("FIX hooks: run /hooks in the interactive Codex CLI, not the "
+              "desktop composer, and review VibePulse; trust status is not "
+              "machine-readable", file=stdout)
         fixes = True
     else:
         print("OFF Hook review: provider intentionally disabled", file=stdout)
@@ -1507,12 +1595,87 @@ def _doctor(
             fixes = True
         else:
             print("PASS Tokenserver", file=stdout)
+            if config.claude_interactions and not _doctor_claude_quota(
+                    payload, stdout):
+                fixes = True
+            panel = interactions.get("panel")
+            if isinstance(panel, dict) and panel.get("status") == "ready":
+                print("PASS Panel contact: recent direct poll", file=stdout)
+            elif not isinstance(panel, dict):
+                print("FIX Panel contact: tokenserver diagnostics are too old",
+                      file=stdout)
+                fixes = True
+            else:
+                print("FIX Panel contact: no recent direct poll; relay-only "
+                      "presence cannot be proven", file=stdout)
+                fixes = True
     return not fixes
 
 
+def _doctor_claude_quota(payload: dict, stdout) -> bool:
+    """Report the safe credential/probe guard published by tokenserver."""
+    credential = payload.get("claudeCredential")
+    probe = payload.get("claudeProbe")
+    if not isinstance(credential, dict):
+        print("FIX Claude quota credential: diagnostics are too old; "
+              "restart the VibePulse tokenserver", file=stdout)
+        return False
+
+    status = credential.get("status")
+    remaining = credential.get("expiresInMin")
+    if status == "ready" and isinstance(remaining, int) and remaining >= 0:
+        if probe == "usage_http_200 + ok":
+            print(f"PASS Claude quota credential: ready ({remaining} min "
+                  "remaining)", file=stdout)
+            return True
+        if probe == "not_run":
+            print("WAIT Claude quota probe: credential is ready but the "
+                  "first probe has not completed", file=stdout)
+            return False
+        print("FIX Claude quota probe: credential is ready but the usage "
+              "source is unavailable; see docs/agent-setup.md", file=stdout)
+        return False
+
+    if status == "expiring" and isinstance(remaining, int) and remaining >= 0:
+        print(f"FIX Claude quota credential: expires in {remaining} min; "
+              "start a new Claude Code CLI turn before then so its supported "
+              "client refreshes Keychain", file=stdout)
+        return False
+    if status == "expired":
+        print("FIX Claude quota credential: expired; login status alone is "
+              "not enough—start a new Claude Code CLI turn, then restart "
+              "the VibePulse tokenserver", file=stdout)
+        return False
+    if status == "unavailable":
+        print("FIX Claude quota credential: no supported Claude credential "
+              "was found on this computer", file=stdout)
+        return False
+    if status == "unknown":
+        print("FIX Claude quota credential: a process token exists but its "
+              "expiry cannot be guarded; sign in with Claude Code so the "
+              "supported credential store is populated", file=stdout)
+        return False
+
+    print("FIX Claude quota credential: invalid diagnostics", file=stdout)
+    return False
+
+
 def _resolve_executables(python, codex):
-    python_path = (Path(sys.executable) if python is _AUTO else
-                   (None if python is None else Path(python)))
+    if python is _AUTO:
+        python_path = Path(sys.executable)
+        if sys.version_info < (3, 11):
+            # macOS kan låta /usr/bin/python3 3.9 vinna PATH trots att en
+            # modern Python redan finns installerad och är den som MCP:n
+            # använder. Setup/doctor ska hitta den installationen i stället
+            # för att ge ett falskt "installera Python"-fel vid varje start.
+            for name in ("python3.14", "python3.13", "python3.12",
+                         "python3.11"):
+                found = shutil.which(name)
+                if found:
+                    python_path = Path(found)
+                    break
+    else:
+        python_path = None if python is None else Path(python)
     if codex is _AUTO:
         found = shutil.which("codex")
         codex_path = Path(found) if found else None
@@ -1809,6 +1972,7 @@ def main(
         input_fn: Callable[[str], str] = input, stdout=None,
         stdin_isatty: bool | None = None,
         relay_token_path: Path | None = None,
+        codex_config_path: Path | None = None,
         secrets_path: Path | None = None,
         interaction_relay_dir: Path | None = None,
         token_urlsafe=secrets.token_urlsafe) -> int:
@@ -1816,6 +1980,9 @@ def main(
     args = _parser().parse_args(argv)
     output = sys.stdout if stdout is None else stdout
     path = default_config_path() if config_path is None else Path(config_path)
+    codex_settings = (default_codex_config_path()
+                      if codex_config_path is None
+                      else Path(codex_config_path))
     python_path, codex_path = _resolve_executables(python, codex)
     interactive = (sys.stdin.isatty() if stdin_isatty is None
                    else stdin_isatty)
@@ -1887,10 +2054,15 @@ def main(
 
         if args.command == "doctor":
             config = load_config(path)
-            return 0 if _doctor(
+            local_ok = _doctor(
                 config, python=python_path, codex=codex_path,
                 repo_root=Path(repo_root), run=run, urlopen=urlopen,
-                stdout=output) else 1
+                codex_config_path=codex_settings, stdout=output)
+            relay_ok = _relay_doctor(
+                config, token_path=relay_token,
+                secrets_path=secrets_header,
+                service_dir=relay_service, stdout=output)
+            return 0 if local_ok and relay_ok else 1
 
         if args.command == "disable":
             _disable(path, args.target)
@@ -1932,8 +2104,9 @@ def main(
                 codex=codex_path, run=run, stdout=output):
             return 1
         print("PASS Installed the local VibePulse package", file=output)
-        print("Review and trust the exact VibePulse commands in Codex /hooks.",
-              file=output)
+        print("Start the interactive Codex CLI in a terminal, run /hooks "
+              "there (not in the desktop composer), and trust the exact "
+              "VibePulse commands.", file=output)
         print("If the panel is unavailable, Codex uses computer fallback.",
               file=output)
         return 0

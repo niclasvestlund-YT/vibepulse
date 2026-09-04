@@ -237,10 +237,21 @@ def _tool_success(payload):
     }
 
 
+def _valid_request_meta(params):
+    """Accept the MCP-reserved request metadata without opening other fields."""
+    if "_meta" not in params:
+        return True
+    metadata = params["_meta"]
+    return isinstance(metadata, dict) and _bounded_tree(metadata)
+
+
 def _initialize(params):
     if not isinstance(params, dict):
         return None
-    if set(params) != {"protocolVersion", "capabilities", "clientInfo"}:
+    required = {"protocolVersion", "capabilities", "clientInfo"}
+    if not required.issubset(params) or \
+            not set(params).issubset(required | {"_meta"}) or \
+            not _valid_request_meta(params):
         return None
     protocol = params.get("protocolVersion")
     if not _clean_text(protocol, 64):
@@ -270,12 +281,17 @@ def _dispatch(method, params):
         result = _initialize(params)
         return result if result is not None else _MISSING
     if method in {"ping", "tools/list", "notifications/initialized"}:
-        if params not in (_MISSING, None, {}):
+        if params not in (_MISSING, None, {}) and not (
+                isinstance(params, dict) and set(params) == {"_meta"} and
+                _valid_request_meta(params)):
             return _MISSING
         if method == "tools/list":
             return {"tools": [TOOL]}
         return {}
-    if not isinstance(params, dict) or set(params) != {"name", "arguments"}:
+    required = {"name", "arguments"}
+    if not isinstance(params, dict) or not required.issubset(params) or \
+            not set(params).issubset(required | {"_meta"}) or \
+            not _valid_request_meta(params):
         return _tool_error("Invalid ask parameters")
     if params["name"] != TOOL_NAME or not _bounded_tree(params["arguments"]) or \
             not _valid_arguments(params["arguments"]):

@@ -272,6 +272,15 @@ for path, symbol in attention_fonts:
 project_font_source = attention_fonts[1][0].read_text()
 assert "--range 0x20,0x2D,0x2E,0x30-0x39,0x3F,0x41-0x5A,0x5F,0xC4,0xC5,0xD6" in project_font_source
 
+# The Needs You attract label receives the same normalized project alphabet as
+# the completion overlay (digits plus .-_ and replacement ?).  Pin it to the
+# existing native 21 px full-ASCII raster so those bytes can never become LVGL
+# missing-glyph boxes on the physical display.
+ui_21_source = (root / "platform/fonts/plex_ui_21.c").read_text()
+assert "--range 0x20-0x7E" in ui_21_source
+assert "v->a_project = ny_text(v->a_group, &plex_ui_21" in monitor
+assert "v->a_project = ny_text(v->a_group, &plex_text_21" not in monitor
+
 assert "provider_lane" not in monitor
 assert "render_rail" not in monitor
 assert "mon.rail" not in monitor

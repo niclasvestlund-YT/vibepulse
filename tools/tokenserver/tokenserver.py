@@ -120,6 +120,7 @@ RECOMPUTE_EVERY_S = 30
 LIMITS_EVERY_S = 240  # rate-limit-proben: 15 anrop/h — kontots bucket delas
                       # med Claude Code självt, och kvoten rör sig långsamt;
                       # panelens 30 s-pollar får ändå cachat svar direkt
+CLAUDE_CREDENTIAL_WARNING_S = 30 * 60
 HTTP_MAX_WORKERS = 32
 JSON_BODY_TIMEOUT_S = 2.0
 
@@ -541,6 +542,10 @@ _probe_unknown_buckets = []
 _probe_cooldown_until = 0.0
 _probe_failure_streak = 0
 _probe_status_logged = None  # senast loggade status — övergångar loggas, tillstånd inte
+# Content-free credential readiness captured on the probe thread.  GET / must
+# never reread Keychain synchronously: Codex' SessionStart health check has a
+# sub-second budget, while ``security`` can block for several seconds.
+_claude_credential = {"status": "unknown"}
 # Döda tokens (värde → orsak): en kandidat som fått 401/403 skickas ALDRIG
 # igen. Det var mönstret bakom 429-straffrutan: nyckelringstokenen dog på
 # natten och Desktops frusna processtoken hamrade API:t varje probecykel i
@@ -669,6 +674,37 @@ def _read_oauth_candidates():
     if keychain_token and keychain_token != process_token:
         candidates.append((keychain_token, expires_at))
     return candidates
+
+
+def _oauth_credential_snapshot(candidates, now_s=None):
+    """Return expiry readiness without retaining or exposing token values.
+
+    Claude's supported credential stores include an ``expiresAt`` timestamp,
+    but a token copied into a process environment does not.  The snapshot is
+    deliberately small and safe for ``GET /``: it communicates when the saved
+    refreshable credential is about to fail without publishing an access or
+    refresh token, account identifier, or raw Keychain payload.
+    """
+    if not candidates:
+        return {"status": "unavailable"}
+    expiries = []
+    for _token, raw_expiry in candidates:
+        try:
+            expiry_s = float(raw_expiry) / 1000
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(expiry_s) and expiry_s > 0:
+            expiries.append(expiry_s)
+    if not expiries:
+        return {"status": "unknown"}
+
+    remaining_s = max(expiries) - (time.time() if now_s is None else now_s)
+    if remaining_s <= 0:
+        return {"status": "expired", "expiresInMin": 0}
+    remaining_min = max(1, int(math.ceil(remaining_s / 60)))
+    status = ("expiring" if remaining_s <= CLAUDE_CREDENTIAL_WARNING_S
+              else "ready")
+    return {"status": status, "expiresInMin": remaining_min}
 
 
 def _parse_reset_minutes(value: str, now_ts: float):
@@ -972,8 +1008,9 @@ def _probe_limits():
 
 def _probe_limits_locked():
     global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _probe_cooldown_until
+        _probe_cooldown_until, _claude_credential
     candidates = _read_oauth_candidates()
+    _claude_credential = _oauth_credential_snapshot(candidates)
     if not candidates:
         _probe_status = "no_claude_oauth_token"
         return None
@@ -2100,6 +2137,19 @@ class Handler(BaseHTTPRequestHandler):
     interaction_relay_reason = None
     agent_status_relay_status = "off"
     agent_status_relay_reason = None
+    # Innehållsfritt närvarobevis för startup-hälsan. Den befintliga panelen
+    # pollar /api/agent-status varje sekund. Två kända panel-GET från samma
+    # icke-loopback-klient inom ett kort fönster är starkare evidens än en
+    # ensam curl. Kandidatadressen hålls bara i processminnet och returneras
+    # eller loggas aldrig.
+    panel_poll_lock = threading.Lock()
+    panel_poll_candidate_host = None
+    panel_poll_candidate_at = None
+    panel_poll_candidate_count = 0
+    panel_last_seen_at = None
+    panel_last_seen_route = None
+    panel_confirm_window_s = 10.0
+    panel_fresh_s = 15.0
     json_body_timeout_s = JSON_BODY_TIMEOUT_S
 
     def _send(self, code, payload):
@@ -2137,6 +2187,52 @@ class Handler(BaseHTTPRequestHandler):
         mapped = getattr(address, "ipv4_mapped", None)
         return bool(mapped.is_loopback if mapped is not None
                     else address.is_loopback)
+
+    def _record_panel_poll(self):
+        """Confirm a live panel without trusting one anonymous LAN request."""
+        if not getattr(self, "client_address", None):
+            return
+        if self._is_loopback():
+            return
+        host = self.client_address[0] if self.client_address else None
+        if not isinstance(host, str) or not host:
+            return
+        now = time.monotonic()
+        cls = type(self)
+        became_ready = False
+        with cls.panel_poll_lock:
+            if (cls.panel_poll_candidate_host == host and
+                    cls.panel_poll_candidate_at is not None and
+                    now - cls.panel_poll_candidate_at <=
+                    cls.panel_confirm_window_s):
+                cls.panel_poll_candidate_count += 1
+            else:
+                cls.panel_poll_candidate_host = host
+                cls.panel_poll_candidate_count = 1
+            cls.panel_poll_candidate_at = now
+            if cls.panel_poll_candidate_count >= 2:
+                was_fresh = (cls.panel_last_seen_at is not None and
+                             now - cls.panel_last_seen_at <= cls.panel_fresh_s)
+                cls.panel_last_seen_at = now
+                cls.panel_last_seen_route = self.path
+                became_ready = not was_fresh
+        if became_ready:
+            log.info("startup-health: panelkontakt READY via %s", self.path)
+
+    @classmethod
+    def _panel_health_snapshot(cls):
+        now = time.monotonic()
+        with cls.panel_poll_lock:
+            seen = cls.panel_last_seen_at
+            route = cls.panel_last_seen_route
+        if seen is None:
+            return {"status": "waiting"}
+        age_s = max(0, int(now - seen))
+        return {
+            "status": "ready" if age_s <= cls.panel_fresh_s else "stale",
+            "ageS": age_s,
+            "route": route,
+        }
 
     def _header_values(self, name):
         get_all = getattr(self.headers, "get_all", None)
@@ -2522,6 +2618,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_GET(self):
+        if self.path in ("/api/tokens", "/api/agent-status",
+                         "/api/max-tracker", "/api/github"):
+            self._record_panel_poll()
         if self.path == "/api/tokens":
             self._reply(lambda: get_snapshot(
                 self.projects_dir,
@@ -2557,6 +2656,7 @@ class Handler(BaseHTTPRequestHandler):
                            if self.github_monitor is not None
                            else disabled_snapshot()),
                 "claudeProbe": _probe_status,
+                "claudeCredential": dict(_claude_credential),
                 "ratelimitHeaders": _probe_headers,
                 "unknownRateLimitBuckets": _probe_unknown_buckets,
                 # GET / parsas aldrig av skärmen — fält kan läggas till
@@ -2583,6 +2683,7 @@ class Handler(BaseHTTPRequestHandler):
                            if self.agent_status_relay_reason is not None
                            else {}),
                     }),
+                    "panel": self._panel_health_snapshot(),
                     "transport": (
                         "lan+encrypted-relay"
                         if (self.interaction_relay_status == "ready" or

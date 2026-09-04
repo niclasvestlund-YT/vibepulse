@@ -19,12 +19,12 @@ extern const lv_font_t plex_ui_16;
 extern const lv_font_t plex_ui_21; /* full ASCII incl. lowercase — long-question step-down */
 /* Needs You v2 takeover fonts. The command payload is the one element the
  * design keeps in real mono; the question/title need a shelf-readable full-
- * ASCII face (plex_body_27). headline_48 carries the one-word heroes, text_21
- * the attract project line. See docs/needs-you-investigation.md. */
+ * ASCII face (plex_body_27). headline_48 carries the one-word heroes. The
+ * attract project line deliberately uses ui_21: project labels may contain
+ * digits and .-_?, which the uppercase-only text_21 raster cannot draw. */
 extern const lv_font_t plex_body_27;
 extern const lv_font_t plex_mono_40;
 extern const lv_font_t plex_headline_48;
-extern const lv_font_t plex_text_21;
 
 #define COL_BLACK   lv_color_hex(VP_COLOR_BACKGROUND)
 #define COL_WHITE   lv_color_hex(VP_COLOR_TEXT)
@@ -743,7 +743,7 @@ static void create_needs_you(lv_obj_t *app_root) {
   v->a_codex_icon = ny_codex_icon(v->a_group, 208, 118);
   v->a_word = ny_text(v->a_group, &plex_headline_48, COL_WHITE, 0, 278, 480, 0, C);
   lv_label_set_text(v->a_word, "NEEDS YOU");
-  v->a_project = ny_text(v->a_group, &plex_text_21, COL_CLAUDE, 0, 332, 480, 3, C);
+  v->a_project = ny_text(v->a_group, &plex_ui_21, COL_CLAUDE, 0, 332, 480, 3, C);
   v->a_tap = ny_text(v->a_group, &plex_ui_16, COL_DIM, 0, 424, 480, 2, C);
   lv_label_set_text(v->a_tap, "TAP TO ANSWER");
 

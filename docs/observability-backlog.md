@@ -6,7 +6,7 @@ around them (2026-08-13). How these get found and worked is described in
 [observability.md](observability.md); stories behind them live in
 [lessons.md](lessons.md).
 
-**Last combed: 2026-08-13 (initial audit — this document is its result).**
+**Last combed: 2026-08-26 (Needs You startup health audit).**
 
 Rules of the file:
 
@@ -202,6 +202,38 @@ false on client-init failure with no log at all — the only silent path in
 an otherwise well-logged function.
 **Fix:** log the real enum + URL; retry instead of task suicide; add the
 missing log line.
+
+### OBS-32 · Needs You setup could look healthy while no panel was listening
+`server/plugin · M · done (2026-08-26)` — the general doctor checked the
+tokenserver's Mac-side relay state but not the matching firmware relay block,
+and `GET /` had no evidence that a panel had polled. A real Claude approval on
+2026-08-26 reached the hook, parked, published successfully, received no panel
+verdict for 120 seconds, and fell back to the computer; USB enumeration and a
+ready Mac relay had both looked healthy meanwhile. The tokenserver now requires
+two close non-loopback panel polls for a short-lived, content-free
+`interactions.panel=ready` proof. Codex checks it on `SessionStart`, and the
+general doctor includes relay/device-key pairing. Client addresses and prompt
+content remain absent from diagnostics. Guards: `PanelStartupHealthTests`,
+`SessionStartTests`, and `RelaySetupTests`.
+
+### OBS-33 · Startup warmup held the server port closed behind a cache lock
+`server · M · done (2026-08-26)` — launchd showed a running process, but the
+HTTP socket was not bound while the first history scan held `_cache_lock`.
+The scan itself was already asynchronous; the synchronous first pass in
+`Publisher.start()` immediately called the same token producer and waited for
+that lock before `BoundedThreadingHTTPServer` was constructed. The first
+publisher pass now runs inside its worker thread. Guard:
+`test_start_never_blocks_the_server_on_first_producer_pass`.
+
+### OBS-34 · Relay recovery assumed a pre-existing Worker and a LAN-speed cloud
+`setup · M · done (2026-08-26)` — setup ran `wrangler secret bulk` before
+deploy, which cannot create a missing Worker, while `secrets.required` rejects
+a bootstrap without keys. Once deploy did succeed, the generic 15-second local
+command bound expired first and setup deleted the healthy result as rollback.
+Setup now deploys the first version with a private ephemeral `--secrets-file`
+and uses a 60-second bound only for Cloudflare mutations. Relay tests cover the
+command order, private file mode/cleanup, and no delete after a failed first
+mutation.
 
 ---
 

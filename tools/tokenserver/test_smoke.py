@@ -25,6 +25,7 @@ HEALTHY_ROOT = {
     "rev": "abc1234",
     "startedAt": "2026-08-13T20:00:00+02:00",
     "claudeProbe": "usage_http_200 + ok",
+    "claudeCredential": {"status": "ready", "expiresInMin": 480},
     "ratelimitHeaders": [],
     "unknownRateLimitBuckets": [],
     "usageComputeOk": True,
@@ -77,7 +78,7 @@ class ServerCheckTests(unittest.TestCase):
     def test_healthy_server_with_matching_rev_is_all_ok(self):
         with canned_server({"/": HEALTHY_ROOT}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        self.assertEqual(levels(results), [smoke.OK, smoke.OK])
+        self.assertEqual(levels(results), [smoke.OK, smoke.OK, smoke.OK])
 
     def test_unreachable_server_is_fail(self):
         results = smoke.check_server("http://127.0.0.1:9")  # discard-porten
@@ -97,6 +98,16 @@ class ServerCheckTests(unittest.TestCase):
         self.assertEqual(len(warn), 1)
         self.assertIn("usage_http_401", warn[0])
         self.assertIn("agent-setup", warn[0])
+
+    def test_expiring_credential_warns_before_probe_fails(self):
+        root = dict(HEALTHY_ROOT, claudeCredential={
+            "status": "expiring", "expiresInMin": 19})
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        warnings = [text for level, text in results if level == smoke.VARN]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("19 min", warnings[0])
+        self.assertIn("ny Claude Code CLI-turn", warnings[0])
 
     def test_unknown_buckets_warn(self):
         root = dict(HEALTHY_ROOT, unknownRateLimitBuckets=["7d_haiku"])
@@ -134,13 +145,13 @@ class ServerCheckTests(unittest.TestCase):
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234",
                                          checkout_src="aaaa11112222")
-        self.assertEqual(levels(results), [smoke.OK, smoke.OK])
+        self.assertEqual(levels(results), [smoke.OK, smoke.OK, smoke.OK])
 
     def test_missing_fingerprint_on_older_server_is_not_judged(self):
         with canned_server({"/": HEALTHY_ROOT}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234",
                                          checkout_src="bbbb33334444")
-        self.assertEqual(levels(results), [smoke.OK, smoke.OK])
+        self.assertEqual(levels(results), [smoke.OK, smoke.OK, smoke.OK])
 
     def test_frozen_usage_compute_is_fail(self):
         # OBS-08: siffror som fryst men ser färska ut är värsta sortens fel
@@ -159,7 +170,7 @@ class ServerCheckTests(unittest.TestCase):
                 if not k.startswith("usageCompute")}
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        self.assertEqual(levels(results), [smoke.OK, smoke.OK])
+        self.assertEqual(levels(results), [smoke.OK, smoke.OK, smoke.OK])
 
 
 class EndpointCheckTests(unittest.TestCase):

@@ -37,10 +37,25 @@ python3 tools/vibepulse_setup.py uninstall codex
 Install offers four independent choices: Claude, Codex, both, or neither.
 Installing the plugin does not turn Codex on. It also asks separately whether
 bounded question/command detail may reach the local panel; no is the default.
-After installation, open Codex, run `/hooks`, review the VibePulse
-`SessionStart` and `PermissionRequest` hooks, and explicitly trust them. Then
-**Start a new Codex task** so the hooks and MCP tool are freshly loaded. Doctor
+After installation, open a terminal, start the interactive Codex CLI with
+`codex`, run `/hooks` there, review the VibePulse `SessionStart` and
+`PermissionRequest` hooks, and explicitly trust them. `/hooks` is not a
+command in the desktop task composer. Then **Start a new Codex desktop task**
+so the hooks and MCP tool are freshly loaded. Doctor
 reports trust/setup problems but does not bypass review.
+
+At `SessionStart`, the plugin reads `GET /` with a short loopback-only timeout.
+It reports READY only when Codex routing is on and the tokenserver has seen two
+close panel polls recently. This is a reachability proof, not a USB-presence
+check; relay-only panel presence remains explicitly unverified. The normal
+computer fallback stays active for every non-ready state.
+
+The same health payload includes a content-free Claude credential guard:
+`ready`, `expiring`, `expired`, `unavailable`, or `unknown`, plus whole minutes
+remaining when known. Startup and doctor warn 30 minutes before expiry. No
+access token, refresh token, account id, or Keychain body is returned or
+logged. A fresh Claude Code CLI turn is the supported refresh path; login
+status alone does not prove that the usage credential is current.
 
 The Codex safe-command tier only offers **ALLOW ONCE** for recognized
 read-only, test, and build commands. Unknown, mutating, secret-bearing, or
@@ -95,9 +110,9 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    aktiva, injicerade OAuth-token eller Claude Codes nyckelringsfallback
    (på Windows i stället `%USERPROFILE%\.claude\.credentials.json`, samma
    post — se [Windows](#windows) nedan) och gör en minimal API-förfrågan
-   (`max_tokens: 0` — prefill utan output, i praktiken gratis) var 240:e
-   sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
-   5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
+   till Anthropics skrivskyddade usage-källa var 240:e sekund. Svaret bär
+   usage-panelens tre fönster: 5-timmars, veckan och veckan för tyngsta
+   modellen (Fable/Opus); ingen modelltext genereras.
    Tokenen lämnar aldrig datorn — skärmen får bara procenttal.
 3. **Codex tak** — tjänsten frågar Codex lokala, skrivskyddade app-server via
    `account/rateLimits/read`, alltså samma aktuella snapshot som Codex-panelen

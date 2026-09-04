@@ -6,6 +6,8 @@ must name its publisher (the mailbox merges freshest-per-source) and wear
 the project's own User-Agent, not somebody else's.
 """
 
+import threading
+import time
 import unittest
 
 try:
@@ -123,6 +125,27 @@ class PublisherTests(unittest.TestCase):
                                       "/api/github": lambda: {"ok": 1}})
         self.assertEqual(p.publish_once(), 1)
         self.assertEqual(len(sent), 1)
+
+    def test_start_never_blocks_the_server_on_first_producer_pass(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_first_payload():
+            entered.set()
+            release.wait(timeout=2)
+            return {"ok": 1}
+
+        publisher, _sent, _clock = self._publisher({
+            "/api/tokens": slow_first_payload,
+        })
+        try:
+            started = time.monotonic()
+            publisher.start()
+            self.assertLess(time.monotonic() - started, 0.2)
+            self.assertTrue(entered.wait(timeout=1))
+        finally:
+            release.set()
+            publisher.stop()
 
     def test_the_user_agent_is_our_own(self):
         # The Anthropic probe imitating claude-cli is a separate, deliberate

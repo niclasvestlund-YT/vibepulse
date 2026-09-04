@@ -146,6 +146,38 @@ agentstatusen över LAN. VibePulse sparar högst en content-fri quotapunkt per
 endast tid, leverantör, fönster, procent och resetcykel. Se README:n där för
 kontrakt, integritetsgräns och autostart via launchd.
 
+### Codex-knappen för godkännanden
+
+VibePulse kan bara visa **APPROVE / DENY** när Codex först skapar en
+godkännandefråga. Rekommenderat sparat läge i `~/.codex/config.toml` är:
+
+```toml
+approval_policy = "on-request"
+approvals_reviewer = "user"
+sandbox_mode = "workspace-write"
+```
+
+`approval_policy = "never"` stänger av frågorna och
+`sandbox_mode = "danger-full-access"` tar bort den normala
+workspace-gränsen. Då kan panelen, pluginen och bryggan vara friska utan att
+någon godkännandekort skapas. VibePulse ändrar inte dessa globala
+säkerhetsval automatiskt. Efter en ändring: starta om Codex, öppna `/hooks`,
+men gör det i den interaktiva Codex-CLI:n i en terminal, inte i desktop-taskens
+meddelanderuta. Granska och lita på VibePulse-hookarna där och starta sedan en
+ny desktop-task.
+`python3 tools/vibepulse_setup.py doctor` och startup-kontrollen varnar när
+ett sparat läge undertrycker korten. Se OpenAI:s dokumentation om
+[godkännanden](https://learn.chatgpt.com/docs/agent-approvals-security) och
+[hook-förtroende](https://learn.chatgpt.com/docs/hooks).
+
+Samma startup-/doctor-kedja bevakar nu Claudes separata Fable-källa.
+`GET /` visar bara `claudeCredential.status` och hela minuter kvar—aldrig
+åtkomst- eller refresh-token. Den varnar 30 minuter före utgång, eftersom en
+långlivad Claude Desktop-process kan fortsätta vara inloggad samtidigt som
+den exporterade credentialen tyst blir för gammal. Starta en ny Claude
+Code-CLI-turn vid varningen och kör doctor igen; gammal kvotdata märks alltid
+som stale.
+
 ## Hårdvarufällorna
 
 Översikten finns i `spec/hardware.md`; capability-, source- och unitstatus

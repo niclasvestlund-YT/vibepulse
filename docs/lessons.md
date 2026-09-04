@@ -21,6 +21,56 @@ point at the backlog item.
 
 ---
 
+## 2026-08-26 · Logged in did not mean the exported usage token was fresh
+
+**What happened:** Claude kept working all evening while Fable alone became
+stale; `claude auth status` still said logged in. **Root cause:** Claude
+Desktop's long-lived child retained a frozen process token, while the separate
+Keychain access token VibePulse can read expired at 21:52; general quota had a
+newer passive observation, masking the split. **The rule:** login state and an
+out-of-process usage credential are separate health dimensions, and expiry
+must be warned before the first failed request. **Guards:** content-free
+`claudeCredential` readiness on `GET /`, a 30-minute startup/doctor/smoke
+warning, and honest stale rendering. **Watch for:** hidden keepalive prompts or
+undocumented refresh-token calls—neither is an acceptable automatic fix.
+
+## 2026-08-26 · A ready sender did not mean a listening panel
+
+**What happened:** Claude's hook parked and encrypted an approval correctly,
+but the panel never answered; after 120 seconds the request fell back to the
+computer. **Root cause:** every health signal stopped on the Mac side. A
+running tokenserver, ready relay, configured hooks, and an enumerated ESP32
+proved four separate components, not the end-to-end receive loop; the matching
+firmware relay block was missing too. **The rule:** readiness requires evidence
+from the consumer, and setup checks must compose dependent sub-checks instead
+of making the user know which second doctor to run. **Guards:** short-lived
+two-poll panel proof in `GET /`, Codex startup health, and general-doctor relay
+pairing. **Watch for:** relay-only panels remain honestly unprovable until the
+relay has a privacy-reviewed panel heartbeat.
+
+## 2026-08-26 · A background warmup still blocked the listening socket
+
+**What happened:** launchd reported the tokenserver running while port 8737
+stayed closed and one core scanned histories. **Root cause:** the first usage
+scan was threaded, but the numbers publisher synchronously called the same
+producer before the HTTP server bound; it waited on the scan's cache lock.
+**The rule:** every startup dependency before `bind()` must have a bounded cost;
+moving work to one thread does not help if another startup step joins it through
+a lock. **Guard:** the publisher's first pass is asynchronous and a blocking
+producer test requires `start()` to return immediately. **Watch for:** new
+startup publishers or probes that invoke payload producers synchronously.
+
+## 2026-08-26 · Cloud repair was neither a local command nor a warm deploy
+
+**What happened:** relay repair deleted the old Worker, then could not recreate
+it; a later successful deploy was misread as failure and rolled back again.
+**Root cause:** `secret bulk` assumes a Worker already exists, required secrets
+forbid a secret-less bootstrap, and the local 15-second command timeout was too
+short for Cloudflare. **The rule:** create the first version and its secrets in
+one request, and give bounded cloud mutations their own network-scale timeout.
+**Guards:** `deploy --secrets-file`, a 60-second cloud-only bound, and tests for
+secret privacy plus no delete after a failed first mutation.
+
 ## 2026-08-19 · `sdkconfig.defaults` did not migrate the existing LVGL pool
 
 **What happened:** v0.6 froze on any full redraw while the LVGL task held
