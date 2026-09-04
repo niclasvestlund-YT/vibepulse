@@ -321,9 +321,9 @@ pairing window keeps all three and puts nothing persistent on the glass:
    only a transient candidate host in `_record_panel_poll` and then the
    last-seen time and route; `_panel_health_snapshot` deliberately omits
    the address, and nothing lists panels. Step 4 adds a bounded in-memory
-   **recent-panels registry** to the service (address, first and last seen,
-   poll count; at most eight entries; an entry expires after the existing
-   panel-fresh window) and a **loopback-only local route** that lists it,
+   **recent-panels registry** to the service (address, running firmware
+   version, first and last seen, poll count; at most eight entries; an
+   entry expires after the existing panel-fresh window) and a **loopback-only local route** that lists it,
    using the `_is_loopback` check the service already applies to its
    plugin endpoints. Addresses only, never a secret. `vibepulse pair` reads
    that route and picks the panel seen most recently; when more than one
@@ -367,10 +367,12 @@ pairing window keeps all three and puts nothing persistent on the glass:
    an impostor endpoint cannot name another panel's id and collect that
    panel's bearer.
    **Addresses change; identities do not.** The panel adds its non-secret
-   device id to every poll as an `X-VibePulse-Device` header, next to the
-   `X-VibePulse-Recovery-Boot` header `torget_http.c` already sets, so the
-   recent-panels registry maps id to *current* address as long as the
-   panel keeps polling. The uploader resolves the address for a record in
+   device id and its running firmware version to every poll as
+   `X-VibePulse-Device` and `X-VibePulse-Version` headers, next to the
+   `X-VibePulse-Recovery-Boot` header `torget_http.c` already sets (a
+   repository-wide search finds no version header on polls today, so both
+   are new). The recent-panels registry maps id to *current* address and
+   running version as long as the panel keeps polling. The uploader resolves the address for a record in
    this order: `--device <id> --at <ip>` when given explicitly; the
    registry's current address for that id; the record's last-known
    address. A bare `.ota-device` IP matches a record either by last-known
@@ -419,8 +421,9 @@ pairing window keeps all three and puts nothing persistent on the glass:
       bytes cannot fabricate a success. Following the honesty invariant,
       the uploader reports **delivered** only on a valid ack and
       **running** only once the panel's next poll — which carries its
-      device id — reports the new version; a panel that never reports it
-      is shown as *delivered, not confirmed*, never as updated.
+      device id and its running version in `X-VibePulse-Version` — reports
+      the version the ack named; a panel that never reports it is shown as
+      *delivered, not confirmed*, never as updated.
 
    What a relay gains: nothing durable. Forwarding the exchange to the real
    panel installs exactly the image the user chose on exactly the panel they
@@ -617,9 +620,12 @@ Recorded so the cleanup is a decision, not an accident.
   treats a missing or wrong ack as *delivered, not confirmed*; that the
   legacy bearer upload still works with a compiled token; and that the
   challenge endpoint is absent outside the window.
-- Poll identity header: a test that every panel poll carries
-  `X-VibePulse-Device` with the device id, that the registry keys entries
-  by it, and that the header never carries a token or code.
+- Poll identity and version headers: a test that every panel poll carries
+  `X-VibePulse-Device` with the device id and `X-VibePulse-Version` with
+  the running firmware version, that the registry keys entries by the id
+  and records the version, that the updater's *running* state appears only
+  when the registry's version for that id equals the version the ack
+  named, and that neither header ever carries a token or code.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; that a build with a flag at

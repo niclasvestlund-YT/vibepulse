@@ -418,12 +418,13 @@ bounded and fail-closed, while host repair remains an explicit setup action.
 ## What you need
 
 Four things. All four are required for the core — your usage on the glass.
-Nothing else: no account, no cloud, no API key.
+Nothing else: no account, no cloud, no API key. Git and Python are the only
+tools; the Windows runbook shows where to get both.
 
 | | You need | Because |
 |---|---|---|
 | **1. A screen** | One of the boards below, a USB-C cable, and **its own USB power supply** | a computer USB port usually cannot feed the running AMOLED |
-| **2. A computer** | A Mac or a Windows PC with **Python 3.11+**, awake whenever you want fresh numbers | the VibePulse service runs here and reads your agents' local usage |
+| **2. A computer** | A Mac or a Windows PC with **Git** and **Python 3.11+**, awake whenever you want fresh numbers | the VibePulse service runs here and reads your agents' local usage |
 | **3. An agent on that computer** | **Claude Code and/or Codex, installed and signed in.** Either alone is fine | that is where the numbers come from |
 | **4. WiFi** | A **2.4 GHz** network that both the screen and the computer can reach | the ESP32-S3 cannot see 5 GHz; the optional relay lifts the same-network rule later |
 
