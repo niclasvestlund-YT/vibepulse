@@ -21,6 +21,30 @@ point at the backlog item.
 
 ---
 
+## 2026-09-04 · The screen was honest, the API was not
+
+**What happened:** once a Codex-only computer could start (entry below), a
+review flagged that `/api/tokens` reported `dayTokens`/`daySessions`/
+`monthTokens` as `0` on a machine with no Claude directory — measured zeros
+where there was no measurement. **Root cause:** two honesty boundaries were
+assumed to be one. The *display* was already correct: the percentages come
+over as `null`, `pct_or_null` turns that into `has_pct = 0`, and the
+presenter renders `–` with USAGE UNAVAILABLE; a value row of `0` is dropped
+entirely. The *wire* was not, and neither was the log, where
+`net.c` printed "0.00 Mtok idag" — indistinguishable from a real day with
+no work. **The rule now:** check the invariant at every boundary a number
+crosses, not just the glass. A field that no view renders today is still
+read by logs, by future consumers, and by whoever is debugging at 2am.
+**Guards:** `claudeSourcePresent` in the payload (additive; unknown keys
+are skipped, so flashed panels are unaffected), defaulting to *present*
+when absent so an older service is unchanged; parser tests for absent,
+true, false and non-boolean in `test_tokens.c`; an end-to-end
+`/api/tokens` test on a Codex-only tree in `test_provider_gate.py`.
+**Watch for:** the counters still cannot be `null` — `tokens_parse.c`
+rejects a missing or null `dayTokens` outright and every flashed panel
+would stop parsing. The flag is the honest signal until that contract can
+change.
+
 ## 2026-09-04 · A Codex-only computer could never start the service
 
 **What happened:** the tokenserver waited — before binding its HTTP port —

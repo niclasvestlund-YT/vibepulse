@@ -341,8 +341,15 @@ static void feed_tokens_file(const char *file) {
   tk_tokens t;
   if (json && tk_tokens_parse(json, len, &t)) {
     tokens_apply(&t);
-    printf("tokens: %.2f Mtok idag, %d sessioner, takt %.2f Mtok/h\n",
-           t.day_tokens / 1e6, t.day_sessions, t.day_tokens_per_hour / 1e6);
+    if (t.claude_source_present) {
+      printf("tokens: %.2f Mtok idag, %d sessioner, takt %.2f Mtok/h\n",
+             t.day_tokens / 1e6, t.day_sessions,
+             t.day_tokens_per_hour / 1e6);
+    } else {
+      /* Codex-only: volymen är okänd, inte noll. Samma ärlighet som
+         net.c, så simulatorn och panelen inte säger olika saker. */
+      printf("tokens: ingen Claude-källa — volym okänd, inte noll\n");
+    }
   } else {
     printf("tokens: fixtur saknas/avvisad, vyn visar streck\n");
   }

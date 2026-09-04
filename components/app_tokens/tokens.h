@@ -97,6 +97,13 @@ typedef struct {
   int day_sessions;           /* sessioner med aktivitet idag */
   double month_tokens;        /* kalendermånaden */
 
+  /* 0 när tjänsten säger att Claude-katalogen inte finns (Codex-only-
+   * maskin): de fyra räknarna ovan är då nollor, inte mätningar. Saknas
+   * nyckeln — äldre tjänst — antas källan finnas, så beteendet är
+   * oförändrat. Procenttalen behöver ingen flagga: de kommer redan som
+   * null och renderas som streck. */
+  int claude_source_present;
+
   /* taken (null-bara). claude_model_week är veckofönstret för tyngsta
    * modellen (Fable/Opus) — tredje raden i Claudes egen usage-panel. */
   tk_limit claude_session, claude_week, claude_model_week;
