@@ -489,11 +489,33 @@ pairing window keeps all three and puts nothing persistent on the glass:
       ack the uploader accepts. After a successful compiled upload the
       uploader records the panel's id and that it answers the challenge,
       which is what step 3 below pins.
-   3. It computes `auth = HMAC-SHA256(token, "vibepulse-ota-v2" ‖ device
-      id ‖ nonce ‖ declared SHA-256 ‖ declared Content-Length)` and sends
-      the image with `X-VibePulse-Device`, `X-VibePulse-Nonce`,
+   3. It computes `auth = HMAC-SHA256(token, transcript("vibepulse-ota-v2",
+      device id, nonce, declared SHA-256, declared Content-Length))` and
+      sends the image with `X-VibePulse-Device`, `X-VibePulse-Nonce`,
       `X-VibePulse-Auth`, and the `X-VibePulse-SHA256` header the upload
       already carries today. The token never leaves the computer.
+
+      **`transcript(…)` is one canonical byte encoding, and every `‖` in
+      this section is shorthand for it.** The Python updater and the C
+      firmware implement these MACs independently; if each frames `a ‖ b`
+      its own way they compute different digests and reject every honest
+      upload, so the framing is fixed here rather than left to whoever
+      writes the second implementation. Each field is its **exact ASCII
+      bytes as they appear on the wire**, prefixed by its byte length as a
+      big-endian `uint16`, concatenated in the order listed. Taking the
+      field straight off the header value is the whole rule: the nonce and
+      both digests are MAC'd as the strings their headers carry (digests
+      lowercase hex, 64 characters), the length as decimal ASCII with no
+      padding or sign, a result as `success` or `failed`, a version exactly
+      as `X-VibePulse-Version` spells it. Nothing is decoded, re-encoded,
+      case-folded or trimmed first, the domain label is the first field
+      rather than a bare prefix, and the length prefixes keep `a ‖ bc`
+      distinct from `ab ‖ c`. The same framing builds the HKDF `info`
+      below. **A shared test vector is part of the contract, not a nicety:**
+      one fixture pinning a token, device id, nonce, digest, length and
+      version, with the expected MAC for each transcript, asserted by both
+      the host gate and the tokenserver tests — so the two implementations
+      cannot drift apart without a red build.
    4. **The panel authenticates the headers before it touches flash.** It
       recomputes the MAC over the header fields alone with each populated
       slot's token — `runtime` and/or `compiled`, so both slots stay usable
@@ -508,11 +530,22 @@ pairing window keeps all three and puts nothing persistent on the glass:
       one. The existing image checks in `docs/ota.md` then run exactly as
       today.
    5. **The result is authenticated too.** The panel answers with
-      `X-VibePulse-Ack = HMAC-SHA256(token, "vibepulse-ota-ack-v2" ‖ device
-      id ‖ nonce ‖ SHA-256(image) ‖ result ‖ version written)`, keyed by
-      the slot that matched. The uploader verifies it against its own token
-      before reporting anything, so an unpaired endpoint that accepted the
-      bytes cannot fabricate a success. Following the honesty invariant,
+      `X-VibePulse-Ack = HMAC-SHA256(token,
+      transcript("vibepulse-ota-ack-v2", device id, nonce, declared
+      SHA-256, received SHA-256, result, version written))`, keyed by the
+      slot that matched, and repeats the digest it actually hashed in
+      `X-VibePulse-Received-SHA256`. **The transcript binds the *declared*
+      digest**, the one both sides held before a byte moved. A MAC over the
+      received bytes alone would be unverifiable in exactly the case that
+      matters: a mismatched digest is the failure path of step 4, and the
+      uploader knows only what it sent, so every rejected image would land
+      as *unknown* instead of the authenticated *failed* promised below.
+      Carrying the received digest as its own authenticated field keeps the
+      ack reconstructible from the wire in both outcomes and tells the
+      uploader what the panel actually got; on success the two digests are
+      equal. The uploader verifies the ack against its own token before
+      reporting anything, so an unpaired endpoint that accepted the bytes
+      cannot fabricate a success. Following the honesty invariant,
       the uploader has exactly four states and none of them is guessed:
       - **unknown** — no ack, or an ack that fails verification. Nothing
         proves the selected panel received anything. Never shown as
@@ -528,7 +561,8 @@ pairing window keeps all three and puts nothing persistent on the glass:
         The panel stores the update nonce in NVS next to the pending image
         (the boot-health gate already keeps state there across a reboot),
         and adds `X-VibePulse-Boot-Proof = HMAC-SHA256(proof key,
-        "vibepulse-boot-v2" ‖ device id ‖ nonce ‖ running version)`, keyed
+        transcript("vibepulse-boot-v2", device id, nonce, running
+        version))`, keyed
         by the **derived proof key** stored with that nonce — not by the
         token itself, which the update may have replaced.
         **The proof waits for the health gate, not for the first poll.**
@@ -545,7 +579,8 @@ pairing window keeps all three and puts nothing persistent on the glass:
         usual and prove nothing.
         Alongside the nonce the panel stores a **proof key derived from
         the token that authenticated the upload** —
-        `HKDF(authenticating token, "vibepulse-boot-key-v2" ‖ nonce)` — plus
+        `HKDF(authenticating token, info = transcript("vibepulse-boot-key-v2",
+        nonce))` — plus
         the slot label `runtime` or `compiled`. It stores the derived key
         rather than only the label because the compiled token lives inside
         the image being replaced: an update that changes `TG_OTA_TOKEN`
@@ -773,6 +808,14 @@ Recorded so the cleanup is a decision, not an accident.
 - Pairing target: a test that `vibepulse pair` selects the most recently
   seen panel from that registry, lists and refuses to guess when several
   are fresh, and accepts `--device <ip>`.
+- Transcript framing: a shared fixture pinning a token, device id, nonce,
+  declared digest, received digest, length and version, with the expected
+  MAC for the upload, ack and boot-proof transcripts and the expected
+  derived proof key; asserted by both the host gate and the tokenserver
+  tests, so the firmware and the Python updater cannot frame the fields
+  differently without a red build. It also asserts that the length prefixes
+  separate the fields — that moving a byte across a boundary changes the
+  MAC.
 - Authenticated upload, header-first: a test that a request with a wrong
   or missing `X-VibePulse-Auth` is rejected before `esp_ota_begin` is
   called and before any body byte is read; that a body whose streamed
@@ -791,7 +834,9 @@ Recorded so the cleanup is a decision, not an accident.
   rejected; that a panel with both slots accepts a MAC keyed by either
   token; that the uploader reports success only on a valid keyed ack and
   treats a missing or wrong ack as *unknown*, and a valid ack carrying a
-  failure result as *failed*, never as delivered; that the
+  failure result as *failed*, never as delivered; that a digest-mismatch
+  abort produces an ack the uploader can verify and reports it as *failed*
+  rather than *unknown*, with the panel's received digest surfaced; that the
   uploader consults the capability pin even when the credential lookup is
   bypassed, so `--legacy-bearer` is refused against a panel pinned as
   challenge-capable no matter how it is addressed; that the Windows rung-0
