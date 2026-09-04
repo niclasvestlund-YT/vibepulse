@@ -13,6 +13,7 @@ katalogen finns, och att servern faktiskt kan servera i det läget — en
 grind som öppnar mot en tjänst som ändå kraschar vore ingen förbättring.
 """
 
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -234,6 +235,26 @@ class CodexOnlyEndToEndTest(unittest.TestCase):
     def tearDown(self):
         tokenserver._last_result = None
         tokenserver._last_computed = 0.0
+
+
+class WarmupLogHonestyTest(unittest.TestCase):
+    """Starthändelsen ska inte heller skriva ut nollor som mätningar.
+
+    ``_first_scan_warmup`` bor inne i ``main()`` och går inte att kalla
+    isolerat, så vakten läser källan — samma mönster som testet för
+    ``BoundedThreadingHTTPServer`` i test_tokenserver.py. Det räcker för
+    det den ska fånga: att någon lägger tillbaka en ovillkorlig
+    "0 tokens idag"-rad.
+    """
+
+    def test_warmup_log_consults_the_source_flag(self):
+        source = inspect.getsource(tokenserver.main)
+        self.assertIn("claudeSourcePresent", source)
+        # Formateringen av räknarna ska ligga efter flaggkontrollen, inte
+        # före den.
+        flag_at = source.index("claudeSourcePresent")
+        counters_at = source.index("snap['dayTokens']")
+        self.assertLess(flag_at, counters_at)
 
 
 if __name__ == "__main__":

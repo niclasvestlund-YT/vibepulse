@@ -3454,6 +3454,14 @@ def main():
             log.exception("förstaskanningen kraschade — /api/tokens värmer "
                           "vid första anropet i stället")
             return
+        # Samma ärlighet som net.c och simulatorn: utan Claude-källa är
+        # nollorna inte mätningar, och "0 tokens idag" i starthändelsen
+        # läses som en dag utan arbete av den som kammar loggarna.
+        if not snap.get("claudeSourcePresent", True):
+            log.info("förstaskanning %.1f s: ingen Claude-källa på den här "
+                     "maskinen — volym okänd, inte noll",
+                     time.monotonic() - t0)
+            return
         log.info("förstaskanning %.1f s: %s tokens idag, %d sessioner, "
                  "%s denna månad",
                  time.monotonic() - t0,
