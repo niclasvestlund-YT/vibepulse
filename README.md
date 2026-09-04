@@ -400,25 +400,49 @@ bounded and fail-closed, while host repair remains an explicit setup action.
 
 ## What you need
 
-- **[Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm)**
-  (~$30). No soldering, just a USB-C cable. It's the same board Clawdmeter
-  uses, so if you already own one you're 10 minutes away.
-- **A Mac or Windows PC** running the tokenserver. Claude and Codex quota
-  collection are supported on both. Direct LAN mode needs the panel to reach
-  that computer; the optional relays remove the same-WiFi requirement. The
-  exact support/evidence boundary is maintained in
-  **[Host platform support](docs/platform-support.md)**; Windows release
-  installation and recovery use the public
-  **[Windows host runbook](docs/windows-setup.md)**, while release candidates
-  use the reproducible
-  **[Windows validation gate](docs/windows-validation.md)**. “Host supported”
-  does not mean every later candidate has passed the physical Windows loop;
-  the v1 runtime's latest sanitized checkpoint is a
-  **[FULL PASS](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)**,
-  while future runtime revisions require a fresh run rather than inheriting
-  that result.
-- **Claude Code and/or Codex.** Either alone is fine.
-- **2.4 GHz WiFi.** The ESP32-S3 can't see 5 GHz networks.
+Four things. All four are required for the core — your usage on the glass.
+Nothing else: no account, no cloud, no API key.
+
+| | You need | Because |
+|---|---|---|
+| **1. A screen** | One of the boards below, a USB-C cable, and **its own USB power supply** | a computer USB port usually cannot feed the running AMOLED |
+| **2. A computer** | A Mac or a Windows PC with **Python 3.11+**, awake whenever you want fresh numbers | the VibePulse service runs here and reads your agents' local usage |
+| **3. An agent on that computer** | **Claude Code and/or Codex, installed and signed in.** Either alone is fine | that is where the numbers come from |
+| **4. WiFi** | A **2.4 GHz** network that both the screen and the computer can reach | the ESP32-S3 cannot see 5 GHz; the optional relay lifts the same-network rule later |
+
+Flashing the firmware currently also needs
+[ESP-IDF 5.5](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/index.html)
+on the computer — see [Setup](#setup-the-vibecoder-way). A browser-based
+installer is planned so that this step disappears.
+
+### Supported screens
+
+| Board | Display | Status |
+|---|---|---|
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch, IMU | **Verified on a real unit.** Every frame in this README is an exact 480×480 render of the pixels it shows. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
+
+More boards are added here as they pass on a real unit, never from a
+datasheet. What the current board can and cannot do is recorded in
+[`spec/hardware.md`](spec/hardware.md).
+
+### Supported computers
+
+| Computer | Status | Autostart |
+|---|---|---|
+| macOS | **Supported.** Daily development and physical panel reviews. macOS ships an older Python; `brew install python` gives you 3.11+ | launchd |
+| Windows | **Supported.** v1 core, the physical answer loop, and the sign-in/sleep/reboot lifecycle verified on a real PC | Task Scheduler |
+| Linux | **Not yet.** Tracked in [#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2) | — |
+
+"Supported" means the computer service; it does not claim that every
+developer builds or flashes the firmware from that OS. The evidence behind
+each row is maintained in **[Host platform support](docs/platform-support.md)**.
+Windows installation and recovery use the
+**[Windows host runbook](docs/windows-setup.md)**, and release candidates go
+through the reproducible **[Windows validation gate](docs/windows-validation.md)**.
+"Supported" also does not mean every later candidate has passed the physical
+Windows loop: the v1 runtime's latest sanitized checkpoint is a
+**[FULL PASS](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)**,
+and future runtime revisions require a fresh run rather than inheriting it.
 
 ## Setup, the vibecoder way
 
