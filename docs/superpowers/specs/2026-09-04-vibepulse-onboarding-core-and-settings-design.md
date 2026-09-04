@@ -617,7 +617,23 @@ pairing window keeps all three and puts nothing persistent on the glass:
         uploader knows which of its own tokens to derive from.
         The service holds no token: the recent-panels registry stores that
         header verbatim as an opaque value, and `vibepulse update` verifies
-        it against its own token and the nonce it issued. The proof is
+        it against its own token and the nonce it issued.
+        **A boot proof reaches only the computer the panel polls.** The
+        panel carries the header on its ordinary polls, so an update
+        launched from somewhere else — a development checkout running
+        `tools/ota-flash.sh <ip>` with a compiled token, which needs no
+        pairing record and so needs no relationship with the service host —
+        leaves the proof in the *service host's* registry, out of reach of
+        the updater that issued the nonce. That updater must then stop at
+        **delivered** and say so in those words: *delivered; this computer
+        is not the panel's service host, so it cannot observe the reboot.*
+        Reporting *running* from a poll it never saw would break the
+        honesty invariant, and silently sitting at *delivered* with no
+        reason given is the failure mode that invariant exists to prevent.
+        Routing the proof back to an arbitrary invoking updater would mean
+        a second authenticated path into the panel, which is a larger
+        design decision than this plan should make in passing; it is listed
+        under *Sequencing* step 8 rather than assumed here. The proof is
         single-use; the panel clears the nonce once it has sent it for a
         bounded number of polls. A LAN peer that polls with the public
         device id and version but no valid proof never produces *running*,
@@ -763,12 +779,29 @@ reverted alone.
    **Install VibePulse on your computer** QR, *Looking for your
    computer…*, *Found*), the setup page behind that QR, discovery
    retaining the instance label (with test), Homebrew tap and Windows
-   one-liner.
+   one-liner. **This step must also make the service's startup gate
+   provider-aware, or a Codex-only computer never gets past rung 0.**
+   Today `tokenserver.py` waits — before it binds its HTTP port — in a
+   30-second loop until `~/.claude/projects` exists, so on a machine with
+   Codex and no Claude Code the port never opens, nothing is advertised
+   over DNS-SD, and the panel finds a computer it cannot poll. Codex usage
+   is read from `~/.codex/sessions` and needs the Claude directory not at
+   all, so the wait is asking for the wrong thing: **either** provider
+   directory present is enough to start, and the service waits only when
+   neither exists. The prerequisite already says "Claude Code and/or
+   Codex", and installing either one must be sufficient in fact and not
+   only on the setup page. The wait itself stays — it exists because a
+   `SystemExit` here made launchd respawn every ten seconds and flood the
+   log — only its condition changes.
 7. Runtime provisioning for the device key and the relay settings through
    the PAIR window; relay clients compiled into the release image and gated
    at runtime. Only after this does one binary serve every rung.
 8. Later and separately: leaner defaults for fresh installs; `docs/labs/`
-   index; Home Assistant as an add-on.
+   index; Home Assistant as an add-on; and, if it proves worth a second
+   authenticated path into the panel, routing a boot proof back to an
+   updater that is not the panel's service host (see *The paired upload
+   never sends the token*, which today reports an honest **delivered**
+   with the reason in that case).
 
 ## Branch hygiene (snapshot 2026-09-04)
 
@@ -899,6 +932,13 @@ Recorded so the cleanup is a decision, not an accident.
   update which changes the compiled `TG_OTA_TOKEN` still reaches *running*,
   because the proof key was derived before the image was replaced; and that none of the headers ever carries a token
   or code.
+- Codex-only host: a test that the service binds its port and advertises
+  with `~/.codex/sessions` present and `~/.claude/projects` absent, that it
+  serves Codex usage in that state, and that it still waits (rather than
+  exiting) when neither directory exists.
+- Boot proof out of reach: a test that an updater which is not the panel's
+  service host reports *delivered* with the reason stated, never *running*
+  and never a bare *delivered* with no explanation.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; that a build with a flag at
