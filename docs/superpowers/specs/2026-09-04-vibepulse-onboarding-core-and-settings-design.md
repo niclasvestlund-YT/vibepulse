@@ -510,8 +510,12 @@ pairing window keeps all three and puts nothing persistent on the glass:
       as `X-VibePulse-Version` spells it. Nothing is decoded, re-encoded,
       case-folded or trimmed first, the domain label is the first field
       rather than a bare prefix, and the length prefixes keep `a ‖ bc`
-      distinct from `ab ‖ c`. The same framing builds the HKDF `info`
-      below. **A shared test vector is part of the contract, not a nicety:**
+      distinct from `ab ‖ c`. **The HMAC key follows the same rule as the
+      fields:** a token is used as the exact ASCII bytes it is written
+      with, never the bytes a 64-hex token decodes to — one convention for
+      keys and inputs alike, so there is nothing left to choose. The same
+      framing builds the HKDF `info` below, whose remaining parameters are
+      pinned there. **A shared test vector is part of the contract, not a nicety:**
       one fixture pinning a token, device id, nonce, digest, length and
       version, with the expected MAC for each transcript, asserted by both
       the host gate and the tokenserver tests — so the two implementations
@@ -533,9 +537,18 @@ pairing window keeps all three and puts nothing persistent on the glass:
       `X-VibePulse-Ack = HMAC-SHA256(token,
       transcript("vibepulse-ota-ack-v2", device id, nonce, declared
       SHA-256, received SHA-256, result, version written))`, keyed by the
-      slot that matched, and repeats the digest it actually hashed in
-      `X-VibePulse-Received-SHA256`. **The transcript binds the *declared*
-      digest**, the one both sides held before a byte moved. A MAC over the
+      slot that matched. **Every input the uploader does not already hold
+      comes back as its own response header**, because a transcript field
+      that is only implied is a field the uploader cannot reconstruct:
+      `X-VibePulse-Received-SHA256` (the digest the panel actually hashed),
+      `X-VibePulse-Result` (`success` or `failed`, spelled exactly as it
+      enters the transcript), and `X-VibePulse-Version-Written`. That last
+      one is **empty on any failure** — a rejected image has no version,
+      whether the digest mismatched or an image check refused it before a
+      descriptor could be read — and an empty field is unambiguous under
+      the length-prefixed framing above: `uint16` zero, no bytes. The panel
+      sends all three headers in both outcomes. **The transcript binds the
+      *declared* digest**, the one both sides held before a byte moved. A MAC over the
       received bytes alone would be unverifiable in exactly the case that
       matters: a mismatched digest is the failure path of step 4, and the
       uploader knows only what it sent, so every rejected image would land
@@ -579,9 +592,20 @@ pairing window keeps all three and puts nothing persistent on the glass:
         usual and prove nothing.
         Alongside the nonce the panel stores a **proof key derived from
         the token that authenticated the upload** —
-        `HKDF(authenticating token, info = transcript("vibepulse-boot-key-v2",
-        nonce))` — plus
-        the slot label `runtime` or `compiled`. It stores the derived key
+        `HKDF-SHA256(ikm = the token's exact ASCII bytes, salt = empty,
+        info = transcript("vibepulse-boot-key-v2", nonce), L = 32)` — plus
+        the slot label `runtime` or `compiled`. **Every parameter there is
+        pinned deliberately**, for the same reason the MAC transcript is:
+        an unstated hash, salt, output length or key representation lets
+        two honest implementations derive different proof keys, and the
+        symptom would be that no boot proof ever reaches *running*. In
+        particular a 64-hex token is fed as **the ASCII characters it is
+        written with, never the 32 bytes it decodes to** — the same
+        "take it exactly as it appears" rule the transcript uses, so there
+        is one convention to remember rather than two. The salt is empty
+        (`HKDF` treats that as `HashLen` zero bytes) because the nonce in
+        `info` already makes each derivation unique. The shared test vector
+        covers this derivation alongside the three MACs. It stores the derived key
         rather than only the label because the compiled token lives inside
         the image being replaced: an update that changes `TG_OTA_TOKEN`
         would leave the label pointing at a different key after the reboot,
@@ -815,7 +839,10 @@ Recorded so the cleanup is a decision, not an accident.
   tests, so the firmware and the Python updater cannot frame the fields
   differently without a red build. It also asserts that the length prefixes
   separate the fields — that moving a byte across a boundary changes the
-  MAC.
+  MAC; that a 64-hex token keys the MAC and seeds the HKDF as its ASCII
+  characters rather than its decoded bytes, the two differing in the
+  fixture; and that an empty field (a version written after a failure) is
+  distinct from an absent one.
 - Authenticated upload, header-first: a test that a request with a wrong
   or missing `X-VibePulse-Auth` is rejected before `esp_ota_begin` is
   called and before any body byte is read; that a body whose streamed
@@ -836,7 +863,11 @@ Recorded so the cleanup is a decision, not an accident.
   treats a missing or wrong ack as *unknown*, and a valid ack carrying a
   failure result as *failed*, never as delivered; that a digest-mismatch
   abort produces an ack the uploader can verify and reports it as *failed*
-  rather than *unknown*, with the panel's received digest surfaced; that the
+  rather than *unknown*, with the panel's received digest surfaced; that an
+  image rejected before any version could be read still acks with an empty
+  `X-VibePulse-Version-Written` and verifies; that every transcript input
+  the uploader does not already hold arrives as a response header, so no
+  outcome forces it to guess a field; that the
   uploader consults the capability pin even when the credential lookup is
   bypassed, so `--legacy-bearer` is refused against a panel pinned as
   challenge-capable no matter how it is addressed; that the Windows rung-0
