@@ -7,6 +7,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- The usage service now starts on a computer that has Codex but not Claude
+  Code. Its readiness check waited — before binding the HTTP port — until
+  `~/.claude/projects` existed, so on a Codex-only machine the port never
+  opened, nothing was advertised over DNS-SD, and the panel found a computer
+  it could not poll. Codex usage is read from `~/.codex/sessions` and does not
+  need that directory at all. Either provider is now enough to start, and the
+  service waits only when neither is present.
 - A successfully parsed ESP32 quota response now clears the transport-level
   `STALE` state synchronously, rather than waiting for a later LVGL timer tick.
   The refresh is deliberately unconditional so display and app bookkeeping
