@@ -21,6 +21,25 @@ point at the backlog item.
 
 ---
 
+## 2026-09-04 · A rejected request lost its answer on Windows
+
+**What happened:** three `CodexRouteTests` wire tests failed on the Windows
+CI runner with `None != 415` / `None != 403` while the same commit passed the
+same job in a parallel run and on Linux and macOS. **Root cause:** the tests
+prove that the server rejects on the headers alone, before parsing the body.
+The test client wrote headers and body in one go, so when the server
+answered and closed, the body was still unread in its socket; Windows treats
+a close with unread data as an abort (`WinError 10053`) and discards the
+response already sent, so `getresponse()` raised instead of returning the
+status. **The rule:** a client that expects an early rejection must not
+leave unread bytes behind it — send the headers, wait briefly for the
+answer, and send the body only when none came. **Guards:**
+`early_reject_exchange` in `test_codex_interactions.py`, and a legible
+failure message carrying the socket error. **Watch for:** the same abort in
+real Windows hook clients that get a 403/415 from the tokenserver before
+their body is read; if a hook on Windows reports a connection abort where a
+status was expected, this is the mechanism.
+
 ## 2026-08-30 · Local activity was rendered as no active agent
 
 **What happened:** the local `/api/agent-status` reported the current Codex

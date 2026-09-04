@@ -436,7 +436,7 @@ installer is planned so that this step disappears.
 
 | Board | Display | Status |
 |---|---|---|
-| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch; IMU and speaker on board but **not yet verified on the unit** | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Every frame in this README is an exact 480×480 render of the pixels it shows. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Every frame in this README is an exact 480×480 render of the pixels it shows. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
 
 More boards are added here as they pass on a real unit, never from a
 datasheet. What the current board can and cannot do is recorded in

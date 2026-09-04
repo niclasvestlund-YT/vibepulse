@@ -394,14 +394,23 @@ pairing window keeps all three and puts nothing persistent on the glass:
    2. It checks the returned device id against the selected record and
       aborts on mismatch — an early exit, not the security boundary.
    3. It computes `auth = HMAC-SHA256(token, "vibepulse-ota-v2" ‖ device
-      id ‖ nonce ‖ SHA-256(image))` and sends the image with
-      `X-VibePulse-Device`, `X-VibePulse-Nonce`, and `X-VibePulse-Auth`
-      headers. The token never leaves the computer.
-   4. The panel recomputes the MAC over the body it actually received with
-      each populated slot's token — `runtime` and/or `compiled`, so both
-      slots stay usable when they coexist — consumes the nonce, and applies
-      the image only on a match. The existing image checks in `docs/ota.md`
-      then run exactly as today.
+      id ‖ nonce ‖ declared SHA-256 ‖ declared Content-Length)` and sends
+      the image with `X-VibePulse-Device`, `X-VibePulse-Nonce`,
+      `X-VibePulse-Auth`, and the `X-VibePulse-SHA256` header the upload
+      already carries today. The token never leaves the computer.
+   4. **The panel authenticates the headers before it touches flash.** It
+      recomputes the MAC over the header fields alone with each populated
+      slot's token — `runtime` and/or `compiled`, so both slots stay usable
+      when they coexist — and only on a match does it consume the nonce and
+      call `esp_ota_begin`. An unauthenticated request is rejected without
+      reading its body, so a LAN peer cannot make the inactive partition
+      erase or accept a single unauthenticated write during a window
+      (today `ota_service.c` streams straight into `esp_ota_begin` /
+      `esp_ota_write` once the bearer and the SHA-256 header are present).
+      It then streams the body while hashing, as it already does, and
+      aborts the update if the streamed digest differs from the declared
+      one. The existing image checks in `docs/ota.md` then run exactly as
+      today.
    5. **The result is authenticated too.** The panel answers with
       `X-VibePulse-Ack = HMAC-SHA256(token, "vibepulse-ota-ack-v2" ‖ device
       id ‖ nonce ‖ SHA-256(image) ‖ result ‖ version written)`, keyed by
@@ -437,13 +446,18 @@ pairing window keeps all three and puts nothing persistent on the glass:
    Outside a window the pairing endpoint does not exist, following the
    lazy-surface rule the Wi-Fi window uses.
 
-Two token slots exist and the panel accepts a bearer matching either:
+Two token slots exist, and each is usable only through its own path:
 
 - the **compiled** slot (`TG_OTA_TOKEN`), the immutable floor: pairing
-  never reads, replaces, or removes it;
+  never reads, replaces, or removes it. It is the **only** slot the legacy
+  `Authorization: Bearer` upload is checked against, and it is also
+  accepted by the authenticated request;
 - the **runtime** slot in NVS, which pairing fills, and which a fresh
   physically opened, code-authenticated window **replaces**. The previous
-  runtime token is invalid the moment the new exchange completes.
+  runtime token is invalid the moment the new exchange completes. It is
+  honoured **only** through the authenticated request: a bearer equal to
+  the runtime token is rejected with 403, so no tool that reads the
+  per-panel store can ever put that secret on the wire in plaintext.
 
 That is how rotation and recovery work: a compromised runtime token, or a
 lost paired computer, is fixed by opening PAIR again and pairing again,
@@ -583,6 +597,12 @@ Recorded so the cleanup is a decision, not an accident.
 - Pairing target: a test that `vibepulse pair` selects the most recently
   seen panel from that registry, lists and refuses to guess when several
   are fresh, and accepts `--device <ip>`.
+- Authenticated upload, header-first: a test that a request with a wrong
+  or missing `X-VibePulse-Auth` is rejected before `esp_ota_begin` is
+  called and before any body byte is read; that a body whose streamed
+  digest differs from the declared one aborts the update; that a bearer
+  equal to the runtime token is rejected with 403; and that the legacy
+  bearer path still accepts only the compiled token.
 - Credential selection and authenticated upload: a test that the uploader
   selects the record by id or by a unique address match and refuses
   otherwise; that `--device <id>` resolves the current address from the
