@@ -56,8 +56,13 @@ else:  # direct execution
 DEFAULT_SESSIONS_DIR: Optional[Path] = None
 
 
-def _default_sessions_dir() -> Path:
+def default_sessions_dir() -> Path:
     """Resolve the sessions directory the same way the Codex CLI does.
+
+    Public because it is the single answer to "where does Codex keep its
+    rollouts" for the whole package: ``tokenserver`` resolves ``CODEX_SESSIONS``
+    through it too, so the readiness gate, the rate-limit scan, agent status and
+    the Max Tracker cannot drift onto a different profile from the month scan.
 
     ``CODEX_HOME`` is commonly set by the desktop app and by managed Windows
     installations.  Falling back unconditionally to ``~/.codex`` makes quota
@@ -182,7 +187,7 @@ def month_value(sessions_dir: Optional[Path] = None,
     genuinely nothing there to price.
     """
     root = (Path(sessions_dir) if sessions_dir is not None
-            else _default_sessions_dir())
+            else default_sessions_dir())
     if not root.is_dir():
         return 0.0, 0, 0
 

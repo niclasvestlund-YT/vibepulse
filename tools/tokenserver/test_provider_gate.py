@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.tokenserver import tokenserver
+from tools.tokenserver import codex_usage, tokenserver
 
 
 class ProviderGateTest(unittest.TestCase):
@@ -61,6 +61,46 @@ class ProviderGateTest(unittest.TestCase):
         self.missing.parent.mkdir(parents=True, exist_ok=True)
         self.missing.write_text("inte en katalog")
         self.assertFalse(self._gate(self.missing, self.missing))
+
+
+class CodexHomeTest(unittest.TestCase):
+    """``CODEX_SESSIONS`` ska följa ``CODEX_HOME``, inte hårdkodat ``~/.codex``.
+
+    Det här är inte ett hypotetiskt fall: ``run-windows-task.ps1`` exporterar
+    ``CODEX_HOME`` innan tjänsten startar, och desktop-appen sätter den. Med
+    en hårdkodad sökväg såg grinden en katalog som inte fanns, väntade för
+    evigt, och porten öppnades aldrig — exakt felet den här ändringen finns
+    för att laga, kvar för den ena konfiguration som är dokumenterat stödd.
+    """
+
+    def test_sessions_dir_follows_codex_home(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir) / "managed-codex-home"
+            (home / "sessions").mkdir(parents=True)
+
+            with mock.patch.dict("os.environ", {"CODEX_HOME": str(home)}):
+                resolved = codex_usage.default_sessions_dir()
+
+            self.assertEqual(resolved, home / "sessions")
+            # Grinden ska öppna på den katalogen, utan någon Claude-katalog.
+            with mock.patch.object(tokenserver, "CODEX_SESSIONS", resolved):
+                self.assertTrue(
+                    tokenserver._any_provider_dir(Path(temp_dir) / "no-claude"))
+
+    def test_tokenserver_resolves_through_the_shared_source(self):
+        """Konstanten ska komma från samma funktion som månadsskanningen.
+
+        Vaktar mot att någon återinför en hårdkodad sökväg: då läser
+        grinden, rate-limits, agentstatus och Max Tracker en annan profil
+        än månadsvärdet, vilket är precis den tysta delningen
+        ``default_sessions_dir`` skrevs för att stänga.
+        """
+        with mock.patch.object(codex_usage, "DEFAULT_SESSIONS_DIR",
+                               Path("/sentinel/sessions")):
+            self.assertEqual(codex_usage.default_sessions_dir(),
+                             Path("/sentinel/sessions"))
+        # Importtidsvärdet ska ha gått genom resolvern, inte förbi den.
+        self.assertEqual(tokenserver.CODEX_SESSIONS.name, "sessions")
 
 
 class CodexOnlySnapshotTest(unittest.TestCase):

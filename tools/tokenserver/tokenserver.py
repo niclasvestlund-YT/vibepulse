@@ -1341,7 +1341,13 @@ def get_limits():
 # passerat) är siffran meningslös och vi serverar null — aldrig gamla procent
 # som låtsas vara färska.
 
-CODEX_SESSIONS = Path(os.path.expanduser("~/.codex/sessions"))
+# Följer CODEX_HOME, precis som Codex CLI och månadsskanningen: den
+# desktop-appen och managed Windows-installationer sätter den, och
+# run-windows-task.ps1 exporterar den innan tjänsten startar. En hårdkodad
+# ~/.codex här gjorde att beredskapsgrinden, rate-limit-skanningen,
+# agentstatus och Max Tracker läste en annan profil än månadsvärdet — på en
+# Codex-only-maskin med egen CODEX_HOME öppnades porten aldrig.
+CODEX_SESSIONS = codex_usage.default_sessions_dir()
 CODEX_LIMITS_EVERY_S = 30
 CODEX_APP_SERVER_TIMEOUT_S = 15
 CODEX_LIMIT_SCAN_BYTES = 1024 * 1024
