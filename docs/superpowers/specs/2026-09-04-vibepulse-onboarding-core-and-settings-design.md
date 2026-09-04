@@ -285,7 +285,7 @@ Rules:
 |---|---|---|---|
 | Wi-Fi networks | `secrets.h` + NVS | NVS first | compiled networks stay as the immutable floor (already true) |
 | Service address | `TK_VIBEPULSE_BASE_URL`, required | DNS-SD by default; optional URL via *Manual setup* | a compiled URL is still honoured as the fallback |
-| OTA token | `TG_OTA_TOKEN` | **derived independently on both sides** from a password-authenticated key exchange seeded by the on-glass pairing code, inside a device-opened PAIR window (see *The pairing window*). Neither the code nor the token is ever transmitted. Stored in the panel's NVS runtime slot and in the computer's per-user credential file. **Never rendered on the glass**: not in ABOUT, not in a QR, not in a log | two slots: the compiled token is an immutable floor that pairing never touches; the runtime slot is **replaced** by each new physically opened, code-authenticated pairing |
+| OTA token | `TG_OTA_TOKEN` | **derived independently on both sides** from a password-authenticated key exchange seeded by the on-glass pairing code, inside a device-opened PAIR window (see *The pairing window*). Neither the code nor the token is ever transmitted. Stored in the panel's NVS runtime slot and in the computer's per-user, per-panel credential store. **Never rendered on the glass**: not in ABOUT, not in a QR, not in a log | two slots: the compiled token is an immutable floor that pairing never touches; the runtime slot is **replaced** by each new physically opened, code-authenticated pairing |
 | Needs You device key | `TK_VIBEPULSE_DEVICE_KEY` | the same pairing window, later step (*Sequencing* 7) | a compiled key is still honoured |
 | Relay configuration | `secrets.h` plus Kconfig. The relay clients are **compiled out** unless `CONFIG_TK_VIBEPULSE_INTERACTION_RELAY` / `…_AGENT_STATUS_RELAY` and their build-time secrets are set (`components/app_tokens/CMakeLists.txt`) | later step (*Sequencing* 7): clients compiled into the release image and gated at runtime, settings provisioned through the pairing window | until then a relay user builds from source exactly as today |
 | GitHub / sound flags | compile-time | FEATURES switch with the flag as floor | unchanged |
@@ -311,6 +311,15 @@ pairing window keeps all three and puts nothing persistent on the glass:
    This is the same model as the Wi-Fi window's access-point password:
    whoever cannot see the screen cannot enrol. The code is not the token
    and expires with the window, so showing it exposes nothing durable.
+   **How the command finds the panel:** no new discovery protocol. By the
+   time PAIR is useful the panel has already found the computer over
+   DNS-SD and polled it, and the service records the address of every
+   recent panel poll (`_record_panel_poll` in `tokenserver.py`). `vibepulse
+   pair` asks the local service for the panel that polled most recently;
+   when several panels polled recently it lists them and requires
+   `--device`; and `--device <ip>` is always accepted, which is why the
+   PAIR screen shows the panel's IP next to the code. The panel's pairing
+   endpoint exists only while its window is open.
 3. **Knowledge, without the token ever crossing the LAN** — the code is not
    sent and the token is not sent. Both sides run a password-authenticated
    key exchange seeded by the code (proposal: SRP6a, which ESP-IDF ships as
@@ -322,17 +331,29 @@ pairing window keeps all three and puts nothing persistent on the glass:
    the exchange and burns one of three attempts, after which the window
    closes. The panel completes **one** exchange per window, stores the
    derived token in NVS, and never displays, logs, or re-transmits it; a
-   second attempt after a success is refused. The computer stores the same
-   derived token in a **per-user credential file**, following the device
-   key's existing precedent: `~/.vibepulse-ota-token`, mode 0600, with a
-   `VIBEPULSE_OTA_TOKEN` environment override. Today `tools/ota-flash.sh`
-   parses `TG_OTA_TOKEN` from the repository-root `secrets.h` and nothing
-   else, which a package install (Homebrew, no checkout) does not have, and
-   a file inside a Homebrew Cellar would vanish on upgrade. Step 4 therefore
-   changes the uploader — `tools/ota-flash.sh` and the packaged
-   `vibepulse update` alike — to look up the token in this order:
-   environment, per-user file, then `secrets.h` when a checkout exists, so
-   the existing developer flow keeps working unchanged.
+   second attempt after a success is refused. The computer stores the
+   derived token in a **per-user, per-panel credential store**, following
+   the device key's precedent of a git-ignored file in the home directory:
+   `~/.vibepulse/ota-tokens.json` (directory 0700, file 0600), a map from
+   the panel's **device id** to its token and last known address, with a
+   `VIBEPULSE_OTA_TOKEN` environment override that applies to whatever
+   target is named. The device id is stable and non-secret — derived from
+   the SoC's factory MAC (`esp_efuse_mac_get_default`; silicon-provided,
+   the firmware wiring is new) — shown in ABOUT, and sent by the panel
+   inside the PAKE-protected exchange so the computer files the token
+   under the right panel. Two panels paired from one account therefore
+   hold two distinct tokens and never overwrite each other. Today
+   `tools/ota-flash.sh` parses `TG_OTA_TOKEN` from the repository-root
+   `secrets.h` and nothing else, which a package install (Homebrew, no
+   checkout) does not have, and a file inside a Homebrew Cellar would
+   vanish on upgrade. Step 4 therefore changes the uploader —
+   `tools/ota-flash.sh` and the packaged `vibepulse update` alike — to
+   resolve the credential by target: it asks the panel at `--device
+   <ip>` (or the `.ota-device` file) for its non-secret device id on the
+   maintenance endpoint, then looks up the token in this order:
+   environment, the per-panel store, then `secrets.h` when a checkout
+   exists. A single-panel user never sees the map; the developer flow
+   keeps working unchanged.
    *Scope note:* at upload time the bearer still travels as `docs/ota.md`
    specifies today; this spec changes enrolment only and does not claim to
    improve the upload path. Making the upload prove possession without
@@ -416,8 +437,9 @@ reverted alone.
    The `#if TK_GITHUB_*` guards become runtime checks seeded by the
    macros, with the flag-0 toggle test and a re-measured RAM budget.
 4. Runtime configuration: DNS-SD default, the PAIR window with the
-   PAKE-derived OTA token (never transmitted), the per-user credential
-   file and the uploader's lookup order, compiled values honoured as floor.
+   PAKE-derived OTA token (never transmitted), the per-panel credential
+   store keyed by device id, the uploader resolving the credential by
+   target, compiled values honoured as floor.
    Immediate-open Wi-Fi window on an empty panel.
 5. The `AGENTS.md` release-rule change as its own maintainer decision; only
    then the CI release binary from an empty `secrets.h`, the secret gate,
@@ -477,9 +499,14 @@ Recorded so the cleanup is a decision, not an accident.
   refused; that a new pairing invalidates the previous runtime token; and
   that pairing never touches the compiled token.
 - Uploader credential lookup: a test that `tools/ota-flash.sh` and the
-  packaged updater read the token from the environment, then
-  `~/.vibepulse-ota-token`, then `secrets.h`, and that the per-user file
-  path works from a directory that is not a checkout.
+  packaged updater resolve the credential by the target panel's device id
+  from the environment, then `~/.vibepulse/ota-tokens.json`, then
+  `secrets.h`; that two panels paired from one account get distinct
+  entries and the uploader picks the right one; and that the store works
+  from a directory that is not a checkout.
+- Pairing target: a test that `vibepulse pair` selects the most recently
+  polling panel from the service's recorded polls, lists and refuses to
+  guess when several polled recently, and accepts `--device <ip>`.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; and a recorded
