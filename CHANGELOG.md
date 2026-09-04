@@ -15,7 +15,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   unread, and Windows discards an already-sent response when a connection is
   closed that way (`WinError 10053`). The drain follows the existing `503`
   path: at most 64 KiB and 50 ms, and the bytes are never parsed or logged, so
-  rejections still happen before any parsing and nothing is parked.
+  rejections still happen before any parsing and nothing is parked. That cap is
+  deliberate and it is also the limit of the fix: a body larger than 64 KiB is
+  drained only up to the cap, so an early rejection of an over-cap body can
+  still abort on Windows. Draining without a bound would hand any peer a
+  denial-of-service lever, so the residue is accepted rather than chased.
 - A successfully parsed ESP32 quota response now clears the transport-level
   `STALE` state synchronously, rather than waiting for a later LVGL timer tick.
   The refresh is deliberately unconditional so display and app bookkeeping

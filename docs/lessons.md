@@ -56,9 +56,19 @@ closed well inside its second. In `test_codex_interactions.py`,
 writes the body on the plain `http.client` path — the shape a real hook
 client has — so the product-side drain, not the test-side helper, is what
 keeps it green.
+**The bound is also the limit of the fix:** only the first
+`REQUEST_DRAIN_LIMIT` bytes are taken, so an early rejection of a body larger
+than 64 KiB still leaves a residue unread and can still abort on Windows. The
+reachable case is a real hook client posting an over-cap payload to a disabled
+route (404) — a legitimate client sends a loopback `Host`, an allowed `Origin`
+and `application/json`, so it cannot trip the 403 or the 415. This is accepted,
+not overlooked: an unbounded drain hands any peer a denial-of-service lever, and
+the same cap already governs `_reject_busy`. `_read_json_body` refuses an
+over-cap body without consuming it, so that path carries the same residue.
 **Watch for:** the same abort anywhere else a response precedes an unread
 body; if a hook on Windows reports a connection abort where a status was
-expected, this is the mechanism.
+expected, this is the mechanism — and if it reports one on a request that was
+answered, check the body size against the drain cap before looking further.
 
 ## 2026-08-30 · Local activity was rendered as no active agent
 
