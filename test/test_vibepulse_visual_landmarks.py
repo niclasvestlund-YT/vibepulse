@@ -217,6 +217,10 @@ EXPECTED = {
     "torget-wifi-joining.bmp",
     "torget-wifi-joined.bmp",
     "torget-wifi-failed-password.bmp",
+    "torget-settings-menu.bmp",
+    "torget-settings-menu-no-address.bmp",
+    "torget-settings-about-found.bmp",
+    "torget-settings-about-missing.bmp",
 
     "torget-boot-cold.bmp",
     "torget-boot-wifi.bmp",
@@ -572,6 +576,67 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             failed.crop((70, 390, 410, 432)).tobytes(),
             "joined linger is still inside the setup window",
         )
+
+    def test_settings_menu_rows_and_the_muted_update(self):
+        """The menu's honesty claim is visual: with no address, UPDATE must
+        LOOK unavailable. Proven from the pixels, not from the source that
+        drew them."""
+        menu = self.image("torget-settings-menu.bmp")
+        no_addr = self.image("torget-settings-menu-no-address.bmp")
+
+        for image in (menu, no_addr):
+            with self.subTest(image=image):
+                self.assertEqual(image.getpixel((5, 5)), (0, 0, 0))
+                # SETTINGS header in white.
+                header = image.crop((34, 24, 446, 90))
+                self.assertGreater(
+                    sum(p == (255, 255, 255)
+                        for p in header.get_flattened_data()), 300)
+                # Three row outlines, each with muted border ink present.
+                for i in range(3):
+                    top = 120 + i * 100
+                    row = image.crop((74, top, 406, top + 84))
+                    self.assertIn(
+                        (0x92, 0x98, 0xA2), row.get_flattened_data(),
+                        f"row {i} lost its muted outline")
+
+        def white_in_label(image, index):
+            top = 120 + index * 100
+            box = image.crop((100, top + 20, 380, top + 64))
+            return sum(p == (255, 255, 255) for p in box.get_flattened_data())
+
+        # With an address every label is white; without one, UPDATE alone
+        # goes muted while WIFI and ABOUT stay white.
+        for index in range(3):
+            self.assertGreater(white_in_label(menu, index), 50,
+                               f"row {index} should be white with an address")
+        self.assertEqual(white_in_label(no_addr, 0), 0,
+                         "UPDATE must not stay white without an address")
+        for index in (1, 2):
+            self.assertGreater(white_in_label(no_addr, index), 50,
+                               "WIFI and ABOUT stay selectable with no address")
+
+    def test_settings_about_shows_a_dash_for_a_missing_address(self):
+        """A missing address is a dash, never a blank line and never a
+        fabricated 0.0.0.0."""
+        found = self.image("torget-settings-about-found.bmp")
+        missing = self.image("torget-settings-about-missing.bmp")
+        # ADDRESS value row: real text when known, a short dash when not.
+        found_ink = sum(p != (0, 0, 0) for p in
+                        found.crop((74, 194, 406, 236)).get_flattened_data())
+        missing_ink = sum(p != (0, 0, 0) for p in
+                          missing.crop((74, 194, 406, 236)).get_flattened_data())
+        self.assertGreater(found_ink, 400, "a known address must be drawn")
+        self.assertGreater(missing_ink, 0, "a missing address must draw a dash")
+        self.assertLess(missing_ink, found_ink // 3,
+                        "the dash must be far less ink than an address")
+        # BACK clears the values: the band just above it stays black.
+        for image in (found, missing):
+            with self.subTest(image=image):
+                gap = image.crop((74, 292, 406, 306))
+                self.assertTrue(
+                    all(p == (0, 0, 0) for p in gap.get_flattened_data()),
+                    "the last value must clear the BACK control")
 
     def test_provider_bars_are_segmented_with_locked_colors_and_marker(self):
         cases = (

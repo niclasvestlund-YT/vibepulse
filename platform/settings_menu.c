@@ -129,6 +129,11 @@ static void render(void);
 void torget_settings_click_row(tg_settings_row row) {
   switch (row) {
     case TG_SETTINGS_ROW_UPDATE:
+      /* Utan adress kan ett OTA-fönster aldrig ta emot en uppladdning.
+       * Raden är nedtonad och trycket ignoreras — hellre en rad som
+       * synligt inte går att välja än ett fönster som öppnas och sedan
+       * inte kan göra något. ABOUT säger varför: ADDRESS visar streck. */
+      if (!ui.ip[0]) break;
       /* Menyn stänger sig själv och lämnar över. Fönsterordningen — vem som
        * äger port 80 — avgörs av main.c, aldrig härifrån. */
       ui.pending = TG_SETTINGS_INTENT_OPEN_UPDATE;
@@ -209,6 +214,14 @@ static void render(void) {
   bool menu = (ui.view == VIEW_MENU);
 
   for (int i = 0; i < TG_SETTINGS_ROW_COUNT; i++) show(ui.rows[i], menu);
+  /* Samma sanning i två uttryck: tonen på raden och trycket som ignoreras.
+   * Muted text + muted kant läser som "går inte att välja just nu" utan att
+   * raden försvinner — den ska finnas kvar så menyn inte byter form. */
+  {
+    bool can_update = ui.ip[0] != '\0';
+    lv_obj_set_style_text_color(ui.row_labels[TG_SETTINGS_ROW_UPDATE],
+                                can_update ? lv_color_white() : COL_MUTED, 0);
+  }
   for (int i = 0; i < 3; i++) {
     show(ui.about_labels[i], !menu);
     show(ui.about_values[i], !menu);
@@ -227,8 +240,13 @@ static void render(void) {
   }
 }
 
-void torget_settings_open(void) {
+void torget_settings_open(const char *version, const char *ip,
+                          bool computer_found) {
   if (!ui.overlay) return;
+  snprintf(ui.version, sizeof ui.version, "%s", version ? version : "");
+  snprintf(ui.ip, sizeof ui.ip, "%s", ip ? ip : "");
+  ui.computer_found = computer_found;
+  ui.about_dirty = true;
   ui.view = VIEW_MENU;
   ui.open = true;
   render();
@@ -249,13 +267,4 @@ tg_settings_intent torget_settings_take_intent(void) {
   tg_settings_intent intent = ui.pending;
   ui.pending = TG_SETTINGS_INTENT_NONE;
   return intent;
-}
-
-void torget_settings_set_about(const char *version, const char *ip,
-                               bool computer_found) {
-  snprintf(ui.version, sizeof ui.version, "%s", version ? version : "");
-  snprintf(ui.ip, sizeof ui.ip, "%s", ip ? ip : "");
-  ui.computer_found = computer_found;
-  ui.about_dirty = true;
-  if (ui.open && ui.view == VIEW_ABOUT) render();
 }

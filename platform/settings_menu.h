@@ -40,11 +40,29 @@ typedef enum {
   TG_SETTINGS_INTENT_OPEN_WIFI,
 } tg_settings_intent;
 
-/* Skapas en gång vid start, under anroparens UI-lås — som OTA-overlayn och
- * setupfönstret. Ingen allokering sker sedan när menyn öppnas. */
+/*
+ * LÅSREGELN, och den skiljer sig från OTA-overlayn och setupfönstret med
+ * flit: de tar torget_ui_try_lock(200) själva, för de anropas från ANDRA
+ * tasks (nättasken, OTA-tjänsten). Menyn anropas bara från LVGL-tasken —
+ * tick_cb öppnar och stänger den, och radernas callbacks är LVGL-events —
+ * där låset redan är taget. Ett try_lock här hade därför inte skyddat något
+ * utan stallat ticken i 200 ms och sedan tyst gjort ingenting, vilket är
+ * exakt varför main.c:s KEY3-block aldrig får kalla torget_ota_ui_set.
+ * Alla funktioner nedan: kallas UNDER torget_ui_lock(), aldrig utanför.
+ */
+
+/* Skapas en gång vid start. Ingen allokering sker sedan när menyn öppnas. */
 void torget_settings_create(void);
 
-void torget_settings_open(void);
+/* ABOUT-raderna tas som en ögonblicksbild när menyn öppnas, inte som en
+ * ström: värdena bor i andra tasks, och en meny som läste dem live hade
+ * behövt lås eller atomics för tre rader som visas i några sekunder.
+ * ``ip`` NULL eller tom betyder ingen adress — raden visar streck, och
+ * UPDATE tonas ner, för ett OTA-fönster utan adress kan aldrig ta emot
+ * en uppladdning. Att erbjuda det ändå vore ett löfte skärmen inte kan
+ * hålla. */
+void torget_settings_open(const char *version, const char *ip,
+                          bool computer_found);
 void torget_settings_close(void);
 bool torget_settings_open_p(void);
 
@@ -56,10 +74,5 @@ void torget_settings_click_row(tg_settings_row row);
 /* Hämtar och nollställer en väntande avsikt. Returnerar NONE när inget
  * väntar. Anropas från samma task som äger fönsterordningen. */
 tg_settings_intent torget_settings_take_intent(void);
-
-/* ABOUT-raderna. Värden ägs av värden; menyn kopierar dem och visar streck
- * för det som saknas — aldrig en påhittad nolla eller tom rad. */
-void torget_settings_set_about(const char *version, const char *ip,
-                               bool computer_found);
 
 #endif

@@ -56,12 +56,30 @@ assert len(expected) >= 8, "a derived AP password below 8 chars cannot be a WPA2
 
 # --- The consent model ------------------------------------------------------
 # docs/ota.md promises the OTA maintenance window opens ONLY from the device.
-# Routing KEY3 by network state must never hand a script that power.
+# The hold now opens SETTINGS instead of deriving the window from network
+# state, so the assertion moved with it — but the promise it protects did
+# not. What must stay true: the hold reaches a menu and nothing else, the
+# window is opened only by acting on that menu's intent, and a panel with no
+# address is never offered an update it could not receive.
 assert "torget_wifi_setup_request_open()" in main_c
-assert re.search(
-    r"if \(hook_have_ip\(\)\) torget_ota_service_open_maintenance\(\);\s*\n\s*else torget_wifi_setup_request_open\(\);",
-    main_c,
-), "KEY3 must open the OTA window only when there is an IP, setup otherwise"
+hold_branch = main_c.rsplit(
+    "} else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {", 1)[1]
+hold_branch = hold_branch.split("\n  }", 1)[0]
+assert "torget_settings_open(" in hold_branch, (
+    "the KEY3 hold must open SETTINGS"
+)
+assert "torget_ota_service_open_maintenance" not in hold_branch, (
+    "the hold must not reach past the menu into the OTA window"
+)
+# The no-IP protection survives as a menu that cannot offer UPDATE: main.c
+# passes NULL for the address, and the menu refuses the row on that.
+assert re.search(r"hook_have_ip\(\)\s*\?\s*s_ip_text\s*:\s*NULL", main_c), (
+    "a panel without an address must be told so, not handed a stale one"
+)
+settings_c = (root / "platform/settings_menu.c").read_text(encoding="utf-8")
+assert "if (!ui.ip[0]) break;" in settings_c, (
+    "UPDATE must be refused when there is no address to receive an upload"
+)
 
 # The double hold: a second full hold while the OTA window is open must
 # REQUEST the setup window, never close-and-open from the LVGL task — the

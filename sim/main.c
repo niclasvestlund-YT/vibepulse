@@ -1276,12 +1276,16 @@ static int run_vibepulse_static_qa(void) {
 
   /* SETTINGS: vad ett tresekundershåll på KEY3 öppnar. Menyn och ABOUT i
    * båda tillstånd som skiljer sig materiellt — hittad dator och inte. */
-  torget_settings_set_about("v0.2.1-16-g9f9af53", "192.168.1.42", true);
-  torget_settings_open();
+  torget_settings_open("v0.2.1-16-g9f9af53", "192.168.1.42", true);
   dump_overlay_frame("settings-menu");
   torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
   dump_overlay_frame("settings-about-found");
-  torget_settings_set_about("v0.2.1-16-g9f9af53", NULL, false);
+  torget_settings_close();
+  /* Utan adress: UPDATE tonas ner och ABOUT visar streck. Två frames som
+   * skiljer sig materiellt från de ovan, inte samma bild med annan text. */
+  torget_settings_open("v0.2.1-16-g9f9af53", NULL, false);
+  dump_overlay_frame("settings-menu-no-address");
+  torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
   dump_overlay_frame("settings-about-missing");
   torget_settings_close();
 
@@ -1474,9 +1478,10 @@ int main(int argc, char **argv) {
   torget_wifi_ui_create();
   /* OTA-ringen på topplagret, dold tills QA-dumparna väcker den — samma
    * ordning som targetets app_main (overlay EFTER det delade UI:t). */
-  torget_ota_ui_create();
-  /* SETTINGS-menyn på samma topplager. Skapas dold; QA-dumparna öppnar den. */
+  /* SETTINGS mellan nätlagret och OTA-ringen — samma ordning som targetet,
+   * så READY-takeovern vinner över menyn på båda. */
   torget_settings_create();
+  torget_ota_ui_create();
 
   if (argc == 2 &&
       strcmp(argv[1], "--vibepulse-needs-you-render-qa") == 0) {

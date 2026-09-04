@@ -40,6 +40,7 @@
 
 #include "boot_health.h"
 #include "boot_screen.h"
+#include "settings_menu.h"
 #include "button_policy.h"
 #include "agent_monitor.h"
 #include "needs_you_net.h"
@@ -86,6 +87,11 @@ static lv_indev_t *s_touch;
 
 static EventGroupHandle_t s_net_events;
 #define WIFI_GOT_IP BIT0
+
+/* Senaste tilldelade IPv4-adressen som text, för SETTINGS ABOUT.
+ * Tom sträng = ingen adress; menyn visar då streck och tonar ner
+ * UPDATE i stället för att påstå en adress som inte finns. */
+static char s_ip_text[16];
 #define NET_READY   BIT1 /* IP + SNTP: TLS kräver rimlig tid */
 /* Declared with the platform state because the public recovery hook reads it
  * before the Wi-Fi implementation section below. */
@@ -346,6 +352,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (!atomic_load(&s_sta_paused)) esp_wifi_connect();
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(s_net_events, WIFI_GOT_IP);
+    s_ip_text[0] = '\0'; /* ingen adress kvar att visa */
     tg_wifi_signal_event(&s_wifi_signal, 0);
     int reason = ((wifi_event_sta_disconnected_t *)data)->reason;
     bool trial_transition = atomic_exchange(&s_trial_ignore_disconnect, false);
@@ -385,6 +392,15 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     /* GOT_IP is enough to say connected even before the first RSSI sample. */
     xEventGroupSetBits(s_net_events, WIFI_GOT_IP);
+    /* Adressen sparas som text här, där eventet ändå bär den. SETTINGS
+     * ABOUT läser strängen från LVGL-tasken; en läsning av ett netif från
+     * ritloopen vore ett nätverksanrop i fel task för tre tecken på
+     * glaset. En enda skrivare, en enda läsare, och värdet visas bara. */
+    {
+      const ip_event_got_ip_t *got = (const ip_event_got_ip_t *)data;
+      if (got) snprintf(s_ip_text, sizeof s_ip_text, IPSTR,
+                        IP2STR(&got->ip_info.ip));
+    }
     tg_wifi_signal_event(&s_wifi_signal, 1);
     char ssid[TG_WIFI_SSID_CAP];
     wifi_copy_current_ssid(ssid, sizeof ssid);
@@ -674,6 +690,12 @@ static void tick_cb(lv_timer_t *t) {
        * vakter som pollar var 500:e ms. */
       torget_wifi_setup_request_open();
     }
+  } else if (torget_settings_open_p()) {
+    /* Menyn ärver fönstrens nödutgång: VARJE släpp stänger den, kort tryck
+     * som mellanhåll. Ett fullbordat håll stänger också — menyn öppnar
+     * aldrig sig själv igen ovanpå sig själv. Ingen panik avfyras medan
+     * menyn är uppe, exakt som med de två fönstren. */
+    if (key3_action != TG_BUTTON_NONE) torget_settings_close();
   } else if (key3_action == TG_BUTTON_NEXT_APP) {
     torget_app_next();
   } else if (key3_action == TG_BUTTON_PANIC) {
@@ -682,13 +704,34 @@ static void tick_cb(lv_timer_t *t) {
      * svarskanal (ingen enhetsnyckel) gör det till en no-op. */
     tk_needs_you_send_panic();
   } else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {
-    /* Ett håll betyder det ENDA som kan hjälpa just nu. Utan IP kan ett
-     * OTA-fönster aldrig ta emot en uppladdning — då är nätet problemet,
-     * och hållet öppnar setupfönstret i stället. Med IP är allt som förut.
-     * OTA:s samtyckesmodell är oförändrad: fönstret öppnas fortfarande
-     * bara från enheten, aldrig av ett skript. */
-    if (hook_have_ip()) torget_ota_service_open_maintenance();
-    else torget_wifi_setup_request_open();
+    /* Hållet öppnar SETTINGS i stället för att gissa vilket av två fönster
+     * användaren menade. Samtyckesmodellen är oförändrad: menyn nås bara
+     * från enheten, så fysisk närvaro krävs fortfarande för UPDATE, och
+     * tokenet och tiominutersfönstret är orörda. Skillnaden är att valet
+     * blir synligt i stället för härlett ur om panelen råkar ha IP.
+     *
+     * ABOUT-raderna tas som ögonblicksbild här: LVGL-tasken äger dem, och
+     * inget av de tre värdena kostar mer än en läsning. Utan IP skickas
+     * NULL — menyn tonar då ner UPDATE, för ett fönster utan adress kan
+     * ändå aldrig ta emot en uppladdning. */
+    const esp_app_desc_t *desc = esp_app_get_description();
+    torget_settings_open(desc ? desc->version : NULL,
+                         hook_have_ip() ? s_ip_text : NULL,
+                         atomic_load(&s_data_alive));
+  }
+
+  /* Menyns val, utfört av den som äger fönsterordningen. Menyn rör aldrig
+   * OTA:n eller setupfönstret själv: port 80 delas, och ett andra ställe
+   * som öppnade fönster hade gjort överlämningen till en kapplöpning. */
+  switch (torget_settings_take_intent()) {
+    case TG_SETTINGS_INTENT_OPEN_UPDATE:
+      torget_ota_service_open_maintenance();
+      break;
+    case TG_SETTINGS_INTENT_OPEN_WIFI:
+      torget_wifi_setup_request_open();
+      break;
+    default:
+      break;
   }
 
   int target = ((now - s_last_activity_us) > NIGHT_AFTER_US
@@ -920,6 +963,11 @@ void app_main(void) {
    * avgör vem som vinner när båda vill synas. READY-ringen ska alltid
    * vinna — den skapas därför sist. */
   torget_wifi_ui_create();
+  /* SETTINGS mellan nätlagret och OTA-ringen: samma topplager, samma regel
+   * om att den som skapas sist vinner. Menyn ska kunna läggas över nätets
+   * fönster men ALDRIG över READY-takeovern — en väntande uppdatering är
+   * viktigare än en meny, och ringen skapas därför fortfarande sist. */
+  torget_settings_create();
   /* OTA-overlayn EFTER det delade UI:t, på topplagret, dold tills KEY3-
    * hållet öppnar underhållsfönstret — appträdet rörs aldrig. */
   torget_ota_ui_create();
