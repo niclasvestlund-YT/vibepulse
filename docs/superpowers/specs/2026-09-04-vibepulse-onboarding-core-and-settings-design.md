@@ -464,8 +464,15 @@ pairing window keeps all three and puts nothing persistent on the glass:
       `GET /ota/challenge`, which exists only inside the UPDATE window and
       returns the panel's device id plus a fresh, single-use nonce that
       expires with the window.
-   2. It checks the returned device id against the selected record and
-      aborts on mismatch — an early exit, not the security boundary.
+   2. **With a runtime credential** it checks the returned device id
+      against the selected record and aborts on mismatch — an early exit,
+      not the security boundary. A compiled credential has no record to
+      compare against (see *The pairing record is required only for a
+      runtime credential*), so this step is skipped there and the MAC is
+      the whole check: only a holder of that compiled token can produce an
+      ack the uploader accepts. After a successful compiled upload the
+      uploader records the panel's id and that it answers the challenge,
+      which is what step 3 below pins.
    3. It computes `auth = HMAC-SHA256(token, "vibepulse-ota-v2" ‖ device
       id ‖ nonce ‖ declared SHA-256 ‖ declared Content-Length)` and sends
       the image with `X-VibePulse-Device`, `X-VibePulse-Nonce`,
@@ -490,7 +497,7 @@ pairing window keeps all three and puts nothing persistent on the glass:
       the slot that matched. The uploader verifies it against its own token
       before reporting anything, so an unpaired endpoint that accepted the
       bytes cannot fabricate a success. Following the honesty invariant,
-      the uploader has exactly three states and none of them is guessed:
+      the uploader has exactly four states and none of them is guessed:
       - **unknown** — no ack, or an ack that fails verification. Nothing
         proves the selected panel received anything. Never shown as
         delivered.
@@ -560,14 +567,22 @@ pairing window keeps all three and puts nothing persistent on the glass:
    enough to offer the challenge endpoint verifies it just as well. That is
    also what makes the compiled slot's HMAC and the compiled-token rotation
    proof reachable at all, rather than paths no uploader would ever take.
-   Only when the target does not answer the challenge — a panel running
-   firmware from before step 4 — does the uploader fall back to
-   `Authorization: Bearer <compiled token>`, which keeps working exactly as
-   today with the plaintext exposure `docs/ota.md` already documents. A
-   **runtime** token is never sent that way: a pre-step-4 panel has no
-   runtime slot by definition, so the uploader stops and says so. Step 4
-   updates `docs/ota.md` so the *Knowledge* factor reads "proven, never
-   transmitted" wherever the challenge exists.
+   **The downgrade to a bearer is never automatic.** A silent fallback
+   would hand the decision to whoever can make the challenge fail: a LAN
+   peer that suppresses the request or answers 404 would make the uploader
+   send the compiled token in plaintext, capture it, and use it during the
+   open window — and an unanswered challenge proves nothing about the
+   target's firmware. So a target that does not answer the challenge is an
+   **error**, and the uploader says what it wants: `--legacy-bearer`, typed
+   by a person who knows the panel predates step 4. Two guards narrow even
+   that. The uploader **pins capability**: once a panel has answered a
+   challenge, its record remembers so, and `--legacy-bearer` against that
+   panel is refused outright rather than obeyed. And a **runtime** token is
+   never sent as a bearer under any flag, since a panel that has one
+   necessarily offers the challenge. With the flag the upload proceeds as
+   today, with the plaintext exposure `docs/ota.md` already documents.
+   Step 4 updates `docs/ota.md` so the *Knowledge* factor reads "proven,
+   never transmitted" wherever the challenge exists.
    Lookup order for the token is unchanged: environment, the per-panel
    store, then `secrets.h` when a checkout exists. A single-panel user
    never sees the map; the developer flow keeps working unchanged.
@@ -761,12 +776,16 @@ Recorded so the cleanup is a decision, not an accident.
   token; that the uploader reports success only on a valid keyed ack and
   treats a missing or wrong ack as *unknown*, and a valid ack carrying a
   failure result as *failed*, never as delivered; that the
-  uploader asks for a challenge whichever typed slot it holds and falls
-  back to the bearer only when the target offers no challenge endpoint;
-  that it refuses rather than sending a runtime token as a bearer; that the
-  legacy bearer upload still works with a compiled token against a
-  pre-step-4 panel; and that the challenge endpoint is absent outside the
-  window.
+  uploader asks for a challenge whichever typed slot it holds; that an
+  unanswered challenge is an error naming `--legacy-bearer` rather than an
+  automatic downgrade, so a peer that suppresses the challenge cannot
+  elicit a plaintext token; that `--legacy-bearer` is refused against a
+  panel whose record shows it has answered a challenge before; that a
+  runtime token is never sent as a bearer under any flag; that a compiled
+  credential with no pairing record completes an authenticated upload with
+  the MAC as the only check; that the legacy bearer upload still works with
+  a compiled token and the flag against a pre-step-4 panel; and that the
+  challenge endpoint is absent outside the window.
 - Poll identity, version, and boot proof: a test that every panel poll
   carries `X-VibePulse-Device` with the device id and `X-VibePulse-Version`
   with the running firmware version; that the registry keys entries by the
