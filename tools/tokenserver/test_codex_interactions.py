@@ -1,8 +1,5 @@
 import dataclasses
-import http.client
 import json
-import select
-import socket
 import threading
 import time
 import unittest
@@ -717,51 +714,14 @@ class CodexRouteTests(unittest.TestCase):
         handler._read_json_body = mock.Mock()
         return handler
 
-    def early_reject_exchange(self, path, payload, headers,
-                              grace=0.3, timeout=10.0):
-        """POST with the headers first and the body only if no reply came.
-
-        The requests under test must be rejected on their headers alone,
-        before the body is parsed or anything is parked. A client that
-        writes headers and body in one go leaves that body unread in the
-        server's socket when the server answers and closes; Windows then
-        aborts the connection (WinError 10053) and discards the response
-        that was already on its way, so the test sees no status at all.
-        Sending the body only after a short grace period, and only when no
-        response has arrived, keeps the assertion exact and the socket
-        clean on every platform. A route that does need the body still
-        gets it, well inside the server's JSON body deadline.
-        """
-        body = json.dumps(payload).encode()
-        merged = {"Content-Type": "application/json"}
-        merged.update(headers or {})
-        if not any(name.lower() == "host" for name in merged):
-            merged["Host"] = f"127.0.0.1:{self.port}"
-        merged["Content-Length"] = str(len(body))
-        merged["Connection"] = "close"
-        head = (f"POST {path} HTTP/1.1\r\n" +
-                "".join(f"{name}: {value}\r\n"
-                        for name, value in merged.items()) + "\r\n")
-        client = socket.create_connection(("127.0.0.1", self.port),
-                                          timeout=timeout)
-        try:
-            client.sendall(head.encode("latin-1"))
-            readable, _, _ = select.select([client], [], [], grace)
-            if not readable:
-                client.sendall(body)
-            response = http.client.HTTPResponse(client)
-            response.begin()
-            return response.status, response.read()
-        finally:
-            client.close()
-
     def assert_wire_rejected(self, path, payload, headers, expected_status):
         result = {}
 
         def post():
             try:
-                result["status"], result["raw"] = self.early_reject_exchange(
-                    path, payload, headers)
+                result["status"], result["raw"] = self.request(
+                    "POST", path, payload, headers=headers,
+                    early_reject=True)
             except OSError as exc:  # keep the failure legible, never silent
                 result["error"] = repr(exc)
 

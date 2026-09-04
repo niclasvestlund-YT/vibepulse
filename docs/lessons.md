@@ -34,8 +34,14 @@ response already sent, so `getresponse()` raised instead of returning the
 status. **The rule:** a client that expects an early rejection must not
 leave unread bytes behind it — send the headers, wait briefly for the
 answer, and send the body only when none came. **Guards:**
-`early_reject_exchange` in `test_codex_interactions.py`, and a legible
-failure message carrying the socket error. **Watch for:** the same abort in
+`headers_first_request` in `test_interactions.py`, opted into with
+`early_reject=True` by the tests that expect a rejection on the headers
+alone (it cannot be the default: a route that parks a question expects its
+body within the server's 50 ms first-byte deadline), and a legible failure
+message carrying the socket error in `assert_wire_rejected`. The server
+already drains the request before its 503 in `_reject_busy` for exactly this
+reason; extending that drain to the 403/415/404 early rejections is the
+product-side follow-up. **Watch for:** the same abort in
 real Windows hook clients that get a 403/415 from the tokenserver before
 their body is read; if a hook on Windows reports a connection abort where a
 status was expected, this is the mechanism.
