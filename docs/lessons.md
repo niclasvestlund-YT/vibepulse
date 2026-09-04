@@ -62,9 +62,12 @@ than 64 KiB still leaves a residue unread and can still abort on Windows. The
 reachable case is a real hook client posting an over-cap payload to a disabled
 route (404) — a legitimate client sends a loopback `Host`, an allowed `Origin`
 and `application/json`, so it cannot trip the 403 or the 415. This is accepted,
-not overlooked: an unbounded drain hands any peer a denial-of-service lever, and
-the same cap already governs `_reject_busy`. `_read_json_body` refuses an
-over-cap body without consuming it, so that path carries the same residue.
+not overlooked: an unbounded drain hands any peer a denial-of-service lever.
+`_read_json_body` refuses an over-cap body without consuming it, so that path
+carries the same residue. **The 503 path is not the same bound:** `_reject_busy`
+shares the 50 ms deadline but drains at most 8 KiB of *headers*, stopping at the
+end of them — it never touches the advertised body, so only the idea is shared,
+not the cap.
 **Watch for:** the same abort anywhere else a response precedes an unread
 body; if a hook on Windows reports a connection abort where a status was
 expected, this is the mechanism — and if it reports one on a request that was

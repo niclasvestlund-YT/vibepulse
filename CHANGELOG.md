@@ -13,8 +13,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   non-loopback `Host`, a disallowed `Origin`, a non-JSON `Content-Type`, a
   disabled route) previously closed the socket with the advertised body still
   unread, and Windows discards an already-sent response when a connection is
-  closed that way (`WinError 10053`). The drain follows the existing `503`
-  path: at most 64 KiB and 50 ms, and the bytes are never parsed or logged, so
+  closed that way (`WinError 10053`). It applies the idea the existing `503`
+  path already used, on the same 50 ms deadline but not the same byte cap:
+  `_reject_busy` drains at most 8 KiB of *headers* and stops at the end of
+  them, whereas this drains the advertised *body* under its own 64 KiB cap.
+  The bytes are never parsed or logged, so
   rejections still happen before any parsing and nothing is parked. That cap is
   deliberate and it is also the limit of the fix: a body larger than 64 KiB is
   drained only up to the cap, so an early rejection of an over-cap body can

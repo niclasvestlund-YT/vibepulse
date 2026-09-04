@@ -129,8 +129,10 @@ CLAUDE_PLAN_USAGE_FRESH_S = 20 * 60
 CLAUDE_PLAN_USAGE_MAX_BYTES = 2 * 1024 * 1024
 HTTP_MAX_WORKERS = 32
 JSON_BODY_TIMEOUT_S = 2.0
-# Tömning av en oläst, annonserad kropp före ett tidigt avslag: samma
-# tak som _reject_busy använder för sin 503, uttryckt i byte och tid.
+# Tömning av en oläst, annonserad kropp före ett tidigt avslag. Delar
+# deadline med _reject_busy (0.05 s), men inte bytetaket: den tömmer som
+# mest 8 KiB *huvuden* och stannar vid \r\n\r\n, medan den här tömningen
+# gäller den annonserade kroppen och har ett eget, större tak.
 REQUEST_DRAIN_LIMIT = 64 * 1024
 REQUEST_DRAIN_TIMEOUT_S = 0.05
 
@@ -2319,8 +2321,11 @@ class Handler(BaseHTTPRequestHandler):
         kastar bort svaret som redan skickats, så en riktig hookklient ser
         ett avbrott där ett 403/415/404 var meningen.
 
-        Samma medicin som BoundedThreadingHTTPServer._reject_busy ger sin
-        503, med två tak: som mest request_drain_limit byte OCH som mest
+        Samma idé som BoundedThreadingHTTPServer._reject_busy använder före
+        sin 503, men inte samma tak: den tömmer som mest 8 KiB *huvuden* och
+        stannar vid huvudenas slut, medan den här tömningen gäller den
+        annonserade kroppen. Gemensam är deadlinen (0.05 s). Två tak gäller
+        här: som mest request_drain_limit byte OCH som mest
         request_drain_timeout_s totalt (en egen deadline, inte bara en
         socket-timeout per läsning — annars kan en motpart som droppar en
         byte i taget hålla oss kvar i det oändliga). En långsam eller
