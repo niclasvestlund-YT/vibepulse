@@ -486,9 +486,16 @@ pairing window keeps all three and puts nothing persistent on the glass:
       compare against (see *The pairing record is required only for a
       runtime credential*), so this step is skipped there and the MAC is
       the whole check: only a holder of that compiled token can produce an
-      ack the uploader accepts. After a successful compiled upload the
-      uploader records the panel's id and that it answers the challenge,
-      which is what step 3 below pins.
+      ack the uploader accepts. **Any valid ack pins the capability, not
+      only a successful one:** the uploader records the panel's id and that
+      it answers the challenge as soon as a keyed ack verifies, whatever
+      its result. What the pin asserts is that this panel speaks the
+      authenticated protocol, and a verified `failed` ack — the
+      digest-mismatch path, say — proves that exactly as well as a success
+      does. Pinning only on success would leave a panel that refused one
+      image unpinned, and a later `--legacy-bearer` could then put the
+      compiled token on the wire in plaintext against firmware that never
+      needed it.
    3. It computes `auth = HMAC-SHA256(token, transcript("vibepulse-ota-v2",
       device id, nonce, declared SHA-256, declared Content-Length))` and
       sends the image with `X-VibePulse-Device`, `X-VibePulse-Nonce`,
@@ -903,7 +910,10 @@ Recorded so the cleanup is a decision, not an accident.
   outcome forces it to guess a field; that the
   uploader consults the capability pin even when the credential lookup is
   bypassed, so `--legacy-bearer` is refused against a panel pinned as
-  challenge-capable no matter how it is addressed; that the Windows rung-0
+  challenge-capable no matter how it is addressed; that a valid ack with a
+  *failure* result pins the capability just as a success does, so an upload
+  the panel rejected cannot be followed by a plaintext-token downgrade
+  against that same panel; that the Windows rung-0
   command creates the Private-profile TCP 8737 rule and never a Public one,
   and that a host without it is reported as reachable-by-discovery but not
   pollable rather than healthy; that the
