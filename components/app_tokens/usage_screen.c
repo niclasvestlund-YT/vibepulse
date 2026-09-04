@@ -97,6 +97,7 @@ typedef struct {
   lv_obj_t *marker;
   lv_obj_t *today;
   lv_obj_t *reset;
+  lv_obj_t *reset_caption;
   usage_quota_scope scope;
   usage_provider provider;
   char rendered_context[64];
@@ -450,7 +451,10 @@ static lv_obj_t *new_tile(int index) {
   return tile;
 }
 
+/* caption_out is optional: pass it only for a stat whose caption changes at
+ * runtime, because the number it sits under can change what it measures. */
 static void create_stat(lv_obj_t *tile, lv_obj_t **value_out,
+                        lv_obj_t **caption_out,
                         int x, int width, bool right, lv_color_t color,
                         const char *caption) {
   *value_out = label(tile, &plex_stat_35, color, x, STAT_VALUE_Y, width, 42);
@@ -464,6 +468,7 @@ static void create_stat(lv_obj_t *tile, lv_obj_t **value_out,
                               0);
   lv_obj_set_style_text_letter_space(name, 2, 0);
   lv_label_set_text(name, caption);
+  if (caption_out) *caption_out = name;
 }
 
 static void create_quota_page(quota_page *page, int index,
@@ -516,11 +521,11 @@ static void create_quota_page(quota_page *page, int index,
   lv_obj_set_style_bg_color(page->marker, COL_WHITE, 0);
   lv_obj_add_flag(page->marker, LV_OBJ_FLAG_HIDDEN);
 
-  create_stat(page->tile, &page->today, VP_SAFE_X, 210, false,
+  create_stat(page->tile, &page->today, NULL, VP_SAFE_X, 210, false,
               provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX,
               "USED TODAY");
-  create_stat(page->tile, &page->reset, RIGHT_STAT_X, RIGHT_STAT_W, true,
-              COL_WHITE, "TO RESET");
+  create_stat(page->tile, &page->reset, &page->reset_caption,
+              RIGHT_STAT_X, RIGHT_STAT_W, true, COL_WHITE, "TO RESET");
   lv_label_set_text(page->today, "–");
   lv_label_set_text(page->reset, "–");
   create_pager(page->tile, index);
@@ -830,7 +835,8 @@ static void apply_quota(quota_page *page, const tk_tokens *tokens) {
   lv_label_set_text(page->today,
                     quota->has_delta && bar_available
                         ? quota->delta_text : "–");
-  lv_label_set_text(page->reset, quota->reset_short_text);
+  lv_label_set_text(page->reset, view.countdown_text);
+  lv_label_set_text(page->reset_caption, view.countdown_caption);
   refresh_header(page, ui.last_now_us);
 }
 

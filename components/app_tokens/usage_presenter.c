@@ -26,6 +26,20 @@ const char *usage_presenter_quota_status_text(int has_data, int stale,
   return "LIVE";
 }
 
+/* The stat row's duration grammar -- "2D 4H", "9H 30M", "45M". Shared so a
+ * countdown to the wall and a countdown to the reset read as the same kind
+ * of number, because on the quota page they occupy the same slot. */
+static void format_duration_short(int minutes, char *out, size_t capacity) {
+  if (minutes >= 24 * 60) {
+    snprintf(out, capacity, "%dD %dH", minutes / (24 * 60),
+             (minutes / 60) % 24);
+  } else if (minutes >= 60) {
+    snprintf(out, capacity, "%dH %02dM", minutes / 60, minutes % 60);
+  } else {
+    snprintf(out, capacity, "%dM", minutes);
+  }
+}
+
 static void format_reset(const tk_limit *limit,
                          char *long_out, size_t long_capacity,
                          char *short_out, size_t short_capacity) {
@@ -34,18 +48,13 @@ static void format_reset(const tk_limit *limit,
     snprintf(long_out, long_capacity, "RESET IN %dD %dH",
              limit->reset_min / (24 * 60),
              (limit->reset_min / 60) % 24);
-    snprintf(short_out, short_capacity, "%dD %dH",
-             limit->reset_min / (24 * 60),
-             (limit->reset_min / 60) % 24);
   } else if (limit->reset_min >= 60) {
     snprintf(long_out, long_capacity, "RESET IN %dH %02dM",
              limit->reset_min / 60, limit->reset_min % 60);
-    snprintf(short_out, short_capacity, "%dH %02dM",
-             limit->reset_min / 60, limit->reset_min % 60);
   } else {
     snprintf(long_out, long_capacity, "RESET IN %dM", limit->reset_min);
-    snprintf(short_out, short_capacity, "%dM", limit->reset_min);
   }
+  format_duration_short(limit->reset_min, short_out, short_capacity);
 }
 
 static void build_card(usage_card_view *out, usage_card_kind kind,
@@ -110,10 +119,55 @@ void usage_presenter_build_hero(const tk_tokens *tokens,
   build_hero_quota(tokens, provider, &out->quota);
 }
 
+/* Which forecast, if any, is about THIS page's window.
+ *
+ * The service forecasts the weekly windows only, so the model-week page gets
+ * nothing: borrowing the all-models forecast would put a deadline under a
+ * percentage that does not measure it. A page with no forecast of its own
+ * keeps counting down to its reset, which is always true. */
+static const tk_forecast *scope_forecast(const tk_tokens *tokens,
+                                         usage_quota_scope scope) {
+  switch (scope) {
+    case USAGE_QUOTA_CLAUDE_ALL:
+      return &tokens->claude_forecast;
+    case USAGE_QUOTA_CODEX_WEEK:
+      return &tokens->codex_forecast;
+    case USAGE_QUOTA_CLAUDE_MODEL:
+    default:
+      return NULL;
+  }
+}
+
+/* Fold the forecast's deadline into the reset stat.
+ *
+ * Only an EXHAUSTS forecast that lands strictly before the reset earns the
+ * swap -- "at reset" and "lasts past reset" both mean the reset IS the wall,
+ * and the default caption already says that. Everything else (collecting,
+ * unavailable, a limit without a reset) leaves the slot exactly as it was. */
+static void build_countdown(usage_quota_page_view *out, const tk_limit *limit,
+                            const tk_forecast *forecast) {
+  snprintf(out->countdown_caption, sizeof out->countdown_caption, "TO RESET");
+  snprintf(out->countdown_text, sizeof out->countdown_text, "%s",
+           out->quota.reset_short_text);
+  if (!limit->has_pct || !limit->has_reset) return;
+  if (!forecast || forecast->state != TK_FORECAST_EXHAUSTS) return;
+  if (!forecast->has_offset_min || forecast->offset_min >= 0) return;
+
+  int minutes = limit->reset_min + forecast->offset_min;
+  /* A deadline already behind us is not a countdown. The percentage above is
+   * the honest number then, and the reset is still the next real event. */
+  if (minutes <= 0) return;
+  format_duration_short(minutes, out->countdown_text,
+                        sizeof out->countdown_text);
+  snprintf(out->countdown_caption, sizeof out->countdown_caption, "TO EMPTY");
+  out->counts_to_empty = 1;
+}
+
 void usage_presenter_build_quota_page(const tk_tokens *tokens,
                                       usage_quota_scope scope,
                                       usage_quota_page_view *out) {
   tk_tokens empty = {0};
+  const tk_limit *limit;
   if (!out) return;
   if (!tokens) tokens = &empty;
   memset(out, 0, sizeof *out);
@@ -127,19 +181,23 @@ void usage_presenter_build_quota_page(const tk_tokens *tokens,
                      ? tokens->claude_model_week_label
                      : "FABLE · WEEK",
                  &tokens->claude_model_week);
+      limit = &tokens->claude_model_week;
       break;
     case USAGE_QUOTA_CLAUDE_ALL:
       out->provider = USAGE_PROVIDER_CLAUDE;
       build_card(&out->quota, USAGE_CARD_ALL_WEEK,
                  "WEEKLY · ALL MODELS", &tokens->claude_week);
+      limit = &tokens->claude_week;
       break;
     case USAGE_QUOTA_CODEX_WEEK:
     default:
       out->provider = USAGE_PROVIDER_CODEX;
       build_card(&out->quota, USAGE_CARD_ALL_WEEK,
                  "WEEKLY", &tokens->codex_week);
+      limit = &tokens->codex_week;
       break;
   }
+  build_countdown(out, limit, scope_forecast(tokens, scope));
 }
 
 void usage_presenter_build_claude_details(
