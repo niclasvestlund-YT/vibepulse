@@ -20,3 +20,9 @@ sdkconfig.old
 platform/fonts/src/
 # Enhetens LAN-IP for tools/ota-flash.sh — miljospecifik, aldrig delad.
 .ota-device
+
+# Agent-tooling state and scratch captures that appear in worktrees while
+# working with Claude Code/Codex plugins. Never project source.
+.superpowers/
+.scratch-capture/
+.DS_Store

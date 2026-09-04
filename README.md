@@ -41,6 +41,20 @@ the room, no window to switch to, no menu bar to squint at.
 > active, optional integrations remain opt-in, and every platform claim stays
 > tied to its recorded evidence.
 
+## Start here
+
+VibePulse is built for vibecoders — people who build with Claude Code or
+Codex. You do not need to read this whole page:
+
+1. **Have the board?** Check [What you need](#what-you-need), then follow
+   [Setup, the vibecoder way](#setup-the-vibecoder-way): your coding agent
+   does the setup with you, one verified step at a time.
+2. **No board yet?** [Run the simulator](#no-hardware-run-the-simulator).
+   Same pixels, on your computer.
+3. **The core is your Claude/Codex usage on the glass.** Answering from the
+   panel, the relays, GitHub, and sound are add-ons: each is its own switch,
+   off until you turn it on.
+
 ## Latest release: v1.0.0
 
 The first major release makes Windows a first-class VibePulse host and records
@@ -446,17 +460,33 @@ and future runtime revisions require a fresh run rather than inheriting it.
 
 ## Setup, the vibecoder way
 
-Clone the repo, open your coding agent inside it (Claude Code, Codex,
-Cursor, whatever you run), and say:
+You do not set VibePulse up by hand. Your coding agent does it with you,
+step by step, verifying as it goes. Clone the repo and start the agent you
+already use, in that folder, with one line:
 
-> Set up VibePulse for me: help me fill in secrets.h, build and flash the
-> board over USB, and start the tokenserver on this Mac or Windows PC.
+**Claude Code**
 
-The repo is built for this. `CLAUDE.md` and `AGENTS.md` point your agent
+```sh
+git clone https://github.com/niclasvestlund-YT/vibepulse.git && cd vibepulse
+claude "Set up VibePulse for me: help me fill in secrets.h, build and flash the board over USB, and start the tokenserver on this computer."
+```
+
+**Codex**
+
+```sh
+git clone https://github.com/niclasvestlund-YT/vibepulse.git && cd vibepulse
+codex "Set up VibePulse for me: help me fill in secrets.h, build and flash the board over USB, and start the tokenserver on this computer."
+```
+
+Any other agent (Cursor, Copilot, …): open the folder and paste the same
+sentence.
+
+The repo is built for this. `CLAUDE.md` and `AGENTS.md` point the agent
 straight at **[docs/agent-setup.md](docs/agent-setup.md)** — an English
 runbook written for agents, with a verification after every step, the traps
-that actually cost people an evening, and a symptom→fix table. That's the
-whole onboarding.
+that actually cost people an evening, and a symptom→fix table. The agent
+asks before it flashes the board; nothing is written to the screen without
+your go-ahead. That's the whole onboarding.
 
 Reading rather than running? That runbook is also the fastest way to
 understand how the pieces fit together.
