@@ -376,27 +376,51 @@ pairing window keeps all three and puts nothing persistent on the glass:
    address. A bare `.ota-device` IP matches a record either by last-known
    address or by the id the registry reports for that address, so DHCP
    churn needs neither re-pairing nor hand-editing the store. Any address
-   obtained this way is only a place to *try*: the possession proof below
-   decides whether the panel there is the paired one, and after a
-   successful proof the record's last-known address is updated.
-   Before the bearer is sent, the uploader requires a **proof of
-   possession**: it sends a random nonce to the panel's maintenance
-   endpoint, and the panel answers with one labelled HMAC-SHA256 over that
-   nonce **per populated token slot** — `runtime` and/or `compiled`,
-   omitting an empty slot — so both slots stay usable when they coexist
-   and an uploader that fell back to `secrets.h` can still pass with the
-   compiled token. The uploader verifies its own token against the proof
-   with the matching label in constant time and aborts on mismatch or on a
-   missing label. Only then does the upload proceed as today. The endpoint
-   exists only inside the UPDATE window, like the upload itself.
-   Lookup order for the token is environment, the per-panel store, then
-   `secrets.h` when a checkout exists. A single-panel user never sees the
-   map; the developer flow keeps working unchanged.
-   *Scope note:* at upload time the bearer still travels as `docs/ota.md`
-   specifies today; this spec changes enrolment only and does not claim to
-   improve the upload path. Making the upload prove possession without
-   sending the bearer is a candidate for a later step, not part of this
-   one.
+   obtained this way is only a place to *try*: the authenticated upload
+   below decides whether the panel there is the paired one, and after a
+   successful upload the record's last-known address is updated.
+   **The paired upload never sends the token.** A separate "prove you
+   hold the token, then here is the bearer" step is rejected: an impostor
+   at the target address can relay the nonce to the real panel while its
+   window is open, return the real answer, and then collect the bearer.
+   Such a proof shows the token exists *somewhere*, not that the endpoint
+   is the paired panel. So the firmware request itself is authenticated
+   and there is no bearer to hand over:
+
+   1. The uploader asks the panel at the chosen address for a challenge:
+      `GET /ota/challenge`, which exists only inside the UPDATE window and
+      returns the panel's device id plus a fresh, single-use nonce that
+      expires with the window.
+   2. It checks the returned device id against the selected record and
+      aborts on mismatch — an early exit, not the security boundary.
+   3. It computes `auth = HMAC-SHA256(token, "vibepulse-ota-v2" ‖ device
+      id ‖ nonce ‖ SHA-256(image))` and sends the image with
+      `X-VibePulse-Device`, `X-VibePulse-Nonce`, and `X-VibePulse-Auth`
+      headers. The token never leaves the computer.
+   4. The panel recomputes the MAC over the body it actually received with
+      each populated slot's token — `runtime` and/or `compiled`, so both
+      slots stay usable when they coexist — consumes the nonce, and applies
+      the image only on a match. The existing image checks in `docs/ota.md`
+      then run exactly as today.
+
+   What a relay gains: nothing durable. Forwarding the exchange to the real
+   panel installs exactly the image the user chose on exactly the panel they
+   chose; the MAC is bound to that image and that nonce, so no other image
+   and no second use. The impostor ends up holding no token and no reusable
+   credential.
+
+   **Legacy path, unchanged.** An upload carrying `Authorization: Bearer
+   <compiled token>` keeps working exactly as today, so existing panels and
+   the developer flow are untouched; it keeps the plaintext-bearer exposure
+   `docs/ota.md` already documents. `tools/ota-flash.sh` and the packaged
+   `vibepulse update` use the authenticated request whenever they hold a
+   runtime token and fall back to the bearer only for a compiled one. This
+   *does* change the upload path for paired panels, deliberately: step 4
+   updates `docs/ota.md` so the *Knowledge* factor reads "proven, never
+   transmitted" for a paired panel.
+   Lookup order for the token is unchanged: environment, the per-panel
+   store, then `secrets.h` when a checkout exists. A single-panel user
+   never sees the map; the developer flow keeps working unchanged.
 4. **Time and confirmation** — on success the glass shows
    **PAIRED · \<origin of the computer\>** and the window closes at once;
    the computer treats only the panel's success response as success.
@@ -549,16 +573,18 @@ Recorded so the cleanup is a decision, not an accident.
 - Pairing target: a test that `vibepulse pair` selects the most recently
   seen panel from that registry, lists and refuses to guess when several
   are fresh, and accepts `--device <ip>`.
-- Credential selection and possession proof: a test that the uploader
+- Credential selection and authenticated upload: a test that the uploader
   selects the record by id or by a unique address match and refuses
   otherwise; that `--device <id>` resolves the current address from the
   registry when the panel's IP has changed, then the last-known address,
-  and that `--at <ip>` overrides both; that a successful proof updates the
-  record's last-known address; that it never sends a bearer before a valid
-  labelled HMAC over its nonce; that a panel with both slots answers with
-  both labels and an uploader holding either token passes; that a wrong or
-  missing proof aborts the upload with nothing secret sent; and that the
-  proof endpoint is absent outside the window.
+  and that `--at <ip>` overrides both; that a successful upload updates the
+  record's last-known address; that no request in a paired upload contains
+  the token (transcript assertion); that the panel rejects a MAC over a
+  different image, a reused nonce, an expired nonce, and a wrong device
+  id; that a captured request replayed after its nonce is consumed is
+  rejected; that a panel with both slots accepts a MAC keyed by either
+  token; that the legacy bearer upload still works with a compiled token;
+  and that the challenge endpoint is absent outside the window.
 - Poll identity header: a test that every panel poll carries
   `X-VibePulse-Device` with the device id, that the registry keys entries
   by it, and that the header never carries a token or code.
