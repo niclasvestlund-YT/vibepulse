@@ -52,8 +52,11 @@ Codex. You do not need to read this whole page:
 2. **No board yet?** [Run the simulator](#no-hardware-run-the-simulator).
    Same pixels, on your computer.
 3. **The core is your Claude/Codex usage on the glass.** Answering from the
-   panel, the relays, GitHub, and sound are add-ons: each is its own switch,
-   off until you turn it on.
+   panel, the relays, and GitHub are add-ons, each off by default and opted
+   into separately: today through the setup command, `secrets.h`, and the
+   table under [Independent switches](#independent-switches). A settings
+   page on the glass is planned, not built (see the spec in
+   `docs/superpowers/specs/`). Sound has no verified backend yet.
 
 ## Latest release: v1.0.0
 
@@ -433,7 +436,7 @@ installer is planned so that this step disappears.
 
 | Board | Display | Status |
 |---|---|---|
-| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch, IMU | **Verified on a real unit.** Every frame in this README is an exact 480×480 render of the pixels it shows. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch; IMU and speaker on board but **not yet verified on the unit** | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Every frame in this README is an exact 480×480 render of the pixels it shows. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
 
 More boards are added here as they pass on a real unit, never from a
 datasheet. What the current board can and cannot do is recorded in

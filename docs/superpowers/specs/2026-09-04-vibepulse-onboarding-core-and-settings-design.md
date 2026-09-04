@@ -17,7 +17,9 @@ on the shelf that shows their usage, without reading a runbook:
 1. Plug the board into the computer and click **Install** in the browser.
    *(new)*
 2. Put the screen on its own USB power. It shows a Wi-Fi QR at once. Scan
-   it with a phone, pick the network. *(built)*
+   it with a phone, pick the network. *(the QR portal is built; showing it
+   at once on an empty panel is new, step 4 — today
+   `tg_wifi_setup_should_open()` waits the 90-second `TG_WIFI_SETUP_AUTO_US`)*
 3. The glass says **Install VibePulse on your computer** with a QR and a
    short URL, then **Looking for your computer…**. One command on the Mac
    or PC. The glass says which computer it found and shows the usage pages.
