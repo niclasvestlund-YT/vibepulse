@@ -200,9 +200,18 @@ configure.
   user who declines that is offered the checkout path instead. The existing
   `tools/vibepulse_macos_service.py` remains the path for people who run
   from a checkout.
-- **Windows:** a PowerShell one-liner that installs Python via `winget` when
-  it is missing and then runs the shipped
-  `tools/tokenserver/install-windows-task.ps1`. No new installer logic.
+- **Windows:** a PowerShell one-liner that installs Git and Python via
+  `winget` when either is missing, **clones the repository to a durable
+  path** (`$HOME\vibepulse`, the same path the Windows host runbook uses,
+  pulling instead of cloning when it already exists), and then runs the
+  shipped `tools/tokenserver/install-windows-task.ps1` from that checkout.
+  The clone is not optional: that installer derives the repository root
+  from `$PSScriptRoot` and registers `tokenserver.py` and
+  `run-windows-task.ps1` at those paths in Task Scheduler, so the files
+  must live somewhere that survives sign-out. No new installer logic — the
+  one-liner only acquires what the existing installer already expects. A
+  Windows package that removes the checkout is a later option, not a
+  prerequisite for rung 0.
 - **Linux:** the setup page says *not yet*, matching
   `docs/platform-support.md` and issue #2.
 
@@ -452,6 +461,12 @@ pairing window keeps all three and puts nothing persistent on the glass:
         succeeded, which is exactly the moment the image stops being
         revocable. Polls before that carry the device id and version as
         usual and prove nothing.
+        Alongside the nonce the panel stores **which slot authenticated the
+        upload** — the label `runtime` or `compiled`, never the token —
+        because the reboot would otherwise discard it and a panel with both
+        slots populated could not know which key the proof must use. The
+        header carries that label too, so the uploader verifies with the
+        token it actually holds and either upload path reaches *running*.
         The service holds no token: the recent-panels registry stores that
         header verbatim as an opaque value, and `vibepulse update` verifies
         it against its own token and the nonce it issued. The proof is
@@ -676,8 +691,11 @@ Recorded so the cleanup is a decision, not an accident.
   that a poll with the correct id and version but no proof, a wrong proof,
   or a proof for an earlier nonce never produces *running*; that no proof
   is emitted while the running partition is `PENDING_VERIFY`, so a panel
-  whose health gate later rolls back stays *delivered, not running*; and
-  that none of the headers ever carries a token or code.
+  whose health gate later rolls back stays *delivered, not running*; that a
+  panel with both slots populated persists the authenticating slot label
+  across the reboot and keys the proof with that slot, so either upload
+  path reaches *running*; and that none of the headers ever carries a token
+  or code.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; that a build with a flag at
