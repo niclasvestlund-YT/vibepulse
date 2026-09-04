@@ -1,4 +1,5 @@
 import dataclasses
+import io
 import json
 import threading
 import time
@@ -1090,3 +1091,142 @@ class CodexRouteTests(unittest.TestCase):
                     "status": "computer", "reason": "invalid",
                 })
                 self.assertIsNone(self.pending())
+
+    def early_reject_cases(self):
+        """Every rejection that answers on the headers alone.
+
+        The payload is deliberately large so a body left unread would be a
+        real backlog in the socket, not a couple of bytes that happen to fit
+        in the kernel buffer.
+        """
+        payload = dict(codex_question_event(), pad="x" * 8192)
+        return (
+            ("host", "/api/codex/question", payload,
+             {"Host": "attacker.example"}, 403),
+            ("origin", "/api/codex/permission", codex_permission(),
+             {"Origin": "https://attacker.example"}, 403),
+            ("content-type", "/api/codex/question", payload,
+             {"Content-Type": "text/plain"}, 415),
+            ("panic-content-type", "/api/panic", payload,
+             {"Content-Type": "text/plain"}, 415),
+        )
+
+    def test_early_rejections_answer_even_when_the_body_is_written(self):
+        """The plain client path: headers AND body, then read the status.
+
+        This is the shape a real Windows hook client has. Without the
+        server-side drain the connection closes on unread bytes and Windows
+        replaces the 403/415 with WSAECONNABORTED, so the client never sees
+        the status it was sent. `headers_first_request` (early_reject=True)
+        avoids that on the test side; this test deliberately does not, so
+        the product-side drain is what keeps it green.
+        """
+        for label, path, payload, headers, expected in \
+                self.early_reject_cases():
+            with self.subTest(case=label):
+                status, _ = self.request("POST", path, payload,
+                                         headers=headers)
+                self.assertEqual(status, expected)
+                self.assertIsNone(self.pending())
+
+    def test_disabled_route_answers_404_with_the_body_written(self):
+        self.handler.codex_interactions = False
+        status, _ = self.request(
+            "POST", "/api/codex/question",
+            dict(codex_question_event(), pad="x" * 8192))
+        self.assertEqual(status, 404)
+
+    def test_early_rejection_leaves_nothing_unread_in_the_socket(self):
+        drained = []
+        original = self.handler._drain_request_body
+
+        def spy(handler):
+            drained.append(original(handler))
+
+        for label, path, payload, headers, expected in \
+                self.early_reject_cases():
+            with self.subTest(case=label):
+                drained.clear()
+                body = json.dumps(payload).encode()
+                with mock.patch.object(self.handler, "_drain_request_body",
+                                       autospec=True, side_effect=spy):
+                    status, _ = self.request("POST", path, payload,
+                                             headers=headers)
+                self.assertEqual(status, expected)
+                self.assertEqual(drained, [len(body)])
+
+    def test_a_parsed_body_is_never_drained_twice(self):
+        drained = []
+        original = self.handler._drain_request_body
+
+        def spy(handler):
+            drained.append(original(handler))
+
+        with mock.patch.object(self.handler, "_drain_request_body",
+                               autospec=True, side_effect=spy):
+            status, raw = self.request("POST", "/api/codex/question", {})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)["reason"], "invalid")
+        # _read_json_body already took the whole body off the wire.
+        self.assertEqual(drained, [0])
+
+
+class RequestDrainBoundsTests(unittest.TestCase):
+    """The drain is capped in bytes and in time, and never reads the body."""
+
+    class FakeConnection:
+        def __init__(self):
+            self.timeouts = []
+
+        def gettimeout(self):
+            return None
+
+        def settimeout(self, value):
+            self.timeouts.append(value)
+
+    def make_handler(self, advertised, available):
+        from tools.tokenserver import tokenserver as server_module
+        handler = server_module.Handler.__new__(server_module.Handler)
+        handler.headers = {"Content-Length": str(advertised)}
+        handler.rfile = io.BytesIO(available)
+        handler.connection = self.FakeConnection()
+        handler._request_body_consumed = False
+        return handler
+
+    def test_drain_stops_at_the_byte_cap(self):
+        from tools.tokenserver import tokenserver as server_module
+        limit = server_module.Handler.request_drain_limit
+        handler = self.make_handler(4 * limit, b"x" * (4 * limit))
+
+        self.assertEqual(handler._drain_request_body(), limit)
+        self.assertEqual(handler.rfile.tell(), limit)
+
+    def test_drain_uses_the_short_socket_timeout_and_restores_it(self):
+        from tools.tokenserver import tokenserver as server_module
+        handler = self.make_handler(16, b"x" * 16)
+
+        self.assertEqual(handler._drain_request_body(), 16)
+        self.assertEqual(
+            handler.connection.timeouts,
+            [server_module.Handler.request_drain_timeout_s, None])
+        self.assertLessEqual(
+            server_module.Handler.request_drain_timeout_s, 0.05)
+
+    def test_drain_stops_at_eof_and_runs_once(self):
+        handler = self.make_handler(4096, b"x" * 10)
+
+        self.assertEqual(handler._drain_request_body(), 10)
+        self.assertEqual(handler._drain_request_body(), 0)
+
+    def test_nothing_is_drained_without_an_advertised_body(self):
+        handler = self.make_handler(0, b"")
+        self.assertEqual(handler._drain_request_body(), 0)
+
+        handler = self.make_handler("not-a-number", b"x" * 10)
+        self.assertEqual(handler._drain_request_body(), 0)
+        self.assertEqual(handler.rfile.tell(), 0)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

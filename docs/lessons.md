@@ -43,11 +43,22 @@ alone (it cannot be the default: a route that parks a question expects its
 body within the server's 50 ms first-byte deadline), and a legible failure
 message carrying the socket error in `assert_wire_rejected`. The server
 already drains the request before its 503 in `_reject_busy` for exactly this
-reason; extending that drain to the 403/415/404 early rejections is the
-product-side follow-up. **Watch for:** the same abort in
-real Windows hook clients that get a 403/415 from the tokenserver before
-their body is read; if a hook on Windows reports a connection abort where a
-status was expected, this is the mechanism.
+reason. **Outcome:** that drain is now central. `Handler._drain_request_body`
+runs from `_send` and `_send_no_decision` whenever the request advertised a
+body that `_read_json_body` never took off the wire, bounded to
+`REQUEST_DRAIN_LIMIT` (64 KiB) and `REQUEST_DRAIN_TIMEOUT_S` (50 ms) — a byte
+cap *and* its own deadline, so a peer dripping one byte per read cannot hold a
+worker. The bytes are discarded unparsed and unlogged, and the flag is set
+where the body is actually read, so a parsed request never drains twice and
+`test_partial_advertised_body_hits_short_deadline_and_never_parks` still fails
+closed well inside its second. In `test_codex_interactions.py`,
+`test_early_rejections_answer_even_when_the_body_is_written` deliberately
+writes the body on the plain `http.client` path — the shape a real hook
+client has — so the product-side drain, not the test-side helper, is what
+keeps it green.
+**Watch for:** the same abort anywhere else a response precedes an unread
+body; if a hook on Windows reports a connection abort where a status was
+expected, this is the mechanism.
 
 ## 2026-08-30 · Local activity was rendered as no active agent
 
