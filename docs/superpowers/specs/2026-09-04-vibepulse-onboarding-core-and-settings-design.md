@@ -371,9 +371,9 @@ pairing window keeps all three and puts nothing persistent on the glass:
    `X-VibePulse-Device` and `X-VibePulse-Version` headers, next to the
    `X-VibePulse-Recovery-Boot` header `torget_http.c` already sets (a
    repository-wide search finds no version header on polls today, so both
-   are new). After an update the first polls also carry the opaque
+   are new). After an update, polls carry the opaque
    `X-VibePulse-Boot-Proof` described under *The paired upload never sends
-   the token*. The recent-panels registry maps id to *current* address and
+   the token*, but only once the boot-health gate has accepted the image. The recent-panels registry maps id to *current* address and
    running version, and stores the boot proof verbatim without verifying
    it, as long as the panel keeps polling. The uploader resolves the address for a record in
    this order: `--device <id> --at <ip>` when given explicitly; the
@@ -431,17 +431,29 @@ pairing window keeps all three and puts nothing persistent on the glass:
       - **running** — an **authenticated boot proof**, never a bare poll.
         The panel stores the update nonce in NVS next to the pending image
         (the boot-health gate already keeps state there across a reboot),
-        and on its first polls after booting the new image adds
-        `X-VibePulse-Boot-Proof = HMAC-SHA256(token, "vibepulse-boot-v2" ‖
-        device id ‖ nonce ‖ running version)`, keyed by the slot that
-        authenticated the upload. The service holds no token: the
-        recent-panels registry stores that header verbatim as an opaque
-        value, and `vibepulse update` verifies it against its own token
-        and the nonce it issued. The proof is single-use; the panel clears
-        the nonce once it has sent it for a bounded number of polls. A
-        LAN peer that polls with the public device id and version but no
-        valid proof never produces *running*, and a panel that rolled back
-        sends no valid proof and stays *delivered, not running*.
+        and adds `X-VibePulse-Boot-Proof = HMAC-SHA256(token,
+        "vibepulse-boot-v2" ‖ device id ‖ nonce ‖ running version)`, keyed
+        by the slot that authenticated the upload.
+        **The proof waits for the health gate, not for the first poll.**
+        On a freshly updated image the partition is `PENDING_VERIFY` and
+        `boot_health.c` decides between acceptance and rollback no earlier
+        than `TG_HEALTH_MIN_UPTIME_US` (8 s) and no later than
+        `TG_HEALTH_DEADLINE_US` (15 s), while the quota task starts
+        polling well before that. Emitting the proof on the first polls
+        would let the updater say *running* about an image that is still
+        one failed check away from rollback. The panel therefore sends the
+        header only after `esp_ota_mark_app_valid_cancel_rollback()` has
+        succeeded, which is exactly the moment the image stops being
+        revocable. Polls before that carry the device id and version as
+        usual and prove nothing.
+        The service holds no token: the recent-panels registry stores that
+        header verbatim as an opaque value, and `vibepulse update` verifies
+        it against its own token and the nonce it issued. The proof is
+        single-use; the panel clears the nonce once it has sent it for a
+        bounded number of polls. A LAN peer that polls with the public
+        device id and version but no valid proof never produces *running*,
+        and a panel that rolled back never marked itself valid, so it sends
+        no proof and stays *delivered, not running*.
       A panel with only a compiled token, updated over the legacy bearer
       path, gets none of this: the updater reports *sent* and shows the
       version the panel later polls with as *reported by the panel,
@@ -649,9 +661,10 @@ Recorded so the cleanup is a decision, not an accident.
   without verifying it; that the updater's *running* state appears only
   when a boot proof verifies against its token and the nonce it issued;
   that a poll with the correct id and version but no proof, a wrong proof,
-  or a proof for an earlier nonce never produces *running*; that a panel
-  that rolled back stays *delivered, not running*; and that none of the
-  headers ever carries a token or code.
+  or a proof for an earlier nonce never produces *running*; that no proof
+  is emitted while the running partition is `PENDING_VERIFY`, so a panel
+  whose health gate later rolls back stays *delivered, not running*; and
+  that none of the headers ever carries a token or code.
 - Feature switches: a simulator test that a build with every GitHub flag
   at 0 creates the GitHub page, the star popup, and the fetch task once the
   NVS switches are on, and omits them when off; that a build with a flag at
