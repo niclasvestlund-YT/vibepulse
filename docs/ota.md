@@ -16,9 +16,11 @@ short version; this is the reference.
 │                          │          │     takeover on the glass   │
 │ tools/ota-flash.sh waits │          │                             │
 │  for the window...       │          │  YOU consent:               │
-│                          │          │   · tap UPDATE pill, or     │
-│                          │          │   · hold KEY3 ~3 s, then    │
-│                          │          │     pick UPDATE in SETTINGS │
+│                          │          │  takeover up? tap UPDATE    │
+│                          │          │   (KEY3 does nothing)       │
+│                          │          │  otherwise: hold KEY3       │
+│                          │          │   ~3 s, pick UPDATE in      │
+│                          │          │   SETTINGS                  │
 │  └─ POST firmware ─────────────────►│  window open 10 min         │
 │     (token + SHA-256)    │          │  RECEIVING → VERIFYING →    │
 │                          │          │  RESTARTING → reboot into   │
