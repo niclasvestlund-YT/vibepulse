@@ -168,8 +168,10 @@ network-off part is done once, not twice.
    get past the gate — that is the user's call, not the sheet's. So 4.4
    is not exercised by it. **Before you leave:** confirm with `git log -1`
    that the empty stage commit is still HEAD, drop it with
-   `git reset --hard HEAD~1`, and delete `build-stage/`, or the panel
-   nags about a phantom version every hour from then on.
+   `git reset --soft HEAD~1` — *soft*, so the review notes and inventory
+   edits from §4 that may already be in the working tree survive — and
+   delete `build-stage/` separately, or the panel nags about a phantom
+   version every hour from then on.
 4. **§4 update path** — covered by §1 of this sheet: 4.5 right after the
    first delivery, then 4.1–4.3 on the new image with nothing armed, and
    4.4 only if a second build goes on. Nothing left here.
