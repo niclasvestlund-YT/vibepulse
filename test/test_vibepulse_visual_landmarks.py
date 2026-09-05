@@ -225,6 +225,15 @@ EXPECTED = {
     "torget-wifi-joining.bmp",
     "torget-wifi-joined.bmp",
     "torget-wifi-failed-password.bmp",
+    "torget-settings-menu.bmp",
+    "torget-settings-over-wifi-searching.bmp",
+    "torget-settings-notice-takes-over.bmp",
+    "torget-settings-wifi-handoff-closed.bmp",
+    "torget-settings-wifi-handoff-open.bmp",
+    "torget-settings-menu-no-address.bmp",
+    "torget-settings-menu-address-lost.bmp",
+    "torget-settings-about-found.bmp",
+    "torget-settings-about-missing.bmp",
 
     "torget-boot-cold.bmp",
     "torget-boot-wifi.bmp",
@@ -637,6 +646,179 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             self.image("torget-wifi-searching.bmp").tobytes(),
             "SEARCHING must not inherit anything from the setup window",
         )
+
+    def test_settings_menu_rows_and_the_muted_update(self):
+        """The menu's honesty claim is visual: with no address, UPDATE must
+        LOOK unavailable. Proven from the pixels, not from the source that
+        drew them."""
+        menu = self.image("torget-settings-menu.bmp")
+        no_addr = self.image("torget-settings-menu-no-address.bmp")
+
+        for image in (menu, no_addr):
+            with self.subTest(image=image):
+                self.assertEqual(image.getpixel((5, 5)), (0, 0, 0))
+                # SETTINGS header in white.
+                header = image.crop((34, 24, 446, 90))
+                self.assertGreater(
+                    sum(p == (255, 255, 255)
+                        for p in header.get_flattened_data()), 300)
+                # Three row outlines, each with muted border ink present.
+                for i in range(3):
+                    top = 120 + i * 100
+                    row = image.crop((74, top, 406, top + 84))
+                    self.assertIn(
+                        (0x92, 0x98, 0xA2), row.get_flattened_data(),
+                        f"row {i} lost its muted outline")
+
+        def white_in_label(image, index):
+            top = 120 + index * 100
+            box = image.crop((100, top + 20, 380, top + 64))
+            return sum(p == (255, 255, 255) for p in box.get_flattened_data())
+
+        # With an address every label is white; without one, UPDATE alone
+        # goes muted while WIFI and ABOUT stay white.
+        for index in range(3):
+            self.assertGreater(white_in_label(menu, index), 50,
+                               f"row {index} should be white with an address")
+        self.assertEqual(white_in_label(no_addr, 0), 0,
+                         "UPDATE must not stay white without an address")
+        for index in (1, 2):
+            self.assertGreater(white_in_label(no_addr, index), 50,
+                               "WIFI and ABOUT stay selectable with no address")
+
+    def test_settings_stays_on_top_of_the_no_network_page(self):
+        """The composite state, proven from pixels rather than from layer
+        order — because layer order was exactly what was wrong. NO NETWORK
+        redraws its countdown once a second and lifts itself each time, so a
+        menu lifted only at open was buried within a second. That is the
+        state where the WIFI row matters most: the panel has no network.
+
+        The frame is captured after the Wi-Fi layer redraws, so it fails if
+        the menu stops re-asserting its position."""
+        composite = self.image("torget-settings-over-wifi-searching.bmp")
+        no_addr = self.image("torget-settings-menu-no-address.bmp")
+        # Identical to the standalone no-address menu: nothing of the
+        # NO NETWORK page shows through, and UPDATE is still muted (a
+        # searching panel has no address, so it could not receive an upload).
+        self.assertEqual(composite.tobytes(), no_addr.tobytes(),
+                         "the Wi-Fi page must not show through the menu")
+        # Independent of that equality: the NO NETWORK wordmark is a wide
+        # white band at y~48-92, and the menu's headline is narrower. If the
+        # Wi-Fi layer were on top, this column would carry its ink.
+        for x in (80, 400):
+            column = composite.crop((x, 48, x + 8, 92))
+            self.assertTrue(
+                all(p == (0, 0, 0) for p in column.get_flattened_data()),
+                "NO NETWORK's wide headline is showing through")
+
+    def test_the_notice_takes_the_glass_from_an_open_menu(self):
+        """The composite this repository could not honestly capture before the
+        arbitration became a callable function: the UPDATE READY notice is
+        announced by maintenance_ui_task, with no button event to hang a test
+        on, WHILE the menu is up. The frame is taken after one arbitration
+        tick, and the claim it proves is an absence — the menu must be GONE,
+        not layered underneath. The bug it locks out put the notice over a menu
+        that still held open=true, and LATER revealed the forgotten menu."""
+        composite = self.image("torget-settings-notice-takes-over.bmp")
+        notice = self.image("torget-ota-ring-notice.bmp")
+        # Pixel-identical to the notice that never had a menu behind it: the
+        # menu left no trace at all, on any layer.
+        self.assertEqual(composite.tobytes(), notice.tobytes(),
+                         "the menu must be gone, not hidden behind the notice")
+        # Independent of that equality, so it cannot pass by both frames being
+        # blank: the menu's "KEY3 CLOSES" footer sits in a band the notice
+        # leaves entirely black, so it is the one piece of menu ink no part of
+        # the takeover can imitate. (The row outlines cannot serve here — the
+        # notice's own LATER pill is drawn in the same muted colour.)
+        footer = composite.crop((100, 440, 380, 478))
+        self.assertEqual(
+            sum(p != (0, 0, 0) for p in footer.get_flattened_data()), 0,
+            "the menu's KEY3 CLOSES footer is still on the glass")
+        self.assertGreater(
+            sum(p != (0, 0, 0) for p in
+                self.image("torget-settings-menu.bmp")
+                    .crop((100, 440, 380, 478)).get_flattened_data()), 500,
+            "the footer band must actually carry menu ink, or it proves nothing")
+        # And the notice itself is really there — UPDATE READY is a wide white
+        # headline, so this frame is not simply an empty screen.
+        headline = composite.crop((34, 24, 446, 110))
+        self.assertGreater(
+            sum(p == (255, 255, 255)
+                for p in headline.get_flattened_data()), 300,
+            "the notice must own the glass it took")
+
+    def test_the_wifi_handoff_leaves_no_ota_window_behind(self):
+        """The intent handoff, driven end to end through the gesture: hold
+        opens SETTINGS, a finger on UPDATE opens the maintenance window, and a
+        second completed hold inside it REQUESTS the setup window. The setup
+        guard's window_open() closes the maintenance window first, because
+        port 80 has one owner.
+
+        Both frames are needed, and the second one is the one that bites. A
+        setup window covers the whole glass, so a forgotten OTA layer is
+        INVISIBLE while it stands — it is revealed only when the setup window
+        closes, which is exactly how it behaved in reality. Asserting on the
+        handoff moment alone would pass with the bug still in."""
+        opened = self.image("torget-settings-wifi-handoff-open.bmp")
+        # Frame one carries two failures at once. It is taken after a tap
+        # DURING STARTING and after the guard has had time to finish:
+        #   * had the tap closed the window, the glass would be empty here
+        #     (request_close ignores STARTING — a window that is not up yet
+        #     cannot be closed, and the bench must not invent an escape the
+        #     device does not have);
+        #   * had the guard never advanced the phase, STARTING would still be
+        #     standing and the setup window would be unreachable by gesture.
+        # Only if both hold does the setup window itself appear.
+        self.assertEqual(opened.tobytes(),
+                         self.image("torget-wifi-setup-open.bmp").tobytes(),
+                         "the gesture must reach the real setup window")
+        self.assertNotEqual(opened.tobytes(),
+                            self.image("torget-wifi-starting.bmp").tobytes(),
+                            "the guard never advanced past STARTING")
+
+        # Frame two: the setup window closed. Nothing may be left underneath.
+        closed = self.image("torget-settings-wifi-handoff-closed.bmp")
+        self.assertEqual(
+            set(closed.get_flattened_data()), {(0, 0, 0)},
+            "a stale window was revealed when the setup window closed")
+
+    def test_losing_the_address_remutes_update_without_closing(self):
+        """The address is live, not a snapshot. When Wi-Fi drops while the
+        menu is up, the panel must stop offering an update it could not
+        receive — and it must do so on the open menu, not only on the next
+        open. Proven by pixels: identical to the menu that never had an
+        address."""
+        lost = self.image("torget-settings-menu-address-lost.bmp")
+        never = self.image("torget-settings-menu-no-address.bmp")
+        self.assertEqual(lost.tobytes(), never.tobytes(),
+                         "a lost address must look like no address")
+        # And materially different from the menu that still has one, so the
+        # equality above cannot be satisfied by both frames being wrong.
+        self.assertNotEqual(lost.tobytes(),
+                            self.image("torget-settings-menu.bmp").tobytes())
+
+    def test_settings_about_shows_a_dash_for_a_missing_address(self):
+        """A missing address is a dash, never a blank line and never a
+        fabricated 0.0.0.0."""
+        found = self.image("torget-settings-about-found.bmp")
+        missing = self.image("torget-settings-about-missing.bmp")
+        # ADDRESS value row (design: firstLineY 140 + lineGap 62 + 24).
+        found_ink = sum(p != (0, 0, 0) for p in
+                        found.crop((74, 226, 406, 258)).get_flattened_data())
+        missing_ink = sum(p != (0, 0, 0) for p in
+                          missing.crop((74, 226, 406, 258)).get_flattened_data())
+        self.assertGreater(found_ink, 400, "a known address must be drawn")
+        self.assertGreater(missing_ink, 0, "a missing address must draw a dash")
+        self.assertLess(missing_ink, found_ink // 3,
+                        "the dash must be far less ink than an address")
+        # BACK clears the values: the band just above it stays black.
+        # (design: last value ends ~258, backY 285.)
+        for image in (found, missing):
+            with self.subTest(image=image):
+                gap = image.crop((74, 262, 406, 282))
+                self.assertTrue(
+                    all(p == (0, 0, 0) for p in gap.get_flattened_data()),
+                    "the last value must clear the BACK control")
 
     def test_provider_bars_are_segmented_with_locked_colors_and_marker(self):
         cases = (

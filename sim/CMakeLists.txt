@@ -61,6 +61,8 @@ add_executable(torget-sim
   ../platform/torget_ui.c
   ../platform/wifi_status_assets.c
   ../platform/boot_screen.c
+  ../platform/settings_menu.c
+  ../platform/button_arbitration.c
   ../main/registry.c
   ../components/app_tokens/app.c
   ../components/app_tokens/tokens_parse.c
@@ -91,6 +93,8 @@ add_executable(torget-sim
   ../components/torget_ota/ota_ui.c
   # Wi-Fi-onboardingen: samma delade LVGL-lager som targetet visar.
   ../components/torget_wifi/wifi_slots.c
+  # KEY3:s tidsregler och skiljedom — samma filer som targetet bygger.
+  ../components/torget_ota/button_policy.c
   ../components/torget_wifi/wifi_qr_payload.c
   ../components/torget_wifi/wifi_setup_ui.c
   ../third_party/cjson/cJSON.c

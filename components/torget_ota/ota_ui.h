@@ -32,6 +32,19 @@ void torget_ota_ui_create(void);
 void torget_ota_ui_set(tg_ota_ui_state state, unsigned percent,
                        int seconds_left);
 
+/* Äger UPDATE READY-takeovern glaset just nu?
+ *
+ * Notisen är ett UI-tillstånd, inte ett öppet underhållsfönster, så
+ * torget_ota_service_maintenance_open() säger nej medan den syns. Utan den
+ * här frågan hamnade ett KEY3-håll i SETTINGS bakom notisen: menyn öppnades
+ * osynligt och dök upp senare när notisen försvann.
+ *
+ * Läses utan lås från LVGL-tasken. Värdet är en enum som bara skrivs under
+ * UI-låset; en läsning kan i värsta fall vara en tick gammal, vilket är
+ * ofarligt här — frågan är "vem äger glaset just nu", inte ett beslut som
+ * måste vara atomärt. */
+bool torget_ota_ui_notice_visible(void);
+
 /* Versionsraden under ringen: den KÖRANDE versionen när fönstret öppnas,
  * den INKOMMANDE så fort uppladdningens metadata är läst — svaret på "vad
  * är det som installeras?". Bara enhetens egna fakta, aldrig påhitt.

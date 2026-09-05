@@ -419,7 +419,8 @@ first.
 
 On the glass: a tap opens the decision; APPROVE / DENY / LEAVE IT answer it; on
 the private screen a tap hands it to the terminal. KEY3 held ~1.5–3 s and
-released is the panic — deny everything parked; the 3 s hold still opens OTA.
+released is the panic — deny everything parked; the 3 s hold opens SETTINGS,
+where UPDATE is the OTA window.
 
 ### Post-flash physical Codex smoke test
 
@@ -457,10 +458,10 @@ workflow, consent model and troubleshooting live in [ota.md](ota.md).
 | Dashes, and the computer's URL is set | tokenserver not running, computer asleep, or firewall | Start it; check `curl localhost:8737/` |
 | Dashes only for Claude, Codex fine (or vice versa) | That provider's source is unavailable | Check `claudeProbe`; the other half working is by design |
 | Never joins WiFi | Network is 5 GHz | 2.4 GHz only. iPhone hotspot: enable "Maximize Compatibility". The glass names the reason itself after 60 s |
-| Moved to a new place; panel finds nothing | The new network was never taught to it | It raises `VibePulse-setup` after 90 s (or a 3 s KEY3 hold). Run `tools/wifi-here.sh` on the Mac, or join the AP from a phone. Remembered afterwards — [docs/wifi.md](wifi.md) |
+| Moved to a new place; panel finds nothing | The new network was never taught to it | It raises `VibePulse-setup` after 90 s (or a 3 s KEY3 hold → WIFI). Run `tools/wifi-here.sh` on the Mac, or join the AP from a phone. Remembered afterwards — [docs/wifi.md](wifi.md) |
 | `wifi-here.sh` cannot join the setup AP | The window is closed, or `TG_OTA_TOKEN` is missing so the password is random | Check the glass says WIFI SETUP; without a token run `TG_AP_PASS=<what the glass shows> tools/wifi-here.sh` |
 | Panel joined the venue WiFi but still shows dashes | Client isolation, or a captive portal the panel cannot pass | Not fixable on the device. Use the phone hotspot instead |
-| "This project has no OTA" / partitions.csv shows one factory partition | Reading a tree from before the OTA foundation (A/B slots + otadata + `components/torget_ota/`) | Check which branch/commit the checkout is on; read `partitions.csv` in THAT tree before concluding. OTA workflow: `tools/ota-flash.sh <ip>` + a 3 s KEY3 hold |
+| "This project has no OTA" / partitions.csv shows one factory partition | Reading a tree from before the OTA foundation (A/B slots + otadata + `components/torget_ota/`) | Check which branch/commit the checkout is on; read `partitions.csv` in THAT tree before concluding. OTA workflow: `tools/ota-flash.sh <ip>` + a 3 s KEY3 hold → UPDATE |
 | **UPDATE READY** appears immediately after USB flash | The flashed image is older than the advertised OTA build, often because it came from another worktree | Compare the booted version, `git describe --tags --always --dirty`, and `otaAvailableVersion`; rebuild and flash from the intended checkout |
 | A test question shows only **LEAVE IT** | The request has no single explicit recommendation | Use 2–3 short options and mark exactly one genuinely recommended option |
 | **SOMETHING IS WAITING** appears with no answer buttons | The question failed the physical fit/privacy gate | Finish on the computer. For a diagnostic only, use the canonical short smoke test above |

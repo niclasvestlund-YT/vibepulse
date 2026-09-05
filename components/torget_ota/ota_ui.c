@@ -195,6 +195,10 @@ void torget_ota_ui_create(void) {
   lv_obj_add_event_cb(ui.overlay, overlay_clicked_cb, LV_EVENT_CLICKED, NULL);
 }
 
+bool torget_ota_ui_notice_visible(void) {
+  return ui.rendered_state == TG_OTA_UI_NOTICE;
+}
+
 static const char *state_word(tg_ota_ui_state state) {
   switch (state) {
     case TG_OTA_UI_OPEN:       return "READY";

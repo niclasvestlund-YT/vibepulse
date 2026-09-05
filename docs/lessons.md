@@ -47,6 +47,29 @@ canvas quiet zone from pixels and pins the whole frame byte-equal to
 a new widget added to `render_open_view()` can reintroduce this. The
 byte-equality assertion is the backstop: any residue at all breaks it.
 
+## 2026-09-05 · The simulator could not reach the decision it was supposed to be the spec for
+
+**What happened:** a review found KEY3's whole arbitration — 110 lines
+deciding, in order, the Wi-Fi setup window's input ownership, the OTA
+window's escape and hold-to-switch, the SETTINGS menu's exclusion,
+foreground and escape, app-next, panic and the menu-open hold — living in
+`tick_cb` in `main/main.c`. `sim/main.c`'s `poll_keys()` could not reach any
+of it; static QA called `torget_settings_open()` directly instead.
+**Root cause:** the chain grew one branch at a time, each of them small and
+each of them obviously belonging next to the GPIO read. Nothing was ever
+"moved into" the host layer, so no single change looked like the violation it
+added up to. **The rule now:** if the simulator cannot drive it, it is not a
+host detail — it is untested UI behaviour wearing a host's clothes. A
+decision that reads only observable state belongs in `platform/` as a pure
+function the moment a second host exists. **Guards:**
+`platform/button_arbitration.c` (pure: no service call, no lock, no clock),
+`test/test_key3_arbitration.c` pinning all eight invariants as a table —
+including the notice close that fires from `maintenance_ui_task()` with no
+button event to hang a test on, which could not be tested at all before;
+`test_wifi_setup_wiring.py` and `test_settings_design.py` now assert neither
+host names a button action. **Watch for:** the next branch. The chain is one
+`if` in a host away from growing back.
+
 ## 2026-09-04 · The screen was honest, the API was not
 
 **What happened:** once a Codex-only computer could start (entry below), a
