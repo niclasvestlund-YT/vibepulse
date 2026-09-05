@@ -7,6 +7,21 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **`doctor` and Codex startup health now name a saved Codex mode that
+  silently prevents approvals from reaching the panel.** This is the failure
+  that looks exactly like a broken panel: the bridge is green, the panel
+  polls, and **APPROVE / DENY** never arrives — because `approval_policy =
+  "never"`, `approvals_reviewer = "auto_review"` or `sandbox_mode =
+  "danger-full-access"` means no permission event is ever created. The panel
+  cannot see a setting on the user's computer, so the host is the only place
+  that can say so, and the startup check now says it *before* reporting a
+  reachable service healthy. Reads the three mode names and nothing else in
+  the file, stops at the first table header so a value under `[profiles.x]`
+  is never read as a top-level one, and stays quiet when there is no
+  `config.toml` — most working installs have none, and a check that cries
+  wolf is skipped like any other. Rescued from
+  `niclas/wip/wifi-dma-calibration-20260904` before that branch is deleted.
+
 - **The KEY3 flow is tested as a journey, not only as a table.**
   `test/test_key3_arbitration.c` pins eight invariants separately, which is
   the right shape for them — but every cell in that table is set up by hand,

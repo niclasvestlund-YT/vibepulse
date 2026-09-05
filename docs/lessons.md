@@ -460,6 +460,34 @@ physical review dated 2026-08-27, plugin documentation assertions, and the
 hardware registry. **Watch for:** treating a successful build, a visible
 waiting screen, silence, or computer fallback as an end-to-end pass.
 
+## 2026-08-26 · A ready sender did not mean a listening panel
+
+**What happened:** Claude's hook parked and encrypted an approval correctly,
+but the panel never answered; after 120 seconds the request fell back to the
+computer. **Root cause:** every health signal stopped on the Mac side. A
+running tokenserver, ready relay, configured hooks and an enumerated ESP32
+proved four separate components, not the end-to-end receive loop; the matching
+firmware relay block was missing too. **The rule:** readiness requires evidence
+from the CONSUMER, and setup checks must compose dependent sub-checks instead
+of making the user know which second doctor to run. **Guards:** the short-lived
+two-poll panel proof in `GET /` (`_panel_health_snapshot`), Codex startup
+health, and the general doctor's relay pairing report. **Watch for:**
+relay-only panels stay honestly unprovable until the relay has a
+privacy-reviewed panel heartbeat.
+
+## 2026-08-26 · A background warmup still blocked the listening socket
+
+**What happened:** launchd reported the tokenserver running while port 8737
+stayed closed and one core scanned histories. **Root cause:** the first usage
+scan was threaded, but the numbers publisher synchronously called the same
+producer before the HTTP server bound, and waited on the scan's cache lock.
+**The rule:** every startup dependency before `bind()` must have a bounded
+cost; moving work to one thread does not help if another startup step joins it
+through a lock. **Guard:** the publisher's first pass is asynchronous
+(`publisher.py`), and a blocking-producer test requires `start()` to return
+immediately. **Watch for:** new startup publishers or probes that call payload
+producers synchronously.
+
 ## 2026-08-26 · Logged in did not mean the exported usage token was fresh
 
 **What happened:** Claude kept working all evening while Fable alone became
