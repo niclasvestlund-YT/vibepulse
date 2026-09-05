@@ -32,6 +32,7 @@ idf_component_register(
        "../platform/wifi_status_assets.c"
        "../platform/boot_screen.c"
        "../platform/settings_menu.c"
+       "../platform/button_arbitration.c"
   # ".." ger `#include "secrets.h"` (gitignorad, kopieras ur secrets.h.example)
   INCLUDE_DIRS "." ".." "../platform"
   REQUIRES ${TORGET_MAIN_REQUIRES}

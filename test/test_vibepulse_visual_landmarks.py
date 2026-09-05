@@ -219,6 +219,7 @@ EXPECTED = {
     "torget-wifi-failed-password.bmp",
     "torget-settings-menu.bmp",
     "torget-settings-over-wifi-searching.bmp",
+    "torget-settings-notice-takes-over.bmp",
     "torget-settings-menu-no-address.bmp",
     "torget-settings-menu-address-lost.bmp",
     "torget-settings-about-found.bmp",
@@ -642,6 +643,42 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             self.assertTrue(
                 all(p == (0, 0, 0) for p in column.get_flattened_data()),
                 "NO NETWORK's wide headline is showing through")
+
+    def test_the_notice_takes_the_glass_from_an_open_menu(self):
+        """The composite this repository could not honestly capture before the
+        arbitration became a callable function: the UPDATE READY notice is
+        announced by maintenance_ui_task, with no button event to hang a test
+        on, WHILE the menu is up. The frame is taken after one arbitration
+        tick, and the claim it proves is an absence — the menu must be GONE,
+        not layered underneath. The bug it locks out put the notice over a menu
+        that still held open=true, and LATER revealed the forgotten menu."""
+        composite = self.image("torget-settings-notice-takes-over.bmp")
+        notice = self.image("torget-ota-ring-notice.bmp")
+        # Pixel-identical to the notice that never had a menu behind it: the
+        # menu left no trace at all, on any layer.
+        self.assertEqual(composite.tobytes(), notice.tobytes(),
+                         "the menu must be gone, not hidden behind the notice")
+        # Independent of that equality, so it cannot pass by both frames being
+        # blank: the menu's "KEY3 CLOSES" footer sits in a band the notice
+        # leaves entirely black, so it is the one piece of menu ink no part of
+        # the takeover can imitate. (The row outlines cannot serve here — the
+        # notice's own LATER pill is drawn in the same muted colour.)
+        footer = composite.crop((100, 440, 380, 478))
+        self.assertEqual(
+            sum(p != (0, 0, 0) for p in footer.get_flattened_data()), 0,
+            "the menu's KEY3 CLOSES footer is still on the glass")
+        self.assertGreater(
+            sum(p != (0, 0, 0) for p in
+                self.image("torget-settings-menu.bmp")
+                    .crop((100, 440, 380, 478)).get_flattened_data()), 500,
+            "the footer band must actually carry menu ink, or it proves nothing")
+        # And the notice itself is really there — UPDATE READY is a wide white
+        # headline, so this frame is not simply an empty screen.
+        headline = composite.crop((34, 24, 446, 110))
+        self.assertGreater(
+            sum(p == (255, 255, 255)
+                for p in headline.get_flattened_data()), 300,
+            "the notice must own the glass it took")
 
     def test_losing_the_address_remutes_update_without_closing(self):
         """The address is live, not a snapshot. When Wi-Fi drops while the

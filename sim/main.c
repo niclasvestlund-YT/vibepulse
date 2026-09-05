@@ -11,6 +11,14 @@
  * fixtur; T matar VibePulse igen; S cyklar agentstatus; M cyklar Max
  * Tracker-fixturerna; L öppnar launchern (långtryck med
  * musen fungerar också — det är enhetens gest).
+ *
+ * K ÄR KEY3, och den är enhetens knapp på riktigt: nivån pollas rått och
+ * tidsreglerna kommer ur den delade knappolicyn, så ett kort tryck byter app,
+ * ett släpp efter 1,5-3 s panikar och ett håll på tre sekunder öppnar
+ * SETTINGS. Släpp före tre sekunder stänger ett öppet fönster i stället —
+ * nödutgången. U och W är fingrar på menyns UPDATE- och WIFI-rader.
+ * Skiljedomen mellan dem alla bor i platform/button_arbitration.c och delas
+ * byte-identiskt med targetet; bänken har ingen egen kopia.
  */
 #include <SDL.h>
 #include <errno.h>
@@ -38,7 +46,9 @@
 #include "vibepulse_recovery.h"
 #include "usage_screen.h"
 #include "wifi_setup_ui.h"
+#include "button_arbitration.h"
 #include "settings_menu.h"
+#include "wifi_slots.h"
 
 /* VibePulse är det här repots app och ligger ALLTID först i registret, så
  * launchern och den obevakade rundan pekar på samma index oavsett vilka
@@ -574,9 +584,123 @@ static void platform_tour_cb(lv_timer_t *t) {
   lv_timer_set_period(t, 500);
 }
 
+/* ---------------------------------------------------- KEY3, som på enheten */
+
+/*
+ * Bänkens "enhet": exakt samma läsning → dom → verkställ som main/main.c:s
+ * tick_cb, mot samma delade platform/button_arbitration.c. Ingen egen kedja
+ * och inga egna beslut — det var just den kopian som gjorde simulatorn till
+ * något annat än specen (Codex P1 på PR #72). Det som skiljer är bara VAD ett
+ * verkställt beslut betyder här: bänken har inga tjänster, så fönstren är
+ * lager och Needs You-kön är en utskrift.
+ *
+ * Håll K i tre sekunder och SETTINGS öppnas — samma gest som på hyllan, med
+ * samma tidsregler ur den värdtestade knappolicyn. U och W är FINGRAR på
+ * UPDATE- respektive WIFI-raden; de går genom torget_settings_click_row(),
+ * vilket är exakt vad touch-callbacken själv gör, inte en QA-bakdörr.
+ */
+static tg_wifi_setup_phase key3_setup_phase = TG_WIFI_PHASE_IDLE;
+static bool key3_maintenance_open;
+/* Vad värden vet om sig själv när menyn öppnas — motsvarigheten till
+ * esp_app_get_description() och den låsta IP-kopian i main.c. */
+static const char *key3_version = "v0.2.1-16-g9f9af53";
+static const char *key3_address = "192.168.1.42";
+
+static void key3_open_setup_window(void) {
+  /* Setupvakten renderar STARTING innan den skannar; fasen ägs redan då, så
+   * det utlösande släppet inte kan bli appväxling. */
+  key3_setup_phase = TG_WIFI_PHASE_STARTING;
+  torget_wifi_ui_set(TG_WIFI_UI_STARTING, NULL, NULL, NULL, 0);
+}
+
+static void key3_close_setup_window(void) {
+  key3_setup_phase = TG_WIFI_PHASE_IDLE;
+  torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
+}
+
+static void key3_open_maintenance_window(void) {
+  key3_maintenance_open = true;
+  torget_ota_ui_set(TG_OTA_UI_OPEN, 0, 600);
+}
+
+static void key3_close_maintenance_window(void) {
+  key3_maintenance_open = false;
+  torget_ota_ui_set(TG_OTA_UI_HIDDEN, 0, 0);
+}
+
+/* En tick av värdlagret. `down` är knappens råa nivå, `now_us` bänkens klocka. */
+static void key3_tick(bool down, int64_t now_us) {
+  static tg_button_policy policy;
+  const tg_button_inputs in = {
+      .key = tg_button_update(&policy, down, now_us),
+      .setup_owns_input = tg_wifi_setup_owns_input(key3_setup_phase),
+      .maintenance_open = key3_maintenance_open,
+      .notice_visible = torget_ota_ui_notice_visible(),
+      .menu_open = torget_settings_open_p(),
+  };
+  tg_button_outputs out;
+  tg_button_arbitrate(&in, &out);
+
+  if (out.menu_foreground) {
+    torget_settings_set_address(key3_address);
+    torget_settings_keep_foreground();
+  }
+  if (out.close_menu) torget_settings_close();
+  if (out.close_setup) key3_close_setup_window();
+  if (out.close_maintenance) key3_close_maintenance_window();
+  if (out.request_setup_open) key3_open_setup_window();
+  if (out.next_app) torget_app_next();
+  if (out.panic) printf("KEY3: panik — Needs You-kön finns bara på enheten\n");
+  if (out.open_menu) torget_settings_open(key3_version, key3_address);
+
+  /* Menyns val, utfört av den som äger fönsterordningen — samma överlämning
+   * som på enheten, och det är den här halvan som poll_keys aldrig kunde nå. */
+  switch (torget_settings_take_intent()) {
+    case TG_SETTINGS_INTENT_OPEN_UPDATE:
+      key3_open_maintenance_window();
+      break;
+    case TG_SETTINGS_INTENT_OPEN_WIFI:
+      key3_open_setup_window();
+      break;
+    default:
+      break;
+  }
+}
+
+/* Statisk QA driver KEY3 genom SAMMA väg som SDL-pollningen: rå nivå och en
+ * egen mikrosekundsklocka in i key3_tick(). Ingen genväg förbi skiljedomen,
+ * och ingen egen kopia av tidsreglerna — hållet mäts av knappolicyn. */
+static int64_t qa_key3_now_us;
+
+static void qa_key3_poll(bool down, int64_t step_us) {
+  qa_key3_now_us += step_us;
+  key3_tick(down, qa_key3_now_us);
+}
+
+/* En tom tick: det är den som lyfter menyn varje gång, och den som bär den
+ * ASYNKRONA stängningen när ett fönster tar över utan knapphändelse. */
+static void qa_key3_idle(void) { qa_key3_poll(false, 100000); }
+
+/* Ett fullbordat tresekundershåll. Hållet avfyras medan fingret ligger kvar;
+ * släppet efteråt sväljs av policyn, precis som på hyllan. */
+static void qa_key3_hold(void) {
+  qa_key3_idle();
+  qa_key3_poll(true, 100000);
+  qa_key3_poll(true, TG_MAINTENANCE_HOLD_US);
+  qa_key3_poll(false, 100000);
+}
+
+/* Ett kort tryck — nödutgången ur menyn och ur fönstren. */
+static void qa_key3_tap(void) {
+  qa_key3_idle();
+  qa_key3_poll(true, 100000);
+  qa_key3_poll(false, 100000);
+}
+
 /* Tangent 1-4: Solelkollen-fixtur. T: mata VibePulse. S: nästa agentläge.
- * L: launchern. [ och ] bläddrar VibePulse-sidor; N byter app (KEY3).
- * M: nästa Max Tracker-fixtur. G: simulera en ny GitHub-stjärna.
+ * L: launchern. [ och ] bläddrar VibePulse-sidor; N byter app (KEY3:s
+ * appväxling utan gest). M: nästa Max Tracker-fixtur. G: simulera en ny
+ * GitHub-stjärna. K är KEY3 självt, U och W fingrar på menyns rader.
  * LVGL:s SDL-drivrutin
  * pumpar eventen, så ren tangentbordspollning räcker — ingen indev-
  * rördragning för ett bänkverktyg. */
@@ -584,6 +708,13 @@ static void poll_keys(lv_timer_t *t) {
   (void)t;
   static bool held[12];
   const Uint8 *ks = SDL_GetKeyboardState(NULL);
+
+  /* KEY3 pollas RÅTT, inte på flank: hållet är en tidsgest och tidsreglerna
+   * bor i knappolicyn, precis som targetets 10 Hz-tick. Det är det som gör
+   * bänken till spec för gesten — håll K i tre sekunder och SETTINGS öppnas,
+   * släpp före tre sekunder och ett öppet fönster stänger i stället. */
+  key3_tick(ks[SDL_SCANCODE_K] != 0, (int64_t)lv_tick_get() * 1000);
+
   const SDL_Scancode keys[12] = { SDL_SCANCODE_1, SDL_SCANCODE_2,
                                   SDL_SCANCODE_3, SDL_SCANCODE_4,
                                   SDL_SCANCODE_T, SDL_SCANCODE_S,
@@ -591,6 +722,20 @@ static void poll_keys(lv_timer_t *t) {
                                   SDL_SCANCODE_LEFTBRACKET,
                                   SDL_SCANCODE_RIGHTBRACKET,
                                   SDL_SCANCODE_M, SDL_SCANCODE_G };
+  /* Fingrar på menyns rader. click_row() är samma väg touch-callbacken tar,
+   * så avsikten uppstår som den gör på glaset — och konsumeras av key3_tick(),
+   * aldrig här. */
+  static bool row_held[2];
+  const SDL_Scancode rows[2] = { SDL_SCANCODE_U, SDL_SCANCODE_W };
+  const tg_settings_row row_of[2] = { TG_SETTINGS_ROW_UPDATE,
+                                      TG_SETTINGS_ROW_WIFI };
+  for (int i = 0; i < 2; i++) {
+    bool down = ks[rows[i]];
+    if (down && !row_held[i] && torget_settings_open_p())
+      torget_settings_click_row(row_of[i]);
+    row_held[i] = down;
+  }
+
   for (int i = 0; i < 12; i++) {
     bool down = ks[keys[i]];
     if (down && !held[i]) {
@@ -1281,39 +1426,60 @@ static int run_vibepulse_static_qa(void) {
    * NO NETWORK i stället för menyn, vilket är hela poängen med att fånga
    * den: menyn får inte bara vara "öppen", den ska synas — och det här är
    * läget där WIFI-raden behövs mest. */
+  /* NO NETWORK är en SÖKNING, inte setupfönstret: den äger inte knappen, så
+   * menyn får ligga kvar ovanpå den. Hållet, lyftet och ramen är alla
+   * skiljedomens — inget öppnas för hand här. */
+  key3_address = NULL;
   torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "Niclas iPhone", NULL,
                      "NOT SEEN - 2.4 GHZ ONLY", 24);
-  torget_settings_open("v0.2.1-16-g9f9af53", NULL);
+  qa_key3_hold();
   torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "Niclas iPhone", NULL,
                      "NOT SEEN - 2.4 GHZ ONLY", 23);
-  torget_settings_keep_foreground();
+  qa_key3_idle();
   dump_overlay_frame("settings-over-wifi-searching");
-  torget_settings_close();
+  qa_key3_tap();
   torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
 
+  /* Det sammansatta läget som PR #72 inte kunde fånga ärligt: notisen kommer
+   * MEDAN menyn står uppe. Den annonseras av maintenance_ui_task utan någon
+   * knapphändelse, så det var bara en källäsning — nu är det en tick genom
+   * skiljedomen, och den ska stänga menyn på exakt den tick notisen tar över.
+   * Ramen är beviset: glaset visar UPDATE READY och INGENTING av menyn.
+   * Buggen den låser ute lade notisen ovanpå en meny som fortfarande hade
+   * open=true, och LATER avslöjade den bortglömda menyn. */
+  key3_address = "192.168.1.42";
+  qa_key3_hold();
+  torget_ota_ui_set(TG_OTA_UI_NOTICE, 0, 0);
+  qa_key3_idle();
+  dump_overlay_frame("settings-notice-takes-over");
+  torget_ota_ui_set(TG_OTA_UI_HIDDEN, 0, 0);
+
   /* SETTINGS: vad ett tresekundershåll på KEY3 öppnar. Menyn och ABOUT i
-   * båda tillstånd som skiljer sig materiellt — hittad dator och inte. */
-  torget_settings_open("v0.2.1-16-g9f9af53", "192.168.1.42");
+   * båda tillstånd som skiljer sig materiellt — hittad dator och inte.
+   * ABOUT nås med ett FINGER på raden, samma väg touch-callbacken tar. */
+  qa_key3_hold();
   dump_overlay_frame("settings-menu");
   torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
   dump_overlay_frame("settings-about-found");
-  torget_settings_close();
+  qa_key3_tap();
   /* Utan adress: UPDATE tonas ner och ABOUT visar streck. Två frames som
    * skiljer sig materiellt från de ovan, inte samma bild med annan text. */
   /* Adressen försvinner MEDAN menyn står uppe. Ögonblicksbilden lämnade
    * kvar den gamla adressen i över en minut med UPDATE valbar; nu tonas
    * raden ner och ABOUT visar streck utan att menyn stängs. Fångad som
    * egen frame för att det är ett tillståndsBYTE, inte en ny öppning. */
-  torget_settings_open("v0.2.1-16-g9f9af53", "192.168.1.42");
-  torget_settings_set_address(NULL);
+  qa_key3_hold();
+  key3_address = NULL; /* nätet försvinner medan menyn står uppe */
+  qa_key3_idle();      /* och det är den tomma ticken som uppdaterar raden */
   dump_overlay_frame("settings-menu-address-lost");
-  torget_settings_close();
+  qa_key3_tap();
 
-  torget_settings_open("v0.2.1-16-g9f9af53", NULL);
+  qa_key3_hold();
   dump_overlay_frame("settings-menu-no-address");
   torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
   dump_overlay_frame("settings-about-missing");
-  torget_settings_close();
+  qa_key3_tap();
+  key3_address = "192.168.1.42";
 
   /* Value multiple. Every state the parser can hand the page gets its own
    * raster, because the whole design premise is that a wrong figure here is

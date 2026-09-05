@@ -40,6 +40,7 @@
 
 #include "boot_health.h"
 #include "boot_screen.h"
+#include "button_arbitration.h"
 #include "settings_menu.h"
 #include "button_policy.h"
 #include "agent_monitor.h"
@@ -667,11 +668,6 @@ static void tick_cb(lv_timer_t *t) {
   if (s_touch && lv_indev_get_state(s_touch) == LV_INDEV_STATE_PRESSED)
     s_last_touch_us = now;
 
-  /* KEY3 (GPIO18, aktiv låg): kort tryck = nästa app, tre sekunders håll =
-   * OTA-underhållsfönster. Tidsreglerna bor i den värdtestade knappolicyn;
-   * 10 Hz-ticken pollar vidare medan knappen är nere så hållet avfyras
-   * utan släpp. Körs i LVGL-tasken — därför bara atomära tjänsteanrop här,
-   * aldrig torget_ota_ui_set (som tar UI-låset). */
   /* Bootskärmen tas ner av första datalivet — eller ge-upp-taket när
    * nätet aldrig kommer (45 s: två hämtcykler + marginal; bakom står
    * apparnas ärliga NO DATA). Låset är rekursivt, så stage() från
@@ -687,120 +683,60 @@ static void tick_cb(lv_timer_t *t) {
     }
   }
 
+  /* KEY3 (GPIO18, aktiv låg): kort tryck = nästa app, tre sekunders håll =
+   * SETTINGS. Tidsreglerna bor i den värdtestade knappolicyn; 10 Hz-ticken
+   * pollar vidare medan knappen är nere så hållet avfyras utan släpp.
+   * SKILJEDOMEN — vad handlingen betyder givet vem som äger glaset — bor i
+   * platform/button_arbitration.c och delas byte-identiskt med simulatorn.
+   * Här läses bara läget och verkställs svaret; INGA beslut i värdlagret.
+   * Körs i LVGL-tasken — därför bara atomära tjänsteanrop här, aldrig
+   * torget_ota_ui_set (som tar UI-låset). */
   static tg_button_policy key3;
   bool key3_down = gpio_get_level(GPIO_NUM_18) == 0;
-  tg_button_action key3_action = tg_button_update(&key3, key3_down, now);
   if (key3_down)
     s_last_touch_us = now; /* knappkontakt är aktivitet, precis som touch */
-  /* Menyn är en vägvisare, aldrig en konkurrent: så fort ETT RIKTIGT fönster
-   * äger glaset stänger den sig. Det är det som ger fönstren företräde —
-   * inte lagerordningen, som inte betyder något här (både setupfönstret och
-   * OTA-overlayn lyfter sig själva i sina egna set()).
-   *
-   * Två vägar in som ingen knappgren kan fånga, båda utlösta från ANDRA
-   * tasks medan menyn redan står uppe:
-   *   - notisen annonseras av maintenance_ui_task. Utan detta lade den sig
-   *     över en meny som fortfarande hade open=true, och LATER avslöjade
-   *     den bortglömda menyn.
-   *   - setupfönstret öppnar sig SJÄLVT efter 90 s utan adress. Då blev
-   *     owns_input sant, grenen nedan åt knapphändelsen och stängde ett
-   *     fönster som inte syntes, medan menyn låg kvar överst och lovade
-   *     "KEY3 CLOSES" i foten. Det synliga svarade inte, det osynliga dog.
-   *
-   * Därför FÖRE knappkedjan: stängningen ska hinna ske på den tick då
-   * fönstret tar över, så att nästa tryck landar på det man faktiskt ser.
-   *
-   * Ligger inget fönster på glaset hävdar menyn sitt läge överst i stället.
-   * NO NETWORK-sidan ritar om sin nedräkning varje sekund och lyfter sig då,
-   * så en meny som bara lyftes vid öppning begravdes inom en sekund — i
-   * precis det läge där WIFI-raden behövs mest. Gratis när den redan ligger
-   * överst; LVGL returnerar före invalideringen när indexet stämmer. */
-  if (torget_settings_open_p()) {
-    if (torget_ota_ui_notice_visible() || torget_wifi_setup_owns_input() ||
-        torget_ota_service_maintenance_open())
-      torget_settings_close();
-    else {
-      /* Adressen hålls LEVANDE, inte som ögonblicksbilden den var: utan nät
-       * tar setupfönstret inte över förrän efter 90 s, så menyn hann visa en
-       * adress panelen inte längre hade — med UPDATE kvar valbar. Kopian tas
-       * under spinlocket och avdupliceras i menyn, så en oförändrad adress
-       * kostar ingen omritning. */
-      char ip[16];
-      bool have_ip = ip_text_copy(ip, sizeof ip);
-      torget_settings_set_address(have_ip ? ip : NULL);
-      torget_settings_keep_foreground();
-    }
-  }
 
-  if (torget_wifi_setup_owns_input()) {
-    /* Även STARTING äger knappen. AP/skanning kan ta sekunder och under den
-     * tiden får det utlösande släppet aldrig bli appväxling eller panik.
-     * request_close() ignorerar STARTING men stänger OPEN/JOINING/JOINED/
-     * FAILED, så nödutgången finns kvar när fönstret väl kan stängas. */
-    if (key3_action == TG_BUTTON_NEXT_APP || key3_action == TG_BUTTON_PANIC)
-      torget_wifi_setup_request_close();
-  } else if (torget_ota_service_maintenance_open()) {
-    /* While the update window owns the glass, ANY release closes it — a
-     * short tap or the panic-window hold — so the nödutgången never depends
-     * on out-tapping the panic threshold (a real trap found on hardware
-     * 2026-08-16: a ~2 s press panicked instead of closing, leaving the
-     * window stuck). Ten minutes without an escape once made a healthy
-     * device look hung. No panic fires while the window is up.
+  tg_button_inputs key3_in = {
+      .key = tg_button_update(&key3, key3_down, now),
+      .setup_owns_input = torget_wifi_setup_owns_input(),
+      .maintenance_open = torget_ota_service_maintenance_open(),
+      .notice_visible = torget_ota_ui_notice_visible(),
+      .menu_open = torget_settings_open_p(),
+  };
+  tg_button_outputs key3_out;
+  tg_button_arbitrate(&key3_in, &key3_out);
+
+  /* Verkställandet följer skiljedomens ordning: menyns lyft FÖRE dess
+   * stängning, och båda före knappkedjans utdata. */
+  if (key3_out.menu_foreground) {
+    /* Adressen hålls LEVANDE, inte som ögonblicksbilden den var: utan nät tar
+     * setupfönstret inte över förrän efter 90 s, så menyn hann visa en adress
+     * panelen inte längre hade — med UPDATE kvar valbar. Kopian tas under
+     * spinlocket och avdupliceras i menyn, så en oförändrad adress kostar
+     * ingen omritning. */
+    char ip[16];
+    bool have_ip = ip_text_copy(ip, sizeof ip);
+    torget_settings_set_address(have_ip ? ip : NULL);
+    torget_settings_keep_foreground();
+  }
+  if (key3_out.close_menu) torget_settings_close();
+  if (key3_out.close_setup) torget_wifi_setup_request_close();
+  if (key3_out.close_maintenance) torget_ota_service_close_maintenance();
+  if (key3_out.request_setup_open) torget_wifi_setup_request_open();
+  if (key3_out.next_app) torget_app_next();
+  /* Bara ett köinlägg (atomärt), säkert från LVGL-tasken; en avstängd
+   * svarskanal (ingen enhetsnyckel) gör det till en no-op. */
+  if (key3_out.panic) tk_needs_you_send_panic();
+  if (key3_out.open_menu) {
+    /* ABOUT-raderna tas som ögonblicksbild här: LVGL-tasken äger dem, och
+     * inget av värdena kostar mer än en läsning. Utan IP skickas NULL — menyn
+     * tonar då ner UPDATE, för ett fönster utan adress kan ändå aldrig ta emot
+     * en uppladdning.
      *
-     * Ett NYTT fullt 3 s-håll byter fönster: OTA-fönstret stängs och
-     * setupfönstret öppnar. Det är vägen att nå WIFI SETUP på en panel som
-     * HAR nät (håll–håll: först uppdateringsfönstret, sen nätfönstret) —
-     * utan den kunde ett nytt nät bara läras ut när panelen redan var
-     * strandad. Nödutgången är intakt: varje släpp FÖRE tre sekunder
-     * stänger, bara ett medvetet fullbordat håll byter. */
-    if (key3_action == TG_BUTTON_NEXT_APP || key3_action == TG_BUTTON_PANIC) {
-      torget_ota_service_close_maintenance();
-    } else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {
-      /* Bara begäran härifrån: setupvaktens window_open äger överlämningen
-       * av port 80 (stänger OTA-fönstret och väntar ut dess httpd-stopp).
-       * Att stänga HÄR hade gjort portbytet till en kapplöpning mellan två
-       * vakter som pollar var 500:e ms. */
-      torget_wifi_setup_request_open();
-    }
-  } else if (torget_settings_open_p()) {
-    /* Menyn ärver fönstrens nödutgång: VARJE släpp stänger den, kort tryck
-     * som mellanhåll. Ett fullbordat håll stänger också — menyn öppnar
-     * aldrig sig själv igen ovanpå sig själv. Ingen panik avfyras medan
-     * menyn är uppe, exakt som med de två fönstren. */
-    if (key3_action != TG_BUTTON_NONE) torget_settings_close();
-  } else if (key3_action == TG_BUTTON_NEXT_APP) {
-    torget_app_next();
-  } else if (key3_action == TG_BUTTON_PANIC) {
-    /* Mellanhåll-och-släpp med stängt fönster: neka allt Needs You parkerat.
-     * Bara ett köinlägg (atomärt), säkert från LVGL-tasken; en avstängd
-     * svarskanal (ingen enhetsnyckel) gör det till en no-op. */
-    tk_needs_you_send_panic();
-  } else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE &&
-             !torget_ota_ui_notice_visible()) {
-    /* UPDATE READY-takeovern äger glaset utan att vara ett öppet
-     * underhållsfönster, så maintenance_open() ovan säger nej och hållet
-     * nådde ända hit. Menyn öppnades då BAKOM notisen: open=true, inget
-     * syntes, och den dök upp senare när notisen gick bort. Takeovern har
-     * sina egna svar (UPDATE-pillret och LATER, med fingret) — hållet gör
-     * ingenting alls medan den syns. Villkoret sitter på just den här
-     * grenen och inte som ett eget block: ett kort tryck och paniken ska
-     * bete sig precis som förut.
-     *
-     * Hållet öppnar SETTINGS i stället för att gissa vilket av två fönster
-     * användaren menade. Samtyckesmodellen är oförändrad: menyn nås bara
-     * från enheten, så fysisk närvaro krävs fortfarande för UPDATE, och
-     * tokenet och tiominutersfönstret är orörda. Skillnaden är att valet
-     * blir synligt i stället för härlett ur om panelen råkar ha IP.
-     *
-     * ABOUT-raderna tas som ögonblicksbild här: LVGL-tasken äger dem, och
-     * inget av värdena kostar mer än en läsning. Utan IP skickas NULL —
-     * menyn tonar då ner UPDATE, för ett fönster utan adress kan ändå
-     * aldrig ta emot en uppladdning.
-     *
-     * s_data_alive skickas INTE med som en "COMPUTER"-rad: flaggan sätts
-     * en gång och aldrig tillbaka, så raden hade sagt FOUND för alltid
-     * efter en enda lyckad hämtning — även med datorn borta, och även när
-     * siffrorna kom via reläet. */
+     * s_data_alive skickas INTE med som en "COMPUTER"-rad: flaggan sätts en
+     * gång och aldrig tillbaka, så raden hade sagt FOUND för alltid efter en
+     * enda lyckad hämtning — även med datorn borta, och även när siffrorna kom
+     * via reläet. */
     const esp_app_desc_t *desc = esp_app_get_description();
     char ip[16];
     bool have_ip = ip_text_copy(ip, sizeof ip);

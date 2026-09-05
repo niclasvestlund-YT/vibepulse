@@ -20,6 +20,12 @@ DESIGN_PATH = ROOT / "design/vibepulse/settings-design.json"
 SOURCE_PATH = ROOT / "platform/settings_menu.c"
 HEADER_PATH = ROOT / "platform/settings_menu.h"
 MAIN_PATH = ROOT / "main/main.c"
+# The KEY3 arbitration left main/main.c for shared, pure platform code, so
+# the structural assertions below follow it there. What each rule DOES is
+# pinned as a table of cases in test/test_key3_arbitration.c; what is checked
+# here is that the rule still lives in one shared place and in the right
+# order, and that the hosts only apply it.
+ARBITRATION_PATH = ROOT / "platform/button_arbitration.c"
 
 CANVAS = 480
 # Clipped corners: content that reaches the edge loses characters.
@@ -198,16 +204,24 @@ class SettingsDesignTests(unittest.TestCase):
           and closed a window nobody could see, while the menu stayed on
           top promising "KEY3 CLOSES". The visible thing did not answer and
           the invisible one died."""
-        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
-        block = main.split("if (torget_settings_open_p()) {\n    if (", 1)
+        arb = without_comments(ARBITRATION_PATH.read_text(encoding="utf-8"))
+        owners = arb.split("const bool window_owns_glass =", 1)
+        self.assertEqual(len(owners), 2, "the window-ownership test moved")
+        owners = owners[1].split(";", 1)[0]
+        for owner in ("in->notice_visible",
+                      "in->setup_owns_input",
+                      "in->maintenance_open"):
+            self.assertIn(owner, owners, owner)
+        block = arb.split("if (menu_open) {", 1)
         self.assertEqual(len(block), 2, "the exclusion block moved")
         block = block[1].split("\n  }", 1)[0]
-        for owner in ("torget_ota_ui_notice_visible()",
-                      "torget_wifi_setup_owns_input()",
-                      "torget_ota_service_maintenance_open()"):
-            self.assertIn(owner, block, owner)
-        self.assertIn("torget_settings_close()", block)
-        self.assertIn("torget_settings_keep_foreground()", block)
+        self.assertIn("window_owns_glass", block)
+        self.assertIn("out->close_menu = true;", block)
+        self.assertIn("out->menu_foreground = true;", block)
+        # Both hosts feed the same function; neither keeps a copy of the rule.
+        for host in (MAIN_PATH, ROOT / "sim/main.c"):
+            self.assertIn("tg_button_arbitrate(",
+                          host.read_text(encoding="utf-8"), str(host))
 
     def test_the_address_stays_live_while_the_menu_is_open(self):
         """A snapshot taken at open goes stale, and the honesty rules bite
@@ -230,7 +244,7 @@ class SettingsDesignTests(unittest.TestCase):
         # the menu on top — i.e. exactly when no window owns the glass.
         main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
         block = main.split("torget_settings_keep_foreground();", 1)[0]
-        block = block.rsplit("else {", 1)[1]
+        block = block.rsplit("if (key3_out.menu_foreground) {", 1)[1]
         self.assertIn("ip_text_copy(ip, sizeof ip)", block)
         self.assertIn("torget_settings_set_address(have_ip ? ip : NULL)", block)
 
@@ -239,11 +253,15 @@ class SettingsDesignTests(unittest.TestCase):
         tick the window takes over, so the next press acts on what the user
         actually sees. Behind the chain instead, that press would still be
         eaten by the setup branch."""
-        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
-        exclusion = main.index("if (torget_settings_open_p()) {\n    if (")
-        chain = main.index("if (torget_wifi_setup_owns_input()) {\n")
+        arb = without_comments(ARBITRATION_PATH.read_text(encoding="utf-8"))
+        exclusion = arb.index("if (menu_open) {")
+        chain = arb.index("if (in->setup_owns_input) {")
         self.assertLess(exclusion, chain,
                         "the exclusion must run before the KEY3 chain")
+        # And the chain must read the CLOSED menu, not the input: the local is
+        # cleared by the exclusion, which is what makes the ordering visible.
+        self.assertIn("menu_open = false;", arb)
+        self.assertIn("} else if (menu_open) {", arb)
 
     def test_update_is_refused_without_an_address(self):
         """An OTA window with no address can never receive an upload, so the
@@ -267,25 +285,27 @@ class SettingsDesignTests(unittest.TestCase):
 
     def test_main_keeps_the_consent_model_and_the_escape(self):
         main = MAIN_PATH.read_text(encoding="utf-8")
-        # The hold opens the menu; it must not reach past it into a window.
-        # Two branches carry this action: the hold-hold path inside the OTA
-        # window (unchanged, and still the way to reach Wi-Fi from there) and
-        # the one that opens the menu. Only the latter carries the takeover
-        # guard, so that condition names it unambiguously.
-        block = main.split(
-            "} else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE &&", 1)
+        arb = without_comments(ARBITRATION_PATH.read_text(encoding="utf-8"))
+        # The hold reaches a MENU and nothing else. The arbitration cannot
+        # reach past it even in principle: it has no output that opens the
+        # maintenance window, and it calls no service at all.
+        block = arb.split(
+            "} else if (in->key == TG_BUTTON_OPEN_MAINTENANCE &&", 1)
         self.assertEqual(len(block), 2, "the KEY3 hold branch moved")
         opened = block[1].split("\n  }", 1)[0]
-        self.assertIn("torget_settings_open(", opened)
-        self.assertNotIn("torget_ota_service_open_maintenance", opened)
+        self.assertIn("out->open_menu = true;", opened)
+        self.assertNotIn("torget_ota_service_open_maintenance", arb)
+        # The host applies that output by opening the menu, and the window is
+        # opened in exactly one place: the menu's own intent.
+        self.assertIn("if (key3_out.open_menu) {", main)
+        self.assertEqual(main.count("torget_ota_service_open_maintenance();"), 1)
+        self.assertIn("torget_settings_take_intent()", main)
         # Any release closes the menu: the same escape the two windows have,
         # found on hardware when a ~2 s press once left a window stuck.
-        escape = main.split("} else if (torget_settings_open_p()) {", 1)[1]
+        escape = arb.split("} else if (menu_open) {", 1)[1]
         escape = escape.split("} else if", 1)[0]
-        self.assertIn("torget_settings_close();", escape)
+        self.assertIn("out->close_menu = true;", escape)
         self.assertIn("TG_BUTTON_NONE", escape)
-        # The menu's choice is executed by whoever owns the window order.
-        self.assertIn("torget_settings_take_intent()", main)
 
     def test_the_hold_does_nothing_while_update_ready_owns_the_glass(self):
         """The takeover is a UI state, not an open maintenance window, so
@@ -295,12 +315,12 @@ class SettingsDesignTests(unittest.TestCase):
         glass, and the menu surfacing later when the notice went away. The
         guard belongs on that one branch — a short tap and the panic hold
         must behave exactly as before."""
-        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
+        arb = without_comments(ARBITRATION_PATH.read_text(encoding="utf-8"))
         self.assertIn(
-            "key3_action == TG_BUTTON_OPEN_MAINTENANCE &&\n"
-            "             !torget_ota_ui_notice_visible()", main)
+            "in->key == TG_BUTTON_OPEN_MAINTENANCE && !in->notice_visible",
+            arb)
         # Not a block of its own: NEXT_APP and PANIC keep their own branches.
-        self.assertNotIn("} else if (torget_ota_ui_notice_visible()) {", main)
+        self.assertNotIn("} else if (in->notice_visible) {", arb)
 
     def test_the_address_is_copied_under_the_lock_not_aliased(self):
         """Writing the string before publishing the event bit only ordered

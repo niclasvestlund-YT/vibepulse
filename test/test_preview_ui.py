@@ -84,6 +84,7 @@ EXPECTED_BMPS = {
     "torget-wifi-failed-password.bmp",
     "torget-settings-menu.bmp",
     "torget-settings-over-wifi-searching.bmp",
+    "torget-settings-notice-takes-over.bmp",
     "torget-settings-menu-no-address.bmp",
     "torget-settings-menu-address-lost.bmp",
     "torget-settings-about-found.bmp",
