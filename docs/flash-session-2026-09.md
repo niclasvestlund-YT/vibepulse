@@ -14,7 +14,7 @@ panel has never seen:
 
 | Change | Where it landed | What only the glass can prove |
 |---|---|---|
-| SETTINGS menu on a 3 s KEY3 hold (UPDATE / WIFI / ABOUT) | #72, #73 | timing, z-order against NO NETWORK, the takeover hand-off |
+| SETTINGS menu on a 3 s KEY3 hold (UPDATE / WIFI / ABOUT) | #72, #73 | timing, z-order against NO NETWORK, the takeover hand-off. The flashed image predates the menu: its hold opens the update window directly, which is how the first delivery in §1 goes |
 | Overlay cost lines at boot (`overlaykostnad …`) | #77 | the actual `settings` internal-RAM figure — the FEATURES row waits on it |
 | Setup QR no longer outlives its window | #76 | no leftover QR over `NO NETWORK` |
 | KEY3 arbitration moved to pure platform code | #73 | no behaviour change — a regression here would be a bug |
@@ -45,9 +45,17 @@ panel has never seen:
 
    Then `python3 tools/vibepulse_setup.py doctor` — it now names a saved
    Codex mode that would silently hide permission cards (#82).
-4. Panel on **its own USB power supply**, not the Mac's port. The Mac port
-   cannot run the AMOLED and it looks exactly like a bad cable.
-5. Open a serial monitor before flashing so the boot log is captured:
+4. **Power and serial at the same time.** The panel must run from its
+   own power supply (a Mac port cannot run the AMOLED; it looks exactly
+   like a bad cable) *and* the Mac must still see `/dev/cu.usbmodem*` to
+   capture the boot log. That takes a powered USB hub or a PSU/data-split
+   cable, not a plain wall charger. `docs/lessons.md` (2026-08-13) records
+   serial-monitoring a *running* board as unverified, so this is the
+   first thing to confirm: with the panel booted on that arrangement,
+   `ls /dev/cu.usbmodem*` must list a port. If it never appears, §2
+   cannot be done this session; the three lines are logged once at boot
+   and nowhere else. Say so in the review rather than skipping §2 quietly.
+5. Open the serial monitor before flashing so the boot log is captured:
 
    ```sh
    idf.py -p $(ls /dev/cu.usbmodem* | head -1) monitor
@@ -61,12 +69,31 @@ idf.py build
 tools/ota-flash.sh            # waits; prints the newest build*/torget.bin it will send
 ```
 
-Then, **at the panel**: hold KEY3 a full 3 s → SETTINGS → tap **UPDATE**.
-The uploader only starts when the window is open; the hold alone reaches
-the menu, nothing more. Expect RECEIVING → VERIFYING → RESTARTING, then
-the boot-health gate. After the reboot the window re-arms once, so a
-second build in the same sitting needs no new hold. A short KEY3 press
-ends the chain when you are done.
+**The first delivery lands on the old image, and the old image has no
+SETTINGS menu.** On `v1.0.0-25-g054db68` the 3 s KEY3 hold opens the
+update window directly; the menu, and UPDATE inside it, arrive with this
+build. So for this one upload: hold KEY3 a full 3 s, the UPDATES ON ring
+appears, and the uploader (already polling) sends. Expect RECEIVING →
+VERIFYING → RESTARTING, then the boot-health gate. The script exits after
+the one upload.
+
+After the reboot the window re-arms itself once (manual-test **4.5**).
+Nothing is armed on the Mac now, so nothing uploads. Short-tap KEY3 to
+close it.
+
+Now the new image is up and the rest of `docs/manual-test-key3.md` §4
+runs with **nothing polling on the Mac** — the uploader would otherwise
+send the instant 4.1 opens a window, and 4.2 would never happen:
+
+| # | At the panel | Expect |
+|---|---|---|
+| 4.1 | Hold KEY3 a full 3 s → SETTINGS → tap **UPDATE** | the window opens, ten-minute countdown, `KEY3 CLOSES` |
+| 4.2 | Short-tap | it closes early, with no upload |
+| 4.3 | Reopen the same way, then hold 3 s inside the already-open window | it switches to WIFI SETUP (the hold–hold shortcut); short-tap to close |
+| 4.4 | Only if there is a second build to install: start `tools/ota-flash.sh`, then hold 3 s → SETTINGS → tap **UPDATE** | the upload runs through the menu's row, the first time that path is used on the glass |
+
+That is all of §4. A short KEY3 press ends the re-armed chain whenever
+you are done.
 
 If the panel shows **UPDATE READY** the moment it boots, the booted image
 is older than what the tokenserver advertises — compare the banner with
@@ -104,9 +131,9 @@ network-off part is done once, not twice.
    redraw) and 3.5 (LATER must not bring the menu back). **Do not have
    `tools/ota-flash.sh` running here**; a leftover copy uploads the moment
    a window opens.
-4. **§4 update path** — already exercised by §1 of this sheet; only 4.3
-   (hold–hold shortcut inside an open window) and 4.5 (re-arm once) still
-   need a look.
+4. **§4 update path** — covered by §1 of this sheet: 4.5 right after the
+   first delivery, then 4.1–4.3 on the new image with nothing armed, and
+   4.4 only if a second build goes on. Nothing left here.
 5. **Codex smoke test** — `docs/agent-setup.md`, "Post-flash physical Codex
    smoke test": one `mcp__vibepulse__ask` with header `Test`, question
    `Ser du APPROVE?`, `Ja` recommended. Pass only on a real APPROVE tap
