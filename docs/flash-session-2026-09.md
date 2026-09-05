@@ -55,16 +55,29 @@ panel has never seen:
    `ls /dev/cu.usbmodem*` must list a port. If it never appears, §2
    cannot be done this session; the three lines are logged once at boot
    and nowhere else. Say so in the review rather than skipping §2 quietly.
-5. Open the serial monitor before flashing so the boot log is captured:
+5. **Find the panel's port, then open the monitor.** Source ESP-IDF in
+   every terminal you use, the monitor one included — `idf.py` does not
+   exist in a fresh shell:
 
    ```sh
-   idf.py -p $(ls /dev/cu.usbmodem* | head -1) monitor
+   . ~/esp/esp-idf/export.sh        # their install path may differ
+   ls /dev/cu.usbmodem*             # note the list
+   ```
+
+   Now unplug the panel's data cable, list again, plug it back, list a
+   third time: the entry that vanishes and returns is the panel. Use that
+   exact path, not the first match — a Mac with another serial device
+   would otherwise monitor the wrong thing and lose the once-only lines:
+
+   ```sh
+   idf.py -p /dev/cu.usbmodemXXXX monitor
    ```
 
 ## 1. Build and deliver (flash authorization required)
 
+In a second terminal (sourced the same way):
+
 ```sh
-. ~/esp/esp-idf/export.sh
 idf.py build
 tools/ota-flash.sh            # waits; prints the newest build*/torget.bin it will send
 ```
@@ -131,6 +144,25 @@ network-off part is done once, not twice.
    redraw) and 3.5 (LATER must not bring the menu back). **Do not have
    `tools/ota-flash.sh` running here**; a leftover copy uploads the moment
    a window opens.
+
+   **3.4 needs a strictly newer version than the one now running**, and
+   after §1 the newest `build*/torget.bin` on the Mac *is* the running
+   one, so nothing would announce. The firmware orders versions by the
+   commit distance in `git describe`, so stage one more commit and build
+   it into its own directory:
+
+   ```sh
+   git commit --allow-empty -m "stage: one commit ahead for manual-test 3.4"
+   idf.py -B build-stage build      # clean tree, so not -dirty
+   ```
+
+   The tokenserver advertises the newest `torget.bin` by mtime within
+   30 s; the panel sees a distance one higher and shows UPDATE READY.
+   Run 3.4–3.6 against it. This staged image is also a real second build
+   for 4.4 if you want that path exercised. **Before you leave:** confirm with
+   `git log -1` that the empty stage commit is still HEAD, drop it with
+   `git reset --hard HEAD~1`, and delete `build-stage/`, or the panel
+   nags about a phantom version every hour from then on.
 4. **§4 update path** — covered by §1 of this sheet: 4.5 right after the
    first delivery, then 4.1–4.3 on the new image with nothing armed, and
    4.4 only if a second build goes on. Nothing left here.
