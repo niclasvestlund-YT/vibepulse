@@ -21,6 +21,31 @@ point at the backlog item.
 
 ---
 
+## 2026-09-05 · A QR code that outlived its access point
+
+**What happened:** the WiFi setup window's QR stayed on screen after the
+window closed. A setup window that expires while the panel still has no
+network hops straight from `OPEN` to `SEARCHING`, and the `NO NETWORK` page
+came up with a dead QR over the middle of it, covering part of the reason
+line. **Root cause:** one control's visibility was owned by one branch.
+`show(ui.qr, ...)` lived only in `render_open_view()`, reached only when
+`state == TG_WIFI_UI_OPEN`; the non-open branch repositioned and cleared the
+labels but never touched the canvas, and only `HIDDEN` cleared it. The same
+split ran the other way: `render_open_view()` hides the network name behind
+the code, so `NO NETWORK`/`JOINING`/`ON THE NET` inherited that and stopped
+naming the network. **The rule now:** a state renderer with two branches
+must set every shared control's visibility in *both*. Clearing text is not
+hiding a widget, and `HIDDEN` is not the only exit from a state.
+**Guards:** `show()` calls for the canvas, the action control and the three
+open-view labels in the non-open branch of `torget_wifi_ui_set()`; pinned
+capture `torget-wifi-open-to-searching.bmp` (taken *after* an OPEN state —
+the older `wifi-searching` frame is taken before one, so its canvas has
+never been populated) and
+`test_setup_qr_does_not_survive_a_visible_state_change`, which reads the
+canvas quiet zone from pixels and pins the whole frame byte-equal to
+`wifi-searching`. **Watch for:** the fix is per-control, not structural —
+a new widget added to `render_open_view()` can reintroduce this. The
+byte-equality assertion is the backstop: any residue at all breaks it.
 ## 2026-09-05 · A timing bound that measured the CI runner, not the deadline
 
 **What happened:** `test_mcp_recovers_after_absolute_drip_deadline` went red

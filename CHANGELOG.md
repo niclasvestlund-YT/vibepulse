@@ -71,6 +71,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- The WiFi setup QR no longer survives the window it belongs to. Only the
+  OPEN branch of `torget_wifi_ui_set()` ever managed the canvas, and only
+  `HIDDEN` ever cleared it, so every hop from OPEN to another *visible* state
+  carried the code along. The one that reaches a user: a setup window that
+  times out with still no network goes straight to `SEARCHING`, and a QR for
+  an access point that no longer exists sat on top of the honest reason line
+  (`NOT SEEN - 2.4 GHZ ONLY`) — inviting a scan that does nothing. The same
+  split hid the network *name*: the QR view tucks it away behind the code and
+  nothing put it back, so `NO NETWORK`, `JOINING` and `ON THE NET` had stopped
+  saying which network they meant. Every control the open view touches now
+  gets its visibility set in both branches. New pinned capture
+  `wifi-open-to-searching`, which the existing `wifi-searching` frame could
+  not catch — that one is taken before any OPEN state, so the canvas has
+  never been populated at that point.
 - `test_mcp_recovers_after_absolute_drip_deadline` no longer flakes on the
   Windows CI runner. It bounded wall clock taken around `run_mcp()`, which
   spawns a Python subprocess, so interpreter startup counted against a budget

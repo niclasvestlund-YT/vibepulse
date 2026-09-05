@@ -55,6 +55,13 @@ MT_STAT_COL_X = [MT_GRID_X + (i * MT_GRID_W) // 4 for i in range(4)]
 MT_STAT_COL_W = MT_GRID_W // 4  # 104
 PAGER_ROW_Y = 458  # PAGER_Y (456) + 2: inside the 6px-tall dot row
 
+# The setup window's QR canvas — mirrors WIFI_OPEN_QR_* in
+# components/torget_wifi/wifi_setup_ui.c (also pinned by
+# design/vibepulse/wifi-onboarding-design.json via test_wifi_onboarding_design.py).
+WIFI_OPEN_QR_X = 142
+WIFI_OPEN_QR_Y = 108
+WIFI_OPEN_QR_SIZE = 196
+
 
 def _screen_views():
     """The tile count the SIMULATOR renders. The header now defines
@@ -214,6 +221,7 @@ EXPECTED = {
     "torget-wifi-setup-open.bmp",
     "torget-wifi-setup-qr.bmp",
     "torget-wifi-setup-manual.bmp",
+    "torget-wifi-open-to-searching.bmp",
     "torget-wifi-joining.bmp",
     "torget-wifi-joined.bmp",
     "torget-wifi-failed-password.bmp",
@@ -580,6 +588,63 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             joined.crop((70, 390, 410, 432)).tobytes(),
             failed.crop((70, 390, 410, 432)).tobytes(),
             "joined linger is still inside the setup window",
+        )
+
+    def test_setup_qr_does_not_survive_a_visible_state_change(self):
+        """The QR belongs to the open window and to nothing after it.
+
+        torget_wifi_ui_set() used to manage the canvas only inside its OPEN
+        branch (render_open_view) and only clear it in HIDDEN, so any hop
+        from OPEN to another VISIBLE state carried the code along. The one
+        that reaches a user is a setup window that expires with still no
+        network: wifi_setup.c's guard goes straight to SEARCHING, and a QR
+        for an access point that no longer exists sat on top of the honest
+        reason line, inviting a scan that does nothing.
+
+        The pinned wifi-searching frame cannot catch this — it is captured
+        before any OPEN state, so the canvas has never been populated.
+        wifi-open-to-searching is captured after one.
+        """
+        after_open = self.image("torget-wifi-open-to-searching.bmp")
+
+        qr_box = (WIFI_OPEN_QR_X, WIFI_OPEN_QR_Y,
+                  WIFI_OPEN_QR_X + WIFI_OPEN_QR_SIZE,
+                  WIFI_OPEN_QR_Y + WIFI_OPEN_QR_SIZE)
+
+        # The canvas carries a white quiet zone all the way round, and this
+        # page's copy never reaches those rows — so they are the exact pixels
+        # that separate a hidden canvas from a drawn one. Black there means
+        # the QR is gone, not merely redrawn.
+        for band in ((WIFI_OPEN_QR_Y, WIFI_OPEN_QR_Y + 12),
+                     (WIFI_OPEN_QR_Y + WIFI_OPEN_QR_SIZE - 12,
+                      WIFI_OPEN_QR_Y + WIFI_OPEN_QR_SIZE)):
+            with self.subTest(quiet_zone=band):
+                quiet = after_open.crop(
+                    (qr_box[0], band[0], qr_box[2], band[1])
+                )
+                self.assertTrue(all(
+                    pixel == (0, 0, 0)
+                    for pixel in quiet.get_flattened_data()
+                ), "the QR canvas quiet zone is still on screen")
+
+        # And nothing raster-sized is left anywhere in the box. A drawn
+        # 196px canvas is ~24k white pixels; the SSID line legitimately
+        # sitting in this band is under a thousand.
+        canvas = list(after_open.crop(qr_box).get_flattened_data())
+        self.assertLess(
+            sum(pixel == (255, 255, 255) for pixel in canvas), 3000,
+            "a stale setup QR is still drawn over the NO NETWORK page",
+        )
+
+        # Nothing else survives the hop either: the same state must render
+        # identically whether or not a setup window was ever open. This also
+        # pins the network name back on — render_open_view() hides it behind
+        # the code, and NO NETWORK that cannot say WHICH network is not an
+        # honest page.
+        self.assertEqual(
+            after_open.tobytes(),
+            self.image("torget-wifi-searching.bmp").tobytes(),
+            "SEARCHING must not inherit anything from the setup window",
         )
 
     def test_settings_menu_rows_and_the_muted_update(self):
