@@ -44,11 +44,18 @@ layer down: `run_script`'s 4 s `subprocess.run` timeout timed out
 a second run of the same commit. That one is a hang guard, not an assertion —
 nothing overrides it and no test asserts it fires — so it is now a named
 `SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still proven to fire on a wedged script.
-**Watch for:** every fixed budget in this file that a subprocess spawn sits
-inside. `run_mcp`/`run_script` start an interpreter each call, so both the
-assertion and the guard around them measure the runner unless said otherwise.
-The in-process timing tests (`loopback.post_json`, `setup._invoke`) are fine as
-they stand — the ones that do spawn say so in a comment and budget for it.
+A sweep for the fourth corrected why the `setup._invoke` tests were called
+safe: they do spawn, but Popen returns before the child boots, so startup
+overlaps the mocked wait rather than serialising into it (elapsed = that
+timeout + <=53 ms). The serial spawn is Windows-only —
+`_terminate_process_tree()` runs `taskkill` — and
+`test_production_process_timeout_kills_reaps_and_recovers` is the only one of
+them on windows-latest: at `PIPE_JOIN_TIMEOUT_SECONDS = 1` it permitted
+0.1 + 1 + 1 = 2.1 s against a 2 s bound. It now mocks that to 0.25 as its
+POSIX siblings did and bounds at 4 s. **Watch for:** every fixed budget with a
+spawn inside — but only a *serial* one counts. `run_mcp`/`run_script` start an
+interpreter per call; a killed child's `taskkill` is serial too, and invisible
+on Linux. `loopback.post_json` and the tokenserver bounds spawn nothing.
 
 ## 2026-09-05 · The simulator could not reach the decision it was supposed to be the spec for
 

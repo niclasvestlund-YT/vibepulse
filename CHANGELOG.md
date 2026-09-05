@@ -73,6 +73,17 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   windows-latest it did not: `test_unicode_decision_is_emitted_as_utf8` timed
   out and passed on a second run of the same commit. It is now a named
   `SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still verified to catch a wedged script.
+- `test_production_process_timeout_kills_reaps_and_recovers` no longer bounds a
+  Windows-only subprocess spawn it never budgeted for. A sweep of every timed
+  assertion CI runs on windows-latest found it: `_terminate_process_tree()`
+  spawns `taskkill` there, and with the production
+  `PIPE_JOIN_TIMEOUT_SECONDS = 1` the permitted worst case was 0.1 + 1 + 1 =
+  2.1 s against a 2 s bound — the assertion could have lost to a slow runner
+  rather than to the bug. It now caps that constant at 0.25 s the way the two
+  POSIX siblings already did and asserts under 4 s; it runs in ~0.1 s and
+  still turns red at 5.1 s if the deadline is lengthened. The sweep found
+  nothing else: the other three process tests are POSIX-only, and every timed
+  bound in the tokenserver modules is in-process.
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as
   measured zeros. A new additive `claudeSourcePresent` flag says when the
   Claude directory is absent, so the zeros are not mistaken for a day with no

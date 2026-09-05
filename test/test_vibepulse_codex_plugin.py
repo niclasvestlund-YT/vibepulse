@@ -3999,10 +3999,24 @@ class RelaySetupTests(unittest.TestCase):
     def test_production_process_timeout_kills_reaps_and_recovers(self):
         setup = load_setup()
         sleeping = [sys.executable, "-c", "import time; time.sleep(10)"]
-        with mock.patch.object(setup, "COMMAND_TIMEOUT_SECONDS", 0.1):
+        # The only one of these process tests that runs on Windows, and there
+        # `_terminate_process_tree()` spawns `taskkill` — a real CreateProcess
+        # inside the bound, followed by two `PIPE_JOIN_TIMEOUT_SECONDS` waits
+        # and up to two rounds of drain-thread joins.  Left at the production
+        # 1 s that is 0.1 + 1 + 1 = 2.1 s of permitted worst case against a
+        # 2 s bound: the assertion could lose to a slow runner rather than to
+        # the bug.  Cap the joins the way the two POSIX siblings already do,
+        # so the worst case is 0.1 + 6 x 0.25 = 1.6 s.  A real `taskkill`
+        # still runs; if a loaded runner ever exceeds 0.25 s the documented
+        # `process.kill()` fallback reaps this single child anyway.
+        with mock.patch.object(setup, "COMMAND_TIMEOUT_SECONDS", 0.1), \
+                mock.patch.object(
+                    setup, "PIPE_JOIN_TIMEOUT_SECONDS", 0.25):
             started = time.monotonic()
             self.assertIsNone(setup._invoke(sleeping, setup._AUTO))
-            self.assertLess(time.monotonic() - started, 2)
+            # Bounds the deadline, not the runner: it fires in ~0.1 s here and
+            # the failure it catches is waiting out the child's 10 s sleep.
+            self.assertLess(time.monotonic() - started, 4)
         completed = setup._invoke(
             [sys.executable, "-c", "print('recovered')"], setup._AUTO)
         self.assertIsNotNone(completed)
