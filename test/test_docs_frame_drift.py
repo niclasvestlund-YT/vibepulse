@@ -184,6 +184,37 @@ class DocsFrameDriftTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
+    def test_no_frame_smuggles_transparency(self):
+        """Both comparisons below call convert("RGB"), which silently DROPS an
+        alpha channel. Codex caught the consequence: an RGBA frame whose
+        hidden RGB still matched would pass as identical to the opaque
+        simulator BMP while the README rendered it differently — the exact
+        check advertised as exact, looking through the thing that changed.
+
+        The sound rule is not to work around the conversion but to reject its
+        precondition failing. These are captures of an AMOLED panel; the glass
+        has no transparency, the simulator writes opaque BMPs, and a frame
+        carrying alpha did not come from where it claims to. Asserting that
+        first makes convert("RGB") provably lossless for everything after it.
+
+        Checked as fully-opaque rather than as mode == "RGB": LA, PA and a
+        palette image with a `transparency` key all carry alpha too, and mode
+        alone would wave those past.
+        """
+        for frame, path in self.frames:
+            with self.subTest(frame=frame):
+                with Image.open(path) as im:
+                    has_alpha = ("A" in im.getbands()
+                                 or "transparency" in im.info)
+                    if not has_alpha:
+                        continue
+                    low, _ = im.convert("RGBA").getchannel("A").getextrema()
+                    self.assertEqual(
+                        low, 255,
+                        f"{frame} has transparent pixels. A panel capture is "
+                        f"opaque; alpha here would be dropped unnoticed by "
+                        f"the comparisons below.")
+
     def test_the_capture_sets_actually_ran(self):
         """Both QA modes writing nothing would make every other test in this
         file pass vacuously — an empty allowed-set rejects nothing only if
