@@ -79,6 +79,7 @@ EXPECTED_BMPS = {
     "torget-wifi-setup-open.bmp",
     "torget-wifi-setup-qr.bmp",
     "torget-wifi-setup-manual.bmp",
+    "torget-wifi-open-to-searching.bmp",
     "torget-wifi-joining.bmp",
     "torget-wifi-joined.bmp",
     "torget-wifi-failed-password.bmp",
