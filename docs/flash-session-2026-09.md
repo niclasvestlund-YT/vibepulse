@@ -53,8 +53,9 @@ panel has never seen:
    read `build*/torget.bin` from *that* tree, so the staged build in §3
    would never be advertised and 3.4 could not fire. If smoke reports a
    rev or fingerprint mismatch, re-point the service with
-   `tools/vibepulse_macos_service.py` (`bootout` + `bootstrap`, not
-   `kickstart`) before going on.
+   `python3 tools/vibepulse_macos_service.py install` from this checkout
+   (it does a real `bootout` + `bootstrap`; `kickstart` cannot move it),
+   then run smoke again before going on.
 4. **Power and serial at the same time.** The panel must run from its
    own power supply (a Mac port cannot run the AMOLED; it looks exactly
    like a bad cable) *and* the Mac must still see `/dev/cu.usbmodem*` to
