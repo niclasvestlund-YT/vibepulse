@@ -90,9 +90,23 @@ In a second terminal (sourced the same way):
 
 ```sh
 ls -d build*/                 # only build/ should be here; remove any leftover build-stage/ first
+idf.py fullclean              # drop the CMake cache: a stale TORGET_WITH_BUDDY=ON would otherwise survive
 idf.py build
 tools/ota-flash.sh "$(cat .ota-device)" build   # the build dir is pinned on purpose
 ```
+
+**Say what went into the image.** This checkout's `git status` and the
+uploader's CI gate only vouch for *this* repo. `CMakeLists.txt` also
+pulls in `~/Solelkollen/components` whenever it exists, and Buddy if
+`TORGET_WITH_BUDDY=ON` is cached. Neither is covered by either gate, and
+Buddy carries a DMA configuration that has frozen the glass before. So,
+from a fresh configure: read the build's own status lines — `Solelkollen
+saknas` / `~/Buddy saknas` mean not included; otherwise record each
+companion's `git describe --tags --always --dirty` from its own checkout
+in the review, refuse a `-dirty` companion the same way the uploader
+refuses a dirty platform, and compare against
+`spec/hardware-sources.yaml`. Buddy stays **OFF** unless the user asks
+for it in this session.
 
 The build directory is passed explicitly because the script otherwise
 takes the newest `build*/torget.bin` by mtime, and it makes that choice
