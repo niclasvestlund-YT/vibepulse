@@ -14,22 +14,25 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   required for UPDATE, and the token and the ten-minute window are untouched.
   Without an address UPDATE is greyed out and cannot be picked, because an
   update window with no address could never receive an upload; WIFI is then
-  the one lit row. ABOUT shows the firmware version and the address, with a
-  dash for anything missing. There is deliberately no "computer found" row:
-  the only available signal is a boot latch that never clears, so it would
-  have read FOUND forever after one fetch. Any KEY3 release closes the menu,
-  the same escape the two windows have. The menu and the UPDATE READY takeover
-  are mutually exclusive: the hold does nothing at all while that notice is
-  up, and a notice that arrives while the menu is open closes it. The notice
-  is a UI state rather than an open maintenance window, so without both edges
-  the menu opened invisibly behind it and reappeared on LATER. Answer the
-  takeover with its own UPDATE and LATER pills. Against everything else the
-  menu keeps itself on top, which it has to re-assert rather than inherit from
-  creation order — the NO NETWORK page redraws its countdown every second and
-  lifts itself each time, and that is precisely the state where the WIFI row
-  is what you need. FEATURES and PAIR from the design spec are not in this
-  step: FEATURES needs the internal-RAM budget re-measured on the unit, and
-  PAIR belongs to a later step.
+  the one lit row, and the address is live rather than a snapshot — lose Wi-Fi
+  while the menu is up and UPDATE greys out there and then, instead of
+  offering a window that could no longer receive anything. ABOUT shows the
+  firmware version and the address, with a dash for anything missing. There is
+  deliberately no "computer found" row: the only available signal is a boot
+  latch that never clears, so it would have read FOUND forever after one
+  fetch. Any KEY3 release closes the menu, the same escape the two windows
+  have. The menu and the UPDATE READY takeover are mutually exclusive: the
+  hold does nothing at all while that notice is up, and a notice that arrives
+  while the menu is open closes it. The notice is a UI state rather than an
+  open maintenance window, so without both edges the menu opened invisibly
+  behind it and reappeared on LATER. Answer the takeover with its own UPDATE
+  and LATER pills. Against everything else the menu keeps itself on top, which
+  it has to re-assert rather than inherit from creation order — the NO NETWORK
+  page redraws its countdown every second and lifts itself each time, and that
+  is precisely the state where the WIFI row is what you need. FEATURES and
+  PAIR from the design spec are not in this step: FEATURES needs the
+  internal-RAM budget re-measured on the unit, and PAIR belongs to a later
+  step.
 
 ### Fixed
 

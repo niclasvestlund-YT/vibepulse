@@ -271,6 +271,30 @@ void torget_settings_keep_foreground(void) {
   lv_obj_move_foreground(ui.overlay);
 }
 
+/* Adressen är LEVANDE, inte en ögonblicksbild — det var den till en början,
+ * och det var fel. Nätet kan försvinna medan menyn står uppe: setupfönstret
+ * tar inte över förrän efter 90 s utan adress, så menyn kunde visa en adress
+ * panelen inte längre hade i över en minut, och UPDATE stod kvar valbar.
+ * Ett tryck hade då öppnat ett underhållsfönster som aldrig kunde ta emot en
+ * uppladdning — exakt det nedtoningen finns för att förhindra.
+ *
+ * Skälet till ögonblicksbilden var att värdet bodde i en annan task och en
+ * direktläsning hade krävt lås. Det skälet är borta: main.c:s ip_text_copy()
+ * tar spinlocket och lämnar en hel kopia, billigt nog att göra varje tick.
+ *
+ * Avduplicerar på värdet, så en oförändrad adress inte kostar en omritning.
+ * Versionen är däremot fortfarande en ögonblicksbild: den kan inte ändras
+ * medan firmwaren kör. */
+void torget_settings_set_address(const char *ip) {
+  if (!ui.overlay || !ui.open) return;
+  char next[sizeof ui.ip];
+  snprintf(next, sizeof next, "%s", ip ? ip : "");
+  if (strcmp(next, ui.ip) == 0) return;
+  snprintf(ui.ip, sizeof ui.ip, "%s", next);
+  ui.about_dirty = true;
+  render();
+}
+
 void torget_settings_close(void) {
   if (!ui.overlay) return;
   ui.open = false;

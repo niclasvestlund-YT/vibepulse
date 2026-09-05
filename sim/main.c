@@ -1300,6 +1300,15 @@ static int run_vibepulse_static_qa(void) {
   torget_settings_close();
   /* Utan adress: UPDATE tonas ner och ABOUT visar streck. Två frames som
    * skiljer sig materiellt från de ovan, inte samma bild med annan text. */
+  /* Adressen försvinner MEDAN menyn står uppe. Ögonblicksbilden lämnade
+   * kvar den gamla adressen i över en minut med UPDATE valbar; nu tonas
+   * raden ner och ABOUT visar streck utan att menyn stängs. Fångad som
+   * egen frame för att det är ett tillståndsBYTE, inte en ny öppning. */
+  torget_settings_open("v0.2.1-16-g9f9af53", "192.168.1.42");
+  torget_settings_set_address(NULL);
+  dump_overlay_frame("settings-menu-address-lost");
+  torget_settings_close();
+
   torget_settings_open("v0.2.1-16-g9f9af53", NULL);
   dump_overlay_frame("settings-menu-no-address");
   torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);

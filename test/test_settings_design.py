@@ -209,6 +209,31 @@ class SettingsDesignTests(unittest.TestCase):
         self.assertIn("torget_settings_close()", block)
         self.assertIn("torget_settings_keep_foreground()", block)
 
+    def test_the_address_stays_live_while_the_menu_is_open(self):
+        """A snapshot taken at open goes stale, and the honesty rules bite
+        both ways when it does: ABOUT shows an address the panel no longer
+        has, and UPDATE stays selectable so a press opens a maintenance
+        window that can never receive an upload — the exact thing the muting
+        exists to prevent. Nothing rescues it quickly either: the setup
+        window does not take over until 90 s without an address, so the
+        stale menu can stand for over a minute."""
+        source = SOURCE_PATH.read_text(encoding="utf-8")
+        setter = source.split("void torget_settings_set_address(const char *ip) {", 1)
+        self.assertEqual(len(setter), 2, "the live address setter moved")
+        setter = setter[1].split("\n}", 1)[0]
+        # Only while open, deduplicated, and it must re-render on a change.
+        self.assertIn("!ui.open", setter)
+        self.assertIn("strcmp(next, ui.ip) == 0", setter)
+        self.assertIn("ui.about_dirty = true;", setter)
+        self.assertIn("render();", setter)
+        # Fed every tick from the locked copy, in the same branch that keeps
+        # the menu on top — i.e. exactly when no window owns the glass.
+        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
+        block = main.split("torget_settings_keep_foreground();", 1)[0]
+        block = block.rsplit("else {", 1)[1]
+        self.assertIn("ip_text_copy(ip, sizeof ip)", block)
+        self.assertIn("torget_settings_set_address(have_ip ? ip : NULL)", block)
+
     def test_the_exclusion_runs_before_the_key_chain(self):
         """Order matters, not just presence. The close must land on the same
         tick the window takes over, so the next press acts on what the user

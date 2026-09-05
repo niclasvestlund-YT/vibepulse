@@ -220,6 +220,7 @@ EXPECTED = {
     "torget-settings-menu.bmp",
     "torget-settings-over-wifi-searching.bmp",
     "torget-settings-menu-no-address.bmp",
+    "torget-settings-menu-address-lost.bmp",
     "torget-settings-about-found.bmp",
     "torget-settings-about-missing.bmp",
 
@@ -641,6 +642,21 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             self.assertTrue(
                 all(p == (0, 0, 0) for p in column.get_flattened_data()),
                 "NO NETWORK's wide headline is showing through")
+
+    def test_losing_the_address_remutes_update_without_closing(self):
+        """The address is live, not a snapshot. When Wi-Fi drops while the
+        menu is up, the panel must stop offering an update it could not
+        receive — and it must do so on the open menu, not only on the next
+        open. Proven by pixels: identical to the menu that never had an
+        address."""
+        lost = self.image("torget-settings-menu-address-lost.bmp")
+        never = self.image("torget-settings-menu-no-address.bmp")
+        self.assertEqual(lost.tobytes(), never.tobytes(),
+                         "a lost address must look like no address")
+        # And materially different from the menu that still has one, so the
+        # equality above cannot be satisfied by both frames being wrong.
+        self.assertNotEqual(lost.tobytes(),
+                            self.image("torget-settings-menu.bmp").tobytes())
 
     def test_settings_about_shows_a_dash_for_a_missing_address(self):
         """A missing address is a dash, never a blank line and never a

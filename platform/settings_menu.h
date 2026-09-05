@@ -54,9 +54,9 @@ typedef enum {
 /* Skapas en gång vid start. Ingen allokering sker sedan när menyn öppnas. */
 void torget_settings_create(void);
 
-/* ABOUT-raderna tas som en ögonblicksbild när menyn öppnas, inte som en
- * ström: värdena bor i andra tasks, och en meny som läste dem live hade
- * behövt lås eller atomics för två rader som visas i några sekunder.
+/* ``version`` tas som en ögonblicksbild när menyn öppnas — den kan inte
+ * ändras medan firmwaren kör. ``ip`` gör det INTE längre: se
+ * torget_settings_set_address() nedan, som hålls levande varje tick.
  * ``ip`` NULL eller tom betyder ingen adress — raden visar streck, och
  * UPDATE tonas ner, för ett OTA-fönster utan adress kan aldrig ta emot
  * en uppladdning. Att erbjuda det ändå vore ett löfte skärmen inte kan
@@ -71,6 +71,20 @@ void torget_settings_create(void);
  * kommer tillbaka när det finns ett värde som bär den. */
 void torget_settings_open(const char *version, const char *ip);
 void torget_settings_close(void);
+
+/* Uppdaterar adressen medan menyn står uppe; no-op när den är stängd.
+ *
+ * Måste kallas varje tick av den som äger fönsterordningen. Adressen var
+ * först en ögonblicksbild tagen vid öppning, och det var fel: nätet kan
+ * försvinna medan menyn är uppe, och setupfönstret tar inte över förrän
+ * efter 90 s utan adress. Menyn kunde alltså visa en adress panelen inte
+ * längre hade i över en minut, med UPDATE kvar valbar — ett tryck hade
+ * öppnat ett underhållsfönster som aldrig kunde ta emot något.
+ *
+ * NULL eller tom betyder ingen adress: ABOUT visar streck och UPDATE tonas
+ * ner igen, precis som när menyn öppnas utan nät. Avduplicerar på värdet,
+ * så en oförändrad adress inte kostar en omritning. */
+void torget_settings_set_address(const char *ip);
 bool torget_settings_open_p(void);
 
 /* Håller menyn överst medan den är öppen; no-op när den är stängd.

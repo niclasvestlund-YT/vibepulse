@@ -85,6 +85,7 @@ EXPECTED_BMPS = {
     "torget-settings-menu.bmp",
     "torget-settings-over-wifi-searching.bmp",
     "torget-settings-menu-no-address.bmp",
+    "torget-settings-menu-address-lost.bmp",
     "torget-settings-about-found.bmp",
     "torget-settings-about-missing.bmp",
     "torget-vibepulse-value-ahead.bmp",

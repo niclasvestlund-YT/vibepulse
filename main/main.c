@@ -719,8 +719,17 @@ static void tick_cb(lv_timer_t *t) {
     if (torget_ota_ui_notice_visible() || torget_wifi_setup_owns_input() ||
         torget_ota_service_maintenance_open())
       torget_settings_close();
-    else
+    else {
+      /* Adressen hålls LEVANDE, inte som ögonblicksbilden den var: utan nät
+       * tar setupfönstret inte över förrän efter 90 s, så menyn hann visa en
+       * adress panelen inte längre hade — med UPDATE kvar valbar. Kopian tas
+       * under spinlocket och avdupliceras i menyn, så en oförändrad adress
+       * kostar ingen omritning. */
+      char ip[16];
+      bool have_ip = ip_text_copy(ip, sizeof ip);
+      torget_settings_set_address(have_ip ? ip : NULL);
       torget_settings_keep_foreground();
+    }
   }
 
   if (torget_wifi_setup_owns_input()) {
