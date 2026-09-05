@@ -99,10 +99,20 @@ only after the window opens — too late for you to see it. A stale
 `build-stage/` from an earlier session would win and be sent.
 
 **The first delivery lands on the old image, and the old image has no
-SETTINGS menu.** On `v1.0.0-25-g054db68` the 3 s KEY3 hold opens the
-update window directly; the menu, and UPDATE inside it, arrive with this
-build. So for this one upload: hold KEY3 a full 3 s, the UPDATES ON ring
-appears, and the uploader (already polling) sends. Expect RECEIVING →
+SETTINGS menu.** On `v1.0.0-25-g054db68` the menu does not exist yet; it
+arrives with this build. What that image *does* have is the UPDATE READY
+takeover, and the tokenserver advertises the new `build/torget.bin`
+within about 30 s of `idf.py build` — so by the time you reach the panel
+the takeover has most likely already taken the glass. Two cases, and the
+first is the normal one:
+
+- **UPDATE READY is showing.** Tap its **UPDATE** pill. A KEY3 hold does
+  nothing while the takeover owns the glass — deliberately — so holding
+  here leaves the uploader waiting forever.
+- **It has not appeared yet.** Hold KEY3 a full 3 s; on this old image
+  the hold opens the update window directly and the ring appears.
+
+Either way the uploader (already polling) sends. Expect RECEIVING →
 VERIFYING → RESTARTING, then the boot-health gate. The script exits after
 the one upload.
 
@@ -119,7 +129,7 @@ send the instant 4.1 opens a window, and 4.2 would never happen:
 | 4.1 | Hold KEY3 a full 3 s → SETTINGS → tap **UPDATE** | the window opens, ten-minute countdown, `KEY3 CLOSES` |
 | 4.2 | Short-tap | it closes early, with no upload |
 | 4.3 | Reopen the same way, then hold 3 s inside the already-open window | it switches to WIFI SETUP (the hold–hold shortcut); short-tap to close |
-| 4.4 | Only if a real second build exists — a *pushed* commit with green CI, since the uploader's CI gate refuses anything else: start `tools/ota-flash.sh "$(cat .ota-device)" <that build dir>`, then hold 3 s → SETTINGS → tap **UPDATE** | the upload runs through the menu's row, the first time that path is used on the glass. Otherwise record 4.4 as not exercised |
+| 4.4 | Only if a real second build exists — a *pushed* commit with green CI, since the uploader's CI gate refuses anything else. The panel will already be showing UPDATE READY for it: tap **LATER** first, because the point of 4.4 is the menu's route and the hold is ignored under the takeover. Then start `tools/ota-flash.sh "$(cat .ota-device)" <that build dir>`, hold 3 s → SETTINGS → tap **UPDATE** | the upload runs through the menu's row, the first time that path is used on the glass. Otherwise record 4.4 as not exercised |
 
 That is all of §4. A short KEY3 press ends the re-armed chain whenever
 you are done.
