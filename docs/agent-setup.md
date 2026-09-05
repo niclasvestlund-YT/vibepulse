@@ -355,6 +355,29 @@ legacy alias for Claude only. Current installations should use the setup tool.
 
 ### 3. Review hooks instead of bypassing trust
 
+Codex must be allowed to create interactive permission requests before a
+permission card can reach VibePulse at all. Keep the user-controlled global
+switches explicit in `~/.codex/config.toml`:
+
+```toml
+approval_policy = "on-request"
+approvals_reviewer = "user"
+sandbox_mode = "workspace-write"
+```
+
+`approval_policy = "never"` suppresses every approval prompt, and
+`sandbox_mode = "danger-full-access"` removes the normal workspace boundary.
+Either one produces the confusing failure this section exists to prevent: the
+panel, bridge, plugin and MCP are all healthy, and **APPROVE / DENY** simply
+never happens, because no permission event was ever created. `doctor` and the
+Codex `SessionStart` health check both read these three names — and nothing
+else in the file — so the state is reported rather than guessed at.
+
+The VibePulse installer never edits these settings. They are global Codex
+security controls that happen to gate this feature; changing them on a user's
+behalf is not ours to do. After changing them yourself, fully restart Codex
+before reviewing the hooks below.
+
 For Codex, open Codex and run `/hooks`. Review the VibePulse `SessionStart` and
 `PermissionRequest` command hooks and explicitly trust them. Then **Start a new
 Codex task** so the newly trusted hooks, skill, and MCP tool are loaded. Run
@@ -457,6 +480,7 @@ workflow, consent model and troubleshooting live in [ota.md](ota.md).
 | Screen boots, everything is dashes, forever | `DIN-MAC` never replaced in `secrets.h`, the Windows LAN IP changed, or the `TK_*` defines were removed | Set the reachable host (Bonjour on macOS; reserved LAN IPv4 on Windows), rebuild, reflash |
 | Dashes, and the computer's URL is set | tokenserver not running, computer asleep, or firewall | Start it; check `curl localhost:8737/` |
 | Dashes only for Claude, Codex fine (or vice versa) | That provider's source is unavailable | Check `claudeProbe`; the other half working is by design |
+| Panel polls, bridge is green, but Codex never shows APPROVE / DENY | Codex has `approval_policy = "never"`, `approvals_reviewer = "auto_review"`, or `sandbox_mode = "danger-full-access"`, so no user permission event is created at all | Restore `on-request` / `user` / `workspace-write`, fully restart Codex, review `/hooks` in the interactive CLI, start a new task, then `python3 tools/vibepulse_setup.py doctor` |
 | Never joins WiFi | Network is 5 GHz | 2.4 GHz only. iPhone hotspot: enable "Maximize Compatibility". The glass names the reason itself after 60 s |
 | Moved to a new place; panel finds nothing | The new network was never taught to it | It raises `VibePulse-setup` after 90 s (or a 3 s KEY3 hold → WIFI). Run `tools/wifi-here.sh` on the Mac, or join the AP from a phone. Remembered afterwards — [docs/wifi.md](wifi.md) |
 | `wifi-here.sh` cannot join the setup AP | The window is closed, or `TG_OTA_TOKEN` is missing so the password is random | Check the glass says WIFI SETUP; without a token run `TG_AP_PASS=<what the glass shows> tools/wifi-here.sh` |

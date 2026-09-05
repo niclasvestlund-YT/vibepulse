@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+import re
 import sys
 
 from loopback import get_json, strict_json_loads
@@ -16,6 +18,13 @@ HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
 EXPECTED_HOST_SOURCE_FINGERPRINT = "8772b9339e93"
+CODEX_CONFIG_MAX_BYTES = 64 * 1024
+# Only the three top-level string settings that decide whether a permission
+# card can reach a user at all. Anchored and quote-matched so a value inside
+# a table further down the file cannot be read as a top-level one.
+_CODEX_STRING_SETTING = re.compile(
+    r'^[ \t]*(approval_policy|approvals_reviewer|sandbox_mode)[ \t]*='
+    r'[ \t]*(["\'])([^"\']*)\2[ \t]*(?:#.*)?$')
 CONTEXT = (
     "For short, non-secret, single-choice 2–3 option questions or "
     "recommendations, use mcp__vibepulse__ask. Mark at most one option "
@@ -129,7 +138,66 @@ def classify_startup_health(root, tokens):
             f"recent direct panel polling is confirmed.{risk}")
 
 
+def _saved_codex_permission_fix():
+    """Name a saved Codex mode that silently prevents approvals reaching the
+    panel — the failure that looks exactly like a broken panel.
+
+    A user in this state sees the bridge green, the panel polling and no
+    APPROVE / DENY ever arriving, with nothing anywhere saying why. The
+    setting is on their computer and the panel cannot see it, so the hook is
+    the only place that can.
+
+    Reads NOTHING but the three mode names: never the prompts, the history,
+    or any other key. Returns a message or None; an unreadable or absent
+    config is not a failure, because plenty of working installs have no
+    config.toml at all.
+    """
+    codex_home = os.environ.get("CODEX_HOME")
+    config_path = ((Path(codex_home) if codex_home else Path.home() / ".codex")
+                   / "config.toml")
+    try:
+        raw = config_path.read_bytes()
+        if len(raw) > CODEX_CONFIG_MAX_BYTES:
+            raise ValueError("oversized config")
+        text = raw.decode("utf-8", errors="strict")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError, ValueError):
+        return ("VibePulse startup health: FIX - saved Codex config is "
+                "unreadable; verify /permissions on this computer.")
+
+    config = {}
+    for line in text.splitlines():
+        # Stop at the first table header: below it these names would belong
+        # to that table, not to the top level.
+        if line.lstrip().startswith("["):
+            break
+        match = _CODEX_STRING_SETTING.fullmatch(line)
+        if match is not None:
+            config[match.group(1)] = match.group(3)
+
+    if config.get("approval_policy") == "never":
+        return ("VibePulse startup health: FIX - Codex approval_policy is "
+                "never, so no permission card can reach the panel. Use "
+                "on-request and start a new task.")
+    if config.get("approvals_reviewer") == "auto_review":
+        return ("VibePulse startup health: FIX - Codex approvals are routed "
+                "to auto_review instead of the user. Use the user reviewer "
+                "and start a new task.")
+    if config.get("sandbox_mode") == "danger-full-access":
+        return ("VibePulse startup health: FIX - Codex sandbox_mode is "
+                "danger-full-access, so workspace permission boundaries are "
+                "bypassed. Use workspace-write and start a new task.")
+    return None
+
+
 def _startup_health():
+    # Before any HTTP: a suppressed approval mode makes every downstream
+    # reading look healthy, so reporting the reachable service first would
+    # tell the user everything is fine while nothing can reach them.
+    permission_fix = _saved_codex_permission_fix()
+    if permission_fix is not None:
+        return permission_fix
     port = _port()
     if port is None:
         return classify_startup_health(None, None)

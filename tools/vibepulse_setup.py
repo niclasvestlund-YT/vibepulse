@@ -47,6 +47,13 @@ TOKEN_SERVER_URL = "http://127.0.0.1:8737/"
 MAX_DIAGNOSTIC_BYTES = 16 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 16 * 1024
 COMMAND_TIMEOUT_SECONDS = 15
+CODEX_CONFIG_MAX_BYTES = 64 * 1024
+# Only the three top-level string settings that decide whether a permission
+# card can reach a user at all. Anchored and quote-matched, so a value inside
+# a table further down the file is never read as a top-level one.
+_CODEX_STRING_SETTING = re.compile(
+    r'^[ \t]*(approval_policy|approvals_reviewer|sandbox_mode)[ \t]*='
+    r'[ \t]*(["\'])([^"\']*)\2[ \t]*(?:#.*)?$')
 NETWORK_TIMEOUT_SECONDS = 2
 PIPE_JOIN_TIMEOUT_SECONDS = 1
 _AUTO = object()
@@ -95,6 +102,69 @@ def default_config_path() -> Path:
         return base / "VibePulse" / "config.json"
     return (Path.home() / "Library" / "Application Support" / "VibePulse" /
             "config.json")
+
+
+def default_codex_config_path() -> Path:
+    """The saved Codex configuration, without ever writing to it."""
+    codex_home = os.environ.get("CODEX_HOME")
+    return ((Path(codex_home) if codex_home else Path.home() / ".codex") /
+            "config.toml")
+
+
+def _codex_permission_config_status(path: Path) -> tuple[bool | None, str]:
+    """Say whether saved Codex settings can surface a permission card.
+
+    This is the failure that looks exactly like a broken panel: the bridge
+    is green, the panel polls, and APPROVE / DENY never arrives, because a
+    setting on the user's computer suppressed it. The panel cannot see that
+    setting, so the doctor is the only place that can say so.
+
+    Reads NOTHING but the three mode names. Returns True (fine), False
+    (a named problem) or None (cannot tell) — the middle value matters,
+    because plenty of working installs have no config.toml at all and
+    guessing green there would be the same dishonesty in reverse.
+    """
+    try:
+        raw = Path(path).read_bytes()
+        if len(raw) > CODEX_CONFIG_MAX_BYTES:
+            raise ValueError("oversized config")
+        text = raw.decode("utf-8", errors="strict")
+    except FileNotFoundError:
+        return (None, "CHECK Codex approvals: no saved config.toml; verify "
+                "that /permissions is interactive")
+    except (OSError, UnicodeError, ValueError):
+        return (False, "FIX Codex approvals: saved config.toml is unreadable")
+
+    config = {}
+    for line in text.splitlines():
+        if line.lstrip().startswith("["):
+            break
+        match = _CODEX_STRING_SETTING.fullmatch(line)
+        if match is not None:
+            config[match.group(1)] = match.group(3)
+
+    if config.get("approval_policy") == "never":
+        return (False, "FIX Codex approvals: approval_policy=never prevents "
+                "permission cards; use on-request")
+    if config.get("approvals_reviewer") == "auto_review":
+        return (False, "FIX Codex approvals: approvals_reviewer=auto_review "
+                "routes decisions away from the user; use user")
+    if config.get("sandbox_mode") == "danger-full-access":
+        return (False, "FIX Codex approvals: sandbox_mode=danger-full-access "
+                "bypasses workspace permission boundaries; use "
+                "workspace-write")
+
+    policy = config.get("approval_policy")
+    reviewer = config.get("approvals_reviewer")
+    sandbox = config.get("sandbox_mode")
+    if (isinstance(policy, str) and policy in {"on-request", "untrusted"} and
+            (reviewer is None or reviewer == "user") and
+            isinstance(sandbox, str) and
+            sandbox in {"workspace-write", "read-only"}):
+        return (True, "PASS Codex approvals: saved policy can surface "
+                "permission cards")
+    return (None, "CHECK Codex approvals: verify the active mode with "
+            "/permissions")
 
 
 def plan_codex_install(
@@ -1440,6 +1510,7 @@ def _doctor(
         config: VibePulseConfig, *, python: Path | None, codex: Path | None,
         repo_root: Path, run: Callable[..., object],
         urlopen: Callable[..., object], stdout,
+        codex_config_path: Path | None = None,
         ) -> bool:
     fixes = False
 
@@ -1511,6 +1582,12 @@ def _doctor(
             fixes = True
 
     if config.codex_interactions:
+        approval_ok, approval_message = _codex_permission_config_status(
+            default_codex_config_path() if codex_config_path is None
+            else codex_config_path)
+        print(approval_message, file=stdout)
+        if approval_ok is False:
+            fixes = True
         print("FIX hooks: open /hooks and review VibePulse; trust status is "
               "not machine-readable", file=stdout)
         fixes = True
