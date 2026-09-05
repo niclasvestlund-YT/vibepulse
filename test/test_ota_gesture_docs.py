@@ -172,6 +172,35 @@ def emitted(line):
     return QUOTED.findall(line)
 
 
+def logical_lines(text):
+    """Physical lines joined across trailing backslashes.
+
+    A shell command wrapped over several lines is ONE command, and a long
+    message is exactly what gets wrapped:
+
+        printf '%s%s\n' \\
+          "Underhållsfönstret öppnas med ett håll " \\
+          "KEY3 ~3 s."
+
+    Scanning physical lines saw `printf` on the first and nothing but
+    orphaned quotes after it, so the arguments carrying the sentence were
+    never read. Joining first is what "read what the line emits" meant all
+    along; doing it per physical line was an implementation detail that
+    quietly became the rule.
+    """
+    joined, buf = [], ""
+    for line in text.splitlines():
+        stripped = line.rstrip()
+        if stripped.endswith("\\"):
+            buf += stripped[:-1] + " "
+            continue
+        joined.append(buf + line)
+        buf = ""
+    if buf:
+        joined.append(buf)
+    return joined
+
+
 def passages(text):
     """Blank-line paragraphs, plus each table row on its own.
 
@@ -213,7 +242,7 @@ def passages(text):
         else:
             yield " ".join(block.split())
     run = []
-    for line in text.splitlines():
+    for line in logical_lines(text):
         parts = emitted(line)
         if parts:
             run.extend(parts)
@@ -350,6 +379,14 @@ class OtaGestureDocsTest(unittest.TestCase):
             # Several arguments to one echo are one line on the terminal too.
             'status() {\n'
             '  echo "Underhållsfönstret öppnas med ett håll " "KEY3 ~3 s."\n'
+            '}',
+            # One command wrapped over three physical lines. A long message
+            # is precisely what gets wrapped, so this is the shape a real
+            # regression would take, not a contrived one.
+            'status() {\n'
+            "  printf '%s%s\\n' \\\n"
+            '    "Underhållsfönstret öppnas med ett håll " \\\n'
+            '    "KEY3 ~3 s."\n'
             '}',
         )
         for text in built:
