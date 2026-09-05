@@ -185,21 +185,40 @@ class SettingsDesignTests(unittest.TestCase):
         keep = keep[1].split("\n}", 1)[0]
         self.assertIn("!ui.open", keep)
 
-    def test_the_menu_and_the_takeover_are_mutually_exclusive(self):
-        """Precedence over a pending update rests on the two never being up
-        at once, not on layer order. Both edges must be covered: the hold is
-        refused while the notice shows, and a notice that appears while the
-        menu is already open closes it. The second edge cannot live in a key
-        branch — maintenance_ui_task announces the notice from another task,
-        with no button event to hang it on — and without it the notice
-        covered a menu still holding open=true, which reappeared on LATER."""
+    def test_the_menu_yields_to_every_window_that_owns_the_glass(self):
+        """The menu is a signpost, never a competitor: any real window on
+        the glass closes it. That — not layer order — is what gives the
+        windows precedence, and it has to cover the two paths no key branch
+        can catch, both triggered from other tasks while the menu is up:
+
+        * the notice, announced by maintenance_ui_task, which otherwise
+          covered a menu still holding open=true and revealed it on LATER;
+        * the setup window, which opens ITSELF after 90 s without an
+          address. owns_input then went true, the branch below ate the key
+          and closed a window nobody could see, while the menu stayed on
+          top promising "KEY3 CLOSES". The visible thing did not answer and
+          the invisible one died."""
         main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
         block = main.split("if (torget_settings_open_p()) {\n    if (", 1)
-        self.assertEqual(len(block), 2, "the z-order/exclusion block moved")
+        self.assertEqual(len(block), 2, "the exclusion block moved")
         block = block[1].split("\n  }", 1)[0]
-        self.assertIn("torget_ota_ui_notice_visible()", block)
+        for owner in ("torget_ota_ui_notice_visible()",
+                      "torget_wifi_setup_owns_input()",
+                      "torget_ota_service_maintenance_open()"):
+            self.assertIn(owner, block, owner)
         self.assertIn("torget_settings_close()", block)
         self.assertIn("torget_settings_keep_foreground()", block)
+
+    def test_the_exclusion_runs_before_the_key_chain(self):
+        """Order matters, not just presence. The close must land on the same
+        tick the window takes over, so the next press acts on what the user
+        actually sees. Behind the chain instead, that press would still be
+        eaten by the setup branch."""
+        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
+        exclusion = main.index("if (torget_settings_open_p()) {\n    if (")
+        chain = main.index("if (torget_wifi_setup_owns_input()) {\n")
+        self.assertLess(exclusion, chain,
+                        "the exclusion must run before the KEY3 chain")
 
     def test_update_is_refused_without_an_address(self):
         """An OTA window with no address can never receive an upload, so the

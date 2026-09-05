@@ -88,8 +88,10 @@ compares against its own running version:
 
 - **Mismatch** → full-screen takeover: UPDATE / READY in the ring, the
   waiting version inside, LATER + UPDATE pills below.
-- **UPDATE pill** (or a KEY3 hold) → opens the window; if
-  `tools/ota-flash.sh` is waiting on the Mac, delivery is automatic.
+- **UPDATE pill** → opens the window; if `tools/ota-flash.sh` is waiting on
+  the Mac, delivery is automatic. The pill is the ONLY affirmative action
+  while the takeover owns the glass: a KEY3 hold does nothing there, on
+  purpose, so SETTINGS can never open behind the notice.
 - **LATER / any other tap** → snooze; the takeover returns every hour
   (`TG_NOTICE_NAG_US` in `notice_policy.h` — raise it when the platform
   calms down) until the update is installed.

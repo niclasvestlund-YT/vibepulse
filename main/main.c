@@ -692,6 +692,37 @@ static void tick_cb(lv_timer_t *t) {
   tg_button_action key3_action = tg_button_update(&key3, key3_down, now);
   if (key3_down)
     s_last_touch_us = now; /* knappkontakt är aktivitet, precis som touch */
+  /* Menyn är en vägvisare, aldrig en konkurrent: så fort ETT RIKTIGT fönster
+   * äger glaset stänger den sig. Det är det som ger fönstren företräde —
+   * inte lagerordningen, som inte betyder något här (både setupfönstret och
+   * OTA-overlayn lyfter sig själva i sina egna set()).
+   *
+   * Två vägar in som ingen knappgren kan fånga, båda utlösta från ANDRA
+   * tasks medan menyn redan står uppe:
+   *   - notisen annonseras av maintenance_ui_task. Utan detta lade den sig
+   *     över en meny som fortfarande hade open=true, och LATER avslöjade
+   *     den bortglömda menyn.
+   *   - setupfönstret öppnar sig SJÄLVT efter 90 s utan adress. Då blev
+   *     owns_input sant, grenen nedan åt knapphändelsen och stängde ett
+   *     fönster som inte syntes, medan menyn låg kvar överst och lovade
+   *     "KEY3 CLOSES" i foten. Det synliga svarade inte, det osynliga dog.
+   *
+   * Därför FÖRE knappkedjan: stängningen ska hinna ske på den tick då
+   * fönstret tar över, så att nästa tryck landar på det man faktiskt ser.
+   *
+   * Ligger inget fönster på glaset hävdar menyn sitt läge överst i stället.
+   * NO NETWORK-sidan ritar om sin nedräkning varje sekund och lyfter sig då,
+   * så en meny som bara lyftes vid öppning begravdes inom en sekund — i
+   * precis det läge där WIFI-raden behövs mest. Gratis när den redan ligger
+   * överst; LVGL returnerar före invalideringen när indexet stämmer. */
+  if (torget_settings_open_p()) {
+    if (torget_ota_ui_notice_visible() || torget_wifi_setup_owns_input() ||
+        torget_ota_service_maintenance_open())
+      torget_settings_close();
+    else
+      torget_settings_keep_foreground();
+  }
+
   if (torget_wifi_setup_owns_input()) {
     /* Även STARTING äger knappen. AP/skanning kan ta sekunder och under den
      * tiden får det utlösande släppet aldrig bli appväxling eller panik.
@@ -765,24 +796,6 @@ static void tick_cb(lv_timer_t *t) {
     char ip[16];
     bool have_ip = ip_text_copy(ip, sizeof ip);
     torget_settings_open(desc ? desc->version : NULL, have_ip ? ip : NULL);
-  }
-
-  /* Menyn och UPDATE READY-takeovern utesluter varandra, och det är DET som
-   * ger notisen företräde — inte lagerordningen. Grenen ovan vägrar öppna
-   * menyn medan notisen syns; den här raden täcker andra hållet, som en
-   * knappgren omöjligt kan fånga: notisen annonseras av maintenance_ui_task
-   * i en ANNAN task och kan dyka upp när menyn redan står uppe. Utan detta
-   * lade notisen sig ovanpå en meny som fortfarande hade open=true, och när
-   * användaren tryckte LATER dök den bortglömda menyn upp igen.
-   *
-   * Annars hävdar menyn sitt läge överst varje tick. Setupfönstret lyfter
-   * sig i sin egen set(), och NO NETWORK-sidans nedräkning ritar om varje
-   * sekund, så en meny som bara lyftes vid öppning hamnade under den inom
-   * en sekund — i precis det läge där WIFI-raden är det användaren behöver.
-   * Kallas härifrån för att LVGL-tasken äger både låset och ordningen. */
-  if (torget_settings_open_p()) {
-    if (torget_ota_ui_notice_visible()) torget_settings_close();
-    else torget_settings_keep_foreground();
   }
 
   /* Menyns val, utfört av den som äger fönsterordningen. Menyn rör aldrig
