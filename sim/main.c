@@ -1272,6 +1272,23 @@ static int run_vibepulse_static_qa(void) {
   torget_wifi_ui_set(TG_WIFI_UI_FAILED, "Niclas iPhone", NULL,
                      "WRONG PASSWORD - TRY AGAIN ON PHONE", 0);
   dump_overlay_frame("wifi-failed-password");
+
+  /* Sammansatt läge, och det som faktiskt gick sönder: NO NETWORK uppe och
+   * ett håll som öppnar menyn. Sekvensen nedan är den riktiga, inte en
+   * gynnsam uppställning — nätlagret ritar om sin nedräkning EFTER att
+   * menyn öppnats, vilket lyfter det över henne, och sedan kör ticken sin
+   * torget_settings_keep_foreground(). Utan den raden visar den här framen
+   * NO NETWORK i stället för menyn, vilket är hela poängen med att fånga
+   * den: menyn får inte bara vara "öppen", den ska synas — och det här är
+   * läget där WIFI-raden behövs mest. */
+  torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "Niclas iPhone", NULL,
+                     "NOT SEEN - 2.4 GHZ ONLY", 24);
+  torget_settings_open("v0.2.1-16-g9f9af53", NULL);
+  torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "Niclas iPhone", NULL,
+                     "NOT SEEN - 2.4 GHZ ONLY", 23);
+  torget_settings_keep_foreground();
+  dump_overlay_frame("settings-over-wifi-searching");
+  torget_settings_close();
   torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
 
   /* SETTINGS: vad ett tresekundershåll på KEY3 öppnar. Menyn och ABOUT i

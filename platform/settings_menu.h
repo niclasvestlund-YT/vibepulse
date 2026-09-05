@@ -73,6 +73,21 @@ void torget_settings_open(const char *version, const char *ip);
 void torget_settings_close(void);
 bool torget_settings_open_p(void);
 
+/* Håller menyn överst medan den är öppen; no-op när den är stängd.
+ *
+ * Kallas varje tick från den som äger fönsterordningen. Skapelseordningen
+ * räcker inte: setupfönstret och OTA-overlayn lyfter sig själva i sina
+ * set(), och NO NETWORK-sidans nedräkning ändras varje sekund, så den
+ * ritar om och lyfter sig en gång i sekunden. En ensam lyftning vid
+ * öppning hade alltså begravts inom en sekund — just i det läge där
+ * användaren behöver WIFI-raden mest.
+ *
+ * Gratis när menyn redan ligger överst (LVGL returnerar före
+ * invalideringen när indexet stämmer). Företrädet mot en väntande
+ * uppdatering vilar INTE på detta utan på att menyn och notisen aldrig är
+ * uppe samtidigt — se torget_settings_open(). */
+void torget_settings_keep_foreground(void);
+
 /* Vad ett tryck på en rad gör. Touch-callbacken delegerar hit, så
  * simulatorn och värdtesterna kan driva EXAKT samma väg som ett finger i
  * stället för en egen QA-bakdörr som kunde hinna glida isär från den. */

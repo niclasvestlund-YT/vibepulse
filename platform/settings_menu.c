@@ -247,13 +247,28 @@ void torget_settings_open(const char *version, const char *ip) {
   ui.open = true;
   render();
   show(ui.overlay, true);
-  /* INGET lv_obj_move_foreground här, med flit. Skapelseordningen är
-   * företrädet — appar < nät < settings < OTA — och den håller bara så
-   * länge menyn inte lyfter sig själv. UPDATE READY-takeovern är inte ett
-   * öppet underhållsfönster, så ett håll når hit medan den syns; en
-   * foregrounding hade lagt menyn ovanpå den, och OTA-renderaren
-   * avduplicerar samma tillstånd och hade aldrig lyft tillbaka den.
-   * Utan lyftet kan menyn aldrig skymma en väntande uppdatering. */
+  torget_settings_keep_foreground();
+}
+
+/* Skapelseordningen räcker INTE som företräde, och att lita på den var ett
+ * eget misstag: både setupfönstret och OTA-overlayn kallar
+ * lv_obj_move_foreground() i sina egna set(). Den som ritade senast ligger
+ * överst, oavsett vem som skapades sist. Konkret gick menyn under NO
+ * NETWORK-sidan: dess nedräkning ändras varje sekund, så avdupliceringen
+ * släpper igenom en omritning i sekunden och lyfter nätlagret igen.
+ *
+ * Därför hävdar menyn sitt läge varje tick i stället för en gång vid
+ * öppning. Det är gratis när den redan ligger överst: lv_obj_move_foreground
+ * går till lv_obj_move_to_index, som returnerar direkt när indexet redan
+ * stämmer — före lv_obj_invalidate. Ingen omritning, inga extra pixlar.
+ *
+ * Att detta inte lägger menyn ovanpå en väntande uppdatering garanteras
+ * inte av lagerordningen utan av att de två aldrig är uppe samtidigt:
+ * main.c vägrar öppna menyn medan notisen syns, och stänger den om notisen
+ * dyker upp under tiden. Ömsesidig uteslutning, inte z-ordning. */
+void torget_settings_keep_foreground(void) {
+  if (!ui.overlay || !ui.open) return;
+  lv_obj_move_foreground(ui.overlay);
 }
 
 void torget_settings_close(void) {

@@ -767,6 +767,24 @@ static void tick_cb(lv_timer_t *t) {
     torget_settings_open(desc ? desc->version : NULL, have_ip ? ip : NULL);
   }
 
+  /* Menyn och UPDATE READY-takeovern utesluter varandra, och det är DET som
+   * ger notisen företräde — inte lagerordningen. Grenen ovan vägrar öppna
+   * menyn medan notisen syns; den här raden täcker andra hållet, som en
+   * knappgren omöjligt kan fånga: notisen annonseras av maintenance_ui_task
+   * i en ANNAN task och kan dyka upp när menyn redan står uppe. Utan detta
+   * lade notisen sig ovanpå en meny som fortfarande hade open=true, och när
+   * användaren tryckte LATER dök den bortglömda menyn upp igen.
+   *
+   * Annars hävdar menyn sitt läge överst varje tick. Setupfönstret lyfter
+   * sig i sin egen set(), och NO NETWORK-sidans nedräkning ritar om varje
+   * sekund, så en meny som bara lyftes vid öppning hamnade under den inom
+   * en sekund — i precis det läge där WIFI-raden är det användaren behöver.
+   * Kallas härifrån för att LVGL-tasken äger både låset och ordningen. */
+  if (torget_settings_open_p()) {
+    if (torget_ota_ui_notice_visible()) torget_settings_close();
+    else torget_settings_keep_foreground();
+  }
+
   /* Menyns val, utfört av den som äger fönsterordningen. Menyn rör aldrig
    * OTA:n eller setupfönstret själv: port 80 delas, och ett andra ställe
    * som öppnade fönster hade gjort överlämningen till en kapplöpning. */
@@ -1010,10 +1028,12 @@ void app_main(void) {
    * avgör vem som vinner när båda vill synas. READY-ringen ska alltid
    * vinna — den skapas därför sist. */
   torget_wifi_ui_create();
-  /* SETTINGS mellan nätlagret och OTA-ringen: samma topplager, samma regel
-   * om att den som skapas sist vinner. Menyn ska kunna läggas över nätets
-   * fönster men ALDRIG över READY-takeovern — en väntande uppdatering är
-   * viktigare än en meny, och ringen skapas därför fortfarande sist. */
+  /* SETTINGS på samma topplager. Skapelseordningen bestämmer dock INTE
+   * företrädet här: menyn hävdar sitt läge överst varje tick, för annars
+   * begraver NO NETWORK-sidan den inom en sekund (den ritar om sin
+   * nedräkning och lyfter sig själv). Att en väntande uppdatering ändå
+   * alltid vinner vilar på att menyn och notisen aldrig är uppe samtidigt
+   * — se tick_cb — inte på vem som skapades sist. */
   torget_settings_create();
   /* OTA-overlayn EFTER det delade UI:t, på topplagret, dold tills KEY3-
    * hållet öppnar underhållsfönstret — appträdet rörs aldrig. */

@@ -601,10 +601,11 @@ one hold, not one per build.
 
 The tokenserver announces the newest build on your computer
 (`otaAvailableVersion` on `/api/tokens`); when the screen runs an older
-version it takes the glass with an **UPDATE READY** notice — answer the
-on-glass LATER/UPDATE pills by touch, or hold KEY3 and pick UPDATE in
-SETTINGS; the pill opens the window just like the menu does. A snooze
-returns every hour until installed. Full lifecycle reference: [docs/ota.md](docs/ota.md).
+version it takes the glass with an **UPDATE READY** notice — answer it with
+the on-glass LATER/UPDATE pills by touch. While that notice is up it owns
+the glass completely: a KEY3 hold does nothing, deliberately, so the menu
+can never open behind it. The UPDATE pill opens the same maintenance window
+the menu's UPDATE row does. A snooze returns every hour until installed. Full lifecycle reference: [docs/ota.md](docs/ota.md).
 
 **If someone tells you "this project has no OTA":** they are reading a tree
 where `partitions.csv` still has a single `factory` partition. The OTA

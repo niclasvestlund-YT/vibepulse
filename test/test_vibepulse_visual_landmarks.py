@@ -218,6 +218,7 @@ EXPECTED = {
     "torget-wifi-joined.bmp",
     "torget-wifi-failed-password.bmp",
     "torget-settings-menu.bmp",
+    "torget-settings-over-wifi-searching.bmp",
     "torget-settings-menu-no-address.bmp",
     "torget-settings-about-found.bmp",
     "torget-settings-about-missing.bmp",
@@ -615,6 +616,31 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         for index in (1, 2):
             self.assertGreater(white_in_label(no_addr, index), 50,
                                "WIFI and ABOUT stay selectable with no address")
+
+    def test_settings_stays_on_top_of_the_no_network_page(self):
+        """The composite state, proven from pixels rather than from layer
+        order — because layer order was exactly what was wrong. NO NETWORK
+        redraws its countdown once a second and lifts itself each time, so a
+        menu lifted only at open was buried within a second. That is the
+        state where the WIFI row matters most: the panel has no network.
+
+        The frame is captured after the Wi-Fi layer redraws, so it fails if
+        the menu stops re-asserting its position."""
+        composite = self.image("torget-settings-over-wifi-searching.bmp")
+        no_addr = self.image("torget-settings-menu-no-address.bmp")
+        # Identical to the standalone no-address menu: nothing of the
+        # NO NETWORK page shows through, and UPDATE is still muted (a
+        # searching panel has no address, so it could not receive an upload).
+        self.assertEqual(composite.tobytes(), no_addr.tobytes(),
+                         "the Wi-Fi page must not show through the menu")
+        # Independent of that equality: the NO NETWORK wordmark is a wide
+        # white band at y~48-92, and the menu's headline is narrower. If the
+        # Wi-Fi layer were on top, this column would carry its ink.
+        for x in (80, 400):
+            column = composite.crop((x, 48, x + 8, 92))
+            self.assertTrue(
+                all(p == (0, 0, 0) for p in column.get_flattened_data()),
+                "NO NETWORK's wide headline is showing through")
 
     def test_settings_about_shows_a_dash_for_a_missing_address(self):
         """A missing address is a dash, never a blank line and never a

@@ -167,13 +167,39 @@ class SettingsDesignTests(unittest.TestCase):
         self.assertNotIn("COMPUTER", without_comments(source),
                          "the COMPUTER row had no signal that meant it")
 
-    def test_menu_never_lifts_itself_above_the_update_takeover(self):
-        """UPDATE READY is not an open maintenance window, so a hold reaches
-        the menu while it shows. Creation order keeps the ring on top only
-        while the menu does not foreground itself, and the OTA renderer
-        deduplicates an unchanged state so it would never lift back."""
+    def test_menu_asserts_its_own_z_order_every_tick(self):
+        """Creation order is NOT precedence here, and assuming it was is the
+        mistake this test replaces. Both the Wi-Fi overlay and the OTA
+        overlay call lv_obj_move_foreground() inside their own set(), so
+        whoever drew last sits on top. NO NETWORK is the case that bites:
+        its countdown changes every second, so its dedup lets a redraw
+        through once a second and lifts the Wi-Fi layer again — burying a
+        menu that had only been lifted once at open, in exactly the state
+        where the user needs the WIFI row."""
         source = without_comments(SOURCE_PATH.read_text(encoding="utf-8"))
-        self.assertNotIn("lv_obj_move_foreground", source)
+        self.assertIn("lv_obj_move_foreground(ui.overlay)", source)
+        # Re-asserted while open, not once at open: the guard is the open
+        # check, so a closed menu can never claim the top layer.
+        keep = source.split("void torget_settings_keep_foreground(void) {", 1)
+        self.assertEqual(len(keep), 2, "keep_foreground moved")
+        keep = keep[1].split("\n}", 1)[0]
+        self.assertIn("!ui.open", keep)
+
+    def test_the_menu_and_the_takeover_are_mutually_exclusive(self):
+        """Precedence over a pending update rests on the two never being up
+        at once, not on layer order. Both edges must be covered: the hold is
+        refused while the notice shows, and a notice that appears while the
+        menu is already open closes it. The second edge cannot live in a key
+        branch — maintenance_ui_task announces the notice from another task,
+        with no button event to hang it on — and without it the notice
+        covered a menu still holding open=true, which reappeared on LATER."""
+        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
+        block = main.split("if (torget_settings_open_p()) {\n    if (", 1)
+        self.assertEqual(len(block), 2, "the z-order/exclusion block moved")
+        block = block[1].split("\n  }", 1)[0]
+        self.assertIn("torget_ota_ui_notice_visible()", block)
+        self.assertIn("torget_settings_close()", block)
+        self.assertIn("torget_settings_keep_foreground()", block)
 
     def test_update_is_refused_without_an_address(self):
         """An OTA window with no address can never receive an upload, so the
