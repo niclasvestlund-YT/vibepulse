@@ -67,6 +67,7 @@ LIVE_DOCS = (
     "docs/ota.md",
     "docs/wifi.md",
     "docs/agent-setup.md",
+    "docs/flash-session-2026-09.md",
     # The two operator runbooks. Adding them is the whole reason this file
     # changed: both still described the old gesture, and ota-flash.sh printed
     # it at RUNTIME — "håll KEY3 ~3 s..." on the terminal at the exact moment
