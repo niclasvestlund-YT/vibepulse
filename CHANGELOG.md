@@ -5,6 +5,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Fixed
+
+- **The OTA runbook told you the wrong gesture, on the terminal, while you
+  stood at the panel.** `tools/ota-flash.sh` said "håll KEY3 ~3 s tills
+  UPDATES ON-ringen syns" — in its header *and* in the line it prints while
+  waiting for the window. The hold has opened SETTINGS since #72; UPDATE in
+  the menu is what opens the window. Someone following it would have held
+  the button and waited for a ring that never came. `tools/wifi-here.sh`
+  had the same error about the setup window. Both corrected, and
+  `test/test_ota_gesture_docs.py` — which exists precisely to catch this
+  class and did not — now reads the two runbooks and understands Swedish
+  verb-first phrasing ("Håll KEY3"), which is why it had called two wrong
+  files clean.
+
 ### Added
 
 - **`doctor` and Codex startup health now name a saved Codex mode that

@@ -19,6 +19,21 @@ shipped at the time, and docs/superpowers/plans/, which are implementation
 plans for work already done. Rewriting either to match today's behaviour
 would be falsifying the record, which is the opposite of the point.
 
+NOT GUARDED, AND MEASURED RATHER THAN ASSUMED: the same mistake about the
+WI-FI SETUP window. tools/wifi-here.sh said the panel raises its access point
+"direkt om du håller KEY3 ~3 s" — the hold opens SETTINGS, where WIFI opens
+it. That text is corrected in this commit, but this guard did NOT catch it
+and cannot: WINDOW deliberately excludes the setup window so the two windows
+keep separate vocabularies, so the passage matched HOLD and nothing else.
+
+Extending WINDOW to cover it was tried and rejected on evidence. A rule
+pairing a hold with setup-window words flags three passages that are
+CORRECT: wifi.md's hold-hold shortcut, ota.md's greyed-out-UPDATE
+explanation, and agent-setup.md's "(or a 3 s KEY3 hold -> WIFI)" table row.
+Same verdict as the takeover rule below, for the same reason. The runbook is
+still in LIVE_DOCS — it would catch an OTA-window claim appearing there — but
+its setup-window sentence is guarded by a reader, not by this file.
+
 Also deliberately NOT guarded, after trying: the neighbouring failure where
 a doc offers the hold *while the UPDATE READY takeover is up*, which the
 firmware ignores. The ota.md diagram shipped that way ("tap UPDATE pill, or
@@ -46,14 +61,31 @@ LIVE_DOCS = (
     "docs/ota.md",
     "docs/wifi.md",
     "docs/agent-setup.md",
+    # The two operator runbooks. Adding them is the whole reason this file
+    # changed: both still described the old gesture, and ota-flash.sh printed
+    # it at RUNTIME — "håll KEY3 ~3 s..." on the terminal at the exact moment
+    # someone is standing at the panel waiting for a ring that will not come.
+    # A guard scoped to .md files was never going to see it. A doc is
+    # whatever a person follows, not whatever has a Markdown extension.
+    #
+    # ota-flash.sh is genuinely covered: reverting its header fails this file.
+    # wifi-here.sh is here for the OTA-window class only — its own error was
+    # about the SETUP window, which WINDOW does not match. See the docstring.
+    "tools/ota-flash.sh",
+    "tools/wifi-here.sh",
 )
 
 # A hold is not always spelled with KEY3 next to it. The README passage
 # that shipped wrong said "hold twice: the first 3-second hold opens the
 # update window" and never named the button in that sentence at all — the
 # first version of this guard required the adjacency and sailed past it.
+# Swedish puts the verb first — "Håll KEY3", "om du håller KEY3" — and the
+# noun form "KEY3-håll" was the only Swedish shape the first version knew.
+# Both missed passages were verb-first, so the guard read two files that were
+# wrong and called them clean.
 HOLD = re.compile(
     r"(hold\w*\s+(the\s+)?KEY3|KEY3[- ]h[åo]ll|KEY3\s+hold"
+    r"|h[åa]ll\w*\s+(ned\s+)?(på\s+)?KEY3"
     r"|\d+[\s-](?:second|s)\s+h[åo]?ll?d?|full hold|hold twice"
     r"|hold[–-]hold)", re.I)
 
@@ -127,6 +159,11 @@ class OtaGestureDocsTest(unittest.TestCase):
             "On a panel that already *has* a network, hold twice: the first "
             "3-second hold opens the update window, a second full hold "
             "switches it to WIFI SETUP.",
+            # Swedish, verb-first, from tools/ota-flash.sh — the header line
+            # and the runtime echo. Both sailed past the first HOLD pattern.
+            "#   3. Håll KEY3 ~3 s tills UPDATES ON-ringen syns — "
+            "uppladdningen går av sig själv.",
+            'echo "väntar på underhållsfönstret på $HOST — håll KEY3 ~3 s..."',
         )
         for text in real_misses:
             with self.subTest(text=text[:60]):
@@ -144,6 +181,14 @@ class OtaGestureDocsTest(unittest.TestCase):
             "| Upload gets 403 | Window not open | Hold KEY3, then pick "
             "UPDATE in SETTINGS — the hold alone only opens the menu; the "
             "glass must show the ring/UPDATES ON |",
+            # The corrected Swedish, so the widened pattern is checked for
+            # over-reach too: it must accept these, not merely reject the old.
+            "#   3. Håll KEY3 ~3 s och välj UPDATE i SETTINGS — hållet "
+            "öppnar MENYN, inte fönstret. När UPDATES ON-ringen syns går "
+            "uppladdningen av sig själv.",
+            "#      själv efter 90 s utan nät, eller om du håller KEY3 ~3 s "
+            "och väljer WIFI i SETTINGS — hållet öppnar menyn, inte "
+            "fönstret.",
         )
         for text in corrected:
             with self.subTest(text=text[:60]):
