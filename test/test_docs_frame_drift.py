@@ -179,6 +179,10 @@ STALE_CHROME = {
 # README rendered the picture differently.
 DISPLAY_METADATA = ("icc_profile", "exif", "gamma", "srgb", "chromaticity")
 
+# Animation lives outside DISPLAY_METADATA because it is not a chunk that
+# recolours a still: it means the comparison examined one frame of several.
+# Guarded separately, and for every frame rather than only the pinned ones.
+
 
 # The images under docs/img that are NOT panel captures, each named with the
 # reason. Anything else must be 480x480: an earlier version simply skipped
@@ -292,6 +296,29 @@ class DocsFrameDriftTests(unittest.TestCase):
                         f"{frame} has transparent pixels. A panel capture is "
                         f"opaque; alpha here would be dropped unnoticed by "
                         f"the comparisons below.")
+
+    def test_no_frame_is_animated(self):
+        """Third of the same family, after alpha and colour metadata: the
+        comparison sees less than a renderer does.
+
+        Image.open() stays on frame zero, so an APNG whose first frame
+        matches the capture passes while every later frame — the ones a
+        browser actually plays — is never looked at. n_frames is also not a
+        chunk the metadata check knows about, so nothing else caught it.
+
+        Applied to every frame, not only the pinned ones: a quarantined
+        frame's digest would catch it changing, but a NEW frame arriving
+        animated should fail on what it is rather than on a hash nobody has
+        recorded yet. And a panel capture is one still image by definition —
+        the simulator writes single-frame BMPs.
+        """
+        for frame, path in self.frames:
+            with self.subTest(frame=frame):
+                with Image.open(path) as im:
+                    self.assertEqual(
+                        getattr(im, "n_frames", 1), 1,
+                        f"{frame} is animated. Only its first frame would be "
+                        f"compared, so the rest ships unchecked.")
 
     def test_pinned_frames_carry_no_display_affecting_metadata(self):
         """Scoped to PINNED because that is where the word "exact" is used.
