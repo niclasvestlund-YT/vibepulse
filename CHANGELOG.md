@@ -25,6 +25,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **The screenshots in `docs/img/` are checked against the simulator.**
+  `test/test_docs_frame_drift.py` compares every checked-in 480 × 480 frame
+  with what this build actually renders, and the answer is blunt: of
+  twenty-nine frames it can verify **four**. The Wi-Fi indicator was redrawn
+  in `d5be82d` — a thick white fan became a thin grey one — and most frames
+  still show the old glyph, so README, `docs/wifi.md` and the release bodies
+  have been showing a screen this firmware cannot produce. The four the
+  simulator reproduces exactly are pinned byte-for-byte and rejected if they
+  gain a colour profile or EXIF orientation, which would change what a
+  browser paints without changing a pixel. The other twenty-five are
+  quarantined by name *and* by a digest of the file — including eight whose
+  indicator box is simply blank, which proves nothing either way and had
+  been passing silently. Re-capturing them is a separate, deliberate
+  documentation change.
 - **`doctor` and Codex startup health now name a saved Codex mode that
   silently prevents approvals from reaching the panel.** This is the failure
   that looks exactly like a broken panel: the bridge is green, the panel
