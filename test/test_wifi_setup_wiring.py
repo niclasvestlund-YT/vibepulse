@@ -62,9 +62,10 @@ assert len(expected) >= 8, "a derived AP password below 8 chars cannot be a WPA2
 # window is opened only by acting on that menu's intent, and a panel with no
 # address is never offered an update it could not receive.
 assert "torget_wifi_setup_request_open()" in main_c
-hold_branch = main_c.rsplit(
-    "} else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {", 1)[1]
-hold_branch = hold_branch.split("\n  }", 1)[0]
+hold_branch = main_c.split(
+    "} else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE &&", 1)
+assert len(hold_branch) == 2, "the KEY3 hold branch that opens SETTINGS moved"
+hold_branch = hold_branch[1].split("\n  }", 1)[0]
 assert "torget_settings_open(" in hold_branch, (
     "the KEY3 hold must open SETTINGS"
 )
@@ -73,8 +74,14 @@ assert "torget_ota_service_open_maintenance" not in hold_branch, (
 )
 # The no-IP protection survives as a menu that cannot offer UPDATE: main.c
 # passes NULL for the address, and the menu refuses the row on that.
-assert re.search(r"hook_have_ip\(\)\s*\?\s*s_ip_text\s*:\s*NULL", main_c), (
+assert re.search(r"have_ip\s*\?\s*ip\s*:\s*NULL", hold_branch), (
     "a panel without an address must be told so, not handed a stale one"
+)
+# ...and the address is COPIED under the spinlock, never read in place: the
+# string is rewritten by the event loop on a renewed lease or a changed
+# address, on another core, with no disconnect in between.
+assert "ip_text_copy(ip, sizeof ip)" in hold_branch, (
+    "the menu must take its own copy of the address, not alias the writer's"
 )
 settings_c = (root / "platform/settings_menu.c").read_text(encoding="utf-8")
 assert "if (!ui.ip[0]) break;" in settings_c, (

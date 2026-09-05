@@ -200,9 +200,10 @@ class SettingsDesignTests(unittest.TestCase):
         # The hold opens the menu; it must not reach past it into a window.
         # Two branches carry this action: the hold-hold path inside the OTA
         # window (unchanged, and still the way to reach Wi-Fi from there) and
-        # the one that opens the menu. rsplit takes the latter.
-        block = main.rsplit(
-            "} else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {", 1)
+        # the one that opens the menu. Only the latter carries the takeover
+        # guard, so that condition names it unambiguously.
+        block = main.split(
+            "} else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE &&", 1)
         self.assertEqual(len(block), 2, "the KEY3 hold branch moved")
         opened = block[1].split("\n  }", 1)[0]
         self.assertIn("torget_settings_open(", opened)
@@ -215,6 +216,33 @@ class SettingsDesignTests(unittest.TestCase):
         self.assertIn("TG_BUTTON_NONE", escape)
         # The menu's choice is executed by whoever owns the window order.
         self.assertIn("torget_settings_take_intent()", main)
+
+    def test_the_hold_does_nothing_while_update_ready_owns_the_glass(self):
+        """The takeover is a UI state, not an open maintenance window, so
+        torget_ota_service_maintenance_open() answers no while it shows and
+        the hold fell through to the branch that opens the menu. Without this
+        guard SETTINGS opened BEHIND the notice: open=true, nothing on the
+        glass, and the menu surfacing later when the notice went away. The
+        guard belongs on that one branch — a short tap and the panic hold
+        must behave exactly as before."""
+        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
+        self.assertIn(
+            "key3_action == TG_BUTTON_OPEN_MAINTENANCE &&\n"
+            "             !torget_ota_ui_notice_visible()", main)
+        # Not a block of its own: NEXT_APP and PANIC keep their own branches.
+        self.assertNotIn("} else if (torget_ota_ui_notice_visible()) {", main)
+
+    def test_the_address_is_copied_under_the_lock_not_aliased(self):
+        """Writing the string before publishing the event bit only ordered
+        the FIRST publication. A renewed DHCP lease or an address change with
+        no disconnect in between rewrites it from the event loop while the
+        LVGL task may be copying it, on another core."""
+        main = without_comments(MAIN_PATH.read_text(encoding="utf-8"))
+        self.assertIn("portMUX_TYPE s_ip_text_mux", main)
+        # Every writer goes through the helper; nobody touches the buffer.
+        self.assertEqual(main.count("s_ip_text["), 3,
+                         "s_ip_text may only be touched inside its helpers")
+        self.assertIn("ip_text_copy(ip, sizeof ip)", main)
 
     def test_readiness_takeover_still_wins_the_top_layer(self):
         """Creation order is z-order on the shared top layer. A pending

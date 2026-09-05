@@ -90,8 +90,36 @@ static EventGroupHandle_t s_net_events;
 
 /* Senaste tilldelade IPv4-adressen som text, för SETTINGS ABOUT.
  * Tom sträng = ingen adress; menyn visar då streck och tonar ner
- * UPDATE i stället för att påstå en adress som inte finns. */
+ * UPDATE i stället för att påstå en adress som inte finns.
+ *
+ * Skyddad av ett spinlock, inte bara av skrivordningen. Att skriva före
+ * xEventGroupSetBits ordnar BARA den första publiceringen; en förnyad DHCP-
+ * lease eller adressändring utan mellanliggande disconnect skriver om
+ * strängen medan LVGL-tasken kan hålla på att kopiera den, och frånkopplingen
+ * nollar den från ett tredje ställe. Kopian är 16 byte och tas en gång per
+ * menyöppning — ett kritiskt avsnitt kostar inget här och gör läsningen
+ * hel i stället för nästan alltid hel. */
 static char s_ip_text[16];
+static portMUX_TYPE s_ip_text_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void ip_text_store(const char *text) {
+  portENTER_CRITICAL(&s_ip_text_mux);
+  if (text) snprintf(s_ip_text, sizeof s_ip_text, "%s", text);
+  else s_ip_text[0] = '\0';
+  portEXIT_CRITICAL(&s_ip_text_mux);
+}
+
+/* Kopierar ut adressen. Returnerar false när ingen finns, så anroparen
+ * slipper skilja på "tom sträng" och "ingen adress". */
+static bool ip_text_copy(char *out, size_t cap) {
+  bool have;
+  portENTER_CRITICAL(&s_ip_text_mux);
+  have = s_ip_text[0] != '\0';
+  if (have) snprintf(out, cap, "%s", s_ip_text);
+  portEXIT_CRITICAL(&s_ip_text_mux);
+  if (!have && cap) out[0] = '\0';
+  return have;
+}
 #define NET_READY   BIT1 /* IP + SNTP: TLS kräver rimlig tid */
 /* Declared with the platform state because the public recovery hook reads it
  * before the Wi-Fi implementation section below. */
@@ -352,7 +380,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (!atomic_load(&s_sta_paused)) esp_wifi_connect();
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(s_net_events, WIFI_GOT_IP);
-    s_ip_text[0] = '\0'; /* ingen adress kvar att visa */
+    ip_text_store(NULL); /* ingen adress kvar att visa */
     tg_wifi_signal_event(&s_wifi_signal, 0);
     int reason = ((wifi_event_sta_disconnected_t *)data)->reason;
     bool trial_transition = atomic_exchange(&s_trial_ignore_disconnect, false);
@@ -390,17 +418,18 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     vTaskDelay(pdMS_TO_TICKS(2000));
     if (!atomic_load(&s_sta_paused)) esp_wifi_connect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-    /* Adressen sparas som text FÖRE bitten publiceras. Ordningen är hela
-     * poängen: hook_have_ip() är grinden SETTINGS läser s_ip_text bakom,
-     * och de två körs i olika tasks på olika kärnor. Satte vi bitten först
-     * kunde ett håll i glappet se "vi har IP" och läsa en tom eller halv-
-     * skriven sträng. Skrivaren är fortfarande en enda (eventloopen);
-     * bitten är den som gör värdet synligt. */
+    /* Adressen sparas som text FÖRE bitten publiceras, och skrivningen går
+     * genom spinlocket. Ordningen ensam räckte inte: den gjorde bara den
+     * FÖRSTA publiceringen hel. En förnyad DHCP-lease eller en adress som
+     * byts utan mellanliggande disconnect skriver om strängen medan
+     * LVGL-tasken kan hålla på att kopiera den, och de två körs på olika
+     * kärnor. Skrivaren är fortfarande en enda (eventloopen); låset gör
+     * läsningen hel, bitten gör värdet synligt. */
     {
       const ip_event_got_ip_t *got = (const ip_event_got_ip_t *)data;
-      if (got) snprintf(s_ip_text, sizeof s_ip_text, IPSTR,
-                        IP2STR(&got->ip_info.ip));
-      else s_ip_text[0] = '\0';
+      char text[16] = "";
+      if (got) snprintf(text, sizeof text, IPSTR, IP2STR(&got->ip_info.ip));
+      ip_text_store(got ? text : NULL);
     }
     /* GOT_IP is enough to say connected even before the first RSSI sample. */
     xEventGroupSetBits(s_net_events, WIFI_GOT_IP);
@@ -706,8 +735,18 @@ static void tick_cb(lv_timer_t *t) {
      * Bara ett köinlägg (atomärt), säkert från LVGL-tasken; en avstängd
      * svarskanal (ingen enhetsnyckel) gör det till en no-op. */
     tk_needs_you_send_panic();
-  } else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {
-    /* Hållet öppnar SETTINGS i stället för att gissa vilket av två fönster
+  } else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE &&
+             !torget_ota_ui_notice_visible()) {
+    /* UPDATE READY-takeovern äger glaset utan att vara ett öppet
+     * underhållsfönster, så maintenance_open() ovan säger nej och hållet
+     * nådde ända hit. Menyn öppnades då BAKOM notisen: open=true, inget
+     * syntes, och den dök upp senare när notisen gick bort. Takeovern har
+     * sina egna svar (UPDATE-pillret och LATER, med fingret) — hållet gör
+     * ingenting alls medan den syns. Villkoret sitter på just den här
+     * grenen och inte som ett eget block: ett kort tryck och paniken ska
+     * bete sig precis som förut.
+     *
+     * Hållet öppnar SETTINGS i stället för att gissa vilket av två fönster
      * användaren menade. Samtyckesmodellen är oförändrad: menyn nås bara
      * från enheten, så fysisk närvaro krävs fortfarande för UPDATE, och
      * tokenet och tiominutersfönstret är orörda. Skillnaden är att valet
@@ -723,8 +762,9 @@ static void tick_cb(lv_timer_t *t) {
      * efter en enda lyckad hämtning — även med datorn borta, och även när
      * siffrorna kom via reläet. */
     const esp_app_desc_t *desc = esp_app_get_description();
-    torget_settings_open(desc ? desc->version : NULL,
-                         hook_have_ip() ? s_ip_text : NULL);
+    char ip[16];
+    bool have_ip = ip_text_copy(ip, sizeof ip);
+    torget_settings_open(desc ? desc->version : NULL, have_ip ? ip : NULL);
   }
 
   /* Menyns val, utfört av den som äger fönsterordningen. Menyn rör aldrig
