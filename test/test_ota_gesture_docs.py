@@ -156,6 +156,18 @@ def passages(text):
     on one line and began "KEY3 ~3 s" on the next, with `" >&2\n  echo "` in
     between, so no pattern could bridge it. Codex found that line by reading
     it; this yields the joined text so the guard can too.
+
+    ADJACENT echoes only, and that word is load-bearing. A first version
+    joined every echo in the file into one synthetic passage, which Codex
+    caught as a hole I had just dug: ota-flash.sh's corrected text mentions
+    SETTINGS, so ANY other echo in that file — a different branch, a
+    mutually exclusive path, text no operator ever sees in the same
+    breath — would inherit that word and be excused by it. Reproduced before
+    fixing: a stale two-line message injected into ota-flash.sh was NOT
+    flagged, while the same message in a file without a SETTINGS echo was.
+    A guard that grows a blind spot as the file it watches gets more correct
+    is worse than one that never looked. Consecutive echo lines are one
+    emitted message; a blank line, a command, or a closing brace ends it.
     """
     for block in text.split("\n\n"):
         rows = [ln for ln in block.splitlines() if ln.lstrip().startswith("|")]
@@ -164,9 +176,17 @@ def passages(text):
                 yield " ".join(row.split())
         else:
             yield " ".join(block.split())
-    spoken = ECHOED.findall(text)
-    if spoken:
-        yield " ".join(" ".join(spoken).split())
+    run = []
+    for line in text.splitlines():
+        parts = ECHOED.findall(line)
+        if parts:
+            run.extend(parts)
+            continue
+        if run:
+            yield " ".join(" ".join(run).split())
+            run = []
+    if run:
+        yield " ".join(" ".join(run).split())
 
 
 class OtaGestureDocsTest(unittest.TestCase):
@@ -237,6 +257,37 @@ class OtaGestureDocsTest(unittest.TestCase):
             with self.subTest(ok=text[:60]):
                 self.assertEqual(flagged(text), [],
                                  "setup rule rejects correct wording")
+
+    def test_one_correct_echo_cannot_excuse_a_stale_one_elsewhere(self):
+        """The hole a first version of the echo-joining dug.
+
+        Joining every echo in a file into one passage means the file's own
+        corrected text — ota-flash.sh now names SETTINGS — is inherited by
+        every other echo in it, including ones in a different branch that no
+        operator sees in the same breath. The guard would then get blinder
+        the more of the file was fixed, which is the worst possible
+        direction. Consecutive lines are one message; anything else is not.
+        """
+        script = (ROOT / "tools/ota-flash.sh").read_text(encoding="utf-8")
+        planted = script + (
+            '\nretry() {\n'
+            '  echo "kom inte in. Underhållsfönstret stängdes — håll" >&2\n'
+            '  echo "KEY3 ~3 s för att öppna ett nytt." >&2\n'
+            '}\n')
+        flagged = [p for p in passages(planted)
+                   if HOLD.search(p) and WINDOW.search(p)
+                   and not STEP.search(p) and not INSIDE.search(p)]
+        self.assertTrue(
+            flagged,
+            "a stale message in another branch was excused by the SETTINGS "
+            "in this script's own corrected text")
+
+        # And the script as it stands must stay clean, so the grouping is not
+        # merely strict enough to flag everything.
+        self.assertEqual(
+            [p for p in passages(script)
+             if HOLD.search(p) and WINDOW.search(p)
+             and not STEP.search(p) and not INSIDE.search(p)], [])
 
     def test_the_guard_would_have_caught_the_real_misses(self):
         """A guard that passes everything proves nothing, so run it against
