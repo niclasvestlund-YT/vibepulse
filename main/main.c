@@ -803,6 +803,54 @@ static void rounder_event_cb(lv_event_t *e) {
   area->y2 = ((area->y2 >> 1) << 1) + 1;
 }
 
+/* ---------------------------------------- overlayernas minnesbudget
+ *
+ * De tre topplageroverlayerna byggs EN gång vid start och lever sedan hela
+ * körningen. AMOLED-skillen kräver en MÄTT budget för ett sådant lager, och
+ * #72 landade utan en — den kunde inte mätas härifrån, bara på enheten.
+ * Det här gör mätningen automatisk: varje flash svarar på frågan i loggen,
+ * utan att någon behöver komma ihåg att mäta.
+ *
+ * TVÅ siffror, för de svarar på olika saker:
+ *
+ *   LVGL-poolen är TLSF i PSRAM (LV_MEM_POOL_ALLOC i main/lv_psram_pool.h,
+ *   flytten dit var frysfixen 2026-08-16). Objektträden bor alltså i PSRAM,
+ *   och det är poolens 256 KiB de tär på — inte det interna minnet.
+ *
+ *   Internt fritt mäts ändå, och det är den viktiga kontrollen: den visar
+ *   om ett create ÄNDÅ tar internt minne (stilar, buffertar, något LVGL
+ *   lägger utanför poolen). Är deltat noll är den interna svältoron
+ *   obefogad för det lagret; är det inte noll står siffran där svart på
+ *   vitt. Ingen behöver gissa åt någotdera hållet.
+ *
+ * Kostar en loggrad per overlay vid boot och ingenting därefter. */
+static size_t s_cost_pool_used;
+static size_t s_cost_internal_free;
+
+static void overlay_cost_mark(void) {
+  lv_mem_monitor_t mon;
+  lv_mem_monitor(&mon);
+  s_cost_pool_used = mon.total_size - mon.free_size;
+  s_cost_internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+}
+
+static void overlay_cost_report(const char *name) {
+  lv_mem_monitor_t mon;
+  lv_mem_monitor(&mon);
+  size_t pool_used = mon.total_size - mon.free_size;
+  size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  /* Signerat: internt kan gå åt båda håll, och en negativ siffra är data,
+   * inte ett fel. */
+  long pool_delta = (long)pool_used - (long)s_cost_pool_used;
+  long internal_delta =
+      (long)s_cost_internal_free - (long)internal_free;
+  ESP_LOGI(TAG,
+           "overlaykostnad %s: LVGL-pool +%ld B (pool %u/%u använt), "
+           "internt %+ld B (kvar %u)",
+           name, pool_delta, (unsigned)pool_used, (unsigned)mon.total_size,
+           internal_delta, (unsigned)internal_free);
+}
+
 static void display_start(void) {
   esp_lv_adapter_config_t adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
   /* 16 KB: appröttarna gör trädet djupare än defaultens 8 KB klarade. */
@@ -985,17 +1033,23 @@ void app_main(void) {
    * och hämtar sig längst fram i sin egen set(), så skapelseordningen
    * avgör vem som vinner när båda vill synas. READY-ringen ska alltid
    * vinna — den skapas därför sist. */
+  overlay_cost_mark();
   torget_wifi_ui_create();
+  overlay_cost_report("wifi-setup");
   /* SETTINGS på samma topplager. Skapelseordningen bestämmer dock INTE
    * företrädet här: menyn hävdar sitt läge överst varje tick, för annars
    * begraver NO NETWORK-sidan den inom en sekund (den ritar om sin
    * nedräkning och lyfter sig själv). Att en väntande uppdatering ändå
    * alltid vinner vilar på att menyn och notisen aldrig är uppe samtidigt
    * — se tick_cb — inte på vem som skapades sist. */
+  overlay_cost_mark();
   torget_settings_create();
+  overlay_cost_report("settings");
   /* OTA-overlayn EFTER det delade UI:t, på topplagret, dold tills KEY3-
    * hållet öppnar underhållsfönstret — appträdet rörs aldrig. */
+  overlay_cost_mark();
   torget_ota_ui_create();
+  overlay_cost_report("ota");
   lv_timer_create(tick_cb, TICK_EVERY_MS, NULL);
   torget_ui_unlock();
 

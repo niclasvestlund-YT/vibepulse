@@ -280,6 +280,7 @@ Verbatim strings worth grepping for, and what they mean:
 | `agentstatus avvisad: transportfel ESP_FAIL` | fw `agent-net` | always literally `ESP_FAIL` — the real cause is discarded before logging (OBS-12). Only says "agent feed unhappy". |
 | `agentstatus kunde inte skapa HTTP-klient` | fw `agent-net` | agent feed **dead until reboot**; screen shows a frozen header meanwhile (OBS-12). |
 | `heap: internt … DMA största …` | fw `torget` | every 10 s. Watch the DMA largest block: its collapse predicted the 2026-08-06 panel freeze. Nothing alerts on it yet (OBS-27). |
+| `overlaykostnad <namn>: LVGL-pool +N B …, internt ±N B …` | fw `torget` | three lines, once at boot: what each permanent top-layer overlay (wifi-setup, settings, ota) costs. The pool figure is PSRAM (LVGL's TLSF pool lives there since the 2026-08-16 freeze fix); the internal figure is the control — a zero delta means that overlay does not touch internal RAM at all. This is the measured budget the AMOLED rule requires for a persistent layer, so read it after any flash that adds or grows one. |
 | `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the whole backtrace *now* — it will not survive the reboot (OBS-02). |
 | `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. |
 | `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died and this line is the only witness. BROWNOUT → suspect the power supply first. |

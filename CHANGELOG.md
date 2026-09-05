@@ -7,6 +7,19 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **Every permanent overlay now reports what it costs, on every boot.** The
+  three top-layer overlays — Wi-Fi setup, SETTINGS and the OTA ring — are
+  built once at start and kept for the whole run, and the AMOLED rule
+  forbids that without a measured memory budget. The measurement is now
+  automatic rather than remembered: each create is bracketed and logs
+  `overlaykostnad <name>: LVGL-pool +N B …, internt ±N B …`. Two numbers
+  because they answer different questions. LVGL's allocator pool is TLSF in
+  **PSRAM** (moved there as the 2026-08-16 freeze fix), so object trees come
+  out of its 256 KiB rather than internal RAM; the internal figure is the
+  control that shows whether a create takes internal memory anyway. A zero
+  delta retires the starvation worry for that layer with evidence instead of
+  argument, and a non-zero one puts the cost in the log.
+
 - A **SETTINGS** menu on a 3 s KEY3 hold. The hold used to derive which window
   you wanted from whether the panel had an IP; it now opens a menu with
   UPDATE, WIFI and ABOUT and lets you say. The consent model is unchanged —
