@@ -808,6 +808,107 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("VibePulse startup health: SERVER UNAVAILABLE", context)
         self.assertNotIn(str(ROOT), context)
 
+    def test_startup_health_names_saved_codex_modes_that_hide_cards(self):
+        """The failure that looks exactly like a broken panel.
+
+        Bridge green, panel polling, and APPROVE / DENY never arriving —
+        because a setting on the user's computer suppressed it. The panel
+        cannot see that setting, so the hook is the only place that can say
+        so, and it must say so BEFORE reporting a reachable service healthy.
+        """
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "interactions": {"codex": True,
+                             "panel": {"status": "ready", "ageS": 1}},
+        }
+        routes = {"/": {"body": compact(root).encode()},
+                  "/api/tokens": {"body": compact({}).encode()}}
+        cases = (
+            ('approval_policy = "never"\n'
+             'sandbox_mode = "workspace-write"\n',
+             "approval_policy is never"),
+            ('approval_policy = "on-request"\n'
+             'approvals_reviewer = "auto_review"\n'
+             'sandbox_mode = "workspace-write"\n',
+             "routed to auto_review"),
+            ('approval_policy = "on-request"\n'
+             'approvals_reviewer = "user"\n'
+             'sandbox_mode = "danger-full-access"\n',
+             "sandbox_mode is danger-full-access"),
+        )
+        for saved, expected in cases:
+            with self.subTest(expected=expected), \
+                    tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, "config.toml").write_text(saved, encoding="utf-8")
+                with LocalServer(routes=routes) as server:
+                    completed = run_script(
+                        "session_start.py", compact(payload).encode(),
+                        port=server.port, env={"CODEX_HOME": tmp})
+                context = json.loads(completed.stdout)["hookSpecificOutput"][
+                    "additionalContext"]
+                self.assertIn("startup health: FIX", context)
+                self.assertIn(expected, context)
+
+    def test_startup_health_does_not_invent_a_codex_approval_problem(self):
+        """A healthy saved mode, and an absent config, must both stay quiet.
+
+        Most working installs have no config.toml at all, so treating its
+        absence as a fault would make the check noise people learn to skip —
+        the same cost as a false green, paid the other way round."""
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "interactions": {"codex": True,
+                             "panel": {"status": "ready", "ageS": 1}},
+        }
+        routes = {"/": {"body": compact(root).encode()},
+                  "/api/tokens": {"body": compact({}).encode()}}
+        healthy = ('approval_policy = "on-request"\n'
+                   'approvals_reviewer = "user"\n'
+                   'sandbox_mode = "workspace-write"\n')
+        for label, write in (("healthy", healthy), ("absent", None)):
+            with self.subTest(config=label), \
+                    tempfile.TemporaryDirectory() as tmp:
+                if write is not None:
+                    Path(tmp, "config.toml").write_text(write,
+                                                        encoding="utf-8")
+                with LocalServer(routes=routes) as server:
+                    completed = run_script(
+                        "session_start.py", compact(payload).encode(),
+                        port=server.port, env={"CODEX_HOME": tmp})
+                context = json.loads(completed.stdout)["hookSpecificOutput"][
+                    "additionalContext"]
+                self.assertNotIn("approval_policy", context)
+                self.assertNotIn("sandbox_mode", context)
+
+    def test_a_table_header_ends_the_top_level_scan(self):
+        """`approval_policy` under a [table] belongs to that table, not to
+        the top level. Reading it anyway would invent a fault from a file
+        that is perfectly fine."""
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "interactions": {"codex": True,
+                             "panel": {"status": "ready", "ageS": 1}},
+        }
+        routes = {"/": {"body": compact(root).encode()},
+                  "/api/tokens": {"body": compact({}).encode()}}
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "config.toml").write_text(
+                '[profiles.other]\napproval_policy = "never"\n',
+                encoding="utf-8")
+            with LocalServer(routes=routes) as server:
+                completed = run_script(
+                    "session_start.py", compact(payload).encode(),
+                    port=server.port, env={"CODEX_HOME": tmp})
+            context = json.loads(completed.stdout)["hookSpecificOutput"][
+                "additionalContext"]
+            self.assertNotIn("approval_policy is never", context)
+
     def test_startup_health_separates_device_path_from_provider_stale(self):
         payload = {"hook_event_name": "SessionStart", "session_id": "s"}
         root = {
