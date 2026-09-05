@@ -21,6 +21,44 @@ point at the backlog item.
 
 ---
 
+## 2026-09-05 · Pinning a screenshot's size did not pin its content
+
+**What happened:** the global Wi-Fi indicator was redrawn in `d5be82d`
+(2026-08-22), which deleted the Font Awesome glyph font
+`platform/fonts/torget_wifi_22.c` and replaced it with the generated
+`platform/wifi_status_assets.c` — a thick, bright-white fan became a thin,
+muted-grey one at a different offset — and `be29dba` the same day made it
+two-state. Sixteen of the twenty-nine simulator frames checked into
+`docs/img/` still show the old glyph; the two Wi-Fi onboarding images date
+from `1b6ba3a`, the day before. README, `docs/wifi.md` and the
+release bodies have shown a panel this firmware cannot draw ever since.
+**Root cause:** the only guard those files had
+(`test/test_wifi_setup_wiring.py`) asserted they exist, are PNG, are
+480 × 480 and are referenced from the README. All four stayed true through
+the redraw. A picture's dimensions are not its content, and nothing looked
+at a pixel. **The rule now:** a checked-in frame is either reproduced
+byte-for-byte by a capture the simulator still produces, or it is quarantined
+by name *and* by a digest of its file. The first version quarantined by name
+alone, and Codex was right that this enforced nothing — adding a filename was
+enough to wave a new stale frame through. No test can stop someone editing a
+constant; the digest makes the edit cost a 64-character hash a reviewer sees,
+and freezes what is already quarantined.
+**Guards:** `test/test_docs_frame_drift.py`. `PINNED` compares four frames
+byte-for-byte against a named capture; every other frame's Wi-Fi indicator
+box must match a rendering the simulator still draws, and `STALE_CHROME`
+names the twenty-five that cannot be confirmed. Two further traps found by
+review and worth remembering: a **blank** indicator box proves nothing on an
+unpinned frame (a takeover hides the header, and so does a capture predating
+the indicator), and `--vibepulse-pulse-qa` / `--vibepulse-completion-qa`
+never set the status to `NORMAL`, so every capture they write is blank — the
+same tag has 56 indicator pixels under static QA and 0 under completion QA.
+Feeding those modes into the allowed set imports blanks the panel never
+draws. **Watch for:** twenty-five frames still unverified. Re-capturing one
+changes what the README *shows* — a different fixture tells a different
+story on the glass — so it is a documentation decision, not a test fix.
+
+---
+
 ## 2026-09-05 · A QR code that outlived its access point
 
 **What happened:** the WiFi setup window's QR stayed on screen after the
