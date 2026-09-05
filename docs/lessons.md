@@ -21,6 +21,35 @@ point at the backlog item.
 
 ---
 
+## 2026-09-05 · A timing bound that measured the CI runner, not the deadline
+
+**What happened:** `test_mcp_recovers_after_absolute_drip_deadline` went red
+on `Tokenserver tests (windows-latest)` at 0.719 s against a 0.6 s bound, then
+passed on the next commit with no relevant change. **Root cause:** the test
+took `time.monotonic()` around the whole `run_mcp(...)` call, and `run_mcp`
+spawns a Python subprocess — so interpreter startup sat inside a bound that
+was only ever meant to cover the transport deadline. On a loaded Windows
+runner that startup ate most of the budget. The sibling test one screen up,
+`test_held_response_timeout_returns_computer_fallback_quickly`, had already
+been fixed this exact way; this one was simply missed. **The rule now:** a
+timing assertion starts at a clock the code under test controls. Here that is
+the server's own `httpd.request_times[0]`, so the bound covers the two
+request/response cycles and nothing else. **Guards:** the test now measures
+`finished - server.httpd.request_times[0]` and asserts `< 0.4` — it runs at
+~0.13 s (the 0.12 s deadline plus overhead), fails at 0.49 s if the deadline
+is merely quadrupled, and at 2.83 s if it is removed and the byte-at-a-time
+drip runs to completion. The same PR's own CI then found the third one, one
+layer down: `run_script`'s 4 s `subprocess.run` timeout timed out
+`test_unicode_decision_is_emitted_as_utf8` on the Windows runner and passed on
+a second run of the same commit. That one is a hang guard, not an assertion —
+nothing overrides it and no test asserts it fires — so it is now a named
+`SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still proven to fire on a wedged script.
+**Watch for:** every fixed budget in this file that a subprocess spawn sits
+inside. `run_mcp`/`run_script` start an interpreter each call, so both the
+assertion and the guard around them measure the runner unless said otherwise.
+The in-process timing tests (`loopback.post_json`, `setup._invoke`) are fine as
+they stand — the ones that do spawn say so in a comment and budget for it.
+
 ## 2026-09-05 · The simulator could not reach the decision it was supposed to be the spec for
 
 **What happened:** a review found KEY3's whole arbitration — 110 lines
