@@ -78,9 +78,15 @@ panel has never seen:
 In a second terminal (sourced the same way):
 
 ```sh
+ls -d build*/                 # only build/ should be here; remove any leftover build-stage/ first
 idf.py build
-tools/ota-flash.sh            # waits; prints the newest build*/torget.bin it will send
+tools/ota-flash.sh "$(cat .ota-device)" build   # the build dir is pinned on purpose
 ```
+
+The build directory is passed explicitly because the script otherwise
+takes the newest `build*/torget.bin` by mtime, and it makes that choice
+only after the window opens — too late for you to see it. A stale
+`build-stage/` from an earlier session would win and be sent.
 
 **The first delivery lands on the old image, and the old image has no
 SETTINGS menu.** On `v1.0.0-25-g054db68` the 3 s KEY3 hold opens the
@@ -103,7 +109,7 @@ send the instant 4.1 opens a window, and 4.2 would never happen:
 | 4.1 | Hold KEY3 a full 3 s → SETTINGS → tap **UPDATE** | the window opens, ten-minute countdown, `KEY3 CLOSES` |
 | 4.2 | Short-tap | it closes early, with no upload |
 | 4.3 | Reopen the same way, then hold 3 s inside the already-open window | it switches to WIFI SETUP (the hold–hold shortcut); short-tap to close |
-| 4.4 | Only if a real second build exists — a *pushed* commit with green CI, since the uploader's CI gate refuses anything else: start `tools/ota-flash.sh`, then hold 3 s → SETTINGS → tap **UPDATE** | the upload runs through the menu's row, the first time that path is used on the glass. Otherwise record 4.4 as not exercised |
+| 4.4 | Only if a real second build exists — a *pushed* commit with green CI, since the uploader's CI gate refuses anything else: start `tools/ota-flash.sh "$(cat .ota-device)" <that build dir>`, then hold 3 s → SETTINGS → tap **UPDATE** | the upload runs through the menu's row, the first time that path is used on the glass. Otherwise record 4.4 as not exercised |
 
 That is all of §4. A short KEY3 press ends the re-armed chain whenever
 you are done.
