@@ -32,11 +32,22 @@ Across the 153 captures the QA sets produce, that rectangle takes exactly
 six renderings; a checked-in frame showing something else is showing a panel
 this build cannot draw.
 
-THE QUARANTINE SHRINKS, NEVER GROWS. STALE_CHROME lists the frames that fail
-CHROME today, and the test asserts the failures are exactly that list. So a
-NEW stale frame fails, and re-capturing an old one also fails until its name
-is struck off — which is the point: the list is the outstanding work, and it
-has to be spent deliberately rather than left to rot quietly.
+THE QUARANTINE, AND WHAT IT ACTUALLY GUARANTEES. STALE_CHROME maps each
+frame that fails CHROME today to a digest of its file, and the test asserts
+both that the failures are exactly those frames and that each is still the
+file that was reviewed. A NEW stale frame fails, and re-capturing an old one
+fails until its entry is struck off.
+
+The first version of this list held filenames only, and the honest reading —
+Codex's, on the PR — is that it did not enforce the rule it advertised: add
+the new frame's name and everything passes again. Nothing in a repository
+can stop someone editing a constant, and claiming otherwise is the mistake
+AGENTS.md records about a merge block that was never there. What the digest
+changes is the price: quarantining a new frame now costs a filename AND a
+64-character hash of that exact file, which a reviewer sees. And it freezes
+what is already here — a quarantined frame cannot quietly become different
+stale art, and re-capturing one has exactly one correct resolution, which is
+to delete its entry rather than update its hash.
 
 Deliberately NOT covered: docs/img/mockups/, which are concept art from
 tools/mockups/gen_concept_mockups.py and never claimed to be captures, and
@@ -45,6 +56,7 @@ docs/img/github/glass-live.png, a photograph of the physical panel.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -77,28 +89,59 @@ PINNED = {
     "vibepulse-needs-you.png": "torget-vibepulse-pulse-t0-bright.bmp",
 }
 
-# Frames still showing the pre-redraw Wi-Fi indicator. Re-capturing one is a
-# documentation change with a visible result — a different fixture tells a
-# different story on the glass — so it is the maintainer's call which capture
-# replaces which, not this test's. Strike a name off when its frame is
-# re-captured; never add one to make a red run go green.
+# Frames still showing the pre-redraw Wi-Fi indicator, each frozen at the
+# exact bytes that were reviewed.
+#
+# A NAME ALONE WOULD NOT BE A RATCHET. This started as a set of filenames,
+# and Codex was right to call that out: a contributor who adds a new stale
+# frame could add its name here and every test would pass again, so the
+# "may shrink, never grow" rule was a comment, not a check — the same shape
+# of mistake AGENTS.md records about promising a merge block that did not
+# exist. Nothing in a repository can stop someone editing a constant. What a
+# digest buys is that quarantining a NEW frame now costs a filename *and* a
+# 64-character hash of that specific file, which is a visible, deliberate
+# act in a diff rather than a one-word addition to a list.
+#
+# It also freezes what is quarantined. A frame here cannot be swapped for
+# different stale art, and re-capturing one breaks its digest — which is the
+# intended exit: the fix is to delete the entry, not to update the hash.
+#
+# Re-capturing is a documentation change with a visible result — a different
+# fixture tells a different story on the glass — so which capture replaces
+# which is the maintainer's call, not this test's.
 STALE_CHROME = {
-    "github/sim-cached.png",
-    "github/sim-live.png",
-    "github/sim-missing.png",
-    "needs-you/vibepulse-needs-you-none.png",
-    "vibepulse-agent-working.png",
-    "vibepulse-burn-rate.png",
-    "vibepulse-claude-week.png",
-    "vibepulse-codex-week.png",
-    "vibepulse-max-tracker-claude.png",
-    "vibepulse-max-tracker.png",
-    "vibepulse-needs-you-codex-approval.png",
-    "vibepulse-needs-you-codex-question.png",
-    "vibepulse-no-data.png",
-    "vibepulse-value-ahead.png",
-    "vibepulse-wifi-searching.png",
-    "vibepulse-wifi-signal.png",
+    "github/sim-cached.png":
+        "371cfc2168bf7d6f85a3e8a83ac6848cdb12ce1a79a2b19a2d634087696ad7dc",
+    "github/sim-live.png":
+        "19a106e5ff938dbbe1314ef7e93208f1d12c384b78cd441dc7c05d38d202f351",
+    "github/sim-missing.png":
+        "709d96c2c720510ceced9bca4dd41d615c21bfbd26e217605dbe6db934ada342",
+    "needs-you/vibepulse-needs-you-none.png":
+        "ba8b6cae7e893909b5fefb38029133a314ad9e5c68534a96957de5992fd1805a",
+    "vibepulse-agent-working.png":
+        "3f2adbdf5020050c307120ce26d4af0a94af06defcc630fe91b57efeae6841b4",
+    "vibepulse-burn-rate.png":
+        "ced77198dbb1086e5fb68d04a85b980c08e7e71a9ad2f97ead524ccf70dfc0b3",
+    "vibepulse-claude-week.png":
+        "f5e0f17b4d437b864c79e0674e17f35860699c9e7ff8465e28328873ddd4bc65",
+    "vibepulse-codex-week.png":
+        "91be52589635e467cad6dbc62266676e958c94e81d891dedb99ba9ff946080c4",
+    "vibepulse-max-tracker-claude.png":
+        "fc07fcd17951e668d6d6014878e65367f7c38e58a9393ba6a250732b389e3c84",
+    "vibepulse-max-tracker.png":
+        "bbc2f49fb7a7f7afd4e8fafe96dadd881df6168ae34bc765da9a6719ab48d637",
+    "vibepulse-needs-you-codex-approval.png":
+        "7f661a322aca5cea0f2645feffed6deba6a326936af9072ff2c97196105f78c0",
+    "vibepulse-needs-you-codex-question.png":
+        "4fd9fd20759c51bf29a8e6fb336033f43db27cd6b1ca0532df712c41f96e2406",
+    "vibepulse-no-data.png":
+        "a70d4683b44819d3c3a40f34a74ef2ec69b125b668c254a2e469fc7794e241fb",
+    "vibepulse-value-ahead.png":
+        "5e82b9c09c39f03bddcd1091b19bba91f092ac25acf8f8155a4764698b5dfc91",
+    "vibepulse-wifi-searching.png":
+        "7f250af04f810ae0966f27be9a29e0bfdb275d097a3757b6f30360aa9aaa532c",
+    "vibepulse-wifi-signal.png":
+        "fd1fff6f8e42157a2143cd3c3fb66ae4ed125ffc72426e0d21f01dfc365ea66b",
 }
 
 
@@ -179,26 +222,60 @@ class DocsFrameDriftTests(unittest.TestCase):
                 if im.convert("RGB").crop(WIFI_BOX).tobytes() not in allowed:
                     stale.add(frame)
 
-        new = sorted(stale - STALE_CHROME)
-        fixed = sorted(STALE_CHROME - stale)
-        self.assertEqual(stale, STALE_CHROME, "\n".join(
+        new = sorted(stale - set(STALE_CHROME))
+        fixed = sorted(set(STALE_CHROME) - stale)
+        self.assertEqual(stale, set(STALE_CHROME), "\n".join(
             [""]
             + [f"  NEW stale frame: {n} — it shows a Wi-Fi indicator this "
                f"build does not draw. Re-capture it." for n in new]
             + [f"  no longer stale: {f} — remove it from STALE_CHROME."
                for f in fixed]))
 
+    def test_each_quarantined_frame_is_frozen_at_the_reviewed_bytes(self):
+        """The half that makes the quarantine cost something.
+
+        Without it, STALE_CHROME is a list of filenames and adding one entry
+        is enough to wave a brand-new stale frame past every check — the rule
+        would live in a comment instead of in the run. With it, quarantining
+        a frame costs its digest too, and a quarantined frame is pinned as
+        hard as a PINNED one: it cannot be swapped for different stale art,
+        and re-capturing it fails here. That failure has ONE correct answer —
+        delete the entry — because a re-captured frame is no longer stale.
+        Updating the hash to make this pass puts the frame back in quarantine
+        it no longer belongs in.
+        """
+        for frame, path in self.frames:
+            expected = STALE_CHROME.get(frame)
+            if expected is None:
+                continue
+            with self.subTest(frame=frame):
+                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                self.assertEqual(
+                    actual, expected,
+                    f"{frame} changed while quarantined. If you re-captured "
+                    f"it, delete its STALE_CHROME entry — do not update the "
+                    f"digest.")
+
     def test_the_quarantine_names_only_real_frames(self):
         """A typo, or a frame someone deleted, would park a name in
         STALE_CHROME forever and quietly shrink what the guard covers."""
         known = {frame for frame, _ in self.frames}
-        self.assertEqual(sorted(STALE_CHROME - known), [])
+        self.assertEqual(sorted(set(STALE_CHROME) - known), [])
         self.assertEqual(sorted(set(PINNED) - known), [])
+
+    def test_every_digest_is_a_digest(self):
+        """A truncated or placeholder value would make the freeze check pass
+        on nothing while looking like it was doing its job."""
+        for frame, digest in sorted(STALE_CHROME.items()):
+            with self.subTest(frame=frame):
+                self.assertRegex(digest, r"\A[0-9a-f]{64}\Z")
+        self.assertEqual(len(set(STALE_CHROME.values())), len(STALE_CHROME),
+                         "two quarantined frames share a digest")
 
     def test_pinned_and_quarantined_do_not_overlap(self):
         """A frame cannot be both reproduced exactly and drawing obsolete
         chrome; if it ever is, one of the two lists is lying."""
-        self.assertEqual(sorted(set(PINNED) & STALE_CHROME), [])
+        self.assertEqual(sorted(set(PINNED) & set(STALE_CHROME)), [])
 
 
 if __name__ == "__main__":

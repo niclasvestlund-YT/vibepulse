@@ -14,9 +14,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   where the panel now draws a thin grey one — so README, `docs/wifi.md` and
   the release bodies have been showing a screen this firmware cannot
   produce. Five frames the simulator reproduces exactly are now pinned
-  byte-for-byte; the sixteen stale ones are named in a list that may shrink
-  but never grow, so no new frame can drift in unnoticed. Re-capturing them
-  is a separate, deliberate documentation change.
+  byte-for-byte; the sixteen stale ones are quarantined by name *and* by a
+  digest of the file, so a frame cannot be waved into the quarantine by
+  adding a filename, and one already in it cannot quietly change.
+  Re-capturing them is a separate, deliberate documentation change.
 - **`doctor` and Codex startup health now name a saved Codex mode that
   silently prevents approvals from reaching the panel.** This is the failure
   that looks exactly like a broken panel: the bridge is green, the panel

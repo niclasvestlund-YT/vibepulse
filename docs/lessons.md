@@ -37,8 +37,12 @@ release bodies have shown a panel this firmware cannot draw ever since.
 480 × 480 and are referenced from the README. All four stayed true through
 the redraw. A picture's dimensions are not its content, and nothing looked
 at a pixel. **The rule now:** a checked-in frame is either reproduced
-byte-for-byte by a capture the simulator still produces, or its name is on a
-list of frames that are not — and that list may shrink, never grow.
+byte-for-byte by a capture the simulator still produces, or it is quarantined
+by name *and* by a digest of its file. The first version quarantined by name
+alone, and Codex was right that this enforced nothing — adding a filename was
+enough to wave a new stale frame through. No test can stop someone editing a
+constant; the digest makes the edit cost a 64-character hash a reviewer sees,
+and freezes what is already quarantined.
 **Guards:** `test/test_docs_frame_drift.py`. `PINNED` compares five frames
 byte-for-byte against a named capture; for the rest, the indicator's own
 20 × 18 rectangle — the one region the firmware decides alone, identical
