@@ -459,16 +459,37 @@ class DocsFrameDriftTests(unittest.TestCase):
         `.PNG` in capitals is the cheap case and the one that makes this more
         than theory: it is a different string to a glob and the same file to
         every browser.
+
+        And the name is checked separately from the CONTENT, because they are
+        two different claims and the first version only made one. Lossless
+        TIFF data saved under a .png name decodes to identical pixels, size,
+        opacity and frame count — every comparison in this file passes — while
+        a browser shows a broken image. Reading the suffix was reading the
+        label on the tin.
         """
         wrong = []
         for name, path in docs_images():
             if name in NOT_FRAMES:
                 continue
             if path.suffix != ".png":
-                wrong.append(f"{name} is {path.suffix or 'extensionless'}")
+                wrong.append(f"{name} is named {path.suffix or 'nothing'}")
+                continue
+            # And the NAME is not the format. TIFF data under a .png name
+            # decodes to identical pixels, dimensions, opacity and frame
+            # count, so every comparison in this file passes while a browser
+            # renders nothing. Checking the suffix was checking the label on
+            # the tin.
+            try:
+                with Image.open(path) as im:
+                    fmt = im.format
+            except Exception as exc:                     # noqa: BLE001
+                wrong.append(f"{name} will not open as an image: {exc}")
+                continue
+            if fmt != "PNG":
+                wrong.append(f"{name} is named .png but contains {fmt}")
         self.assertEqual(wrong, [], "\n".join(
-            ["panel captures must be lowercase-.png. If this is not a "
-             "capture, name it in NOT_FRAMES with the reason:"]
+            ["panel captures must be real, lowercase-.png PNGs. If this is "
+             "not a capture, name it in NOT_FRAMES with the reason:"]
             + wrong))
 
     def test_every_image_is_a_frame_or_a_named_exception(self):
