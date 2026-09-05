@@ -21,6 +21,33 @@ point at the backlog item.
 
 ---
 
+## 2026-09-05 · Pinning a screenshot's size did not pin its content
+
+**What happened:** the global Wi-Fi indicator was redrawn — a thick,
+bright-white fan became a thin, muted-grey one, from a different asset at a
+different offset — and sixteen of the twenty-nine simulator frames checked
+into `docs/img/` kept showing the old glyph. README, `docs/wifi.md` and the
+release bodies have shown a panel this firmware cannot draw ever since.
+**Root cause:** the only guard those files had
+(`test/test_wifi_setup_wiring.py`) asserted they exist, are PNG, are
+480 × 480 and are referenced from the README. All four stayed true through
+the redraw. A picture's dimensions are not its content, and nothing looked
+at a pixel. **The rule now:** a checked-in frame is either reproduced
+byte-for-byte by a capture the simulator still produces, or its name is on a
+list of frames that are not — and that list may shrink, never grow.
+**Guards:** `test/test_docs_frame_drift.py`. `PINNED` compares five frames
+byte-for-byte against a named capture; for the rest, the indicator's own
+20 × 18 rectangle — the one region the firmware decides alone, identical
+across 114 captures — must match a rendering the QA sets still produce, and
+`STALE_CHROME` names the sixteen that do not. Mutation-checked: a one-pixel
+edit, the old glyph pasted into a clean frame, a name struck off the list, a
+phantom name added, and both QA modes producing nothing each fail it.
+**Watch for:** the sixteen are still stale. Re-capturing one changes what
+the README *shows* — a different fixture tells a different story on the
+glass — so it is a documentation decision, not a test fix.
+
+---
+
 ## 2026-09-05 · A QR code that outlived its access point
 
 **What happened:** the WiFi setup window's QR stayed on screen after the

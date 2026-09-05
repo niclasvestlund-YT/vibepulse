@@ -7,6 +7,16 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **The screenshots in `docs/img/` are checked against the simulator.**
+  `test/test_docs_frame_drift.py` compares every checked-in 480 × 480 frame
+  with what this build actually renders. It found that sixteen of the
+  twenty-nine still show the *previous* Wi-Fi indicator — a thick white fan
+  where the panel now draws a thin grey one — so README, `docs/wifi.md` and
+  the release bodies have been showing a screen this firmware cannot
+  produce. Five frames the simulator reproduces exactly are now pinned
+  byte-for-byte; the sixteen stale ones are named in a list that may shrink
+  but never grow, so no new frame can drift in unnoticed. Re-capturing them
+  is a separate, deliberate documentation change.
 - **The KEY3 flow is tested as a journey, not only as a table.**
   `test/test_key3_arbitration.c` pins eight invariants separately, which is
   the right shape for them — but every cell in that table is set up by hand,
