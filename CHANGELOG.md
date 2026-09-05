@@ -13,8 +13,9 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   the menu is reachable only from the device, so physical presence is still
   required for UPDATE, and the token and the ten-minute window are untouched.
   Without an address UPDATE is greyed out and cannot be picked, because an
-  update window with no address could never receive an upload; WIFI is then
-  the one lit row, and the address is live rather than a snapshot — lose Wi-Fi
+  update window with no address could never receive an upload; UPDATE is the
+  only row that goes dark, leaving WIFI as the one that can fix it, and the
+  address is live rather than a snapshot — lose Wi-Fi
   while the menu is up and UPDATE greys out there and then, instead of
   offering a window that could no longer receive anything. ABOUT shows the
   firmware version and the address, with a dash for anything missing. There is

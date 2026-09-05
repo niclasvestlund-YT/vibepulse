@@ -49,8 +49,9 @@ Nothing can write firmware to the screen without three independent factors:
 
    - **Without an IP, UPDATE is greyed out and cannot be picked.** An OTA
      window with no address can never receive an upload, so the menu does
-     not offer one; WIFI is the lit row, and ABOUT shows the address as a
-     dash so the reason is visible.
+     not offer one. UPDATE is the only row that goes dark, so WIFI is the
+     one that can fix it, and ABOUT shows the address as a dash so the
+     reason is visible.
    - A **second full 3 s hold** while the update window is open still
      switches to the WiFi setup window (hold–hold), unchanged. Any
      release before three seconds still just closes — that escape exists

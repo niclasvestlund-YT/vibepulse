@@ -7,10 +7,13 @@
 **A little always-on screen for your shelf that shows what your AI coding
 agents are doing — taps you on the shoulder when one is stuck waiting for
 you, and (if you want) lets you answer it with a tap on the glass. It packs
-too: one command moves it onto whatever WiFi you are on today.**
+too: one command moves it onto whatever WiFi you are on today, and one
+button-hold on the panel opens its own settings on the glass.**
 
 Claude Code and Codex usage, live agent activity, and a full-screen
-**NEEDS YOU** alert you can answer with a tap. A ~$30 ESP32-S3 panel plus a
+**NEEDS YOU** alert you can answer with a tap. A three-second hold on the
+panel's one user button opens **SETTINGS** on the glass — update the firmware,
+teach it a new network, or read its address. A ~$30 ESP32-S3 panel plus a
 core, pure-stdlib Python service on your Mac or Windows PC. Local mode needs no
 VibePulse account and keeps agent activity on your LAN. The optional
 numbers-only relay can carry quota data across isolated WiFi; a separate,
@@ -55,7 +58,7 @@ Codex. You do not need to read this whole page:
    panel, the relays, and GitHub are add-ons, each off by default and opted
    into separately: today through the setup command, `secrets.h`, and the
    table under [Independent switches](#independent-switches). A **3 s KEY3
-   hold opens SETTINGS** on the glass — UPDATE, WIFI and ABOUT today; the
+   hold opens [SETTINGS](#one-button-one-menu)** on the glass — UPDATE, WIFI and ABOUT today; the
    on-glass feature switches are specified but not built yet (see the spec
    in `docs/superpowers/specs/`). Sound has no verified backend yet.
 
@@ -561,6 +564,66 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
    launchd from running a deleted PR worktree. Full details:
    [tools/tokenserver/README.md](tools/tokenserver/README.md).
 
+## One button, one menu
+
+**KEY3** is the panel's one user button — BOOT and reset are recovery
+controls, not part of normal use. Hold KEY3 for three seconds and
+**SETTINGS** opens on the glass.
+
+<p align="center">
+  <img src="docs/img/vibepulse-settings-menu.png" width="31%" alt="The SETTINGS menu on the panel: UPDATE, WIFI and ABOUT, with KEY3 CLOSES in the footer">
+  &nbsp;
+  <img src="docs/img/vibepulse-settings-no-address.png" width="31%" alt="The same menu on a panel with no network: UPDATE is greyed out while WIFI and ABOUT stay lit">
+  &nbsp;
+  <img src="docs/img/vibepulse-settings-about.png" width="31%" alt="The ABOUT page showing only the firmware version and the panel address, with a BACK control">
+</p>
+<p align="center"><em>Real 480×480 frames from the shared LVGL firmware renderer: the menu, the same menu on a panel with no network, and ABOUT.</em></p>
+
+- **UPDATE** opens the ten-minute maintenance window an over-the-air upload
+  needs — see [Over-the-air updates](#over-the-air-updates).
+- **WIFI** opens the setup window that teaches the panel a new network — see
+  [Take it with you](#take-it-with-you).
+- **ABOUT** shows the firmware version and the panel's address, and nothing
+  else. No token, no device key, no password: every line on it is already in
+  the logs or on the glass somewhere else.
+
+**The menu replaced a guess.** The same hold used to open one window or the
+other depending on whether the panel happened to have an address. The panel
+decided, silently, and you found out by watching which one appeared. Now the
+choice is visible and yours.
+
+**A window the panel cannot use is never offered.** With no address, UPDATE
+goes grey *and* refuses the press — a maintenance window with no address
+could never receive an upload, so offering it would be a promise the screen
+cannot keep. UPDATE is the only row that goes dark — WIFI and ABOUT stay
+lit — which leaves WIFI as the only row that can change the situation, and
+that is exactly where a panel in that state needs to go. ABOUT shows the
+address as a dash rather than inventing one. If the network drops while the
+menu is open, UPDATE greys out there and then; it is a live reading, not a
+snapshot taken when you opened it.
+
+**Any KEY3 press closes it.** That is the escape hatch, and it is the same
+one the two windows have — including a press part-way through another hold.
+While an **UPDATE READY** notice is on the glass a hold does nothing at all,
+so SETTINGS can never open behind something you cannot see; answer that
+notice with its own LATER and UPDATE pills instead.
+
+**The consent model is unchanged by any of this.** SETTINGS is reachable
+only from the device, so physical presence is still required before an
+update window can open, and the OTA token and the ten-minute lease are
+untouched. No script can reach the menu, and nothing but a finger on the
+UPDATE row opens the window behind it.
+
+FEATURES and PAIR are in the design spec and deliberately not built yet:
+FEATURES needs the panel's internal-RAM budget re-measured on the unit
+first. Three rows that work beat five where two are promises the screen
+cannot keep.
+
+> **Evidence, honestly:** the frames above come from the shared LVGL
+> renderer in the simulator, and the behaviour is covered by host tests. No
+> panel has been flashed with SETTINGS yet, so nothing here is a physical
+> verification — the static on-panel review is the next gate.
+
 ## Over-the-air updates
 
 After the first USB flash, the screen updates itself over WiFi. The consent
@@ -570,8 +633,8 @@ opens **SETTINGS**, where **UPDATE** starts a ten-minute maintenance window
 **64-hex token** from `secrets.h` authenticates the upload, and the window
 **closes itself** — a short KEY3 press closes it early. No button, no
 update; a script can never open the window for you. (On a panel *without*
-a network, UPDATE is greyed out and WIFI is the lit row — an update window
-with no address could never receive an upload. See
+a network, UPDATE is greyed out and WIFI is the row that can fix it — an
+update window with no address could never receive an upload. See
 [Take it with you](#take-it-with-you).)
 
 ```
@@ -579,16 +642,9 @@ idf.py build
 tools/ota-flash.sh <device-ip>     # waits for KEY3 hold → UPDATE, then uploads
 ```
 
-The hold opens a menu rather than guessing which window you wanted:
-
-![The SETTINGS menu: UPDATE, WIFI, ABOUT](docs/img/vibepulse-settings-menu.png)
-
-On a panel with no address, **UPDATE is greyed out and cannot be picked** —
-an update window with no address could never receive an upload — so WIFI is
-the one lit row, which is exactly where a panel in that state needs to go.
-ABOUT shows the address as a dash, so the reason is on the glass:
-
-![The same menu with no address: UPDATE greyed out](docs/img/vibepulse-settings-no-address.png)
+The hold opens **SETTINGS** rather than guessing which window you wanted,
+and on a panel with no address UPDATE is greyed out and cannot be picked.
+The frames are in [One button, one menu](#one-button-one-menu).
 
 The device verifies the image (magic, chip, project, SHA-256), writes it to
 the **inactive A/B slot** (`ota_0`/`ota_1`, 5 MB each — see
