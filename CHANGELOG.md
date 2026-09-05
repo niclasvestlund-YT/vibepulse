@@ -7,6 +7,15 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **SETTINGS has its own README section and a line in the tagline.** The
+  release rule in `CLAUDE.md` says a shipped feature gets both, and #72
+  argued proportion instead — that a menu should not outweigh the windows it
+  fronts. Overruled. The section carries three current 480x480 frames (on a
+  network, without one, and ABOUT), says what each row does, and explains
+  the greyed-out UPDATE, the absent "computer found" row and the unchanged
+  consent model. The two frames previously inline in the OTA section are now
+  a cross-link, so the state lives in one place.
+
 - A **SETTINGS** menu on a 3 s KEY3 hold. The hold used to derive which window
   you wanted from whether the panel had an IP; it now opens a menu with
   UPDATE, WIFI and ABOUT and lets you say. The consent model is unchanged —

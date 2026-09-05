@@ -7,7 +7,9 @@
 **A little always-on screen for your shelf that shows what your AI coding
 agents are doing — taps you on the shoulder when one is stuck waiting for
 you, and (if you want) lets you answer it with a tap on the glass. It packs
-too: one command moves it onto whatever WiFi you are on today.**
+too: one command moves it onto whatever WiFi you are on today, and a
+three-second press opens SETTINGS on the glass, so updating it and
+re-teaching it a network are things you do on the device, not in a terminal.**
 
 Claude Code and Codex usage, live agent activity, and a full-screen
 **NEEDS YOU** alert you can answer with a tap. A ~$30 ESP32-S3 panel plus a
@@ -238,6 +240,52 @@ use the explicit setup command for new installations. The numbers relay and
 interaction relay are different privacy choices and neither is enabled by the
 plugin. Installing the Codex plugin does not enable the encrypted interaction
 relay or the live agent status relay.
+
+### Settings on the glass
+
+Hold **KEY3** for three seconds and the panel asks what you want instead of
+guessing. Three rows, all of them things the device can actually do:
+
+<table>
+<tr>
+<td width="33%"><img src="docs/img/vibepulse-settings-menu.png" alt="The SETTINGS menu with UPDATE, WIFI and ABOUT" width="100%"></td>
+<td width="33%"><img src="docs/img/vibepulse-settings-no-address.png" alt="The same menu with no network: UPDATE greyed out, WIFI the lit row" width="100%"></td>
+<td width="33%"><img src="docs/img/vibepulse-settings-about.png" alt="ABOUT showing firmware version and address" width="100%"></td>
+</tr>
+<tr>
+<td><b>On a network</b> — every row live.</td>
+<td><b>No network</b> — UPDATE is greyed out and cannot be picked.</td>
+<td><b>ABOUT</b> — version and address, dashes for anything missing.</td>
+</tr>
+</table>
+
+**UPDATE** opens the ten-minute maintenance window an over-the-air upload
+needs. **WIFI** opens the setup window, which is how you teach the panel a
+new network — pre-load your phone's hotspot at home before a trip rather
+than waiting until the screen is stranded somewhere. **ABOUT** shows the
+firmware version and the address, and nothing else: no token, no device key,
+no password.
+
+The middle frame is the point of the whole design. Without an address an
+update window could never receive an upload, so the panel does not offer
+one — the row is toned down *and* the press is ignored, and WIFI is left as
+the lit row, which is exactly where a screen with no network needs to go.
+There is deliberately no "computer found" row either: the only signal
+available for it never clears once set, so it would have read FOUND forever
+after a single successful fetch. A row that says something false is worse
+than a row that is not there.
+
+The consent model is unchanged by any of this. The menu is reachable **only
+from the device**, so a physical press is still required before an update
+window can open — no script can reach it — and the upload still needs the
+token and still expires after ten minutes. What changed is that the choice
+is visible instead of inferred from whether the panel happened to have an
+IP address.
+
+Any KEY3 release closes the menu. While a real window owns the glass — a
+waiting update's takeover, the Wi-Fi setup window, an open update window —
+the hold does nothing at all, so the menu can never open behind something
+you are looking at.
 
 ### Optional GitHub project pulse
 
@@ -579,16 +627,11 @@ idf.py build
 tools/ota-flash.sh <device-ip>     # waits for KEY3 hold → UPDATE, then uploads
 ```
 
-The hold opens a menu rather than guessing which window you wanted:
-
-![The SETTINGS menu: UPDATE, WIFI, ABOUT](docs/img/vibepulse-settings-menu.png)
-
-On a panel with no address, **UPDATE is greyed out and cannot be picked** —
-an update window with no address could never receive an upload — so WIFI is
-the one lit row, which is exactly where a panel in that state needs to go.
-ABOUT shows the address as a dash, so the reason is on the glass:
-
-![The same menu with no address: UPDATE greyed out](docs/img/vibepulse-settings-no-address.png)
+The hold opens a menu rather than guessing which window you wanted — see
+[Settings on the glass](#settings-on-the-glass) for what the three rows do
+and what each state looks like. On a panel with no address, **UPDATE is
+greyed out and cannot be picked**, because an update window with no address
+could never receive an upload.
 
 The device verifies the image (magic, chip, project, SHA-256), writes it to
 the **inactive A/B slot** (`ota_0`/`ota_1`, 5 MB each — see
