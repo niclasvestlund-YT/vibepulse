@@ -3,8 +3,11 @@
 #
 #   1. idf.py build                       (eller -B <byggkatalog>)
 #   2. tools/ota-flash.sh <enhetens-ip>   — skriptet väntar på fönstret
-#   3. Håll KEY3 ~3 s tills UPDATES ON-ringen syns — uppladdningen går av
-#      sig själv, enheten verifierar SHA-256, byter lucka och startar om.
+#   3. Håll KEY3 ~3 s och välj UPDATE i SETTINGS — hållet öppnar MENYN,
+#      inte fönstret. När UPDATES ON-ringen syns går uppladdningen av sig
+#      själv, enheten verifierar SHA-256, byter lucka och startar om.
+#      (Ligger UPDATE READY-övertagandet redan på glaset: svara med dess
+#      UPDATE-pill. Ett håll gör ingenting där.)
 #   4. Efter omstarten återöppnas fönstret själv (PENDING_VERIFY-boot):
 #      nästa bygge i samma arbetspass behöver inget nytt håll. Ett kort
 #      KEY3-tryck stänger när passet är klart.
@@ -27,7 +30,10 @@ TOKEN=$(sed -n 's/.*TG_OTA_TOKEN[^"]*"\([0-9a-f]\{64\}\)".*/\1/p' secrets.h | he
 [ -n "$TOKEN" ] || { echo "inget TG_OTA_TOKEN i secrets.h — uppladdning avstängd" >&2; exit 1; }
 BUILD_ARG=${2:-}
 
-echo "väntar på underhållsfönstret på $HOST — håll KEY3 ~3 s..."
+echo "väntar på underhållsfönstret på $HOST"
+echo "  håll KEY3 ~3 s och välj UPDATE i SETTINGS — hållet öppnar bara menyn"
+echo "  ligger UPDATE READY redan på glaset: tryck på dess UPDATE-pill."
+echo "  ett håll gör ingenting där, så vänta inte på menyn."
 while ! curl -s --max-time 2 "http://$HOST/api/ota/status" 2>/dev/null \
     | grep -q '"maintenance_open":true'; do
   sleep 1

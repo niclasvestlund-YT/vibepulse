@@ -4,7 +4,8 @@
 # att skriva av från glaset.
 #
 #   1. Panelen reser sin egen accesspunkt (VibePulse-setup). Den gör det
-#      själv efter 90 s utan nät, eller direkt om du håller KEY3 ~3 s.
+#      själv efter 90 s utan nät, eller om du håller KEY3 ~3 s och väljer
+#      WIFI i SETTINGS — hållet öppnar menyn, inte fönstret.
 #   2. tools/wifi-here.sh
 #
 # Skriptet läser Macens nuvarande SSID, hämtar lösenordet ur nyckelringen
@@ -69,8 +70,9 @@ fi
 echo "hoppar över till $AP_SSID (Macen är offline en stund)..."
 if ! networksetup -setairportnetwork "$IFACE" "$AP_SSID" "$AP_PASS" >/dev/null 2>&1; then
   echo "kom inte in på $AP_SSID." >&2
-  echo "Står WIFI SETUP på glaset? Fönstret är öppet i tio minuter — håll" >&2
-  echo "KEY3 ~3 s för att öppna ett nytt." >&2
+  echo "Står WIFI SETUP på glaset? Fönstret är öppet i tio minuter." >&2
+  echo "Behöver du ett nytt: håll KEY3 ~3 s och välj WIFI i SETTINGS —" >&2
+  echo "hållet öppnar menyn, inte fönstret." >&2
   exit 1
 fi
 
