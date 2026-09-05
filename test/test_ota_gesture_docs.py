@@ -18,6 +18,17 @@ than instructions: CHANGELOG.md, whose released entries describe what
 shipped at the time, and docs/superpowers/plans/, which are implementation
 plans for work already done. Rewriting either to match today's behaviour
 would be falsifying the record, which is the opposite of the point.
+
+Also deliberately NOT guarded, after trying: the neighbouring failure where
+a doc offers the hold *while the UPDATE READY takeover is up*, which the
+firmware ignores. The ota.md diagram shipped that way ("tap UPDATE pill, or
+hold KEY3 ~3 s, then pick UPDATE in SETTINGS", directly under "mismatch:
+UPDATE READY takeover"). A rule flagging passages that mention both a hold
+and the takeover fires on three CORRECT ones, which list the two routes for
+two different states — and the wrong version is textually identical to them,
+"or" and all. A guard that flags correct prose trains people to sprinkle
+appeasing words instead of thinking, which is worse than no guard. That
+class needs a reader.
 """
 
 import re
