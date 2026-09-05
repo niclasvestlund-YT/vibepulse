@@ -219,8 +219,10 @@ network-off part is done once, not twice.
   the first line, the way the 2026-08-30 one does. Name every step that
   was *not* run.
 - Failures → `docs/observability-backlog.md`; root causes →
-  `docs/lessons.md`. Note how long a hold actually lasted for 1.2, 2.7
-  and 3.3.
+  `docs/lessons.md`. For the three timing steps, record what was actually
+  timed: how long the press lasted in 1.2, how long the wait was before
+  the setup window opened by itself in 2.7, and how soon after the
+  takeover the short tap came in 3.3.
 - README's SETTINGS section still says no panel has been flashed with the
   menu. Once §3 passes, that sentence changes; do it in the same commit
   as the inventory update.
