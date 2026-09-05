@@ -1147,14 +1147,19 @@ class McpServerTests(unittest.TestCase):
                 {"raw_chunks": slow_chunks, "raw_delay": 0.04},
                 {"body": compact(answered).encode()},
         ]) as server:
-            started = time.monotonic()
             _, responses = run_mcp([
                 rpc("tools/call", 1, {"name": "ask", "arguments": QUESTION}),
                 rpc("tools/call", 2, {"name": "ask", "arguments": QUESTION}),
             ], port=server.port,
                env={"_VIBEPULSE_TEST_READ_TIMEOUT": "0.12"})
-            elapsed = time.monotonic() - started
-        self.assertLess(elapsed, 0.6)
+            finished = time.monotonic()
+            self.assertEqual(len(server.httpd.request_times), 2)
+            requests_elapsed = finished - server.httpd.request_times[0]
+        # Measure both request/response cycles, not unrelated Python process
+        # startup. Without the absolute drip deadline the first call rides the
+        # byte-at-a-time drip to the end (69 bytes x 0.04 s = 2.8 s), since no
+        # single read ever exceeds the 0.12 s read timeout.
+        self.assertLess(requests_elapsed, 0.4)
         self.assertEqual(responses[0]["result"]["structuredContent"]["status"],
                          "computer")
         self.assertEqual(responses[1]["result"]["structuredContent"], answered)

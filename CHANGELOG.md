@@ -57,6 +57,15 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- `test_mcp_recovers_after_absolute_drip_deadline` no longer flakes on the
+  Windows CI runner. It bounded wall clock taken around `run_mcp()`, which
+  spawns a Python subprocess, so interpreter startup counted against a budget
+  meant for the transport deadline alone — 0.719 s against a 0.6 s bound on a
+  loaded runner, green again on the next commit. It now measures from the stub
+  server's own recorded request time, as the sibling deadline test already
+  did. The bound is tighter than before, not looser: the two request/response
+  cycles run in ~0.13 s and the assertion trips at 0.4 s, so a lengthened or
+  removed drip deadline still turns it red.
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as
   measured zeros. A new additive `claudeSourcePresent` flag says when the
   Claude directory is absent, so the zeros are not mistaken for a day with no
