@@ -155,9 +155,10 @@ hold KEY3 ~3 s  →  SETTINGS
 
 The hold used to guess from network state; now it asks. **Without an IP,
 UPDATE is greyed out and cannot be picked** — an OTA window with no
-address could never receive an upload — so WIFI is the lit row, which is
-exactly where a stranded panel needs to go. ABOUT shows the address as a
-dash, so the reason is on the glass rather than implied.
+address could never receive an upload. UPDATE is the only row that goes
+dark, so WIFI is the one that can fix it, which is exactly where a stranded
+panel needs to go. ABOUT shows the address as a dash, so the reason is on
+the glass rather than implied.
 
 **Hold again to switch windows.** A second full 3 s hold while the update
 window is open closes it and opens WIFI SETUP instead. That is how you
