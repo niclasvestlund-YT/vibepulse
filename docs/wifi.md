@@ -147,7 +147,7 @@ wiring test asserts no OTA symbol ever appears in `wifi_setup.c`.
 A 3 s hold opens **SETTINGS**, and you pick:
 
 ```
-hold KEY3 ~3 s
+hold KEY3 ~3 s  →  SETTINGS
   ├─ UPDATE   the OTA maintenance window, unchanged
   ├─ WIFI     this setup window, unchanged
   └─ ABOUT    firmware version and address (a dash for either if unknown)

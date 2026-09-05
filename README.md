@@ -603,7 +603,7 @@ The tokenserver announces the newest build on your computer
 (`otaAvailableVersion` on `/api/tokens`); when the screen runs an older
 version it takes the glass with an **UPDATE READY** notice — answer it with
 the on-glass LATER/UPDATE pills by touch. While that notice is up it owns
-the glass completely: a KEY3 hold does nothing, deliberately, so the menu
+the glass completely: a KEY3 hold does nothing, deliberately, so SETTINGS
 can never open behind it. The UPDATE pill opens the same maintenance window
 the menu's UPDATE row does. A snooze returns every hour until installed. Full lifecycle reference: [docs/ota.md](docs/ota.md).
 

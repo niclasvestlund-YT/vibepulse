@@ -139,7 +139,10 @@ first argument. For any agent session starting cold: the repo lives at
 directory is not), the OTA work is on the `claude/ota-foundation` branch,
 and this file plus `docs/agent-setup.md` are the runbooks.
 
-Hold KEY3 (or answer the takeover with UPDATE) when you're ready. After
+Hold KEY3 and pick **UPDATE** in SETTINGS (or, if the takeover is already
+on the glass, answer it with its UPDATE pill) when you're ready. The hold
+alone only reaches the menu — the uploader keeps waiting until you choose
+the row. After
 the OTA reboot the window re-arms itself once (PENDING_VERIFY boot), so
 an iterate-flash-iterate session needs one consent, not one per build —
 observed live 2026-08-14: with the pusher armed, a new build delivered
@@ -155,7 +158,7 @@ SHA, the version line names the incoming image.
 | Symptom | Likely cause | Check |
 |---|---|---|
 | "This project has no OTA" | Reading a pre-OTA tree (factory-only `partitions.csv`) | `git branch --show-current`; read `partitions.csv` in *that* checkout |
-| Upload gets 403 | Window not open | Hold KEY3; the glass must show the ring/UPDATES ON |
+| Upload gets 403 | Window not open | Hold KEY3, then pick UPDATE in SETTINGS — the hold alone only opens the menu; the glass must show the ring/UPDATES ON |
 | Upload gets 401 | Token mismatch or malformed | `TG_OTA_TOKEN` in `secrets.h`: exactly 64 lowercase hex |
 | Upload gets 400 "not a torget esp32s3 image" | Wrong file (bootloader? another project?) | Send `build*/torget.bin`, nothing else |
 | 202 but the old version still runs after reboot | Health gate rolled the image back | The new build is broken on-device; check it on USB with the console |
