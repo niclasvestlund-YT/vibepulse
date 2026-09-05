@@ -21,6 +21,31 @@ point at the backlog item.
 
 ---
 
+## 2026-09-05 · A QR code that outlived its access point
+
+**What happened:** the WiFi setup window's QR stayed on screen after the
+window closed. A setup window that expires while the panel still has no
+network hops straight from `OPEN` to `SEARCHING`, and the `NO NETWORK` page
+came up with a dead QR over the middle of it, covering part of the reason
+line. **Root cause:** one control's visibility was owned by one branch.
+`show(ui.qr, ...)` lived only in `render_open_view()`, reached only when
+`state == TG_WIFI_UI_OPEN`; the non-open branch repositioned and cleared the
+labels but never touched the canvas, and only `HIDDEN` cleared it. The same
+split ran the other way: `render_open_view()` hides the network name behind
+the code, so `NO NETWORK`/`JOINING`/`ON THE NET` inherited that and stopped
+naming the network. **The rule now:** a state renderer with two branches
+must set every shared control's visibility in *both*. Clearing text is not
+hiding a widget, and `HIDDEN` is not the only exit from a state.
+**Guards:** `show()` calls for the canvas, the action control and the three
+open-view labels in the non-open branch of `torget_wifi_ui_set()`; pinned
+capture `torget-wifi-open-to-searching.bmp` (taken *after* an OPEN state —
+the older `wifi-searching` frame is taken before one, so its canvas has
+never been populated) and
+`test_setup_qr_does_not_survive_a_visible_state_change`, which reads the
+canvas quiet zone from pixels and pins the whole frame byte-equal to
+`wifi-searching`. **Watch for:** the fix is per-control, not structural —
+a new widget added to `render_open_view()` can reintroduce this. The
+byte-equality assertion is the backstop: any residue at all breaks it.
 ## 2026-09-05 · A timing bound that measured the CI runner, not the deadline
 
 **What happened:** `test_mcp_recovers_after_absolute_drip_deadline` went red
@@ -44,11 +69,18 @@ layer down: `run_script`'s 4 s `subprocess.run` timeout timed out
 a second run of the same commit. That one is a hang guard, not an assertion —
 nothing overrides it and no test asserts it fires — so it is now a named
 `SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still proven to fire on a wedged script.
-**Watch for:** every fixed budget in this file that a subprocess spawn sits
-inside. `run_mcp`/`run_script` start an interpreter each call, so both the
-assertion and the guard around them measure the runner unless said otherwise.
-The in-process timing tests (`loopback.post_json`, `setup._invoke`) are fine as
-they stand — the ones that do spawn say so in a comment and budget for it.
+A sweep for the fourth corrected why the `setup._invoke` tests were called
+safe: they do spawn, but Popen returns before the child boots, so startup
+overlaps the mocked wait rather than serialising into it (elapsed = that
+timeout + <=53 ms). The serial spawn is Windows-only —
+`_terminate_process_tree()` runs `taskkill` — and
+`test_production_process_timeout_kills_reaps_and_recovers` is the only one of
+them on windows-latest: at `PIPE_JOIN_TIMEOUT_SECONDS = 1` it permitted
+0.1 + 1 + 1 = 2.1 s against a 2 s bound. It now mocks that to 0.25 as its
+POSIX siblings did and bounds at 4 s. **Watch for:** every fixed budget with a
+spawn inside — but only a *serial* one counts. `run_mcp`/`run_script` start an
+interpreter per call; a killed child's `taskkill` is serial too, and invisible
+on Linux. `loopback.post_json` and the tokenserver bounds spawn nothing.
 
 ## 2026-09-05 · The simulator could not reach the decision it was supposed to be the spec for
 

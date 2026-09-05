@@ -293,7 +293,8 @@ void torget_wifi_ui_set(tg_wifi_ui_state state, const char *primary,
     ui.manual_details = false;
     lv_label_set_text(ui.secondary, "");
     lv_canvas_fill_bg(ui.qr, lv_color_white(), LV_OPA_COVER);
-    lv_obj_add_flag(ui.action, LV_OBJ_FLAG_HIDDEN);
+    show(ui.qr, false);
+    show(ui.action, false);
     lv_obj_add_flag(ui.overlay, LV_OBJ_FLAG_HIDDEN);
     torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
     torget_ui_unlock();
@@ -320,7 +321,20 @@ void torget_wifi_ui_set(tg_wifi_ui_state state, const char *primary,
     lv_label_set_text(ui.lead, "");
     lv_label_set_text(ui.secondary, "");
     lv_label_set_text(ui.hint1, "");
+    /* Varje kontroll som render_open_view() rör MÅSTE få sitt läge satt
+     * här också. Förut ägde OPEN-grenen ensam duken, knappen, nätnamnet
+     * och de två raderna under det, medan bara HIDDEN städade — så ett
+     * hopp från OPEN till ett annat SYNLIGT läge ärvde OPEN:s synlighet.
+     * Ett fönster som tar slut utan nät går rakt till SEARCHING: QR-koden
+     * blev kvar ovanpå orsaksraden (en inbjudan att skanna en AP som inte
+     * finns längre) och nätnamnet, som göms bakom koden i QR-läget, kom
+     * aldrig tillbaka — NO NETWORK slutade säga VILKET nät. Båda bryter
+     * ärlighetsinvarianten. */
+    show(ui.qr, false);
     show(ui.action, false);
+    show(ui.primary, true);
+    show(ui.secondary, false);
+    show(ui.hint1, false);
   }
 
   show(ui.lead, open);

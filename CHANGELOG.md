@@ -82,6 +82,20 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- The WiFi setup QR no longer survives the window it belongs to. Only the
+  OPEN branch of `torget_wifi_ui_set()` ever managed the canvas, and only
+  `HIDDEN` ever cleared it, so every hop from OPEN to another *visible* state
+  carried the code along. The one that reaches a user: a setup window that
+  times out with still no network goes straight to `SEARCHING`, and a QR for
+  an access point that no longer exists sat on top of the honest reason line
+  (`NOT SEEN - 2.4 GHZ ONLY`) — inviting a scan that does nothing. The same
+  split hid the network *name*: the QR view tucks it away behind the code and
+  nothing put it back, so `NO NETWORK`, `JOINING` and `ON THE NET` had stopped
+  saying which network they meant. Every control the open view touches now
+  gets its visibility set in both branches. New pinned capture
+  `wifi-open-to-searching`, which the existing `wifi-searching` frame could
+  not catch — that one is taken before any OPEN state, so the canvas has
+  never been populated at that point.
 - `test_mcp_recovers_after_absolute_drip_deadline` no longer flakes on the
   Windows CI runner. It bounded wall clock taken around `run_mcp()`, which
   spawns a Python subprocess, so interpreter startup counted against a budget
@@ -98,6 +112,17 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   windows-latest it did not: `test_unicode_decision_is_emitted_as_utf8` timed
   out and passed on a second run of the same commit. It is now a named
   `SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still verified to catch a wedged script.
+- `test_production_process_timeout_kills_reaps_and_recovers` no longer bounds a
+  Windows-only subprocess spawn it never budgeted for. A sweep of every timed
+  assertion CI runs on windows-latest found it: `_terminate_process_tree()`
+  spawns `taskkill` there, and with the production
+  `PIPE_JOIN_TIMEOUT_SECONDS = 1` the permitted worst case was 0.1 + 1 + 1 =
+  2.1 s against a 2 s bound — the assertion could have lost to a slow runner
+  rather than to the bug. It now caps that constant at 0.25 s the way the two
+  POSIX siblings already did and asserts under 4 s; it runs in ~0.1 s and
+  still turns red at 5.1 s if the deadline is lengthened. The sweep found
+  nothing else: the other three process tests are POSIX-only, and every timed
+  bound in the tokenserver modules is in-process.
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as
   measured zeros. A new additive `claudeSourcePresent` flag says when the
   Claude directory is absent, so the zeros are not mistaken for a day with no

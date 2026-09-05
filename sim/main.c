@@ -1459,6 +1459,18 @@ static int run_vibepulse_static_qa(void) {
   torget_wifi_ui_set_manual_details(true);
   dump_overlay_frame("wifi-setup-manual");
   torget_wifi_ui_set_manual_details(false);
+  /* The window can run out while the panel still has no network: the guard
+   * in wifi_setup.c hops straight from OPEN to SEARCHING with no HIDDEN in
+   * between. The QR must not survive that hop — a code for an access point
+   * that is already gone invites a scan that does nothing, and it used to
+   * sit right on top of the honest reason line. The pinned wifi-searching
+   * frame above cannot catch it: it is taken BEFORE any OPEN state, so the
+   * canvas has never been populated at that point. This one is. */
+  torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "Niclas iPhone", NULL,
+                     "NOT SEEN - 2.4 GHZ ONLY", 24);
+  dump_overlay_frame("wifi-open-to-searching");
+  torget_wifi_ui_set(TG_WIFI_UI_OPEN, "VibePulse-setup", "A1B2C3D4E5F6",
+                     NULL, 583);
   torget_wifi_ui_set(TG_WIFI_UI_JOINING, "Niclas iPhone", NULL, NULL, 0);
   dump_overlay_frame("wifi-joining");
   torget_wifi_ui_set(TG_WIFI_UI_JOINED, "Niclas iPhone", NULL, NULL, 0);
