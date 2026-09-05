@@ -43,16 +43,19 @@ alone, and Codex was right that this enforced nothing — adding a filename was
 enough to wave a new stale frame through. No test can stop someone editing a
 constant; the digest makes the edit cost a 64-character hash a reviewer sees,
 and freezes what is already quarantined.
-**Guards:** `test/test_docs_frame_drift.py`. `PINNED` compares five frames
-byte-for-byte against a named capture; for the rest, the indicator's own
-20 × 18 rectangle — the one region the firmware decides alone, identical
-across 114 captures — must match a rendering the QA sets still produce, and
-`STALE_CHROME` names the sixteen that do not. Mutation-checked: a one-pixel
-edit, the old glyph pasted into a clean frame, a name struck off the list, a
-phantom name added, and both QA modes producing nothing each fail it.
-**Watch for:** the sixteen are still stale. Re-capturing one changes what
-the README *shows* — a different fixture tells a different story on the
-glass — so it is a documentation decision, not a test fix.
+**Guards:** `test/test_docs_frame_drift.py`. `PINNED` compares four frames
+byte-for-byte against a named capture; every other frame's Wi-Fi indicator
+box must match a rendering the simulator still draws, and `STALE_CHROME`
+names the twenty-five that cannot be confirmed. Two further traps found by
+review and worth remembering: a **blank** indicator box proves nothing on an
+unpinned frame (a takeover hides the header, and so does a capture predating
+the indicator), and `--vibepulse-pulse-qa` / `--vibepulse-completion-qa`
+never set the status to `NORMAL`, so every capture they write is blank — the
+same tag has 56 indicator pixels under static QA and 0 under completion QA.
+Feeding those modes into the allowed set imports blanks the panel never
+draws. **Watch for:** twenty-five frames still unverified. Re-capturing one
+changes what the README *shows* — a different fixture tells a different
+story on the glass — so it is a documentation decision, not a test fix.
 
 ---
 
