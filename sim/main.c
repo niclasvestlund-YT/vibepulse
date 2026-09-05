@@ -606,14 +606,51 @@ static bool key3_maintenance_open;
 static const char *key3_version = "v0.2.1-16-g9f9af53";
 static const char *key3_address = "192.168.1.42";
 
+/* Hur länge bänken låtsas att AP:n startar. Enheten tar sekunder här —
+ * skanning, AP, portal — och exakt hur länge spelar ingen roll; att det tar
+ * MER ÄN NOLL gör det, för STARTING sväljer det utlösande släppet med flit
+ * och den regeln går inte att se i ett läge man passerar på noll tid. */
+#define KEY3_SIM_AP_STARTUP_US (1500000LL)
+
+/* Den här tickens klocka, satt överst i key3_tick(). Bänkens motsvarighet
+ * till att vakten och ticken läser samma esp_timer på enheten. */
+static int64_t key3_now_us;
+static int64_t key3_setup_started_us;
+
+static void key3_close_maintenance_window(void) {
+  key3_maintenance_open = false;
+  torget_ota_ui_set(TG_OTA_UI_HIDDEN, 0, 0);
+}
+
 static void key3_open_setup_window(void) {
-  /* Setupvakten renderar STARTING innan den skannar; fasen ägs redan då, så
-   * det utlösande släppet inte kan bli appväxling. */
+  /* Vaktens ordning, spegelvänd: fasen tas FÖRST och STARTING renderas, så
+   * knappen ägs redan medan AP:n kommer upp och det utlösande släppet inte
+   * kan bli appväxling. */
   key3_setup_phase = TG_WIFI_PHASE_STARTING;
+  key3_setup_started_us = key3_now_us;
   torget_wifi_ui_set(TG_WIFI_UI_STARTING, NULL, NULL, NULL, 0);
+  /* Sedan window_open(), och det FÖRSTA den gör är att stänga ett öppet
+   * OTA-fönster: port 80 kan bara ha en ägare, och ett underhållsfönster utan
+   * nät kan ändå inte ta emot en uppladdning, så nätlagret vinner. Utan det
+   * här steget stod bänkens OTA-lager kvar bakom setupfönstret och avslöjades
+   * när setupfönstret stängdes — falskt bevis för precis den överlämning som
+   * är halva poängen med att simulatorn kan nå avsikten alls. */
+  if (key3_maintenance_open) key3_close_maintenance_window();
+}
+
+/* window_open() har återvänt: AP och portal står, fasen blir OPEN. */
+static void key3_setup_window_ready(void) {
+  key3_setup_phase = TG_WIFI_PHASE_OPEN;
+  torget_wifi_ui_set(TG_WIFI_UI_OPEN, "VibePulse-setup", "A1B2C3D4E5F6",
+                     NULL, 583);
 }
 
 static void key3_close_setup_window(void) {
+  /* request_close() ignorerar STARTING — ett fönster som inte står ännu kan
+   * inte stängas. Bänken använder SAMMA rena regel ur wifi_slots.c i stället
+   * för att stänga rakt av, annars hade den visat en nödutgång enheten inte
+   * har och gjort invariant 3 till en illusion. */
+  if (!tg_wifi_setup_can_close(key3_setup_phase)) return;
   key3_setup_phase = TG_WIFI_PHASE_IDLE;
   torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
 }
@@ -623,14 +660,20 @@ static void key3_open_maintenance_window(void) {
   torget_ota_ui_set(TG_OTA_UI_OPEN, 0, 600);
 }
 
-static void key3_close_maintenance_window(void) {
-  key3_maintenance_open = false;
-  torget_ota_ui_set(TG_OTA_UI_HIDDEN, 0, 0);
-}
-
 /* En tick av värdlagret. `down` är knappens råa nivå, `now_us` bänkens klocka. */
 static void key3_tick(bool down, int64_t now_us) {
   static tg_button_policy policy;
+  key3_now_us = now_us;
+
+  /* Vakten, före avläsningen — den kör i en egen task på enheten, så dess
+   * arbete är redan gjort när ticken läser tillståndet. Dess enda uppgift här
+   * är att föra STARTING vidare till OPEN när AP:n står. Utan den satt bänken
+   * kvar i STARTING för alltid: setupfönstret gick aldrig att NÅ genom gesten,
+   * och dess riktiga nödutgång gick därför aldrig att pröva. */
+  if (key3_setup_phase == TG_WIFI_PHASE_STARTING &&
+      now_us - key3_setup_started_us >= KEY3_SIM_AP_STARTUP_US)
+    key3_setup_window_ready();
+
   const tg_button_inputs in = {
       .key = tg_button_update(&policy, down, now_us),
       .setup_owns_input = tg_wifi_setup_owns_input(key3_setup_phase),
@@ -688,6 +731,12 @@ static void qa_key3_hold(void) {
   qa_key3_poll(true, 100000);
   qa_key3_poll(true, TG_MAINTENANCE_HOLD_US);
   qa_key3_poll(false, 100000);
+}
+
+/* Vänta ut bänkens AP-start, som att stå kvar framför panelen: tomma tickar
+ * tills vakten fört STARTING vidare till OPEN. */
+static void qa_key3_await_setup_window(void) {
+  for (int i = 0; i < 25; i++) qa_key3_idle();
 }
 
 /* Ett kort tryck — nödutgången ur menyn och ur fönstren. */
@@ -1453,6 +1502,33 @@ static int run_vibepulse_static_qa(void) {
   qa_key3_idle();
   dump_overlay_frame("settings-notice-takes-over");
   torget_ota_ui_set(TG_OTA_UI_HIDDEN, 0, 0);
+
+  /* Avsiktsöverlämningen, hela vägen genom gesten — den halva poll_keys()
+   * aldrig kunde nå. Håll öppnar SETTINGS, ett finger på UPDATE ger avsikten,
+   * värden öppnar underhållsfönstret; ett NYTT fullbordat håll därinne BEGÄR
+   * setupfönstret, och det första vaktens window_open() gör är att stänga
+   * OTA-fönstret — port 80 kan bara ha en ägare. Ramen bevisar att den
+   * stängningen skedde: STARTING står ensamt på glaset. Utan den satt
+   * OTA-lagret kvar bakom och avslöjades när setupfönstret stängdes. */
+  qa_key3_hold();
+  torget_settings_click_row(TG_SETTINGS_ROW_UPDATE);
+  qa_key3_idle();
+  qa_key3_hold();
+  /* Invariant 3 i sin egen rätt, i EN ram som bär två fel på en gång: ett
+   * tryck medan STARTING står får inte stänga något (request_close ignorerar
+   * STARTING), och vakten MÅSTE föra fasen vidare till OPEN. Hade trycket
+   * stängt vore glaset tomt här; hade vakten inte fört fasen vidare stod
+   * STARTING kvar. Bara om båda stämmer syns setupfönstret. */
+  qa_key3_tap();
+  qa_key3_await_setup_window();
+  dump_overlay_frame("settings-wifi-handoff-open");
+  /* Nu FÅR det stängas — nödutgången finns kvar när fönstret väl står. Och
+   * DEN HÄR ramen är den som bevisar överlämningen: OTA-fönstret måste vara
+   * borta, inte gömt. Ett setupfönster täcker hela glaset, så ett kvarglömt
+   * OTA-lager syns inte medan det står — det avslöjas först nu, precis som
+   * det gjorde i verkligheten. Glaset ska vara tomt. */
+  qa_key3_tap();
+  dump_overlay_frame("settings-wifi-handoff-closed");
 
   /* SETTINGS: vad ett tresekundershåll på KEY3 öppnar. Menyn och ABOUT i
    * båda tillstånd som skiljer sig materiellt — hittad dator och inte.

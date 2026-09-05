@@ -220,6 +220,8 @@ EXPECTED = {
     "torget-settings-menu.bmp",
     "torget-settings-over-wifi-searching.bmp",
     "torget-settings-notice-takes-over.bmp",
+    "torget-settings-wifi-handoff-closed.bmp",
+    "torget-settings-wifi-handoff-open.bmp",
     "torget-settings-menu-no-address.bmp",
     "torget-settings-menu-address-lost.bmp",
     "torget-settings-about-found.bmp",
@@ -679,6 +681,41 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             sum(p == (255, 255, 255)
                 for p in headline.get_flattened_data()), 300,
             "the notice must own the glass it took")
+
+    def test_the_wifi_handoff_leaves_no_ota_window_behind(self):
+        """The intent handoff, driven end to end through the gesture: hold
+        opens SETTINGS, a finger on UPDATE opens the maintenance window, and a
+        second completed hold inside it REQUESTS the setup window. The setup
+        guard's window_open() closes the maintenance window first, because
+        port 80 has one owner.
+
+        Both frames are needed, and the second one is the one that bites. A
+        setup window covers the whole glass, so a forgotten OTA layer is
+        INVISIBLE while it stands — it is revealed only when the setup window
+        closes, which is exactly how it behaved in reality. Asserting on the
+        handoff moment alone would pass with the bug still in."""
+        opened = self.image("torget-settings-wifi-handoff-open.bmp")
+        # Frame one carries two failures at once. It is taken after a tap
+        # DURING STARTING and after the guard has had time to finish:
+        #   * had the tap closed the window, the glass would be empty here
+        #     (request_close ignores STARTING — a window that is not up yet
+        #     cannot be closed, and the bench must not invent an escape the
+        #     device does not have);
+        #   * had the guard never advanced the phase, STARTING would still be
+        #     standing and the setup window would be unreachable by gesture.
+        # Only if both hold does the setup window itself appear.
+        self.assertEqual(opened.tobytes(),
+                         self.image("torget-wifi-setup-open.bmp").tobytes(),
+                         "the gesture must reach the real setup window")
+        self.assertNotEqual(opened.tobytes(),
+                            self.image("torget-wifi-starting.bmp").tobytes(),
+                            "the guard never advanced past STARTING")
+
+        # Frame two: the setup window closed. Nothing may be left underneath.
+        closed = self.image("torget-settings-wifi-handoff-closed.bmp")
+        self.assertEqual(
+            set(closed.get_flattened_data()), {(0, 0, 0)},
+            "a stale window was revealed when the setup window closed")
 
     def test_losing_the_address_remutes_update_without_closing(self):
         """The address is live, not a snapshot. When Wi-Fi drops while the
