@@ -218,6 +218,18 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -o /tmp/torget-ota-button-policy-test
 /tmp/torget-ota-button-policy-test
 
+# KEY3:s skiljedom: vem av glasets ägare som får knappen. Ren och delad
+# byte-identiskt mellan main/main.c och sim/main.c. wifi_slots.c länkas med
+# för att STARTING-invarianten ska pinnas mot den DELADE fasregeln i stället
+# för mot en bool testet självt satte.
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  -I../components/torget_ota \
+  ../platform/button_arbitration.c \
+  ../components/torget_wifi/wifi_slots.c \
+  test_key3_arbitration.c \
+  -o /tmp/torget-key3-arbitration-test
+/tmp/torget-key3-arbitration-test
+
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_ota/notice_policy.c \
   test_ota_notice_policy.c \

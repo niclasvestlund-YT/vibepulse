@@ -56,31 +56,67 @@ assert len(expected) >= 8, "a derived AP password below 8 chars cannot be a WPA2
 
 # --- The consent model ------------------------------------------------------
 # docs/ota.md promises the OTA maintenance window opens ONLY from the device.
-# The hold now opens SETTINGS instead of deriving the window from network
-# state, so the assertion moved with it — but the promise it protects did
-# not. What must stay true: the hold reaches a menu and nothing else, the
-# window is opened only by acting on that menu's intent, and a panel with no
-# address is never offered an update it could not receive.
-assert "torget_wifi_setup_request_open()" in main_c
-hold_branch = main_c.split(
-    "} else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE &&", 1)
-assert len(hold_branch) == 2, "the KEY3 hold branch that opens SETTINGS moved"
-hold_branch = hold_branch[1].split("\n  }", 1)[0]
-assert "torget_settings_open(" in hold_branch, (
-    "the KEY3 hold must open SETTINGS"
+# The decision chain moved out of main/main.c into the pure, shared
+# platform/button_arbitration.c — so the assertions moved with the mechanism
+# again, and got stricter, because the arbitration can now be checked for what
+# it CANNOT do rather than for the shape of an if/else.
+arb_c = (root / "platform/button_arbitration.c").read_text(encoding="utf-8")
+arb_h = (root / "platform/button_arbitration.h").read_text(encoding="utf-8")
+
+# Purity is the guarantee, not a comment about one: the arbitration reaches no
+# service at all. A decision that cannot call anything cannot be tricked into
+# opening a window, and both hosts feed the same function.
+for forbidden in ("torget_ota_service", "torget_wifi_setup_request",
+                  "torget_settings_", "torget_app_next", "tk_needs_you"):
+    assert forbidden not in arb_c, (
+        f"the arbitration must stay pure; it calls {forbidden}"
+    )
+# There is no output that opens the maintenance window. The window is reachable
+# only through the menu's UPDATE row, which needs a finger on the glass.
+assert "open_maintenance" not in arb_h, (
+    "the arbitration must expose no output that opens the maintenance window"
 )
-assert "torget_ota_service_open_maintenance" not in hold_branch, (
+assert "request_setup_open" in arb_h and "open_menu" in arb_h
+
+# Neither host decides anything: they read inputs and apply outputs. If a host
+# names a button ACTION it is deciding again, which is the violation this whole
+# module exists to end (AGENTS.md: "UI-beteende hör hemma i appen/platform/,
+# aldrig i main/main.c eller sim/main.c").
+sim_c = (root / "sim/main.c").read_text(encoding="utf-8")
+for host_name, host in (("main/main.c", main_c), ("sim/main.c", sim_c)):
+    assert "tg_button_arbitrate(" in host, (
+        f"{host_name} must route KEY3 through the shared arbitration"
+    )
+    assert "TG_BUTTON_" not in host, (
+        f"{host_name} must not branch on button actions; that is a decision"
+    )
+
+# The hold reaches a menu and nothing else. main.c applies open_menu; the OTA
+# window is opened in exactly one place, and only from the menu's intent.
+hold_apply = main_c.split("if (key3_out.open_menu) {", 1)
+assert len(hold_apply) == 2, "the KEY3 hold must apply the arbitration's open_menu"
+hold_apply = hold_apply[1].split("\n  }", 1)[0]
+assert "torget_settings_open(" in hold_apply, "the KEY3 hold must open SETTINGS"
+assert "torget_ota_service_open_maintenance" not in hold_apply, (
     "the hold must not reach past the menu into the OTA window"
+)
+assert main_c.count("torget_ota_service_open_maintenance();") == 1, (
+    "the maintenance window may be opened from exactly one place"
+)
+intent_switch = main_c.split("switch (torget_settings_take_intent())", 1)
+assert len(intent_switch) == 2, "the settings intent switch moved"
+assert "torget_ota_service_open_maintenance();" in intent_switch[1].split("\n  }", 1)[0], (
+    "that one place must be the menu's UPDATE intent"
 )
 # The no-IP protection survives as a menu that cannot offer UPDATE: main.c
 # passes NULL for the address, and the menu refuses the row on that.
-assert re.search(r"have_ip\s*\?\s*ip\s*:\s*NULL", hold_branch), (
+assert re.search(r"have_ip\s*\?\s*ip\s*:\s*NULL", hold_apply), (
     "a panel without an address must be told so, not handed a stale one"
 )
 # ...and the address is COPIED under the spinlock, never read in place: the
 # string is rewritten by the event loop on a renewed lease or a changed
 # address, on another core, with no disconnect in between.
-assert "ip_text_copy(ip, sizeof ip)" in hold_branch, (
+assert "ip_text_copy(ip, sizeof ip)" in hold_apply, (
     "the menu must take its own copy of the address, not alias the writer's"
 )
 settings_c = (root / "platform/settings_menu.c").read_text(encoding="utf-8")
@@ -89,20 +125,21 @@ assert "if (!ui.ip[0]) break;" in settings_c, (
 )
 
 # The double hold: a second full hold while the OTA window is open must
-# REQUEST the setup window, never close-and-open from the LVGL task — the
-# port-80 handover belongs to the setup guard's window_open().  Two request
-# sites total: the no-IP route and the switch route.
+# REQUEST the setup window, never close-and-open — the port-80 handover belongs
+# to the setup guard's window_open().  Two request sites in main.c: the
+# arbitration's request_setup_open and the menu's WIFI intent.
 assert main_c.count("torget_wifi_setup_request_open();") == 2, (
-    "expected exactly the no-IP route and the hold-again switch route"
+    "expected exactly the arbitration's request and the menu's WIFI intent"
 )
-maintenance_branch = main_c.split("torget_ota_service_maintenance_open()) {")[1]
-# Skär vid nästa YTTRE gren (appväxlaren) — den inre else-if-kedjan för
-# knapphändelserna hör till branchen och får inte klippa bort växlingsvägen.
-maintenance_branch = maintenance_branch.split("torget_app_next()")[0]
-assert "torget_wifi_setup_request_open();" in maintenance_branch, (
+maintenance_branch = arb_c.split("} else if (in->maintenance_open) {")[1]
+maintenance_branch = maintenance_branch.split("} else if (menu_open) {")[0]
+assert "out->request_setup_open = true;" in maintenance_branch, (
     "the hold-again switch must live inside the maintenance-open branch"
 )
-assert "torget_ota_service_close_maintenance();\n      torget_wifi_setup_request_open" not in main_c, (
+# The switch arm itself must produce ONLY the request: split at the hold arm
+# and assert the close is not part of it.
+switch_arm = maintenance_branch.split("TG_BUTTON_OPEN_MAINTENANCE)", 1)[1]
+assert "close_maintenance" not in switch_arm, (
     "the LVGL task must not close the OTA window itself when switching"
 )
 
@@ -137,10 +174,10 @@ assert 0 <= starting_render < slow_open, (
     "STARTING must be rendered before scanning, APSTA and portal startup"
 )
 
-ownership_branch = main_c.find("if (torget_wifi_setup_owns_input())")
-ota_branch = main_c.find("else if (torget_ota_service_maintenance_open())")
-app_switch = main_c.find("torget_app_next();", ota_branch)
-panic = main_c.find("tk_needs_you_send_panic();", ota_branch)
+ownership_branch = arb_c.find("if (in->setup_owns_input) {")
+ota_branch = arb_c.find("} else if (in->maintenance_open) {")
+app_switch = arb_c.find("out->next_app = true;", ota_branch)
+panic = arb_c.find("out->panic = true;", ota_branch)
 assert 0 <= ownership_branch < ota_branch < app_switch < panic, (
     "setup input ownership must be checked before OTA, app switching and panic"
 )

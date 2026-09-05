@@ -34,6 +34,27 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   internal-RAM budget re-measured on the unit, and PAIR belongs to a later
   step.
 
+### Changed
+
+- KEY3's arbitration — which of the glass's owners gets the button on a given
+  tick — moved out of `main/main.c` into a pure `tg_button_arbitrate()` in
+  `platform/`, shared byte-identically by the panel and the simulator. It was
+  110 lines of decisions in the host layer that `sim/main.c` could not reach:
+  the simulator called `torget_settings_open()` directly during static QA, so
+  it was not the authority for the gesture, the escape, the intent handoff or
+  the asynchronous notice close, against `AGENTS.md` on both counts. Both hosts
+  now read inputs and apply outputs and decide nothing. No behaviour changed —
+  the point of the move is that the behaviour is now provable: the eight
+  invariants behind it, each with a real incident, are pinned as a table of
+  host tests rather than by reading source, including the notice close that
+  fires from `maintenance_ui_task()` with no button event to hang a test on.
+  The simulator drives the real gesture through `poll_keys()` (hold K for
+  three seconds), and the composite state where a notice arrives over an open
+  menu is captured at 480x480 for the first time. The consent model is
+  strengthened rather than restated: the arbitration reaches no service at all
+  and has no output that opens the maintenance window, so the only way there
+  remains a finger on the menu's UPDATE row.
+
 ### Fixed
 
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as

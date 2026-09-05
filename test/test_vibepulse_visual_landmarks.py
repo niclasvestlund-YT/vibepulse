@@ -219,6 +219,9 @@ EXPECTED = {
     "torget-wifi-failed-password.bmp",
     "torget-settings-menu.bmp",
     "torget-settings-over-wifi-searching.bmp",
+    "torget-settings-notice-takes-over.bmp",
+    "torget-settings-wifi-handoff-closed.bmp",
+    "torget-settings-wifi-handoff-open.bmp",
     "torget-settings-menu-no-address.bmp",
     "torget-settings-menu-address-lost.bmp",
     "torget-settings-about-found.bmp",
@@ -642,6 +645,77 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
             self.assertTrue(
                 all(p == (0, 0, 0) for p in column.get_flattened_data()),
                 "NO NETWORK's wide headline is showing through")
+
+    def test_the_notice_takes_the_glass_from_an_open_menu(self):
+        """The composite this repository could not honestly capture before the
+        arbitration became a callable function: the UPDATE READY notice is
+        announced by maintenance_ui_task, with no button event to hang a test
+        on, WHILE the menu is up. The frame is taken after one arbitration
+        tick, and the claim it proves is an absence — the menu must be GONE,
+        not layered underneath. The bug it locks out put the notice over a menu
+        that still held open=true, and LATER revealed the forgotten menu."""
+        composite = self.image("torget-settings-notice-takes-over.bmp")
+        notice = self.image("torget-ota-ring-notice.bmp")
+        # Pixel-identical to the notice that never had a menu behind it: the
+        # menu left no trace at all, on any layer.
+        self.assertEqual(composite.tobytes(), notice.tobytes(),
+                         "the menu must be gone, not hidden behind the notice")
+        # Independent of that equality, so it cannot pass by both frames being
+        # blank: the menu's "KEY3 CLOSES" footer sits in a band the notice
+        # leaves entirely black, so it is the one piece of menu ink no part of
+        # the takeover can imitate. (The row outlines cannot serve here — the
+        # notice's own LATER pill is drawn in the same muted colour.)
+        footer = composite.crop((100, 440, 380, 478))
+        self.assertEqual(
+            sum(p != (0, 0, 0) for p in footer.get_flattened_data()), 0,
+            "the menu's KEY3 CLOSES footer is still on the glass")
+        self.assertGreater(
+            sum(p != (0, 0, 0) for p in
+                self.image("torget-settings-menu.bmp")
+                    .crop((100, 440, 380, 478)).get_flattened_data()), 500,
+            "the footer band must actually carry menu ink, or it proves nothing")
+        # And the notice itself is really there — UPDATE READY is a wide white
+        # headline, so this frame is not simply an empty screen.
+        headline = composite.crop((34, 24, 446, 110))
+        self.assertGreater(
+            sum(p == (255, 255, 255)
+                for p in headline.get_flattened_data()), 300,
+            "the notice must own the glass it took")
+
+    def test_the_wifi_handoff_leaves_no_ota_window_behind(self):
+        """The intent handoff, driven end to end through the gesture: hold
+        opens SETTINGS, a finger on UPDATE opens the maintenance window, and a
+        second completed hold inside it REQUESTS the setup window. The setup
+        guard's window_open() closes the maintenance window first, because
+        port 80 has one owner.
+
+        Both frames are needed, and the second one is the one that bites. A
+        setup window covers the whole glass, so a forgotten OTA layer is
+        INVISIBLE while it stands — it is revealed only when the setup window
+        closes, which is exactly how it behaved in reality. Asserting on the
+        handoff moment alone would pass with the bug still in."""
+        opened = self.image("torget-settings-wifi-handoff-open.bmp")
+        # Frame one carries two failures at once. It is taken after a tap
+        # DURING STARTING and after the guard has had time to finish:
+        #   * had the tap closed the window, the glass would be empty here
+        #     (request_close ignores STARTING — a window that is not up yet
+        #     cannot be closed, and the bench must not invent an escape the
+        #     device does not have);
+        #   * had the guard never advanced the phase, STARTING would still be
+        #     standing and the setup window would be unreachable by gesture.
+        # Only if both hold does the setup window itself appear.
+        self.assertEqual(opened.tobytes(),
+                         self.image("torget-wifi-setup-open.bmp").tobytes(),
+                         "the gesture must reach the real setup window")
+        self.assertNotEqual(opened.tobytes(),
+                            self.image("torget-wifi-starting.bmp").tobytes(),
+                            "the guard never advanced past STARTING")
+
+        # Frame two: the setup window closed. Nothing may be left underneath.
+        closed = self.image("torget-settings-wifi-handoff-closed.bmp")
+        self.assertEqual(
+            set(closed.get_flattened_data()), {(0, 0, 0)},
+            "a stale window was revealed when the setup window closed")
 
     def test_losing_the_address_remutes_update_without_closing(self):
         """The address is live, not a snapshot. When Wi-Fi drops while the
