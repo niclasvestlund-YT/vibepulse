@@ -26,6 +26,13 @@ CANVAS = 480
 SAFE_MARGIN = 8
 
 
+def without_comments(source):
+    """Strip C comments so an assertion about code is not tripped by prose
+    explaining why that code is absent."""
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
+    return re.sub(r"//[^\n]*", "", source)
+
+
 class SettingsDesignTests(unittest.TestCase):
     def setUp(self):
         self.design = json.loads(DESIGN_PATH.read_text(encoding="utf-8"))
@@ -34,7 +41,7 @@ class SettingsDesignTests(unittest.TestCase):
         self.assertEqual(
             set(design),
             {"schemaVersion", "deviceCapability", "canvas", "menu", "rows",
-             "about", "fonts"},
+             "aboutRows", "about", "fonts"},
         )
         self.assertEqual(design["schemaVersion"], 1)
         self.assertEqual(design["deviceCapability"], "display.amoled")
@@ -77,10 +84,21 @@ class SettingsDesignTests(unittest.TestCase):
             set(about),
             {"wordY", "labelX", "firstLineY", "lineGap", "backY", "footerY"},
         )
+        # No COMPUTER row: the only signal available for it is a boot latch
+        # that never clears, so it would have read FOUND forever after one
+        # successful fetch. A row that says something false is worse than a
+        # row that is not there.
+        about_rows = design["aboutRows"]
+        self.assertEqual(about_rows, ["FIRMWARE", "ADDRESS"])
+
         # The regression this file exists for: the last label/value pair must
-        # clear the BACK control, not merely avoid overlapping it.
+        # clear the BACK control, not merely avoid overlapping it. Counted
+        # from the declared rows so adding one cannot silently re-create the
+        # five-pixel collision.
         pair_height = design["fonts"]["aboutLabel"] + design["fonts"]["aboutValue"]
-        last_value_bottom = about["firstLineY"] + 2 * about["lineGap"] + pair_height
+        last_value_bottom = (about["firstLineY"]
+                             + (len(about_rows) - 1) * about["lineGap"]
+                             + pair_height)
         self.assertLessEqual(last_value_bottom, about["backY"] - SAFE_MARGIN)
         self.assertLessEqual(about["backY"] + menu["rowHeight"],
                              about["footerY"] - SAFE_MARGIN)
@@ -140,6 +158,23 @@ class SettingsDesignTests(unittest.TestCase):
         block = block.split("};", 1)[0]
         self.assertEqual(re.findall(r'"([A-Z]+)"', block), self.design["rows"])
 
+    def test_about_labels_match_the_contract(self):
+        source = SOURCE_PATH.read_text(encoding="utf-8")
+        block = source.split("ABOUT_LABEL[ABOUT_ROWS] = {", 1)[1]
+        block = block.split("};", 1)[0]
+        self.assertEqual(re.findall(r'"([A-Z]+)"', block),
+                         self.design["aboutRows"])
+        self.assertNotIn("COMPUTER", without_comments(source),
+                         "the COMPUTER row had no signal that meant it")
+
+    def test_menu_never_lifts_itself_above_the_update_takeover(self):
+        """UPDATE READY is not an open maintenance window, so a hold reaches
+        the menu while it shows. Creation order keeps the ring on top only
+        while the menu does not foreground itself, and the OTA renderer
+        deduplicates an unchanged state so it would never lift back."""
+        source = without_comments(SOURCE_PATH.read_text(encoding="utf-8"))
+        self.assertNotIn("lv_obj_move_foreground", source)
+
     def test_update_is_refused_without_an_address(self):
         """An OTA window with no address can never receive an upload, so the
         row is toned down AND the press is ignored — one truth in two
@@ -155,7 +190,7 @@ class SettingsDesignTests(unittest.TestCase):
         tasks call them. The menu is LVGL-task-only, so the same call here
         would stall the tick for 200 ms and then silently do nothing — the
         exact trap main.c's KEY3 block warns about."""
-        source = SOURCE_PATH.read_text(encoding="utf-8")
+        source = without_comments(SOURCE_PATH.read_text(encoding="utf-8"))
         self.assertNotIn("torget_ui_try_lock", source)
         self.assertNotIn("torget_ui_lock", source)
         self.assertIn("torget_ui_lock()", HEADER_PATH.read_text(encoding="utf-8"))

@@ -621,19 +621,20 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         fabricated 0.0.0.0."""
         found = self.image("torget-settings-about-found.bmp")
         missing = self.image("torget-settings-about-missing.bmp")
-        # ADDRESS value row: real text when known, a short dash when not.
+        # ADDRESS value row (design: firstLineY 140 + lineGap 62 + 24).
         found_ink = sum(p != (0, 0, 0) for p in
-                        found.crop((74, 194, 406, 236)).get_flattened_data())
+                        found.crop((74, 226, 406, 258)).get_flattened_data())
         missing_ink = sum(p != (0, 0, 0) for p in
-                          missing.crop((74, 194, 406, 236)).get_flattened_data())
+                          missing.crop((74, 226, 406, 258)).get_flattened_data())
         self.assertGreater(found_ink, 400, "a known address must be drawn")
         self.assertGreater(missing_ink, 0, "a missing address must draw a dash")
         self.assertLess(missing_ink, found_ink // 3,
                         "the dash must be far less ink than an address")
         # BACK clears the values: the band just above it stays black.
+        # (design: last value ends ~258, backY 285.)
         for image in (found, missing):
             with self.subTest(image=image):
-                gap = image.crop((74, 292, 406, 306))
+                gap = image.crop((74, 262, 406, 282))
                 self.assertTrue(
                     all(p == (0, 0, 0) for p in gap.get_flattened_data()),
                     "the last value must clear the BACK control")

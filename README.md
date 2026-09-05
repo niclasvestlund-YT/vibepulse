@@ -54,9 +54,10 @@ Codex. You do not need to read this whole page:
 3. **The core is your Claude/Codex usage on the glass.** Answering from the
    panel, the relays, and GitHub are add-ons, each off by default and opted
    into separately: today through the setup command, `secrets.h`, and the
-   table under [Independent switches](#independent-switches). A settings
-   page on the glass is planned, not built (see the spec in
-   `docs/superpowers/specs/`). Sound has no verified backend yet.
+   table under [Independent switches](#independent-switches). A **3 s KEY3
+   hold opens SETTINGS** on the glass — UPDATE, WIFI and ABOUT today; the
+   on-glass feature switches are specified but not built yet (see the spec
+   in `docs/superpowers/specs/`). Sound has no verified backend yet.
 
 ## Latest release: v1.0.0
 

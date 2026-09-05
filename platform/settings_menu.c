@@ -42,11 +42,12 @@ extern const lv_font_t plex_ui_21;
 #define SETTINGS_ROW_BORDER_W   2
 #define SETTINGS_FOOTER_Y       442
 
-#define SETTINGS_ABOUT_FIRST_LINE_Y 108
+#define SETTINGS_ABOUT_FIRST_LINE_Y 140
 #define SETTINGS_ABOUT_LINE_GAP     62
-#define SETTINGS_ABOUT_BACK_Y       308
+#define SETTINGS_ABOUT_BACK_Y       285
 
 #define ABOUT_VALUE_CAP 40
+#define ABOUT_ROWS 2
 
 typedef enum {
   VIEW_MENU,
@@ -59,10 +60,10 @@ static struct {
   lv_obj_t *foot;
   lv_obj_t *rows[TG_SETTINGS_ROW_COUNT];
   lv_obj_t *row_labels[TG_SETTINGS_ROW_COUNT];
-  /* ABOUT: tre etikett/värde-par plus en BACK-kontroll som återanvänder
-   * radgeometrin. */
-  lv_obj_t *about_labels[3];
-  lv_obj_t *about_values[3];
+  /* ABOUT: två etikett/värde-par plus en BACK-kontroll som återanvänder
+   * radgeometrin. Ingen COMPUTER-rad — se headern för varför. */
+  lv_obj_t *about_labels[ABOUT_ROWS];
+  lv_obj_t *about_values[ABOUT_ROWS];
   lv_obj_t *about_back;
   lv_obj_t *about_back_label;
   settings_view view;
@@ -70,7 +71,6 @@ static struct {
   tg_settings_intent pending;
   char version[ABOUT_VALUE_CAP];
   char ip[ABOUT_VALUE_CAP];
-  bool computer_found;
   bool about_dirty;
 } ui;
 
@@ -78,8 +78,8 @@ static const char *const ROW_TEXT[TG_SETTINGS_ROW_COUNT] = {
   "UPDATE", "WIFI", "ABOUT",
 };
 
-static const char *const ABOUT_LABEL[3] = {
-  "FIRMWARE", "ADDRESS", "COMPUTER",
+static const char *const ABOUT_LABEL[ABOUT_ROWS] = {
+  "FIRMWARE", "ADDRESS",
 };
 
 static void show(lv_obj_t *obj, bool visible) {
@@ -192,7 +192,7 @@ void torget_settings_create(void) {
                         (void *)(intptr_t)i);
   }
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < ABOUT_ROWS; i++) {
     int y = SETTINGS_ABOUT_FIRST_LINE_Y + i * SETTINGS_ABOUT_LINE_GAP;
     ui.about_labels[i] = line(ui.overlay, &plex_ui_21, COL_MUTED, y);
     lv_obj_set_style_text_letter_space(ui.about_labels[i], 2, 0);
@@ -222,7 +222,7 @@ static void render(void) {
     lv_obj_set_style_text_color(ui.row_labels[TG_SETTINGS_ROW_UPDATE],
                                 can_update ? lv_color_white() : COL_MUTED, 0);
   }
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < ABOUT_ROWS; i++) {
     show(ui.about_labels[i], !menu);
     show(ui.about_values[i], !menu);
   }
@@ -234,24 +234,26 @@ static void render(void) {
     lv_label_set_text(ui.about_values[0],
                       ui.version[0] ? ui.version : "–");
     lv_label_set_text(ui.about_values[1], ui.ip[0] ? ui.ip : "–");
-    lv_label_set_text(ui.about_values[2],
-                      ui.computer_found ? "FOUND" : "NOT FOUND");
     ui.about_dirty = false;
   }
 }
 
-void torget_settings_open(const char *version, const char *ip,
-                          bool computer_found) {
+void torget_settings_open(const char *version, const char *ip) {
   if (!ui.overlay) return;
   snprintf(ui.version, sizeof ui.version, "%s", version ? version : "");
   snprintf(ui.ip, sizeof ui.ip, "%s", ip ? ip : "");
-  ui.computer_found = computer_found;
   ui.about_dirty = true;
   ui.view = VIEW_MENU;
   ui.open = true;
   render();
   show(ui.overlay, true);
-  lv_obj_move_foreground(ui.overlay);
+  /* INGET lv_obj_move_foreground här, med flit. Skapelseordningen är
+   * företrädet — appar < nät < settings < OTA — och den håller bara så
+   * länge menyn inte lyfter sig själv. UPDATE READY-takeovern är inte ett
+   * öppet underhållsfönster, så ett håll når hit medan den syns; en
+   * foregrounding hade lagt menyn ovanpå den, och OTA-renderaren
+   * avduplicerar samma tillstånd och hade aldrig lyft tillbaka den.
+   * Utan lyftet kan menyn aldrig skymma en väntande uppdatering. */
 }
 
 void torget_settings_close(void) {

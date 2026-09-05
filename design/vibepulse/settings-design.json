@@ -24,9 +24,9 @@
   "about": {
     "wordY": 24,
     "labelX": 74,
-    "firstLineY": 108,
+    "firstLineY": 140,
     "lineGap": 62,
-    "backY": 308,
+    "backY": 285,
     "footerY": 442
   },
   "fonts": {
@@ -35,5 +35,9 @@
     "aboutLabel": 21,
     "aboutValue": 27,
     "footer": 21
-  }
+  },
+  "aboutRows": [
+    "FIRMWARE",
+    "ADDRESS"
+  ]
 }

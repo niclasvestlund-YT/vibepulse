@@ -56,13 +56,20 @@ void torget_settings_create(void);
 
 /* ABOUT-raderna tas som en ögonblicksbild när menyn öppnas, inte som en
  * ström: värdena bor i andra tasks, och en meny som läste dem live hade
- * behövt lås eller atomics för tre rader som visas i några sekunder.
+ * behövt lås eller atomics för två rader som visas i några sekunder.
  * ``ip`` NULL eller tom betyder ingen adress — raden visar streck, och
  * UPDATE tonas ner, för ett OTA-fönster utan adress kan aldrig ta emot
  * en uppladdning. Att erbjuda det ändå vore ett löfte skärmen inte kan
- * hålla. */
-void torget_settings_open(const char *version, const char *ip,
-                          bool computer_found);
+ * hålla.
+ *
+ * Det finns medvetet INGEN "COMPUTER"-rad. Den skrevs först mot
+ * ``s_data_alive``, som bara sätts till true en gång och aldrig tillbaka —
+ * raden hade sagt FOUND för alltid efter en enda lyckad hämtning, även med
+ * datorn borta, och även när siffrorna kom via reläet i stället för en
+ * upptäckt dator. Ingen befintlig signal betyder det etiketten påstår, och
+ * en rad som säger något falskt är värre än en rad som inte finns. Den
+ * kommer tillbaka när det finns ett värde som bär den. */
+void torget_settings_open(const char *version, const char *ip);
 void torget_settings_close(void);
 bool torget_settings_open_p(void);
 

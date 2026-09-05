@@ -390,17 +390,20 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     vTaskDelay(pdMS_TO_TICKS(2000));
     if (!atomic_load(&s_sta_paused)) esp_wifi_connect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-    /* GOT_IP is enough to say connected even before the first RSSI sample. */
-    xEventGroupSetBits(s_net_events, WIFI_GOT_IP);
-    /* Adressen sparas som text här, där eventet ändå bär den. SETTINGS
-     * ABOUT läser strängen från LVGL-tasken; en läsning av ett netif från
-     * ritloopen vore ett nätverksanrop i fel task för tre tecken på
-     * glaset. En enda skrivare, en enda läsare, och värdet visas bara. */
+    /* Adressen sparas som text FÖRE bitten publiceras. Ordningen är hela
+     * poängen: hook_have_ip() är grinden SETTINGS läser s_ip_text bakom,
+     * och de två körs i olika tasks på olika kärnor. Satte vi bitten först
+     * kunde ett håll i glappet se "vi har IP" och läsa en tom eller halv-
+     * skriven sträng. Skrivaren är fortfarande en enda (eventloopen);
+     * bitten är den som gör värdet synligt. */
     {
       const ip_event_got_ip_t *got = (const ip_event_got_ip_t *)data;
       if (got) snprintf(s_ip_text, sizeof s_ip_text, IPSTR,
                         IP2STR(&got->ip_info.ip));
+      else s_ip_text[0] = '\0';
     }
+    /* GOT_IP is enough to say connected even before the first RSSI sample. */
+    xEventGroupSetBits(s_net_events, WIFI_GOT_IP);
     tg_wifi_signal_event(&s_wifi_signal, 1);
     char ssid[TG_WIFI_SSID_CAP];
     wifi_copy_current_ssid(ssid, sizeof ssid);
@@ -711,13 +714,17 @@ static void tick_cb(lv_timer_t *t) {
      * blir synligt i stället för härlett ur om panelen råkar ha IP.
      *
      * ABOUT-raderna tas som ögonblicksbild här: LVGL-tasken äger dem, och
-     * inget av de tre värdena kostar mer än en läsning. Utan IP skickas
-     * NULL — menyn tonar då ner UPDATE, för ett fönster utan adress kan
-     * ändå aldrig ta emot en uppladdning. */
+     * inget av värdena kostar mer än en läsning. Utan IP skickas NULL —
+     * menyn tonar då ner UPDATE, för ett fönster utan adress kan ändå
+     * aldrig ta emot en uppladdning.
+     *
+     * s_data_alive skickas INTE med som en "COMPUTER"-rad: flaggan sätts
+     * en gång och aldrig tillbaka, så raden hade sagt FOUND för alltid
+     * efter en enda lyckad hämtning — även med datorn borta, och även när
+     * siffrorna kom via reläet. */
     const esp_app_desc_t *desc = esp_app_get_description();
     torget_settings_open(desc ? desc->version : NULL,
-                         hook_have_ip() ? s_ip_text : NULL,
-                         atomic_load(&s_data_alive));
+                         hook_have_ip() ? s_ip_text : NULL);
   }
 
   /* Menyns val, utfört av den som äger fönsterordningen. Menyn rör aldrig

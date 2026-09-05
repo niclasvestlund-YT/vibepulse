@@ -1276,14 +1276,14 @@ static int run_vibepulse_static_qa(void) {
 
   /* SETTINGS: vad ett tresekundershåll på KEY3 öppnar. Menyn och ABOUT i
    * båda tillstånd som skiljer sig materiellt — hittad dator och inte. */
-  torget_settings_open("v0.2.1-16-g9f9af53", "192.168.1.42", true);
+  torget_settings_open("v0.2.1-16-g9f9af53", "192.168.1.42");
   dump_overlay_frame("settings-menu");
   torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
   dump_overlay_frame("settings-about-found");
   torget_settings_close();
   /* Utan adress: UPDATE tonas ner och ABOUT visar streck. Två frames som
    * skiljer sig materiellt från de ovan, inte samma bild med annan text. */
-  torget_settings_open("v0.2.1-16-g9f9af53", NULL, false);
+  torget_settings_open("v0.2.1-16-g9f9af53", NULL);
   dump_overlay_frame("settings-menu-no-address");
   torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
   dump_overlay_frame("settings-about-missing");
