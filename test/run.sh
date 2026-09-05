@@ -287,6 +287,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_ota_partition.py
 "$PYTHON_BIN" test_ota_reopen_wiring.py
 "$PYTHON_BIN" test_ota_sender_gates.py
+"$PYTHON_BIN" test_ota_gesture_docs.py
 "$PYTHON_BIN" test_wifi_setup_wiring.py
 "$PYTHON_BIN" test_settings_design.py
 "$PYTHON_BIN" test_relay_boundary.py
