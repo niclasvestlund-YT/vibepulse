@@ -133,7 +133,21 @@ INSIDE = re.compile(
     r"|while the OTA window is (already )?open)", re.I)
 
 
-ECHOED = re.compile(r"""echo\s+(?:-e\s+)?["']([^"']*)["']""")
+# What a shell script actually puts on the operator's terminal.
+#
+# The flags matter and are not cosmetic. A first version accepted only -e, so
+# `echo -n "... håll "` followed by `echo "KEY3 ~3 s."` — one continuous
+# sentence to the reader, and precisely how you would build one — matched
+# nothing on the first line. That did not merely lose half the message: a
+# line yielding no parts ENDS the adjacent-run grouping, so the guard scanned
+# the tail alone and saw nothing wrong with it.
+#
+# printf is here for the same reason rather than a hypothetical one: other
+# scripts under tools/ already address the operator with it, so a runbook
+# gaining one is a matter of time. Its format specifiers survive as literal
+# "%s" in the extracted text, which none of these patterns care about.
+ECHOED = re.compile(
+    r"""(?:echo|printf)\s+(?:-[neE]+\s+)*["']([^"']*)["']""")
 
 
 def passages(text):
@@ -288,6 +302,32 @@ class OtaGestureDocsTest(unittest.TestCase):
             [p for p in passages(script)
              if HOLD.search(p) and WINDOW.search(p)
              and not STEP.search(p) and not INSIDE.search(p)], [])
+
+    def test_a_message_built_with_echo_n_or_printf_is_still_read(self):
+        """Both are ways to emit one sentence from two commands, and both
+        were invisible: a line the pattern cannot read yields no parts, which
+        ends the adjacent run, so the guard scanned the tail on its own and
+        found nothing wrong with it. Missing a flag did not weaken the
+        reading — it silenced it."""
+        built = (
+            'status() {\n'
+            '  echo -n "Underhållsfönstret öppnas med ett håll "\n'
+            '  echo "KEY3 ~3 s."\n'
+            '}',
+            'status() {\n'
+            "  printf 'Underhållsfönstret öppnas med ett håll '\n"
+            '  echo "KEY3 ~3 s."\n'
+            '}',
+        )
+        for text in built:
+            with self.subTest(form=text.split("\n")[1].strip()[:20]):
+                flagged = [p for p in passages(text)
+                           if HOLD.search(p) and WINDOW.search(p)
+                           and not STEP.search(p) and not INSIDE.search(p)]
+                self.assertTrue(
+                    flagged,
+                    "a message split across two emitting commands was not "
+                    "reassembled, so the guard never saw the sentence")
 
     def test_the_guard_would_have_caught_the_real_misses(self):
         """A guard that passes everything proves nothing, so run it against
