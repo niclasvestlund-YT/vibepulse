@@ -231,6 +231,13 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-key3-arbitration-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
+  -I../components/torget_ota \
+  ../platform/button_arbitration.c \
+  test_key3_flow.c \
+  -o /tmp/torget-key3-flow-test
+/tmp/torget-key3-flow-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_ota/notice_policy.c \
   test_ota_notice_policy.c \
   -lm \

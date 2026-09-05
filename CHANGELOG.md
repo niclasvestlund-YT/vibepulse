@@ -7,6 +7,17 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **The KEY3 flow is tested as a journey, not only as a table.**
+  `test/test_key3_arbitration.c` pins eight invariants separately, which is
+  the right shape for them — but every cell in that table is set up by hand,
+  and a table where all cells pass says nothing about the *transitions*
+  between them. `test/test_key3_flow.c` walks one continuous trip through
+  the whole flow, feeding each tick's output back as the next tick's input
+  the way `main.c` does, and injects the events the button does not control
+  (the setup window opening itself, the notice arriving, windows expiring)
+  where they really occur. It also asserts no world state is a dead end.
+- **`docs/manual-test-key3.md`** — the short list of things only the panel
+  can settle, deliberately excluding everything already automated.
 - **Every permanent overlay now reports what it costs, on every boot.** The
   three top-layer overlays — Wi-Fi setup, SETTINGS and the OTA ring — are
   built once at start and kept for the whole run, and the AMOLED rule
