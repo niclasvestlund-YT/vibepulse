@@ -19,20 +19,26 @@ shipped at the time, and docs/superpowers/plans/, which are implementation
 plans for work already done. Rewriting either to match today's behaviour
 would be falsifying the record, which is the opposite of the point.
 
-NOT GUARDED, AND MEASURED RATHER THAN ASSUMED: the same mistake about the
-WI-FI SETUP window. tools/wifi-here.sh said the panel raises its access point
-"direkt om du håller KEY3 ~3 s" — the hold opens SETTINGS, where WIFI opens
-it. That text is corrected in this commit, but this guard did NOT catch it
-and cannot: WINDOW deliberately excludes the setup window so the two windows
-keep separate vocabularies, so the passage matched HOLD and nothing else.
+THE SAME MISTAKE ABOUT THE WI-FI SETUP WINDOW is now guarded too, and the
+story of why is the useful part. tools/wifi-here.sh said the panel raises its
+access point "direkt om du håller KEY3 ~3 s", and its retry advice said a
+hold opens a new one. Both are wrong the same way — the hold opens SETTINGS,
+where WIFI opens the window.
 
-Extending WINDOW to cover it was tried and rejected on evidence. A rule
-pairing a hold with setup-window words flags three passages that are
-CORRECT: wifi.md's hold-hold shortcut, ota.md's greyed-out-UPDATE
-explanation, and agent-setup.md's "(or a 3 s KEY3 hold -> WIFI)" table row.
-Same verdict as the takeover rule below, for the same reason. The runbook is
-still in LIVE_DOCS — it would catch an OTA-window claim appearing there — but
-its setup-window sentence is guarded by a reader, not by this file.
+I first judged this class unguardable and wrote that down: a rule pairing a
+hold with setup-window words appeared to flag three CORRECT passages. That
+measurement was wrong, and wrong for a reason worth keeping. Two of the
+three were artifacts of matching raw text — patterns here use literal
+spaces, and wifi.md's exempt sentence has a line break inside it, so INSIDE
+could not fire. The third was self-exemption: a step pattern accepting the
+bare word WIFI matches the window's own name, "WIFI SETUP".
+
+With passages whitespace-normalised (see below) and the step required to
+name SETTINGS or to *pick* WIFI rather than merely mention it, the rule
+flags zero correct passages in every live doc and catches both real misses.
+So the class needed a better rule, not a reader. The lesson is that "I tried
+it and it produced false positives" is only as good as the harness that
+produced them.
 
 Also deliberately NOT guarded, after trying: the neighbouring failure where
 a doc offers the hold *while the UPDATE READY takeover is up*, which the
@@ -105,6 +111,17 @@ WINDOW = re.compile(
 # a first version of this guard that accepted it.
 STEP = re.compile(r"SETTINGS")
 
+# ---- the Wi-Fi setup window, which has its own vocabulary and its own step.
+SETUP_WINDOW = re.compile(
+    r"(setup[- ]?f[öo]nstret|setup window|accesspunkt|VibePulse-setup"
+    r"|WIFI SETUP|WiFi SETUP)", re.I)
+
+# Must name the MENU, or picking WIFI *from* it. The bare word WIFI cannot be
+# the step: "WIFI SETUP" contains it, so a passage naming only the window
+# would exempt itself — which is exactly what a first attempt did.
+SETUP_STEP = re.compile(
+    r"SETTINGS|(v[äa]lj|pick|choose|→|->)\s+\*{0,2}WIFI", re.I)
+
 # The one legitimate way a hold and the update window belong in the same
 # breath without the menu: the hold–hold shortcut, which happens INSIDE an
 # already-open window and switches to Wi-Fi setup. That passage is true and
@@ -116,18 +133,40 @@ INSIDE = re.compile(
     r"|while the OTA window is (already )?open)", re.I)
 
 
+ECHOED = re.compile(r"""echo\s+(?:-e\s+)?["']([^"']*)["']""")
+
+
 def passages(text):
     """Blank-line paragraphs, plus each table row on its own.
 
     Tables carry one instruction per row, so a row must stand up alone —
     the 403 troubleshooting entry was exactly such a row.
+
+    WHITESPACE IS NORMALISED, and that is not cosmetic. Every pattern here
+    is written with literal spaces, and prose wraps: wifi.md's hold-hold
+    passage says "while the update window is open" with a line break inside
+    it, so INSIDE — the exemption meant precisely for that sentence — did not
+    fire, and the passage was one line-wrap away from being reported as a
+    violation. A guard that depends on where an author pressed Enter is a
+    guard that reports noise.
+
+    A SHELL SCRIPT ALSO GETS WHAT THE OPERATOR ACTUALLY READS. A message
+    split across two echo statements is one sentence on the terminal and two
+    unrelated fragments on disk: wifi-here.sh's retry advice ended "— håll"
+    on one line and began "KEY3 ~3 s" on the next, with `" >&2\n  echo "` in
+    between, so no pattern could bridge it. Codex found that line by reading
+    it; this yields the joined text so the guard can too.
     """
     for block in text.split("\n\n"):
         rows = [ln for ln in block.splitlines() if ln.lstrip().startswith("|")]
         if rows:
-            yield from rows
+            for row in rows:
+                yield " ".join(row.split())
         else:
-            yield block
+            yield " ".join(block.split())
+    spoken = ECHOED.findall(text)
+    if spoken:
+        yield " ".join(" ".join(spoken).split())
 
 
 class OtaGestureDocsTest(unittest.TestCase):
@@ -146,6 +185,58 @@ class OtaGestureDocsTest(unittest.TestCase):
         self.assertEqual(offenders, [], "\n".join(
             ["a KEY3 hold opens SETTINGS; name the UPDATE step too:"]
             + offenders))
+
+    def test_no_live_doc_sends_a_hold_straight_to_the_setup_window(self):
+        """The Wi-Fi half of the same class. wifi-here.sh got it wrong twice
+        — in its header and, worse, in the retry advice it prints when the
+        Mac fails to reach the panel's AP, which is exactly when the operator
+        is stuck and reading carefully."""
+        offenders = []
+        for name in LIVE_DOCS:
+            path = ROOT / name
+            if not path.exists():
+                continue
+            for passage in passages(path.read_text(encoding="utf-8")):
+                if HOLD.search(passage) and SETUP_WINDOW.search(passage) \
+                        and not SETUP_STEP.search(passage) \
+                        and not INSIDE.search(passage):
+                    offenders.append(f"{name}: {passage[:160]}")
+        self.assertEqual(offenders, [], "\n".join(
+            ["a KEY3 hold opens SETTINGS; name the WIFI step too:"]
+            + offenders))
+
+    def test_the_setup_rule_catches_its_real_misses_and_spares_the_rest(self):
+        """Both halves measured, because a rule is only as trustworthy as the
+        evidence that it neither under- nor over-reaches."""
+        misses = (
+            "#   1. Panelen reser sin egen accesspunkt (VibePulse-setup). "
+            "Den gör det\n#      själv efter 90 s utan nät, eller direkt om "
+            "du håller KEY3 ~3 s.",
+            '  echo "Står WIFI SETUP på glaset? Fönstret är öppet i tio '
+            'minuter — håll" >&2\n  echo "KEY3 ~3 s för att öppna ett '
+            'nytt." >&2',
+        )
+        correct = (
+            "#      själv efter 90 s utan nät, eller om du håller KEY3 ~3 s "
+            "och väljer\n#      WIFI i SETTINGS — hållet öppnar menyn, inte "
+            "fönstret.",
+            "**Hold again to switch windows.** A second full 3 s hold while "
+            "the update\nwindow is open closes it and opens WIFI SETUP "
+            "instead.",
+        )
+
+        def flagged(text):
+            return [p for p in passages(text)
+                    if HOLD.search(p) and SETUP_WINDOW.search(p)
+                    and not SETUP_STEP.search(p) and not INSIDE.search(p)]
+
+        for text in misses:
+            with self.subTest(miss=text[:60]):
+                self.assertTrue(flagged(text), "setup rule missed a real one")
+        for text in correct:
+            with self.subTest(ok=text[:60]):
+                self.assertEqual(flagged(text), [],
+                                 "setup rule rejects correct wording")
 
     def test_the_guard_would_have_caught_the_real_misses(self):
         """A guard that passes everything proves nothing, so run it against

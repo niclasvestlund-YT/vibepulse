@@ -70,8 +70,9 @@ fi
 echo "hoppar över till $AP_SSID (Macen är offline en stund)..."
 if ! networksetup -setairportnetwork "$IFACE" "$AP_SSID" "$AP_PASS" >/dev/null 2>&1; then
   echo "kom inte in på $AP_SSID." >&2
-  echo "Står WIFI SETUP på glaset? Fönstret är öppet i tio minuter — håll" >&2
-  echo "KEY3 ~3 s för att öppna ett nytt." >&2
+  echo "Står WIFI SETUP på glaset? Fönstret är öppet i tio minuter." >&2
+  echo "Behöver du ett nytt: håll KEY3 ~3 s och välj WIFI i SETTINGS —" >&2
+  echo "hållet öppnar menyn, inte fönstret." >&2
   exit 1
 fi
 
