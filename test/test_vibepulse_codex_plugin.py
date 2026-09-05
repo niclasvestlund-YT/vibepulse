@@ -178,7 +178,17 @@ def closed_port():
     return port
 
 
-def run_script(name, stdin=b"", *, port=None, env=None, timeout=4):
+# A hang guard, not a speed assertion: it exists so a wedged script cannot
+# wedge the suite, and no test asserts that it fires.  It has to clear a fresh
+# interpreter's startup on a contended CI runner, which a 4 s budget did not —
+# `test_unicode_decision_is_emitted_as_utf8` timed out on windows-latest and
+# passed on a second run of the same commit.  Every script here answers in
+# well under a second when it answers at all, so a wedge is still caught.
+SCRIPT_HANG_TIMEOUT_SECONDS = 30
+
+
+def run_script(name, stdin=b"", *, port=None, env=None,
+               timeout=SCRIPT_HANG_TIMEOUT_SECONDS):
     process_env = os.environ.copy()
     for key in tuple(process_env):
         if key.lower().endswith("_proxy") or key.lower() == "no_proxy":
@@ -1147,14 +1157,19 @@ class McpServerTests(unittest.TestCase):
                 {"raw_chunks": slow_chunks, "raw_delay": 0.04},
                 {"body": compact(answered).encode()},
         ]) as server:
-            started = time.monotonic()
             _, responses = run_mcp([
                 rpc("tools/call", 1, {"name": "ask", "arguments": QUESTION}),
                 rpc("tools/call", 2, {"name": "ask", "arguments": QUESTION}),
             ], port=server.port,
                env={"_VIBEPULSE_TEST_READ_TIMEOUT": "0.12"})
-            elapsed = time.monotonic() - started
-        self.assertLess(elapsed, 0.6)
+            finished = time.monotonic()
+            self.assertEqual(len(server.httpd.request_times), 2)
+            requests_elapsed = finished - server.httpd.request_times[0]
+        # Measure both request/response cycles, not unrelated Python process
+        # startup. Without the absolute drip deadline the first call rides the
+        # byte-at-a-time drip to the end (69 bytes x 0.04 s = 2.8 s), since no
+        # single read ever exceeds the 0.12 s read timeout.
+        self.assertLess(requests_elapsed, 0.4)
         self.assertEqual(responses[0]["result"]["structuredContent"]["status"],
                          "computer")
         self.assertEqual(responses[1]["result"]["structuredContent"], answered)

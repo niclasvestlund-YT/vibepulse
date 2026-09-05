@@ -7,14 +7,28 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **Every permanent overlay now reports what it costs, on every boot.** The
+  three top-layer overlays — Wi-Fi setup, SETTINGS and the OTA ring — are
+  built once at start and kept for the whole run, and the AMOLED rule
+  forbids that without a measured memory budget. The measurement is now
+  automatic rather than remembered: each create is bracketed and logs
+  `overlaykostnad <name>: LVGL-pool +N B …, internt ±N B …`. Two numbers
+  because they answer different questions. LVGL's allocator pool is TLSF in
+  **PSRAM** (moved there as the 2026-08-16 freeze fix), so object trees come
+  out of its 256 KiB rather than internal RAM; the internal figure is the
+  control that shows whether a create takes internal memory anyway. A zero
+  delta retires the starvation worry for that layer with evidence instead of
+  argument, and a non-zero one puts the cost in the log.
+
 - A **SETTINGS** menu on a 3 s KEY3 hold. The hold used to derive which window
   you wanted from whether the panel had an IP; it now opens a menu with
   UPDATE, WIFI and ABOUT and lets you say. The consent model is unchanged —
   the menu is reachable only from the device, so physical presence is still
   required for UPDATE, and the token and the ten-minute window are untouched.
   Without an address UPDATE is greyed out and cannot be picked, because an
-  update window with no address could never receive an upload; WIFI is then
-  the one lit row, and the address is live rather than a snapshot — lose Wi-Fi
+  update window with no address could never receive an upload; UPDATE is the
+  only row that goes dark, leaving WIFI as the one that can fix it, and the
+  address is live rather than a snapshot — lose Wi-Fi
   while the menu is up and UPDATE greys out there and then, instead of
   offering a window that could no longer receive anything. ABOUT shows the
   firmware version and the address, with a dash for anything missing. There is
@@ -71,6 +85,22 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   `wifi-open-to-searching`, which the existing `wifi-searching` frame could
   not catch — that one is taken before any OPEN state, so the canvas has
   never been populated at that point.
+- `test_mcp_recovers_after_absolute_drip_deadline` no longer flakes on the
+  Windows CI runner. It bounded wall clock taken around `run_mcp()`, which
+  spawns a Python subprocess, so interpreter startup counted against a budget
+  meant for the transport deadline alone — 0.719 s against a 0.6 s bound on a
+  loaded runner, green again on the next commit. It now measures from the stub
+  server's own recorded request time, as the sibling deadline test already
+  did. The bound is tighter than before, not looser: the two request/response
+  cycles run in ~0.13 s and the assertion trips at 0.4 s, so a lengthened or
+  removed drip deadline still turns it red.
+- The same file's `run_script()` no longer times a Codex plugin script out
+  after 4 seconds on a loaded CI runner. The budget is a hang guard, not a
+  speed assertion — nothing overrides it and no test asserts that it fires —
+  but it had to cover a fresh Python interpreter's startup, and on
+  windows-latest it did not: `test_unicode_decision_is_emitted_as_utf8` timed
+  out and passed on a second run of the same commit. It is now a named
+  `SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still verified to catch a wedged script.
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as
   measured zeros. A new additive `claudeSourcePresent` flag says when the
   Claude directory is absent, so the zeros are not mistaken for a day with no
