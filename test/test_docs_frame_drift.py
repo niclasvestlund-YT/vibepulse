@@ -180,6 +180,21 @@ STALE_CHROME = {
 DISPLAY_METADATA = ("icc_profile", "exif", "gamma", "srgb", "chromaticity")
 
 
+# The images under docs/img that are NOT panel captures, each named with the
+# reason. Anything else must be 480x480: an earlier version simply skipped
+# whatever was not, which Codex pointed out is a hole rather than a filter —
+# a new README screenshot at the wrong size would vanish from every test in
+# this file and CI would stay green. Named, a stray file fails; skipped, it
+# is invisible. The distinction is the whole difference between a filter and
+# a blind spot.
+NOT_FRAMES = {
+    "github/glass-live.png": "a photograph of the physical panel",
+    "hero.png": "the README banner, a composed graphic",
+    "qr-repo.png": "a QR code, not a screen",
+    "social-preview.png": "the repository's social card",
+}
+
+
 def docs_frames():
     """Every checked-in 480x480 simulator capture, by path under docs/img.
 
@@ -191,12 +206,10 @@ def docs_frames():
     img = ROOT / "docs/img"
     for path in sorted(img.rglob("*.png")):
         rel = path.relative_to(img)
-        if rel.parts[0] == "mockups":
+        name = rel.as_posix()
+        if rel.parts[0] == "mockups" or name in NOT_FRAMES:
             continue
-        with Image.open(path) as im:
-            if im.size != (480, 480):
-                continue
-        yield rel.as_posix(), path
+        yield name, path
 
 
 def indicator(image):
@@ -386,6 +399,38 @@ class DocsFrameDriftTests(unittest.TestCase):
         """A frame cannot be both reproduced exactly and unverifiable; if it
         ever is, one of the two lists is lying."""
         self.assertEqual(sorted(set(PINNED) & set(STALE_CHROME)), [])
+
+    def test_every_image_is_a_frame_or_a_named_exception(self):
+        """The filter that was a hole. Skipping anything not 480x480 meant a
+        new README screenshot at the wrong size joined no list, faced no
+        check, and left CI green — the failure mode this whole file exists to
+        prevent, reintroduced by the function that gathers its inputs.
+
+        Now the four non-captures are named with reasons and everything else
+        must be panel-sized. A stray graphic fails here instead of vanishing.
+        """
+        img = ROOT / "docs/img"
+        wrong = []
+        for path in sorted(img.rglob("*.png")):
+            rel = path.relative_to(img)
+            name = rel.as_posix()
+            if rel.parts[0] == "mockups" or name in NOT_FRAMES:
+                continue
+            with Image.open(path) as im:
+                if im.size != (480, 480):
+                    wrong.append(f"{name} is {im.size[0]}x{im.size[1]}")
+        self.assertEqual(wrong, [], "\n".join(
+            ["not a 480x480 panel capture. If it is not a screenshot, add it "
+             "to NOT_FRAMES with the reason; if it is, re-capture it:"]
+            + wrong))
+
+    def test_the_named_exceptions_all_exist(self):
+        """A renamed or deleted exception would silently widen NOT_FRAMES
+        into a place to park anything."""
+        for name in sorted(NOT_FRAMES):
+            with self.subTest(name=name):
+                self.assertTrue((ROOT / "docs/img" / name).is_file(),
+                                f"NOT_FRAMES names {name}, which is not there")
 
     def test_every_frame_is_accounted_for(self):
         """No third category. A frame that is neither pinned nor quarantined
