@@ -13,7 +13,7 @@
  * tiominutersfönstret är orörda. Det enda som ändras är att hållet landar i en
  * meny i stället för att gissa vilket av två fönster användaren menade.
  *
- * ABOUT visar version, IP och om datorn hittats. Aldrig en hemlighet: inga
+ * ABOUT visar version och IP. Aldrig en hemlighet: inga
  * tokens, ingen enhetsnyckel, inget lösenord. Raderna är desamma som redan
  * loggas och syns på glaset i andra lägen.
  *

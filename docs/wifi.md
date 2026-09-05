@@ -150,7 +150,7 @@ A 3 s hold opens **SETTINGS**, and you pick:
 hold KEY3 ~3 s
   ├─ UPDATE   the OTA maintenance window, unchanged
   ├─ WIFI     this setup window, unchanged
-  └─ ABOUT    firmware version, address, whether the computer was found
+  └─ ABOUT    firmware version and address (a dash for either if unknown)
 ```
 
 The hold used to guess from network state; now it asks. **Without an IP,

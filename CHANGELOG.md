@@ -14,9 +14,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   presence is still required for UPDATE, and the token and the ten-minute
   window are untouched. Without an address UPDATE is greyed out and cannot
   be picked, because an update window with no address could never receive
-  an upload; WIFI is then the one lit row. ABOUT shows firmware version,
-  address and whether the computer was found, with a dash for anything
-  missing. Any KEY3 release closes the menu, the same escape the two
+  an upload; WIFI is then the one lit row. ABOUT shows the firmware version
+  and the address, with a dash for anything missing. There is deliberately
+  no "computer found" row: the only available signal is a boot latch that
+  never clears, so it would have read FOUND forever after one fetch. Any KEY3 release closes the menu, the same escape the two
   windows have. FEATURES and PAIR from the design spec are not in this
   step: FEATURES needs the internal-RAM budget re-measured on the unit,
   and PAIR belongs to a later step.
