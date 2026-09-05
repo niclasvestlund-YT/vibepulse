@@ -103,7 +103,7 @@ send the instant 4.1 opens a window, and 4.2 would never happen:
 | 4.1 | Hold KEY3 a full 3 s → SETTINGS → tap **UPDATE** | the window opens, ten-minute countdown, `KEY3 CLOSES` |
 | 4.2 | Short-tap | it closes early, with no upload |
 | 4.3 | Reopen the same way, then hold 3 s inside the already-open window | it switches to WIFI SETUP (the hold–hold shortcut); short-tap to close |
-| 4.4 | Only if there is a second build to install: start `tools/ota-flash.sh`, then hold 3 s → SETTINGS → tap **UPDATE** | the upload runs through the menu's row, the first time that path is used on the glass |
+| 4.4 | Only if a real second build exists — a *pushed* commit with green CI, since the uploader's CI gate refuses anything else: start `tools/ota-flash.sh`, then hold 3 s → SETTINGS → tap **UPDATE** | the upload runs through the menu's row, the first time that path is used on the glass. Otherwise record 4.4 as not exercised |
 
 That is all of §4. A short KEY3 press ends the re-armed chain whenever
 you are done.
@@ -157,10 +157,17 @@ network-off part is done once, not twice.
    ```
 
    The tokenserver advertises the newest `torget.bin` by mtime within
-   30 s; the panel sees a distance one higher and shows UPDATE READY.
-   Run 3.4–3.6 against it. This staged image is also a real second build
-   for 4.4 if you want that path exercised. **Before you leave:** confirm with
-   `git log -1` that the empty stage commit is still HEAD, drop it with
+   30 s; the panel sees a distance one higher and shows UPDATE READY
+   (3.4). **Do 3.6 before 3.5**: hold 3 s *while the notice is showing*
+   and confirm nothing happens, *then* tap LATER. LATER starts a one-hour
+   snooze, so the other order leaves 3.6 waiting an hour.
+
+   **This staged image is announcement-only.** The uploader's CI gate
+   refuses a commit without a green run on GitHub, and this one is local
+   and unpushed; do not push it, and do not set `TG_OTA_ALLOW_NO_CI` to
+   get past the gate — that is the user's call, not the sheet's. So 4.4
+   is not exercised by it. **Before you leave:** confirm with `git log -1`
+   that the empty stage commit is still HEAD, drop it with
    `git reset --hard HEAD~1`, and delete `build-stage/`, or the panel
    nags about a phantom version every hour from then on.
 4. **§4 update path** — covered by §1 of this sheet: 4.5 right after the
