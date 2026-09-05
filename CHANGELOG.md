@@ -5,6 +5,24 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Fixed
+
+- **The OTA runbook told you the wrong gesture, on the terminal, while you
+  stood at the panel.** `tools/ota-flash.sh` said "håll KEY3 ~3 s tills
+  UPDATES ON-ringen syns" — in its header *and* in the line it prints while
+  waiting for the window. The hold has opened SETTINGS since #72; UPDATE in
+  the menu is what opens the window. Someone following it would have held
+  the button and waited for a ring that never came. `tools/wifi-here.sh`
+  had the same error twice — in its header and in the retry advice it
+  prints when the Mac cannot reach the panel's access point, which is
+  exactly when the operator is stuck and reading carefully. All corrected,
+  and `test/test_ota_gesture_docs.py` — which exists to catch this class and
+  did not — now reads the two runbooks, understands Swedish verb-first
+  phrasing ("Håll KEY3"), normalises whitespace so a line break inside a
+  sentence no longer hides it, joins what a shell script actually prints
+  across several `echo` lines, and guards the Wi-Fi setup window as well as
+  the update window.
+
 ### Added
 
 - **The screenshots in `docs/img/` are checked against the simulator.**
