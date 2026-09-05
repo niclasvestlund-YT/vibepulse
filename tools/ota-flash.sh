@@ -32,6 +32,8 @@ BUILD_ARG=${2:-}
 
 echo "väntar på underhållsfönstret på $HOST"
 echo "  håll KEY3 ~3 s och välj UPDATE i SETTINGS — hållet öppnar bara menyn"
+echo "  ligger UPDATE READY redan på glaset: tryck på dess UPDATE-pill."
+echo "  ett håll gör ingenting där, så vänta inte på menyn."
 while ! curl -s --max-time 2 "http://$HOST/api/ota/status" 2>/dev/null \
     | grep -q '"maintenance_open":true'; do
   sleep 1

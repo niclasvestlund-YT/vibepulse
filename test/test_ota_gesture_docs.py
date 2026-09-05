@@ -146,8 +146,30 @@ INSIDE = re.compile(
 # scripts under tools/ already address the operator with it, so a runbook
 # gaining one is a matter of time. Its format specifiers survive as literal
 # "%s" in the extracted text, which none of these patterns care about.
-ECHOED = re.compile(
-    r"""(?:echo|printf)\s+(?:-[neE]+\s+)*["']([^"']*)["']""")
+EMITTER = re.compile(r"""^\s*(?:echo|printf)\b""")
+QUOTED = re.compile(r"""["']([^"']*)["']""")
+
+
+def emitted(line):
+    """Everything an emitting line puts on the terminal, in order.
+
+    Matching the COMMAND and then taking every quoted run, rather than
+    writing one regex for the whole invocation, is the third attempt and the
+    only one that has held. The first knew `echo` and `echo -e`, so
+    `echo -n "... håll "` yielded nothing. The second added the flags but
+    still took only the FIRST quoted string, which is right for echo and
+    wrong for printf: `printf '%s%s\n' "... håll " "KEY3 ~3 s."` puts the
+    stale sentence on screen out of its ARGUMENTS, and the guard read the
+    format and called the file clean.
+
+    Both misses had the same cause — a pattern that had to anticipate every
+    shape of the invocation. This does not: the command name says the line
+    speaks, and the quotes say what it says. A format specifier survives as
+    a literal "%s" between the pieces, which none of the rules care about.
+    """
+    if not EMITTER.match(line):
+        return []
+    return QUOTED.findall(line)
 
 
 def passages(text):
@@ -192,7 +214,7 @@ def passages(text):
             yield " ".join(block.split())
     run = []
     for line in text.splitlines():
-        parts = ECHOED.findall(line)
+        parts = emitted(line)
         if parts:
             run.extend(parts)
             continue
@@ -317,6 +339,17 @@ class OtaGestureDocsTest(unittest.TestCase):
             'status() {\n'
             "  printf 'Underhållsfönstret öppnas med ett håll '\n"
             '  echo "KEY3 ~3 s."\n'
+            '}',
+            # One line, one command: the sentence lives in printf's ARGUMENTS
+            # and only "%s%s" is in the format. Reading the format alone —
+            # which a previous version did — sees nothing at all here.
+            'status() {\n'
+            "  printf '%s%s\\n' \"Underhållsfönstret öppnas med ett håll \" "
+            '"KEY3 ~3 s."\n'
+            '}',
+            # Several arguments to one echo are one line on the terminal too.
+            'status() {\n'
+            '  echo "Underhållsfönstret öppnas med ett håll " "KEY3 ~3 s."\n'
             '}',
         )
         for text in built:
