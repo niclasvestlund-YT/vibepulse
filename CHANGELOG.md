@@ -66,6 +66,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   did. The bound is tighter than before, not looser: the two request/response
   cycles run in ~0.13 s and the assertion trips at 0.4 s, so a lengthened or
   removed drip deadline still turns it red.
+- The same file's `run_script()` no longer times a Codex plugin script out
+  after 4 seconds on a loaded CI runner. The budget is a hang guard, not a
+  speed assertion — nothing overrides it and no test asserts that it fires —
+  but it had to cover a fresh Python interpreter's startup, and on
+  windows-latest it did not: `test_unicode_decision_is_emitted_as_utf8` timed
+  out and passed on a second run of the same commit. It is now a named
+  `SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still verified to catch a wedged script.
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as
   measured zeros. A new additive `claudeSourcePresent` flag says when the
   Claude directory is absent, so the zeros are not mistaken for a day with no

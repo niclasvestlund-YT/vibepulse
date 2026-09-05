@@ -38,9 +38,16 @@ request/response cycles and nothing else. **Guards:** the test now measures
 `finished - server.httpd.request_times[0]` and asserts `< 0.4` — it runs at
 ~0.13 s (the 0.12 s deadline plus overhead), fails at 0.49 s if the deadline
 is merely quadrupled, and at 2.83 s if it is removed and the byte-at-a-time
-drip runs to completion. **Watch for:** the third one. `run_mcp` spawns an
-interpreter every time, so a bound taken around it measures the runner. The
-in-process timing tests (`loopback.post_json`, `setup._invoke`) are fine as
+drip runs to completion. The same PR's own CI then found the third one, one
+layer down: `run_script`'s 4 s `subprocess.run` timeout timed out
+`test_unicode_decision_is_emitted_as_utf8` on the Windows runner and passed on
+a second run of the same commit. That one is a hang guard, not an assertion —
+nothing overrides it and no test asserts it fires — so it is now a named
+`SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still proven to fire on a wedged script.
+**Watch for:** every fixed budget in this file that a subprocess spawn sits
+inside. `run_mcp`/`run_script` start an interpreter each call, so both the
+assertion and the guard around them measure the runner unless said otherwise.
+The in-process timing tests (`loopback.post_json`, `setup._invoke`) are fine as
 they stand — the ones that do spawn say so in a comment and budget for it.
 
 ## 2026-09-05 · The simulator could not reach the decision it was supposed to be the spec for

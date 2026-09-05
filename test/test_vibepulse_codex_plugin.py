@@ -178,7 +178,17 @@ def closed_port():
     return port
 
 
-def run_script(name, stdin=b"", *, port=None, env=None, timeout=4):
+# A hang guard, not a speed assertion: it exists so a wedged script cannot
+# wedge the suite, and no test asserts that it fires.  It has to clear a fresh
+# interpreter's startup on a contended CI runner, which a 4 s budget did not —
+# `test_unicode_decision_is_emitted_as_utf8` timed out on windows-latest and
+# passed on a second run of the same commit.  Every script here answers in
+# well under a second when it answers at all, so a wedge is still caught.
+SCRIPT_HANG_TIMEOUT_SECONDS = 30
+
+
+def run_script(name, stdin=b"", *, port=None, env=None,
+               timeout=SCRIPT_HANG_TIMEOUT_SECONDS):
     process_env = os.environ.copy()
     for key in tuple(process_env):
         if key.lower().endswith("_proxy") or key.lower() == "no_proxy":
