@@ -10,8 +10,9 @@ Day-to-day firmware goes over the air: `idf.py build && tools/ota-flash.sh`
 (device IP from git-ignored `.ota-device`). The full loop, consent model and
 troubleshooting live in `docs/ota.md` — read it before touching anything
 OTA. Non-negotiables: the maintenance window opens ONLY from the device (a
-3 s KEY3 hold — with an IP; without one the same hold opens the WiFi setup
-window instead, see `docs/wifi.md` — or the UPDATE pill on the takeover) —
+3 s KEY3 hold opens SETTINGS, where UPDATE opens it — greyed out without an
+address, since a window with no address cannot receive an upload; WIFI opens
+the setup window, see `docs/wifi.md` — or the UPDATE pill on the takeover) —
 never claim or imply a
 script can; the sender gates (newest-binary-at-send, version printed,
 -dirty refused) exist because a stale archived build once froze the panel —

@@ -40,6 +40,8 @@
 
 #include "boot_health.h"
 #include "boot_screen.h"
+#include "button_arbitration.h"
+#include "settings_menu.h"
 #include "button_policy.h"
 #include "agent_monitor.h"
 #include "needs_you_net.h"
@@ -86,6 +88,39 @@ static lv_indev_t *s_touch;
 
 static EventGroupHandle_t s_net_events;
 #define WIFI_GOT_IP BIT0
+
+/* Senaste tilldelade IPv4-adressen som text, för SETTINGS ABOUT.
+ * Tom sträng = ingen adress; menyn visar då streck och tonar ner
+ * UPDATE i stället för att påstå en adress som inte finns.
+ *
+ * Skyddad av ett spinlock, inte bara av skrivordningen. Att skriva före
+ * xEventGroupSetBits ordnar BARA den första publiceringen; en förnyad DHCP-
+ * lease eller adressändring utan mellanliggande disconnect skriver om
+ * strängen medan LVGL-tasken kan hålla på att kopiera den, och frånkopplingen
+ * nollar den från ett tredje ställe. Kopian är 16 byte och tas en gång per
+ * menyöppning — ett kritiskt avsnitt kostar inget här och gör läsningen
+ * hel i stället för nästan alltid hel. */
+static char s_ip_text[16];
+static portMUX_TYPE s_ip_text_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void ip_text_store(const char *text) {
+  portENTER_CRITICAL(&s_ip_text_mux);
+  if (text) snprintf(s_ip_text, sizeof s_ip_text, "%s", text);
+  else s_ip_text[0] = '\0';
+  portEXIT_CRITICAL(&s_ip_text_mux);
+}
+
+/* Kopierar ut adressen. Returnerar false när ingen finns, så anroparen
+ * slipper skilja på "tom sträng" och "ingen adress". */
+static bool ip_text_copy(char *out, size_t cap) {
+  bool have;
+  portENTER_CRITICAL(&s_ip_text_mux);
+  have = s_ip_text[0] != '\0';
+  if (have) snprintf(out, cap, "%s", s_ip_text);
+  portEXIT_CRITICAL(&s_ip_text_mux);
+  if (!have && cap) out[0] = '\0';
+  return have;
+}
 #define NET_READY   BIT1 /* IP + SNTP: TLS kräver rimlig tid */
 /* Declared with the platform state because the public recovery hook reads it
  * before the Wi-Fi implementation section below. */
@@ -346,6 +381,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (!atomic_load(&s_sta_paused)) esp_wifi_connect();
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     xEventGroupClearBits(s_net_events, WIFI_GOT_IP);
+    ip_text_store(NULL); /* ingen adress kvar att visa */
     tg_wifi_signal_event(&s_wifi_signal, 0);
     int reason = ((wifi_event_sta_disconnected_t *)data)->reason;
     bool trial_transition = atomic_exchange(&s_trial_ignore_disconnect, false);
@@ -383,6 +419,19 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     vTaskDelay(pdMS_TO_TICKS(2000));
     if (!atomic_load(&s_sta_paused)) esp_wifi_connect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+    /* Adressen sparas som text FÖRE bitten publiceras, och skrivningen går
+     * genom spinlocket. Ordningen ensam räckte inte: den gjorde bara den
+     * FÖRSTA publiceringen hel. En förnyad DHCP-lease eller en adress som
+     * byts utan mellanliggande disconnect skriver om strängen medan
+     * LVGL-tasken kan hålla på att kopiera den, och de två körs på olika
+     * kärnor. Skrivaren är fortfarande en enda (eventloopen); låset gör
+     * läsningen hel, bitten gör värdet synligt. */
+    {
+      const ip_event_got_ip_t *got = (const ip_event_got_ip_t *)data;
+      char text[16] = "";
+      if (got) snprintf(text, sizeof text, IPSTR, IP2STR(&got->ip_info.ip));
+      ip_text_store(got ? text : NULL);
+    }
     /* GOT_IP is enough to say connected even before the first RSSI sample. */
     xEventGroupSetBits(s_net_events, WIFI_GOT_IP);
     tg_wifi_signal_event(&s_wifi_signal, 1);
@@ -619,11 +668,6 @@ static void tick_cb(lv_timer_t *t) {
   if (s_touch && lv_indev_get_state(s_touch) == LV_INDEV_STATE_PRESSED)
     s_last_touch_us = now;
 
-  /* KEY3 (GPIO18, aktiv låg): kort tryck = nästa app, tre sekunders håll =
-   * OTA-underhållsfönster. Tidsreglerna bor i den värdtestade knappolicyn;
-   * 10 Hz-ticken pollar vidare medan knappen är nere så hållet avfyras
-   * utan släpp. Körs i LVGL-tasken — därför bara atomära tjänsteanrop här,
-   * aldrig torget_ota_ui_set (som tar UI-låset). */
   /* Bootskärmen tas ner av första datalivet — eller ge-upp-taket när
    * nätet aldrig kommer (45 s: två hämtcykler + marginal; bakom står
    * apparnas ärliga NO DATA). Låset är rekursivt, så stage() från
@@ -639,56 +683,78 @@ static void tick_cb(lv_timer_t *t) {
     }
   }
 
+  /* KEY3 (GPIO18, aktiv låg): kort tryck = nästa app, tre sekunders håll =
+   * SETTINGS. Tidsreglerna bor i den värdtestade knappolicyn; 10 Hz-ticken
+   * pollar vidare medan knappen är nere så hållet avfyras utan släpp.
+   * SKILJEDOMEN — vad handlingen betyder givet vem som äger glaset — bor i
+   * platform/button_arbitration.c och delas byte-identiskt med simulatorn.
+   * Här läses bara läget och verkställs svaret; INGA beslut i värdlagret.
+   * Körs i LVGL-tasken — därför bara atomära tjänsteanrop här, aldrig
+   * torget_ota_ui_set (som tar UI-låset). */
   static tg_button_policy key3;
   bool key3_down = gpio_get_level(GPIO_NUM_18) == 0;
-  tg_button_action key3_action = tg_button_update(&key3, key3_down, now);
   if (key3_down)
     s_last_touch_us = now; /* knappkontakt är aktivitet, precis som touch */
-  if (torget_wifi_setup_owns_input()) {
-    /* Även STARTING äger knappen. AP/skanning kan ta sekunder och under den
-     * tiden får det utlösande släppet aldrig bli appväxling eller panik.
-     * request_close() ignorerar STARTING men stänger OPEN/JOINING/JOINED/
-     * FAILED, så nödutgången finns kvar när fönstret väl kan stängas. */
-    if (key3_action == TG_BUTTON_NEXT_APP || key3_action == TG_BUTTON_PANIC)
-      torget_wifi_setup_request_close();
-  } else if (torget_ota_service_maintenance_open()) {
-    /* While the update window owns the glass, ANY release closes it — a
-     * short tap or the panic-window hold — so the nödutgången never depends
-     * on out-tapping the panic threshold (a real trap found on hardware
-     * 2026-08-16: a ~2 s press panicked instead of closing, leaving the
-     * window stuck). Ten minutes without an escape once made a healthy
-     * device look hung. No panic fires while the window is up.
+
+  tg_button_inputs key3_in = {
+      .key = tg_button_update(&key3, key3_down, now),
+      .setup_owns_input = torget_wifi_setup_owns_input(),
+      .maintenance_open = torget_ota_service_maintenance_open(),
+      .notice_visible = torget_ota_ui_notice_visible(),
+      .menu_open = torget_settings_open_p(),
+  };
+  tg_button_outputs key3_out;
+  tg_button_arbitrate(&key3_in, &key3_out);
+
+  /* Verkställandet följer skiljedomens ordning: menyns lyft FÖRE dess
+   * stängning, och båda före knappkedjans utdata. */
+  if (key3_out.menu_foreground) {
+    /* Adressen hålls LEVANDE, inte som ögonblicksbilden den var: utan nät tar
+     * setupfönstret inte över förrän efter 90 s, så menyn hann visa en adress
+     * panelen inte längre hade — med UPDATE kvar valbar. Kopian tas under
+     * spinlocket och avdupliceras i menyn, så en oförändrad adress kostar
+     * ingen omritning. */
+    char ip[16];
+    bool have_ip = ip_text_copy(ip, sizeof ip);
+    torget_settings_set_address(have_ip ? ip : NULL);
+    torget_settings_keep_foreground();
+  }
+  if (key3_out.close_menu) torget_settings_close();
+  if (key3_out.close_setup) torget_wifi_setup_request_close();
+  if (key3_out.close_maintenance) torget_ota_service_close_maintenance();
+  if (key3_out.request_setup_open) torget_wifi_setup_request_open();
+  if (key3_out.next_app) torget_app_next();
+  /* Bara ett köinlägg (atomärt), säkert från LVGL-tasken; en avstängd
+   * svarskanal (ingen enhetsnyckel) gör det till en no-op. */
+  if (key3_out.panic) tk_needs_you_send_panic();
+  if (key3_out.open_menu) {
+    /* ABOUT-raderna tas som ögonblicksbild här: LVGL-tasken äger dem, och
+     * inget av värdena kostar mer än en läsning. Utan IP skickas NULL — menyn
+     * tonar då ner UPDATE, för ett fönster utan adress kan ändå aldrig ta emot
+     * en uppladdning.
      *
-     * Ett NYTT fullt 3 s-håll byter fönster: OTA-fönstret stängs och
-     * setupfönstret öppnar. Det är vägen att nå WIFI SETUP på en panel som
-     * HAR nät (håll–håll: först uppdateringsfönstret, sen nätfönstret) —
-     * utan den kunde ett nytt nät bara läras ut när panelen redan var
-     * strandad. Nödutgången är intakt: varje släpp FÖRE tre sekunder
-     * stänger, bara ett medvetet fullbordat håll byter. */
-    if (key3_action == TG_BUTTON_NEXT_APP || key3_action == TG_BUTTON_PANIC) {
-      torget_ota_service_close_maintenance();
-    } else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {
-      /* Bara begäran härifrån: setupvaktens window_open äger överlämningen
-       * av port 80 (stänger OTA-fönstret och väntar ut dess httpd-stopp).
-       * Att stänga HÄR hade gjort portbytet till en kapplöpning mellan två
-       * vakter som pollar var 500:e ms. */
+     * s_data_alive skickas INTE med som en "COMPUTER"-rad: flaggan sätts en
+     * gång och aldrig tillbaka, så raden hade sagt FOUND för alltid efter en
+     * enda lyckad hämtning — även med datorn borta, och även när siffrorna kom
+     * via reläet. */
+    const esp_app_desc_t *desc = esp_app_get_description();
+    char ip[16];
+    bool have_ip = ip_text_copy(ip, sizeof ip);
+    torget_settings_open(desc ? desc->version : NULL, have_ip ? ip : NULL);
+  }
+
+  /* Menyns val, utfört av den som äger fönsterordningen. Menyn rör aldrig
+   * OTA:n eller setupfönstret själv: port 80 delas, och ett andra ställe
+   * som öppnade fönster hade gjort överlämningen till en kapplöpning. */
+  switch (torget_settings_take_intent()) {
+    case TG_SETTINGS_INTENT_OPEN_UPDATE:
+      torget_ota_service_open_maintenance();
+      break;
+    case TG_SETTINGS_INTENT_OPEN_WIFI:
       torget_wifi_setup_request_open();
-    }
-  } else if (key3_action == TG_BUTTON_NEXT_APP) {
-    torget_app_next();
-  } else if (key3_action == TG_BUTTON_PANIC) {
-    /* Mellanhåll-och-släpp med stängt fönster: neka allt Needs You parkerat.
-     * Bara ett köinlägg (atomärt), säkert från LVGL-tasken; en avstängd
-     * svarskanal (ingen enhetsnyckel) gör det till en no-op. */
-    tk_needs_you_send_panic();
-  } else if (key3_action == TG_BUTTON_OPEN_MAINTENANCE) {
-    /* Ett håll betyder det ENDA som kan hjälpa just nu. Utan IP kan ett
-     * OTA-fönster aldrig ta emot en uppladdning — då är nätet problemet,
-     * och hållet öppnar setupfönstret i stället. Med IP är allt som förut.
-     * OTA:s samtyckesmodell är oförändrad: fönstret öppnas fortfarande
-     * bara från enheten, aldrig av ett skript. */
-    if (hook_have_ip()) torget_ota_service_open_maintenance();
-    else torget_wifi_setup_request_open();
+      break;
+    default:
+      break;
   }
 
   int target = ((now - s_last_activity_us) > NIGHT_AFTER_US
@@ -920,6 +986,13 @@ void app_main(void) {
    * avgör vem som vinner när båda vill synas. READY-ringen ska alltid
    * vinna — den skapas därför sist. */
   torget_wifi_ui_create();
+  /* SETTINGS på samma topplager. Skapelseordningen bestämmer dock INTE
+   * företrädet här: menyn hävdar sitt läge överst varje tick, för annars
+   * begraver NO NETWORK-sidan den inom en sekund (den ritar om sin
+   * nedräkning och lyfter sig själv). Att en väntande uppdatering ändå
+   * alltid vinner vilar på att menyn och notisen aldrig är uppe samtidigt
+   * — se tick_cb — inte på vem som skapades sist. */
+  torget_settings_create();
   /* OTA-overlayn EFTER det delade UI:t, på topplagret, dold tills KEY3-
    * hållet öppnar underhållsfönstret — appträdet rörs aldrig. */
   torget_ota_ui_create();

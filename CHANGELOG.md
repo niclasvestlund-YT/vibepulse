@@ -5,6 +5,56 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Added
+
+- A **SETTINGS** menu on a 3 s KEY3 hold. The hold used to derive which window
+  you wanted from whether the panel had an IP; it now opens a menu with
+  UPDATE, WIFI and ABOUT and lets you say. The consent model is unchanged —
+  the menu is reachable only from the device, so physical presence is still
+  required for UPDATE, and the token and the ten-minute window are untouched.
+  Without an address UPDATE is greyed out and cannot be picked, because an
+  update window with no address could never receive an upload; WIFI is then
+  the one lit row, and the address is live rather than a snapshot — lose Wi-Fi
+  while the menu is up and UPDATE greys out there and then, instead of
+  offering a window that could no longer receive anything. ABOUT shows the
+  firmware version and the address, with a dash for anything missing. There is
+  deliberately no "computer found" row: the only available signal is a boot
+  latch that never clears, so it would have read FOUND forever after one
+  fetch. Any KEY3 release closes the menu, the same escape the two windows
+  have. The menu and the UPDATE READY takeover are mutually exclusive: the
+  hold does nothing at all while that notice is up, and a notice that arrives
+  while the menu is open closes it. The notice is a UI state rather than an
+  open maintenance window, so without both edges the menu opened invisibly
+  behind it and reappeared on LATER. Answer the takeover with its own UPDATE
+  and LATER pills. Against everything else the menu keeps itself on top, which
+  it has to re-assert rather than inherit from creation order — the NO NETWORK
+  page redraws its countdown every second and lifts itself each time, and that
+  is precisely the state where the WIFI row is what you need. FEATURES and
+  PAIR from the design spec are not in this step: FEATURES needs the
+  internal-RAM budget re-measured on the unit, and PAIR belongs to a later
+  step.
+
+### Changed
+
+- KEY3's arbitration — which of the glass's owners gets the button on a given
+  tick — moved out of `main/main.c` into a pure `tg_button_arbitrate()` in
+  `platform/`, shared byte-identically by the panel and the simulator. It was
+  110 lines of decisions in the host layer that `sim/main.c` could not reach:
+  the simulator called `torget_settings_open()` directly during static QA, so
+  it was not the authority for the gesture, the escape, the intent handoff or
+  the asynchronous notice close, against `AGENTS.md` on both counts. Both hosts
+  now read inputs and apply outputs and decide nothing. No behaviour changed —
+  the point of the move is that the behaviour is now provable: the eight
+  invariants behind it, each with a real incident, are pinned as a table of
+  host tests rather than by reading source, including the notice close that
+  fires from `maintenance_ui_task()` with no button event to hang a test on.
+  The simulator drives the real gesture through `poll_keys()` (hold K for
+  three seconds), and the composite state where a notice arrives over an open
+  menu is captured at 480x480 for the first time. The consent model is
+  strengthened rather than restated: the arbitration reaches no service at all
+  and has no output that opens the maintenance window, so the only way there
+  remains a finger on the menu's UPDATE row.
+
 ### Fixed
 
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as

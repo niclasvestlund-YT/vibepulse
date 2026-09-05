@@ -54,9 +54,10 @@ Codex. You do not need to read this whole page:
 3. **The core is your Claude/Codex usage on the glass.** Answering from the
    panel, the relays, and GitHub are add-ons, each off by default and opted
    into separately: today through the setup command, `secrets.h`, and the
-   table under [Independent switches](#independent-switches). A settings
-   page on the glass is planned, not built (see the spec in
-   `docs/superpowers/specs/`). Sound has no verified backend yet.
+   table under [Independent switches](#independent-switches). A **3 s KEY3
+   hold opens SETTINGS** on the glass — UPDATE, WIFI and ABOUT today; the
+   on-glass feature switches are specified but not built yet (see the spec
+   in `docs/superpowers/specs/`). Sound has no verified backend yet.
 
 ## Latest release: v1.0.0
 
@@ -564,18 +565,30 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
 
 After the first USB flash, the screen updates itself over WiFi. The consent
 chain is deliberate and three-factor: a **physical 3-second hold on KEY3**
-opens a ten-minute maintenance window (the glass shows an UPDATES ON ring
-with the lease draining clockwise), a **64-hex token** from `secrets.h`
-authenticates the upload, and the window **closes itself** — a short KEY3
-press closes it early. No button, no update; a script can never open the
-window for you. (The same hold on a panel *without* a network opens the
-WiFi setup window instead — the window that can actually help there. See
+opens **SETTINGS**, where **UPDATE** starts a ten-minute maintenance window
+(the glass shows an UPDATES ON ring with the lease draining clockwise), a
+**64-hex token** from `secrets.h` authenticates the upload, and the window
+**closes itself** — a short KEY3 press closes it early. No button, no
+update; a script can never open the window for you. (On a panel *without*
+a network, UPDATE is greyed out and WIFI is the lit row — an update window
+with no address could never receive an upload. See
 [Take it with you](#take-it-with-you).)
 
 ```
 idf.py build
-tools/ota-flash.sh <device-ip>     # waits for your KEY3 hold, then uploads
+tools/ota-flash.sh <device-ip>     # waits for KEY3 hold → UPDATE, then uploads
 ```
+
+The hold opens a menu rather than guessing which window you wanted:
+
+![The SETTINGS menu: UPDATE, WIFI, ABOUT](docs/img/vibepulse-settings-menu.png)
+
+On a panel with no address, **UPDATE is greyed out and cannot be picked** —
+an update window with no address could never receive an upload — so WIFI is
+the one lit row, which is exactly where a panel in that state needs to go.
+ABOUT shows the address as a dash, so the reason is on the glass:
+
+![The same menu with no address: UPDATE greyed out](docs/img/vibepulse-settings-no-address.png)
 
 The device verifies the image (magic, chip, project, SHA-256), writes it to
 the **inactive A/B slot** (`ota_0`/`ota_1`, 5 MB each — see
@@ -588,10 +601,11 @@ one hold, not one per build.
 
 The tokenserver announces the newest build on your computer
 (`otaAvailableVersion` on `/api/tokens`); when the screen runs an older
-version it takes the glass with an **UPDATE READY** notice — hold KEY3 to
-receive — or answer the on-glass LATER/UPDATE pills by touch; tapping
-UPDATE opens the window just like the hold does. A snooze returns every
-hour until installed. Full lifecycle reference: [docs/ota.md](docs/ota.md).
+version it takes the glass with an **UPDATE READY** notice — answer it with
+the on-glass LATER/UPDATE pills by touch. While that notice is up it owns
+the glass completely: a KEY3 hold does nothing, deliberately, so SETTINGS
+can never open behind it. The UPDATE pill opens the same maintenance window
+the menu's UPDATE row does. A snooze returns every hour until installed. Full lifecycle reference: [docs/ota.md](docs/ota.md).
 
 **If someone tells you "this project has no OTA":** they are reading a tree
 where `partitions.csv` still has a single `factory` partition. The OTA
@@ -651,15 +665,17 @@ or relay health. During setup the complete symbol means setup mode, not a
 successful destination join.
 
 The setup window opens on its own after 90 seconds without a network, or
-immediately on a 3-second KEY3 hold. Before that, at 60 seconds, the glass
-stops being coy: it names the network it is hunting and what the radio
-actually answered ("NOT SEEN - 2.4 GHZ ONLY", "WRONG PASSWORD") instead of
+at once from a 3-second KEY3 hold followed by **WIFI** in SETTINGS. Before
+that, at 60 seconds, the glass stops being coy: it names the network it is
+hunting and what the radio actually answered ("NOT SEEN - 2.4 GHZ ONLY", "WRONG PASSWORD") instead of
 showing dashes and letting you guess.
 
-On a panel that already *has* a network, hold twice: the first 3-second
-hold opens the update window, a second full hold switches it to WIFI
-SETUP. That is how you pre-load the phone hotspot at home before a trip —
-no need to wait until the panel is stranded somewhere.
+On a panel that already *has* a network, the same 3-second hold opens
+SETTINGS; tap **WIFI**. That is how you pre-load the phone hotspot at home
+before a trip — no need to wait until the panel is stranded somewhere.
+(The second-hold shortcut still exists, but only *inside* the update
+window: a full hold there closes it and opens WIFI SETUP. From SETTINGS a
+second completed hold just closes the menu.)
 
 Two things stay true by design. The networks in `secrets.h` remain an
 **immutable floor** — setup can add places, never remove your home network,
