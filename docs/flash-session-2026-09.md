@@ -109,8 +109,9 @@ first is the normal one:
 - **UPDATE READY is showing.** Tap its **UPDATE** pill. A KEY3 hold does
   nothing while the takeover owns the glass — deliberately — so holding
   here leaves the uploader waiting forever.
-- **It has not appeared yet.** Hold KEY3 a full 3 s; on this old image
-  the hold opens the update window directly and the ring appears.
+- **It has not appeared yet.** Hold KEY3 a full 3 s. There is no
+  SETTINGS on this old image for the hold to reach, so it opens the
+  update window directly and the ring appears.
 
 Either way the uploader (already polling) sends. Expect RECEIVING →
 VERIFYING → RESTARTING, then the boot-health gate. The script exits after
