@@ -199,6 +199,29 @@ NOT_FRAMES = {
 }
 
 
+def docs_images():
+    """EVERY file under docs/img except the concept art, whatever it is.
+
+    Not rglob("*.png"), which was the previous version and a hole of exactly
+    the shape this file keeps finding: a capture saved as JPEG, WebP or —
+    trivially, on a case-sensitive filesystem — `.PNG` matched no glob, so it
+    could be linked from the README at any size with any content while every
+    test here stayed green. A discovery pass that decides what to look at by
+    file extension is choosing what it is willing to find.
+
+    So the extension is not a filter here; it is something to CHECK. Anything
+    that is not a lowercase .png fails below, by name, instead of vanishing.
+    """
+    img = ROOT / "docs/img"
+    for path in sorted(img.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(img)
+        if rel.parts[0] == "mockups":
+            continue
+        yield rel.as_posix(), path
+
+
 def docs_frames():
     """Every checked-in 480x480 simulator capture, by path under docs/img.
 
@@ -207,11 +230,8 @@ def docs_frames():
     needs-you/vibepulse-needs-you-none.png joined the quarantine after being
     missed by hand.
     """
-    img = ROOT / "docs/img"
-    for path in sorted(img.rglob("*.png")):
-        rel = path.relative_to(img)
-        name = rel.as_posix()
-        if rel.parts[0] == "mockups" or name in NOT_FRAMES:
+    for name, path in docs_images():
+        if name in NOT_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -427,6 +447,30 @@ class DocsFrameDriftTests(unittest.TestCase):
         ever is, one of the two lists is lying."""
         self.assertEqual(sorted(set(PINNED) & set(STALE_CHROME)), [])
 
+    def test_every_file_under_docs_img_is_a_png_or_a_named_exception(self):
+        """The extension check that used to be an extension filter.
+
+        A panel capture is a lossless PNG: the simulator writes one, the
+        comparisons above are byte-exact, and a JPEG could never satisfy them
+        even when it looks identical. So a non-PNG here is either a mistake or
+        something that is not a capture — and either way it must say so out
+        loud rather than slip past a glob.
+
+        `.PNG` in capitals is the cheap case and the one that makes this more
+        than theory: it is a different string to a glob and the same file to
+        every browser.
+        """
+        wrong = []
+        for name, path in docs_images():
+            if name in NOT_FRAMES:
+                continue
+            if path.suffix != ".png":
+                wrong.append(f"{name} is {path.suffix or 'extensionless'}")
+        self.assertEqual(wrong, [], "\n".join(
+            ["panel captures must be lowercase-.png. If this is not a "
+             "capture, name it in NOT_FRAMES with the reason:"]
+            + wrong))
+
     def test_every_image_is_a_frame_or_a_named_exception(self):
         """The filter that was a hole. Skipping anything not 480x480 meant a
         new README screenshot at the wrong size joined no list, faced no
@@ -436,13 +480,10 @@ class DocsFrameDriftTests(unittest.TestCase):
         Now the four non-captures are named with reasons and everything else
         must be panel-sized. A stray graphic fails here instead of vanishing.
         """
-        img = ROOT / "docs/img"
         wrong = []
-        for path in sorted(img.rglob("*.png")):
-            rel = path.relative_to(img)
-            name = rel.as_posix()
-            if rel.parts[0] == "mockups" or name in NOT_FRAMES:
-                continue
+        for name, path in docs_images():
+            if name in NOT_FRAMES or path.suffix != ".png":
+                continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
                 if im.size != (480, 480):
                     wrong.append(f"{name} is {im.size[0]}x{im.size[1]}")
