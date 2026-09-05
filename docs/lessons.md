@@ -23,10 +23,14 @@ point at the backlog item.
 
 ## 2026-09-05 · Pinning a screenshot's size did not pin its content
 
-**What happened:** the global Wi-Fi indicator was redrawn — a thick,
-bright-white fan became a thin, muted-grey one, from a different asset at a
-different offset — and sixteen of the twenty-nine simulator frames checked
-into `docs/img/` kept showing the old glyph. README, `docs/wifi.md` and the
+**What happened:** the global Wi-Fi indicator was redrawn in `d5be82d`
+(2026-08-22), which deleted the Font Awesome glyph font
+`platform/fonts/torget_wifi_22.c` and replaced it with the generated
+`platform/wifi_status_assets.c` — a thick, bright-white fan became a thin,
+muted-grey one at a different offset — and `be29dba` the same day made it
+two-state. Sixteen of the twenty-nine simulator frames checked into
+`docs/img/` still show the old glyph; the two Wi-Fi onboarding images date
+from `1b6ba3a`, the day before. README, `docs/wifi.md` and the
 release bodies have shown a panel this firmware cannot draw ever since.
 **Root cause:** the only guard those files had
 (`test/test_wifi_setup_wiring.py`) asserted they exist, are PNG, are
