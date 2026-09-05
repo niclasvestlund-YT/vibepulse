@@ -74,7 +74,7 @@ Take the panel off its network, or power the AP down.
 | 2.4 | Tap ABOUT | ADDRESS shows a dash. Not `0.0.0.0`, not blank. |
 | 2.5 | Tap BACK, tap WIFI | the setup window opens with its QR |
 | 2.6 | Short-tap | the setup window closes |
-| 2.7 | Leave it alone ~90 s from the network loss | the setup window opens **by itself** |
+| 2.7 | Leave it alone. If you closed a window in 2.6, the wait is **120 s from that close**, not 90 s from the network loss — `tg_wifi_setup_should_open()` holds a cooldown so a closed window cannot immediately reopen itself | the setup window opens **by itself** |
 | 2.8 | While it is open, short-tap | it closes — and the `NO NETWORK` page behind it has **no leftover QR code** on it |
 
 **2.8 is the newest fix and the least proven.** A stale QR over `NO NETWORK`
@@ -88,11 +88,18 @@ open** when the other thing happens.
 | # | Do | Expect |
 |---|---|---|
 | 3.1 | With no network, hold 3 s to open SETTINGS, then wait through a `NO NETWORK` redraw or two | the menu **stays on top**. It must not slide behind the NO NETWORK page. |
-| 3.2 | With SETTINGS open, wait for the 90 s auto-open | the menu disappears as the setup window arrives — not layered, not behind |
+| 3.2 | With SETTINGS open, wait for the auto-open — again 120 s from the last close if §2 ran first, otherwise 90 s from the network loss | the menu disappears as the setup window arrives — not layered, not behind |
 | 3.3 | Immediately after 3.2, short-tap | the **setup window** responds. The press must not be swallowed by the menu that just left. |
-| 3.4 | Reconnect. Open SETTINGS. Have the computer announce a newer build (`tools/ota-flash.sh`, or bump the announced version) | the UPDATE READY takeover arrives and **the menu is gone**, not behind it |
+| 3.4 | Reconnect. Open SETTINGS. Make the computer *announce* a newer build — put a newer `build*/torget.bin` where the tokenserver reads it, so `otaAvailableVersion` changes. **Do not start `tools/ota-flash.sh`.** | the UPDATE READY takeover arrives and **the menu is gone**, not behind it |
 | 3.5 | Tap LATER | you return to the apps. **The old menu must not reappear.** |
 | 3.6 | Hold 3 s while the takeover is showing | **nothing at all.** Deliberate: answer the takeover with its pills. |
+
+> **Do not have `tools/ota-flash.sh` running during §3.** It polls
+> `/api/ota/status` and uploads the instant `maintenance_open` turns true,
+> so a copy left over from announcing the build would flash the panel the
+> moment you open the window in §4.1 — before you reach the step where you
+> decided to install. Announcing and uploading are separate acts here;
+> the script only ever starts at §4.4.
 
 ## 4. The update path (10 min, flash authorization required)
 

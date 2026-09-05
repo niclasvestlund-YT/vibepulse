@@ -211,8 +211,30 @@ static void the_journey(void) {
         !o.close_maintenance);
   check("11 och öppnar ingen meny ovanpå", !o.open_menu);
 
-  /* 12. YTTRE: överlämningen skedde. Tillbaka till ren glasyta. */
-  w.maintenance_open = false;
+  /* 12. YTTRE: överlämningen sker som den gör på riktigt, i TVÅ steg. Att
+   *     hoppa rakt till ren glasyta här — som den första versionen gjorde —
+   *     lät resan påstå att den prövade övergången underhåll → setup utan
+   *     att någonsin ta den: vakten går först till STARTING, där
+   *     setup_owns_input är sant, och först därefter stänger OTA-fönstret.
+   *     Utan mellansteget hade en felroutad knapp i just det läget aldrig
+   *     synts. */
+  w.setup_owns_input = true;  /* STARTING: AP:n kommer upp */
+  w.maintenance_open = false; /* vakten stängde OTA-fönstret åt oss */
+
+  /* 12b. Under STARTING äger setupvakten knappen. Det utlösande släppet får
+   *      aldrig bli appväxling eller panik medan AP/skanning pågår — och
+   *      request_close() ignorerar STARTING, så nödutgången finns kvar men
+   *      gör ännu ingenting synligt. */
+  o = tick(&w, TG_BUTTON_NEXT_APP);
+  check("12b STARTING äger knappen", o.close_setup);
+  check("12b och trycket byter inte app", !o.next_app);
+  check("12b och panikar inte", !o.panic);
+  o = tick(&w, TG_BUTTON_OPEN_MAINTENANCE);
+  check("12b ett håll under STARTING öppnar ingen meny", !o.open_menu);
+  check("12b och begär inte setupfönstret en gång till",
+        !o.request_setup_open);
+
+  /* 12c. YTTRE: fönstret öppnades, användaren stängde det. Ren glasyta. */
   w.setup_owns_input = false;
 
   /* 13. Med allt stängt betyder mellanhållet panik igen — samma gest, annan
