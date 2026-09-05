@@ -46,6 +46,7 @@ LIVE_DOCS = (
     "docs/ota.md",
     "docs/wifi.md",
     "docs/agent-setup.md",
+    "docs/flash-session-2026-09.md",
 )
 
 # A hold is not always spelled with KEY3 next to it. The README passage
