@@ -51,7 +51,9 @@ branches reach it, `main` and the cleanup branch. To finish it: lift the
 force-push rule for `main`, then swap that blob for the stripped file with
 `git filter-repo --blob-callback` and force-push both refs. Note the clone
 this ran in was SHALLOW; `git fetch --unshallow` first, or the rewrite
-truncates history to whatever the clone happened to hold.
+truncates history to whatever the clone happened to hold —
+`tools/snapshot.sh` now refuses in exactly that state, and taking a snapshot
+first is the rule (AGENTS.md, Arbetsregler).
 
 ---
 
