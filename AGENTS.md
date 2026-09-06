@@ -105,9 +105,15 @@ OTA. Icke förhandlingsbart, och skälen står i filen:
   körande processen behåller annars gammal kod och panelen visar ärligt
   glappet — du validerar då kod som inte kör. På macOS:
   `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`. På Windows
-  finns ingen launchd; tjänsten körs av Task Scheduler och startas om genom
-  `tools/tokenserver/install-windows-task.ps1`, som stoppar den befintliga
-  uppgiften, väntar in att den dör och registrerar om den.
+  finns ingen launchd; tjänsten körs av Task Scheduler och startas om med
+  `Stop-ScheduledTask` följt av `Start-ScheduledTask` på uppgiften
+  `VibePulse tokenserver`. Starta INTE om genom att köra
+  `install-windows-task.ps1`: `Register-ScheduledTask -Force` bygger om
+  uppgiftens kommandorad ur de argument just den körningen fick, så en
+  argumentlös omstart tar tyst bort `-PublishUrl`, `-GithubRepo` och
+  plan-/kostnadsvalen uppgiften installerades med — reläpubliceringen,
+  GitHub-bevakningen och värdesiffrorna försvinner ur den körande tjänsten.
+  Installeraren är för installation och omkonfiguration, inte för omstart.
 
 ## Releaser och utåtriktad dokumentation
 

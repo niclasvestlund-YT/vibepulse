@@ -199,11 +199,21 @@ ipconfig
 ```
 
 Install the optional advertiser in the exact Python environment used by the
-scheduled task, then restart the task through the normal installer flow:
+scheduled task, then restart the task so the running process picks it up:
 
 ```powershell
 py -3 -m pip install -r requirements-discovery.txt
+Stop-ScheduledTask -TaskName "VibePulse tokenserver" -ErrorAction SilentlyContinue
+Start-ScheduledTask -TaskName "VibePulse tokenserver"
 ```
+
+Restart the task itself rather than rerunning the installer.
+`Register-ScheduledTask -Force` rebuilds the task's command line from the
+arguments of that invocation, so an argument-less rerun silently drops the
+`-PublishUrl`, `-GithubRepo` and plan/cost settings the task was installed
+with — the relay publishing, GitHub monitoring and value figures disappear
+from the running service. The installer is for installing and reconfiguring,
+not for restarting.
 
 `GET /` must then report `discovery.status: ready`. Current firmware browses
 `_vibepulse._tcp.local`, caches the last healthy origin in NVS, and can choose
