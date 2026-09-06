@@ -58,7 +58,14 @@ force-push rule for `main`, then swap that blob for the stripped file with
 this ran in was SHALLOW; `git fetch --unshallow` first, or the rewrite
 truncates history to whatever the clone happened to hold —
 `tools/snapshot.sh` now refuses in exactly that state, and taking a snapshot
-first is the rule (AGENTS.md, Arbetsregler).
+first is the rule (AGENTS.md, Arbetsregler). **And `filter-repo` is the wrong
+tool on a PR branch**: `--refs <branch>` rewrites every commit that branch can
+reach, base commits included, so the branch silently detaches from `main` —
+GitHub then shows the PR as 401 commits and 408 files with no merge base. It
+cost two rebuilds here before the pattern was obvious. To scrub a string that
+only exists in your own commits, rebuild on the base with `cherry-pick` and
+fix the content on the way through; check `git merge-base HEAD origin/main`
+afterwards, and compare the final tree against the intended one.
 
 ---
 
