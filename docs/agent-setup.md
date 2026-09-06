@@ -189,7 +189,7 @@ readable OAuth copy is expired:
 | `claudeProbe` | Meaning | What to do |
 |---|---|---|
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
-| `not_run` | Probe has not fired yet | It runs every 120 s — wait |
+| `not_run` | Probe has not fired yet | Normally clears itself within seconds: the startup warmup calls `get_snapshot()`, which calls `get_limits()`, which starts the probe. If it persists, look for `förstaskanningen kraschade` in the server log — the warmup failed and the first `/api/tokens` request warms it instead, so make one. 240 s (`LIMITS_EVERY_S`) is the gap between *completed* probes, not a wait for the first |
 | `no_claude_oauth_token` | No Claude Desktop / Claude Code token found | Have them sign in to Claude Code on this computer |
 | `token_expired_…` | Token found but expired; Claude may still say logged in because login state and the exported usage credential are different | The service rechecks locally every 15 s. `claudeLocalUsage: fresh_applied` can keep the general week live; for Fable, start a **new Claude Code CLI turn** and send one short message so Claude's supported client refreshes Keychain |
 | `usage_http_401` / `usage_http_403` | Every token source rejected (on macOS the probe tries Claude Desktop's process token, then the keychain, and falls back automatically; on Windows there is only `%USERPROFILE%\.claude\.credentials.json`) | Re-authenticate in Claude Code |
@@ -499,7 +499,7 @@ workflow, consent model and troubleshooting live in [ota.md](ota.md).
 | No `/dev/cu.usbmodem*` or Windows `COM` port | Not in download mode | Hold BOOT, tap RESET, release BOOT |
 | Flash starts then dies; board hangs | USB port cannot power the panel | Download mode to flash; own PSU to run |
 | Numbers freeze and go stale | Service, LAN, or the panel's application HTTP path dropped | Last good values are kept deliberately. Run `doctor`; compare source freshness, recent panel polling, and physical glass before restarting anything |
-| `./test/run.sh` refuses to start | Unpinned PyYAML/Pillow | See [Hardware knowledge](../README.md#hardware-knowledge) |
+| `./test/run.sh` refuses to start | Unpinned PyYAML/Pillow, or `cryptography` missing — the encrypted-interaction vectors are part of the host gate | See [Hardware knowledge](../README.md#hardware-knowledge) |
 
 ## Simulator only (no board)
 
@@ -513,7 +513,9 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 ```
 
 Keys: `[` / `]` change page, `S` cycles agent status, `M` cycles Max Tracker
-fixtures, `T` re-feeds tokens, `L` opens the launcher.
+fixtures, `T` re-feeds tokens, `L` opens the launcher. `K` is KEY3 — hold it
+three seconds for SETTINGS — and `U` / `W` press the UPDATE and WIFI rows.
+The full list lives in [README.md](../README.md#no-hardware-run-the-simulator).
 
 For a non-interactive check — useful in CI or over SSH — this writes the full
 480×480 capture matrix and exits non-zero if any frame fails:
@@ -529,7 +531,8 @@ so use the venv:
 
 ```sh
 python3.12 -m venv .venv && . .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt \
+  -r requirements-interaction-relay.txt
 ./test/run.sh
 ```
 

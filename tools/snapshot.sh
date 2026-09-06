@@ -3,8 +3,12 @@
 # historik — rebase, filter-repo, force-push — och löpande om du vill.
 #
 # TÄCKER: varje commit som nås från varje ref. Alla grenar, taggar, notes.
+# Plus ORIG_HEAD när den finns — se nedan.
 # TÄCKER INTE: ocommittade ändringar, ospårade filer, och allt .gitignore
-# döljer. Det betyder att `secrets.h` (WiFi-uppgifter + device key) och
+# döljer. Inte heller REFLOGEN: en bundle kan inte bära en. ORIG_HEAD
+# plockas ut ur den eftersom det är den vanligaste återvändon, men allt
+# annat ett tidigare reset eller en tidigare rebase lämnade utan ref bor
+# kvar i `git reflog` i den ursprungliga klonen och ingen annanstans. Det betyder att `secrets.h` (WiFi-uppgifter + device key) och
 # `.ota-device` INTE ligger här, med flit — en backup som sprider hemligheter
 # till en katalog du glömmer bort är en läcka, inte ett skydd. De två filerna
 # behöver sin egen plats; se docs/lessons.md.
@@ -60,9 +64,16 @@ umask 077
 # Av samma skäl har varje `mktemp` en egen mall: BSD mktemp kräver en, GNU:s
 # gör den valfri, och utan mall dör filen på rad ett på just den maskin där
 # AGENTS.md gör den obligatorisk före en historikomskrivning.
-part=""; probe=""
+part=""; probe=""; sidecar_pending=""; bundle_pending=""
 roots_file="$(mktemp "${TMPDIR:-/tmp}/tg-snapshot-roots-XXXXXXXX")"
-trap 'rm -f "$part" "$roots_file"; rm -rf "$probe"' EXIT
+trap 'rm -f "$part" "$roots_file" "$sidecar_pending" "$bundle_pending"; rm -rf "$probe"' EXIT
+# INT och TERM görs uttryckliga så de går genom EXIT-trappen ovan i stället för
+# att bero på skalets default. Ett Ctrl-C mitt i publiceringen ska lämna
+# ANTINGEN ett komplett par ELLER ingenting — aldrig en bundle utan sin
+# innehållsförteckning, som för OID:n ur en flerradig pseudo-ref är det enda
+# som kan hitta dem igen.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 git worktree list --porcelain -z | {
   cur=""; prunable=0
   emit() { if [ -n "$cur" ] && [ "$prunable" = 0 ]; then printf '%s\0' "$cur"; fi; }
@@ -81,7 +92,20 @@ if ! IFS= read -r -d "" repo < "$roots_file"; then
   echo "VÄGRAR: git worktree list gav ingen levande utcheckning att utgå från." >&2
   exit 1
 fi
-repo="$(cd "$repo" && pwd -P)"
+# Kanonisering som överlever en sökväg som SLUTAR på radbrytning.
+# Kommandosubstitution klipper alla avslutande radbrytningar, så
+# `$(cd "$d" && pwd -P)` gav `/tmp/wt` för katalogen `/tmp/wt<radbrytning>`.
+# Vakten nedan jämförde då mot fel sträng och släppte igenom ett mål inuti
+# utcheckningen — den publicerade backupen i trädet den ska överleva.
+# Reproducerat. Sentineln `x` gör den sista radbrytningen till en icke-sista;
+# resultatet lämnas i `$abs` i stället för att skrivas ut, för ett
+# `abs="$(abspath ...)"` hade klippt den igen och återinfört exakt buggen.
+abspath() {
+  local p
+  p="$(cd -- "$1" && pwd -P && printf x)" || return 1
+  abs="${p%$'\n'x}"
+}
+abspath "$repo" && repo="$abs"
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = "true" ]; then
@@ -103,7 +127,7 @@ fi
 dest_was_created=0
 [ -d "$dest" ] || dest_was_created=1
 mkdir -p "$dest"
-dest="$(cd "$dest" && pwd -P)"
+abspath "$dest" && dest="$abs"
 # En FLAGGA, inte `exit` i loopen. Loopen läser numera från en fil i stället
 # för genom ett rör, alltså körs den i det här skalet — och då avslutade
 # `exit 1` hela skriptet direkt och hoppade över meddelandet som skulle
@@ -112,7 +136,8 @@ dest="$(cd "$dest" && pwd -P)"
 inside=0
 while IFS= read -r -d "" r; do
   [ -n "$r" ] && [ -d "$r" ] || continue
-  rp="$(cd "$r" && pwd -P)"
+  abspath "$r" || continue
+  rp="$abs"
   case "$dest" in "$rp"|"$rp"/*) inside=1; break ;; esac
 done < "$roots_file"
 if [ "$inside" = 1 ]; then
@@ -136,7 +161,140 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 
 # `--quiet` FÖRE filnamnet. Efter det tolkas det som ett rev-list-argument —
 # git accepterar det tyst och skriver ändå förloppet till en terminal.
-git -C "$repo" bundle create --quiet "$part" --all
+#
+# PSEUDO-REFARNA tas med när de finns. `--all` betyder refs/* plus HEAD, och
+# de här ligger utanför båda — men var och en kan vara det enda som håller en
+# commit vid liv, och en fil som körs FÖRE en historikomskrivning finns till
+# för precis det. Listan är KLASSEN, inte ett fall: ORIG_HEAD först (den
+# vanligaste; reproducerat med två commits, reset till den första — den
+# verifierade bundlen höll en commit och den forna toppen gick inte att läsa
+# ur den), men MERGE_HEAD under en konfliktad merge kan lika gärna vara det
+# sista som pekar på en raderad topic-gren, vilket också reproducerats. Att
+# laga en i taget ger en ny runda per namn.
+#
+# Ett namn är medvetet UTE: `AUTO_MERGE` pekar på ett TRÄD, inte en commit —
+# den automerge-nade mellanprodukten under en konflikt, härledd state ingen
+# behöver tillbaka; den går att lägga i en bundle men blir en ref mot ett träd
+# i en räddningsfil, alltså brus.
+#
+# `FETCH_HEAD` stod först på samma lista, med motiveringen att innehållet kom
+# från en remote man fortfarande har. Den motiveringen höll inte:
+# `git fetch /tmp/nånting HEAD` och sedan bort med källan lämnar FETCH_HEAD
+# som enda namnet på den commiten. Reproducerat. Den är med nu.
+#
+# Existenskontrollen PEKAR PÅ COMMITEN: `rev-parse --verify --quiet ORIG_HEAD`
+# svarar med det lagrade objektnamnet även när objektet är gallrat, och namnet
+# gick då vidare till `bundle create`, som dog med "fatal: bad object
+# ORIG_HEAD" — hela den obligatoriska backupen uteblev, exit 128. En tidigare
+# kommentar här påstod att `--verify --quiet` täckte just det fallet; den var
+# fel. `^{commit}` tvingar fram uppslaget och fäller när objektet är borta.
+# Reproducerat med reset, `reflog expire` och `gc --prune=now`.
+#
+# En inaktuell FÖRSTA rad stoppar inte resten: refnamnet läggs bara till om
+# det pekar på något som finns, men filen läses ändå, så rad två och framåt
+# räddas även när rad ett är gallrad.
+#
+# De är dessutom PER UTCHECKNING. `repo` är huvudworktreen, så ett
+# `rev-parse` där ser bara dess egna — en rebase eller ett reset i en länkad
+# worktree hade fallit utanför, och det är i en länkad worktree man gör
+# riskabla saker just för att slippa röra huvudcheckouten. Git exponerar dem
+# som `worktrees/<id>/<namn>`. Reproducerat: commit och reset i en länkad
+# worktree gav en godkänd bundle utan den forna toppen.
+# `worktrees/<id>/HEAD` behöver ingen egen rad — `--all` läser alla
+# utcheckningars HEAD redan, till skillnad från resten.
+#
+# Id:n läses ur `.git/worktrees/`, INTE ur listan över levande utcheckningar.
+# En worktree vars katalog raderats utan `git worktree remove` blir `prunable`
+# — den filtreras bort ur den listan, med rätta, för sökvägsvakten och
+# status-varningarna — men dess metadata ligger kvar tills någon kör
+# `git worktree prune`, och en pseudo-ref där kan vara den enda referensen
+# till en commit. Reproducerat: commit, reset, `rm -rf` av worktreen — den
+# forna toppen fanns bara i den prunable registreringen. Att läsa katalogen
+# är dessutom vad `--all` självt gör: dess `worktrees/<id>/HEAD` kommer med
+# även för en prunable registrering. Liveness avgör var man får SKRIVA och
+# vems osparade filer som ska varnas om; den avgör inte vad som är värt att
+# rädda.
+#
+# MERGE_HEAD kan ha FLERA RADER. En octopus-merge som stannat på en konflikt
+# listar varje förälder, och `rev-parse MERGE_HEAD` ger bara den första — de
+# övriga låg utanför. Reproducerat med tre föräldrar och alla tre grenarna
+# raderade: bundlen namngav en och tappade två.
+#
+# En bundle kan bara NAMNGE refs, och rad två och framåt har inget refnamn.
+# Objekten går ändå in i paketet genom att skicka OID:t som rev — verifierat,
+# de finns där efter en fetch — men de blir onåbara. Därför skrivs de i
+# `.refs`-filen bredvid, och proben skapar en ref per OID så räkningen är
+# sann OCH så en utebliven OID får verifieringen att fälla i stället för att
+# tiga. Ett objekt i filen som ingen kan hitta är inte en räddning.
+pseudo_refs=(ORIG_HEAD MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD
+             BISECT_HEAD FETCH_HEAD)
+revs=(--all)
+extra_oids=()
+main_git="$(git -C "$repo" rev-parse --absolute-git-dir)"
+
+# $1 = refnamn sett från repot, $2 = filen bakom det
+collect_pseudo() {
+  local ref="$1" file="$2" line first=1
+  if git -C "$repo" rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1
+  then
+    revs+=("$ref")
+  fi
+  [ -f "$file" ] || return 0
+  local oid
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    if [ "$first" = 1 ]; then first=0; continue; fi
+    # Första fältet. MERGE_HEAD har bara ett OID per rad, men FETCH_HEAD
+    # skriver `<oid>\t[not-for-merge]\t<beskrivning>`.
+    oid="${line%%[$' \t']*}"
+    git -C "$repo" rev-parse --verify --quiet "$oid^{commit}" >/dev/null 2>&1 \
+      || continue
+    # Bara de som INGEN ref når. Efter en vanlig `git fetch origin` har
+    # FETCH_HEAD en rad per ref, alla redan nådda av refs/remotes/* — att
+    # lista dem som namnlösa räddningsobjekt hade varit brus som döljer de
+    # få som faktiskt är i fara. Tom utdata = nåbar.
+    [ -n "$(git -C "$repo" rev-list -1 "$oid" --not --all 2>/dev/null)" ] \
+      || continue
+    revs+=("$oid")
+    extra_oids+=("$ref $oid")
+  done < "$file"
+}
+
+for ps in "${pseudo_refs[@]}"; do
+  collect_pseudo "$ps" "$main_git/$ps"
+done
+wt_root="$main_git/worktrees"
+if [ -d "$wt_root" ]; then
+  for wt_meta in "$wt_root"/*; do
+    [ -d "$wt_meta" ] || continue
+    wt_id="${wt_meta##*/}"
+    for ps in "${pseudo_refs[@]}"; do
+      collect_pseudo "worktrees/$wt_id/$ps" "$wt_meta/$ps"
+    done
+    # En länkad worktree har också EGNA refs: `refs/worktree/*` som man kan
+    # skriva till själv, `refs/bisect/*` under en bisect och
+    # `refs/rewritten/*` under en `rebase --rebase-merges`. De ligger under
+    # `.git/worktrees/<id>/refs/` och `--all` når dem INTE — bara varje
+    # utcheckningss HEAD. Reproducerat: en commit vars enda referens var
+    # `refs/worktree/saved` i en länkad worktree saknades i klonen av den
+    # verifierade bundlen. Huvudworktreens motsvarigheter ligger under
+    # `refs/` och täcks redan av `--all`.
+    #
+    # Katalogen läses, inte `git -C <worktree> for-each-ref`: metadatan finns
+    # kvar även för en prunable registrering vars katalog är borta, och det
+    # är samma skäl som för pseudo-refarna ovan.
+    if [ -d "$wt_meta/refs" ]; then
+      while IFS= read -r -d "" wt_ref_file; do
+        wt_ref="worktrees/$wt_id/${wt_ref_file#"$wt_meta/"}"
+        if git -C "$repo" rev-parse --verify --quiet "$wt_ref^{commit}" \
+             >/dev/null 2>&1; then
+          revs+=("$wt_ref")
+        fi
+      done < <(find "$wt_meta/refs" -type f -print0 2>/dev/null)
+    fi
+  done
+fi
+git -C "$repo" bundle create --quiet "$part" "${revs[@]}"
 
 # En overifierad backup är ingen backup — men `git bundle verify` räcker inte
 # som verifiering. Den läser huvudet och kontrollerar att förutsättningarna
@@ -163,12 +321,75 @@ specs=('+refs/*:refs/p/*' '+worktrees/*:refs/p-wt/*')
 if grep -qx '[0-9a-f]* HEAD' <<<"$heads"; then
   specs+=('+HEAD:refs/p-head/HEAD')
 fi
+for ps in "${pseudo_refs[@]}"; do
+  if grep -qx "[0-9a-f]* $ps" <<<"$heads"; then
+    specs+=("+$ps:refs/p-pseudo/$ps")
+  fi
+done
 if ! git -C "$probe" fetch "$part" "${specs[@]}" >/dev/null 2>&1; then
   echo "VERIFIERING MISSLYCKADES: paketet gick inte att packa upp." >&2
   echo "  $bundle skrevs aldrig — ingen falsk trygghet." >&2
   exit 1
 fi
+# Antalet räknas i PROBEN, inte i repot. `git -C "$repo" rev-list --all --count`
+# räknar det `--all` når — och sedan ORIG_HEAD kom med håller bundlen commits
+# som `--all` inte når, så raden hade sagt "1 commits" om en fil med två.
+# Proben har hämtat exakt bundlens innehåll och inget annat; den är den enda
+# ärliga källan för vad som faktiskt ligger i filen.
+# De namnlösa OID:na får en ref i PROBEN, inte i repot: dels blir räkningen
+# sann, dels FÄLLER `update-ref` om objektet inte kom med i paketet — vilket
+# är precis vad som ska hända, för då lovar sidecar-filen något som inte finns.
+if [ ${#extra_oids[@]} -gt 0 ]; then
+  n=0
+  for e in "${extra_oids[@]}"; do
+    n=$((n + 1))
+    if ! git -C "$probe" update-ref "refs/p-extra/$n" "${e##* }" 2>/dev/null; then
+      echo "VERIFIERING MISSLYCKADES: en commit ur en flerradig pseudo-ref" >&2
+      echo "  (${e}) kom inte med i paketet." >&2
+      echo "  $bundle skrevs aldrig — ingen falsk trygghet." >&2
+      exit 1
+    fi
+  done
+fi
+commits=$(git -C "$probe" rev-list --all --count)
 rm -rf "$probe"
+
+# Innehållsförteckningen skrivs FÖRE publiceringen, och läses ur `$part` —
+# samma fil, bara inte döpt än. Ordningen är inte kosmetisk: för OID:n ur en
+# flerradig pseudo-ref är den här filen den ENDA nedtecknade vägen tillbaka,
+# eftersom bundlen inte kan namnge dem. Skrevs den efter publiceringen och
+# disken tog slut däremellan, låg en till synes färdig `.bundle` kvar utan
+# sin förteckning, trappen rörde den inte, och de anonyma commitarna var
+# oåterkalleliga i praktiken. Nu finns förteckningen innan filen får sitt
+# riktiga namn; misslyckas publiceringen städas den bort igen.
+#
+# Den läses ur bundlen, inte ur repot: `git show-ref` listar bara vanliga
+# refs, alltså varken `HEAD` från en detached checkout eller
+# `worktrees/<namn>/HEAD` från en länkad worktree — precis de heads vars
+# commits ingen gren når och som därför är hela poängen med att spara dem. Och
+# i ett repo utan vanliga refs returnerar show-ref 1, vilket under `set -e`
+# hade dödat skriptet tyst.
+sidecar="${bundle%.bundle}.refs"
+if [ -e "$bundle" ] || [ -e "$sidecar" ]; then
+  echo "VÄGRAR: $bundle finns redan — skriver inte över en befintlig backup." >&2
+  exit 1
+fi
+sidecar_pending="$sidecar"
+git bundle list-heads "$part" > "$sidecar"
+
+refs=$(wc -l < "$sidecar" | tr -d ' ')
+# Efter räkningen, så de inte räknas som refs — de är motsatsen till en ref.
+if [ ${#extra_oids[@]} -gt 0 ]; then
+  {
+    printf '# Commits i paketet UTAN refnamn. En bundle kan bara namnge refs,\n'
+    printf '# och de här kom ur en flerradig pseudo-ref (octopus-merge,\n'
+    printf '# FETCH_HEAD). Objekten FINNS i filen, men ingen gren når dem.\n'
+    printf '# Rädda dem med\n'
+    printf '#   git -C <katalog> branch rescue-N <oid>\n'
+    printf '# direkt efter klonen, innan nästa gc.\n'
+    printf '%s\n' "${extra_oids[@]}"
+  } >> "$sidecar"
+fi
 
 # `ln` publicerar atomiskt OCH vägrar om målet finns — `mv` skriver över, och
 # `mv -n` gör tyst ingenting och returnerar 0, vilket vore värst av allt här.
@@ -181,26 +402,25 @@ rm -rf "$probe"
 # hårdlänkar och `mv` är det bästa som går att få. Fönstret mellan kontroll och
 # flytt är litet och på en FAT-volym finns ingen atomisk primitiv att välja i
 # stället.
+# `$bundle` läggs i trappen FÖRE publiceringen, inte efter. Annars finns ett
+# fönster mellan `ln` och raden som nollar variabeln där ett Ctrl-C tog bort
+# förteckningen och lämnade kvar bundlen — en till synes färdig backup vars
+# namnlösa OID:n ingen kan hitta. Kontrollen ovan har redan slagit fast att
+# målet inte fanns, så trappen kan bara radera en fil den här körningen
+# skapade.
+bundle_pending="$bundle"
 if ln "$part" "$bundle" 2>/dev/null; then
   rm -f "$part"
 elif [ -e "$bundle" ]; then
+  # Dök upp mellan kontrollen och nu: den är inte vår att radera.
+  bundle_pending=""
   echo "VÄGRAR: $bundle finns redan — skriver inte över en befintlig backup." >&2
   exit 1
 else
   mv "$part" "$bundle"
 fi
-
-# Innehållsförteckningen bredvid, så man ser vad en bundle höll utan att packa
-# upp den. Den läses ur BUNDLEN, inte ur repot: `git show-ref` listar bara
-# vanliga refs, alltså varken `HEAD` från en detached checkout eller
-# `worktrees/<namn>/HEAD` från en länkad worktree — precis de heads vars
-# commits ingen gren når och som därför är hela poängen med att spara dem. Och
-# i ett repo utan vanliga refs returnerar show-ref 1, vilket under `set -e`
-# hade dödat skriptet tyst efter att bundlen redan flyttats på plats.
-git bundle list-heads "$bundle" > "${bundle%.bundle}.refs"
-
-refs=$(wc -l < "${bundle%.bundle}.refs" | tr -d ' ')
-commits=$(git -C "$repo" rev-list --all --count)
+# Paret är komplett: varken bundlen eller förteckningen ska städas bort.
+sidecar_pending=""; bundle_pending=""
 size=$(du -h "$bundle" | cut -f1)
 printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
   "$bundle" "$refs" "$commits" "$size"
@@ -255,5 +475,6 @@ printf '\nInnehåll:  git bundle list-heads %s\n' "$(q "$bundle")"
 printf '           (eller läs %s)\n' "$(basename "${bundle%.bundle}.refs")"
 printf 'Återställ: git clone %s <katalog>\n' "$(q "$bundle")"
 printf '           Klonen tar grenar och taggar. Innehåller listan ovan\n'
-printf '           HEAD eller worktrees/... är de commits ingen gren når;\n'
+printf '           HEAD, ORIG_HEAD, MERGE_HEAD eller worktrees/... är de\n'
+printf '           commits ingen gren når;\n'
 printf '           hämta dem med en egen refspec, se docs/lessons.md.\n'

@@ -26,6 +26,83 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   `test/test_relay_boundary.py` now parses every `ESP_LOG*` call in the fetch
   client and fails if one names a raw address.
 
+- **A photo in `docs/img/` carried the coordinates it was taken at.**
+  `docs/img/github/glass-live.png` was an iPhone photograph committed
+  straight off the camera, and its EXIF held a full GPS IFD — latitude,
+  longitude, altitude, a ten-metre error estimate and the timestamp. This
+  repository gitignores `.ota-device` precisely because a LAN address is too
+  revealing to share; the secrets discipline was built around text, and a
+  camera writes the location into a binary nobody opens. Re-encoded through
+  a fresh image with no metadata, and resized from 3024 × 4032 and 6.9 MB —
+  a quarter of the whole repository — to 1050 × 1400 and 1.0 MB, which is
+  still twice what the page renders. The other 58 tracked images were swept:
+  three carry benign EXIF with no GPS. **The original blob is still in
+  `main`'s history and on GitHub.** Removing it needs a force-push that the
+  repository ruleset refuses; the rewrite is built and documented in
+  `docs/lessons.md`, waiting for that rule to be lifted.
+
+- **Nine documented claims that the code contradicted.** The host-gate recipe
+  in `README.md`, `README.sv.md` and `docs/agent-setup.md` installed only
+  `requirements-dev.txt` while `test/run.sh` exits 1 without `cryptography`
+  — and run.sh's own error pointed the reader back at the recipe that failed
+  them. `docs/agent-setup.md` said the Claude probe fires every 120 s
+  (it is 240). README and `docs/wifi.md` described a one-to-three-bar Wi-Fi
+  indicator; the firmware draws two states and its own comment says why.
+  `docs/ota.md` sent agents to a branch that does not exist. The tokenserver
+  README said stale numbers become dashes (they stay, relabelled `CACHED`),
+  told you to define `TK_TOKENS_URL` by hand (it derives from
+  `TK_VIBEPULSE_BASE_URL`), and presented the rate-limit headers as the
+  primary usage source when they are the fallback (OBS-23). Three key lists
+  described the simulator and none named `K`, `U` or `W` — the keys that
+  drive the KEY3 gesture, which `docs/lessons.md` calls the simulator's
+  reason for being the spec.
+
+- **`tools/mockups/gen_concept_mockups.py` wrote to one machine's checkout.**
+  A hardcoded absolute output path — the repository's only one — so the
+  script regenerated nothing anywhere else. Its sibling already resolved the
+  path from `__file__`.
+
+### Added
+
+- **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
+  pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`
+  and the rest, per worktree, including the extra parents a multi-line one
+  holds), to run before anything that rewrites history. It refuses on a shallow clone, which is
+  the trap that nearly cost 433 commits during the work above:
+  `git rev-parse --is-shallow-repository` answers `true` when the clone *is*
+  truncated, and a bundle taken from it restores a fraction of the history
+  without complaining. It also refuses a destination inside the repository,
+  verifies what it wrote by reading it back, and deletes the file if
+  verification fails. Now a work rule in `AGENTS.md`. Written for BSD
+  userland as well as GNU: the first draft parsed worktrees with awk's
+  `RS="\0"`, trimmed with `head -c -1` and called `mktemp` without a
+  template — three things that work on Linux and none of which work on
+  macOS, the very machine where the rule makes the tool mandatory.
+
+- **`/repo-cleanup`** — a two-phase cleanup command. Phase one only produces
+  an evidence table with a keep-list and an uncertainty list; phase two
+  executes the approved subset, one commit per category with `./test/run.sh`
+  between. It encodes the traps that make this repository different: the
+  docs are load-bearing and asserted by tests, C symbols reach the build
+  through CMake and Kconfig rather than callers, and the committed fonts are
+  generated on purpose.
+
+- **The OTA rules now reach Codex.** `AGENTS.md` and `CLAUDE.md` are the same
+  rules for two different agents, and the section saying the maintenance
+  window opens only from the device, that the sender gates exist because a
+  stale build once froze the panel, and that the launchd service must be
+  restarted, was in only one of them.
+
+### Removed
+
+- **Eighteen concept-mockup SVGs** under `docs/img/mockups/`. Tracked output
+  nothing referenced — the documents link the `.png` beside each one — and
+  the two generators reproduce all eighteen byte-identically, verified by
+  running them and getting a clean `git status`. Now gitignored, the way
+  `platform/fonts/src/` is.
+
+### Fixed
+
 - **The OTA runbook told you the wrong gesture, on the terminal, while you
   stood at the panel.** `tools/ota-flash.sh` said "håll KEY3 ~3 s tills
   UPDATES ON-ringen syns" — in its header *and* in the line it prints while

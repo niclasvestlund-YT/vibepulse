@@ -116,8 +116,12 @@ sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
    (på Windows i stället `%USERPROFILE%\.claude\.credentials.json`, samma
    post — se [Windows](#windows) nedan) och gör en minimal API-förfrågan
    (`max_tokens: 0` — prefill utan output, i praktiken gratis) var 240:e
-   sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
-   5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
+   sekund. Usage-panelens tre fönster — 5-timmars, veckan och veckan för
+   tyngsta modellen (Fable/Opus) — kommer i första hand från usage-endpointen
+   (`usage_http_200 + ok`). Rate-limit-headrarna är FALLBACKEN, som loggar
+   `ratelimit-header:` när den primära vägen inte gav något mappbart; ser du
+   den raden i en normal boot är det ett symptom, inte en frisk start
+   (OBS-23).
    Tokenen lämnar aldrig datorn — skärmen får bara procenttal. Om de
    tokenkopior tokenservern kan läsa har gått ut men den officiella Claude
    Desktop-klienten fortfarande arbetar, används dess innehållsfria
@@ -492,8 +496,13 @@ Peka därför fortfarande skärmens fallback hit i reporotens `secrets.h`. På
 macOS är Bonjour-namnet bäst; på Windows används en DHCP-reserverad LAN-adress:
 
 ```c
-#define TK_TOKENS_URL "http://<datorns-host-eller-lan-ip>:8737/api/tokens"
+#define TK_VIBEPULSE_BASE_URL "http://<datorns-host-eller-lan-ip>:8737"
 ```
+
+Det är basadressen som redigeras, inte de enskilda endpointerna:
+`secrets.h.example` härleder `TK_TOKENS_URL`, `TK_AGENT_STATUS_URL` och
+`TK_MAX_TRACKER_URL` ur den. Skriver du en av dem för hand får du antingen en
+omdefinition eller tre endpoints kvar på `DIN-MAC.local`.
 
 Macens Bonjour-namn: `scutil --get LocalHostName` (lägg till `.local`).
 Windows LAN-IP: `ipconfig`; reservera den valda IPv4-adressen i routern.
@@ -582,5 +591,8 @@ python3 tools/tokenserver/smoke.py
   generell observation räknas som källfel och följer stale-kontraktet ovan.
   Claude-proben kostar en tom förfrågan var 240:e sekund — försumbart mot
   fönstren den mäter.
-- Är datorn av visar skärmen streck efter två minuter (stale), inte gamla
-  siffror som låtsas vara färska. Det är rätt beteende, inte ett fel.
+- Är datorn av behåller skärmen de sista giltiga siffrorna och märker dem
+  `CACHED` efter två minuter — de låtsas aldrig vara färska
+  (`components/app_tokens/app.c` sätter bara stale-flaggan, `usage_screen.c`
+  byter etiketten). Streck visas i ett annat fall: när panelen aldrig fått
+  data alls, eftersom `stale` kräver `has_data`. Båda är rätt beteende.

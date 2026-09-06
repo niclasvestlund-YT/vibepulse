@@ -199,11 +199,45 @@ ipconfig
 ```
 
 Install the optional advertiser in the exact Python environment used by the
-scheduled task, then restart the task through the normal installer flow:
+scheduled task, then restart the task so the running process picks it up:
 
 ```powershell
 py -3 -m pip install -r requirements-discovery.txt
 ```
+
+### Restarting the scheduled task
+
+Stop it, **wait for it to actually stop**, and only then start it:
+
+```powershell
+$Task = "VibePulse tokenserver"
+Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
+$Deadline = (Get-Date).AddSeconds(15)
+do {
+    Start-Sleep -Milliseconds 200
+} while ((Get-ScheduledTask -TaskName $Task).State -eq "Running" -and
+         (Get-Date) -lt $Deadline)
+if ((Get-ScheduledTask -TaskName $Task).State -eq "Running") {
+    throw "$Task did not stop; do not start it yet."
+}
+Start-ScheduledTask -TaskName $Task
+```
+
+The wait is not politeness. The task is registered with
+`-MultipleInstances IgnoreNew`, so a `Start-ScheduledTask` issued while the
+old instance is still shutting down is **silently discarded**: the service
+then stays down until the five-minute watchdog notices, and anything you
+validate in between is talking to nothing. `install-windows-task.ps1` polls
+the same way, to the same fifteen-second deadline, before it re-registers —
+its stop path is the reference for this one.
+
+Restart the task itself rather than rerunning the installer.
+`Register-ScheduledTask -Force` rebuilds the task's command line from the
+arguments of that invocation, so an argument-less rerun silently drops the
+`-PublishUrl`, `-GithubRepo` and plan/cost settings the task was installed
+with — the relay publishing, GitHub monitoring and value figures disappear
+from the running service. The installer is for installing and reconfiguring,
+not for restarting.
 
 `GET /` must then report `discovery.status: ready`. Current firmware browses
 `_vibepulse._tcp.local`, caches the last healthy origin in NVS, and can choose

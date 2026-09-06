@@ -55,6 +55,156 @@ that out today; raising it reopens the leak (OBS-35, paired with OBS-28).
 
 ---
 
+## 2026-09-06 · A photo of the panel carried the coordinates it was taken at
+
+**What happened:** `docs/img/github/glass-live.png` was an iPhone 15 Pro
+photograph committed straight off the camera — 3024 × 4032, 6.9 MB, a
+quarter of the whole repository in one file. Its EXIF held a full GPS IFD:
+a position fix precise to ten metres, with the altitude and the minute it
+was taken. That is a home address, published, in a repository whose
+`.gitignore` deliberately keeps `.ota-device` and `secrets.h` off the disk
+because a LAN address is considered too revealing to share. **Root cause:**
+the secrets discipline was built around *text* — passwords, keys, IP
+addresses in files someone would read. A binary nobody opens was never in
+scope, and a camera writes the location in by default. The size made it
+into the repository the same way: nobody looks at a photo's dimensions
+when the markdown renders it at 800 px. **The rule now:** a photograph
+entering `docs/img/` is resized to what the page actually renders and
+re-encoded through a fresh image with no `info` dict, so EXIF, XMP and the
+ICC profile are all dropped rather than trimmed. Check
+`Image.getexif().get_ifd(0x8825)` is empty before committing. **And do not
+write the values into the write-up.** The first version of this entry quoted
+the exact latitude, longitude, altitude and timestamp in plaintext — more
+searchable than the EXIF it was describing, and it would have outlived any
+scrub of the image. A review bot caught it. Describe what the metadata was,
+never what it said.
+**Guards:** none automated yet — `test_docs_frame_drift.py` deliberately
+skips `NOT_FRAMES`, which is where every photograph lives, so the class is
+unguarded by construction. Backlog item, not a claim of safety.
+**Watch for:** the original blob is still on `main` and on GitHub. Stripping
+the working copy does not unpublish it. The rewrite was built and verified
+but could NOT be delivered: a repository ruleset refuses a force-push to
+`main` ("GH013: Cannot force-push to this branch"). Scope is small — exactly
+one blob (`e5e6190b4bb1`) carries GPS, and only 2 of the repository's 37
+branches reach it, `main` and the cleanup branch. To finish it: lift the
+force-push rule for `main`, then swap that blob for the stripped file with
+`git filter-repo --blob-callback` and force-push both refs. Note the clone
+this ran in was SHALLOW; `git fetch --unshallow` first, or the rewrite
+truncates history to whatever the clone happened to hold —
+`tools/snapshot.sh` now refuses in exactly that state, and taking a snapshot
+first is the rule (AGENTS.md, Arbetsregler). **And `filter-repo` is the wrong
+tool on a PR branch**: `--refs <branch>` rewrites every commit that branch can
+reach, base commits included, so the branch silently detaches from `main` —
+GitHub then shows the PR as 401 commits and 408 files with no merge base. It
+cost two rebuilds here before the pattern was obvious. To scrub a string that
+only exists in your own commits, rebuild on the base with `cherry-pick` and
+fix the content on the way through; check `git merge-base HEAD origin/main`
+afterwards, and compare the final tree against the intended one.
+**Restoring from a snapshot:** `git clone <bundle> <dir>` covers branches and
+tags — and nothing else. `refs/notes/*`, any custom namespace, and the
+pseudo-refs `HEAD`, `ORIG_HEAD` and `worktrees/<name>/HEAD` (commits no
+branch reaches at all) are left behind. `git bundle list-heads`, or the
+`.refs` file beside the snapshot, says what is actually in there. To bring
+back everything, after the clone — note the `-C <dir>`, because `git clone`
+leaves you standing where you started and a bare `git fetch` here would update
+the repository you are in, not the one you just made:
+
+    git -C <dir> fetch <bundle> '+refs/*:refs/rescue/*' \
+      '+worktrees/*:refs/rescue-worktrees/*'
+
+    # then, for each bare pseudo-ref row `git bundle list-heads <bundle>`
+    # actually prints — HEAD, ORIG_HEAD, MERGE_HEAD, ...:
+    git -C <dir> fetch <bundle> '+<NAME>:refs/rescue-pseudo/<NAME>'
+
+Three shapes of name, and a wildcard over `refs/*` reaches only the first:
+named refs, `worktrees/<name>/...` from a linked worktree, and the bare
+pseudo-refs. Those live outside `refs/`, so each needs its own line; omit one
+and its commit comes back with no ref at all and goes away at the next
+`git gc --prune=now`. A wildcard refspec that matches nothing is harmless.
+A bare pseudo-ref refspec is not a wildcard, and that is why it goes on its
+own line, conditional on `list-heads`: an exact refspec that matches nothing
+aborts the whole fetch with `fatal: couldn't find remote ref HEAD`, and takes
+the ones that would have worked down with it. A bundle whose repository had
+no valid HEAD — only remote-tracking refs and tags, which is what a mirror
+looks like — is exactly that case, and `tools/snapshot.sh` called such a
+bundle corrupt until it started asking `list-heads` first.
+
+**`--all` is not everything.** `git bundle create --all` means `refs/*` plus
+`HEAD`. Every other pseudo-ref is outside both, and each can be the last thing
+holding a commit: `ORIG_HEAD` after a `git reset --hard`, a rebase or a merge;
+`MERGE_HEAD` during a conflicted merge, which can be all that still points at
+a deleted topic branch — and which can hold **several** lines, since a paused
+octopus merge lists every parent while `rev-parse` returns only the first; `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`,
+`BISECT_HEAD` the same way mid-operation. Two commits, reset to the first, run
+the tool: the verified bundle held one commit and the former tip could not be
+read out of it. `tools/snapshot.sh` now passes the whole list alongside
+`--all`, taking each one that resolves, and reading the extra lines out of a
+multi-parent `MERGE_HEAD` as well — fixing them one name at a time just buys
+one review round per name.
+
+A bundle can only *name* refs, and those extra parents have no ref name. Their
+objects still go into the pack (passing the OID as a rev is enough, verified),
+so they survive; but nothing reaches them, so the tool records each one in the
+`.refs` sidecar next to the bundle, and the verification probe creates a ref
+per OID — which makes the commit count honest and, more importantly, makes a
+missing object fail the snapshot instead of passing quietly. After restoring,
+`git -C <dir> branch rescue-N <oid>` before the next `gc` is what turns them
+back into something you can look at. An object in the file that nobody can
+find is not a rescue. One is deliberately left out: `AUTO_MERGE`
+points at a *tree*, the derived mid-conflict merge result nobody needs back.
+`FETCH_HEAD` was on that list too, excluded on the reasoning that its contents
+came from a remote you still have — which is simply false for a one-off
+`git fetch /some/path HEAD` whose source is then deleted, leaving `FETCH_HEAD`
+as the only name that commit has. It is included now, and the extra OIDs are
+filtered to those no ref reaches, so an ordinary `git fetch origin` (one
+FETCH_HEAD line per ref, all already under `refs/remotes/*`) adds nothing to
+the rescue list. Noise there would hide the few entries that are actually in
+danger.
+
+They are collected **per worktree** as well, because
+they are per-checkout: a rebase done in a linked worktree, which is
+exactly where you do risky things to avoid touching the main checkout, writes
+`worktrees/<id>/ORIG_HEAD` and the main worktree's `ORIG_HEAD` says nothing
+about it. (`worktrees/<id>/HEAD` needs no such handling: `--all` reads every
+worktree's HEAD already, just not the rest.) A linked worktree also has its
+own **refs**, not only its own pseudo-refs: `refs/worktree/*`, `refs/bisect/*`
+during a bisect and `refs/rewritten/*` during a `rebase --rebase-merges`, all
+under `.git/worktrees/<id>/refs/` and none of them reached by `--all`. A
+commit whose only reference was `refs/worktree/saved` in a linked worktree was
+missing from the clone of a snapshot that called itself verified. The main
+worktree's equivalents sit under `refs/` and were covered all along. The `+worktrees/*`
+refspec above restores them without change.
+
+Those ids come from listing `.git/worktrees/`, not from `git worktree list`.
+A worktree whose directory was deleted without `git worktree remove` is
+`prunable` and rightly drops out of that list — but its metadata, `ORIG_HEAD`
+included, survives until someone runs `git worktree prune`, and it can be the
+only reference a commit has left. Reading the directory is also what `--all`
+itself does: it picks up `worktrees/<id>/HEAD` from a prunable registration
+too. Live-ness matters for where you may write and whose dirty files to warn
+about; it does not decide what is worth saving. **The reflog itself still is not in
+there** and cannot be — a bundle has no way to carry one. Everything an
+earlier reset or rebase orphaned lives in `git reflog` in the original clone
+and nowhere else, which is worth knowing before deleting that clone.
+
+All three destinations are outside `refs/heads/*` on purpose, and that is the
+part that took three attempts to get right. Fetching into `refs/*` aborts with
+`refusing to fetch into branch ... checked out` the moment the clone has any
+branch checked out, which it always does. And a fixed destination under
+`refs/heads/` overwrites itself: restore once, snapshot the result, and the
+next restore force-updates the branch the previous one created. The two
+namespaces above cannot collide with each other or with anything a previous
+restore left, which was verified by snapshotting a restored repository and
+restoring that. `git bundle list-heads`
+(and the `.refs` file beside each snapshot) says which of them exist. No
+recipe is printed by the tool itself: eight review rounds found a new edge in
+those lines almost every time — lost tags and notes, a branch name containing
+`$(...)`, an unnamed detached HEAD, a rescue ref that collided with itself on
+the second restore — and a recovery command that is wrong in the moment you
+need it does more harm than no command at all.
+
+---
+
 ## 2026-09-05 · Pinning a screenshot's size did not pin its content
 
 **What happened:** the global Wi-Fi indicator was redrawn in `d5be82d`
