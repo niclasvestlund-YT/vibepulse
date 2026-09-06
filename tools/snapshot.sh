@@ -39,7 +39,17 @@ umask 077
 # defaultmålet och "ligger den inuti repot"-vakten hade då bara jämfört mot
 # den. Backupen landade inuti huvudcheckouten, och en `rm -rf` av den tar med
 # sig räddningsfilen.
-roots="$(git worktree list --porcelain | sed -n 's/^worktree //p')"
+# Bara LEVANDE utcheckningar. En registrering vars katalog raderats står kvar
+# som `prunable`, och att gissa liveness ur `[ -d ]` räcker inte: återskapas
+# sökvägen som en vanlig katalog passerar den testet, medan `git -C` där dör
+# med "not a git repository" — vilket avslutade skriptet med 128 efter att
+# bundlen publicerats men före återställningsraderna. Git rapporterar
+# `prunable` självt; det är den signalen som gäller, inte en gissning.
+roots="$(git worktree list --porcelain | awk '
+  /^worktree /{p=substr($0,10); pr=0; next}
+  /^prunable/{pr=1; next}
+  /^$/{if (p != "" && !pr) print p; p=""; pr=0; next}
+  END{if (p != "" && !pr) print p}')"
 repo="$(cd "$(printf '%s\n' "$roots" | head -1)" && pwd -P)"   # huvudcheckouten
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 
@@ -160,7 +170,9 @@ printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
 # ett ord om att just deras ändringar ligger utanför.
 printf '%s\n' "$roots" | while read -r r; do
   [ -n "$r" ] && [ -d "$r" ] || continue
-  n=$(git -C "$r" status --porcelain | wc -l | tr -d ' ')
+  # Även med prunable bortsorterat får en oväntat trasig utcheckning aldrig
+  # avsluta skriptet efter att bundlen redan ligger på plats.
+  n=$(git -C "$r" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
   # `if`, inte `[ ] && printf`: när sista utcheckningen är ren returnerar
   # testet 1, hela pipelinen returnerar 1, och under `set -euo pipefail` dog
   # skriptet där — efter att ha skrivit "verifierad" men före
