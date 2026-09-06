@@ -82,6 +82,25 @@ AMOLED-skillen och mäts på panelen.
 - **Ärlighetsinvarianten:** aldrig påhittade nollor — utan data visas
   streck; räknare backar aldrig; copyn säger vad siffran faktiskt mäter.
 
+## Over-the-air-uppdateringar
+
+Vardagsfirmware går över luften: `idf.py build && tools/ota-flash.sh`
+(enhetens IP i den git-ignorerade `.ota-device`). Hela loopen, samtyckes-
+modellen och felsökningen bor i `docs/ota.md` — läs den innan du rör något
+OTA. Icke förhandlingsbart, och skälen står i filen:
+
+- **Underhållsfönstret öppnas ENDAST från enheten.** Ett 3 s KEY3-håll öppnar
+  SETTINGS, där UPDATE öppnar fönstret (grått utan adress — ett fönster utan
+  adress kan inte ta emot något), WIFI öppnar setup-fönstret (`docs/wifi.md`),
+  eller UPDATE-pillret på takeovern. Påstå aldrig, och antyd aldrig, att ett
+  skript kan öppna det.
+- **Sändargrindarna finns för att ett gammalt arkiverat bygge en gång frös
+  panelen**: nyaste binären vid sändning, versionen utskriven, `-dirty` nekas.
+  Kringgå dem aldrig med `TG_OTA_ALLOW_DIRTY` utan att användaren sagt det.
+- **Efter ändringar i `tools/tokenserver/` måste launchd-tjänsten startas om**
+  (`launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`). Den körande
+  processen behåller annars gammal kod och panelen visar ärligt glappet.
+
 ## Releaser och utåtriktad dokumentation
 
 - En viktig användarfunktion är inte klar förrän `README.md` visar den i

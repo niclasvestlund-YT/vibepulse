@@ -513,7 +513,9 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 ```
 
 Keys: `[` / `]` change page, `S` cycles agent status, `M` cycles Max Tracker
-fixtures, `T` re-feeds tokens, `L` opens the launcher.
+fixtures, `T` re-feeds tokens, `L` opens the launcher. `K` is KEY3 — hold it
+three seconds for SETTINGS — and `U` / `W` press the UPDATE and WIFI rows.
+The full list lives in [README.md](../README.md#no-hardware-run-the-simulator).
 
 For a non-interactive check — useful in CI or over SSH — this writes the full
 480×480 capture matrix and exits non-zero if any frame fails:

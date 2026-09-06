@@ -796,7 +796,15 @@ reviewed against them ([review](docs/superpowers/reviews/2026-08-13-max-tracker-
 
 Keys: `[` / `]` change VibePulse page, `S` cycles agent status, `M` cycles
 Max Tracker fixtures, `T` re-feeds tokens, `G` simulates a new GitHub star,
-`L` opens the launcher.
+`N` moves to the next app, `L` opens the launcher, and `1`-`4` pick a
+Solelkollen fixture when that companion is checked out.
+
+`K` is KEY3 itself, polled raw rather than on an edge, so the bench drives
+the real time gesture: hold `K` for three seconds and SETTINGS opens, release
+before three and an open window closes instead. `U` and `W` press the UPDATE
+and WIFI rows in that menu, taking the same path a finger does. That makes
+the simulator the spec for the gesture — there is no other way to exercise it
+without the board.
 
 ## Privacy
 

@@ -12,7 +12,8 @@ kan bo i egna repon. En skärm = en binär = ett bygge här. MIT-licens.
 Utbruten ur [Solelkollen](https://solelkollen.se)s firmware. VibePulse-repot
 äger nu skärmens firmware; den första fysiska flashen och den statiska grinden
 passerade 2026-08-13, OTA-kedjan följde 2026-08-14, v0.7.0 släpptes
-2026-08-23 och v0.7.1:s hälso- och panelreliabilitetsfixar 2026-08-27.
+2026-08-23, v0.7.1:s hälso- och panelreliabilitetsfixar 2026-08-27 och
+v1.0.0 2026-08-28.
 
 ## Arkitekturen i tre meningar
 
@@ -104,7 +105,8 @@ cmake -S sim -B sim/build -G Ninja && ninja -C sim/build
 
 Tangent 1-4 väljer Solelkollen-fixtur (bara med companion utcheckad), T matar om VibePulse-usage, S cyklar
 agentstatus, M cyklar Max Tracker-fixtur (Claude- och Codex-sidorna, två av
-VibePulse-vyns sex sidor), N växlar app (KEY3-knappens bänkmotsvarighet), L öppnar launchern (långtryck med
+VibePulse-vyns sex sidor), N växlar app, K är KEY3 självt (håll tre sekunder för SETTINGS; U och W
+trycker UPDATE- och WIFI-raderna), L öppnar launchern (långtryck med
 musen fungerar också — det är enhetens gest). På enheten växlar KEY3
 (GPIO18) app med ett tryck.
 En obevakad körning BMP-dumpar VibePulse-vyerna och launchern (plus
@@ -192,7 +194,6 @@ Vibbe/Buddy är redan app 3 via companion-inputen `~/Buddy/components`.
 firmware-enabled i build-inputet. Fysisk mikrofon-/högtalarfunktion är
 fortfarande overifierad.
 
-- WiFi-provisionering + OTA — trigger: första enheten som lämnar huset.
 - Responsiv layout för andra Waveshare-storlekar — trigger: andra skärmtypen.
 - Appbutik/paketmaskineri — trigger: bevisad traktion efter open source.
 - Röststyrning för befintliga Vibbe/Buddy är kandidat/senare i väntan på
