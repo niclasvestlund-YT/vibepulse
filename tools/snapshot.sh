@@ -95,12 +95,29 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 
 git -C "$repo" bundle create "$part" --all --quiet
 
-# En overifierad backup är ingen backup. Detta läser tillbaka filen och
-# kontrollerar att varje objekt den utlovar faktiskt finns i den.
-if ! git -C "$repo" bundle verify "$part" >/dev/null 2>&1; then
-  echo "VERIFIERING MISSLYCKADES: $bundle skrevs aldrig, ingen falsk trygghet." >&2
+# En overifierad backup är ingen backup — men `git bundle verify` räcker inte
+# som verifiering. Den läser huvudet och kontrollerar att förutsättningarna
+# finns; den rör inte paketets kontrollsummor. En bit vänd mitt i filen ger
+# fortfarande "The bundle is okay", medan `git clone` dör på
+# "inflate returned -5". Att kalla det verifierat vore precis den falska
+# trygghet den här filen finns för att undvika.
+#
+# Därför indexeras paketet på riktigt: en fetch in i ett tomt bart repo tvingar
+# git att packa upp och kontrollsummera varje objekt. Det kostar ~1,3 s på 13
+# MB, vilket är gratis jämfört med att upptäcka det efter en omskrivning. De
+# tre refspecarna har skilda mål så de aldrig kan peka på samma ref, och
+# täcker även en bundle vars enda head är pseudo-refen HEAD.
+probe="$(mktemp -d)"
+trap 'rm -f "$part"; rm -rf "$probe"' EXIT
+git init -q --bare "$probe"
+if ! git -C "$probe" fetch "$part" \
+       '+refs/*:refs/p/*' '+HEAD:refs/p-head/HEAD' '+worktrees/*:refs/p-wt/*' \
+       >/dev/null 2>&1; then
+  echo "VERIFIERING MISSLYCKADES: paketet gick inte att packa upp." >&2
+  echo "  $bundle skrevs aldrig — ingen falsk trygghet." >&2
   exit 1
 fi
+rm -rf "$probe"
 
 # `ln` publicerar atomiskt OCH vägrar om målet finns — `mv` skriver över, och
 # `mv -n` gör tyst ingenting och returnerar 0, vilket vore värst av allt här.
@@ -144,9 +161,14 @@ printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
 printf '%s\n' "$roots" | while read -r r; do
   [ -n "$r" ] && [ -d "$r" ] || continue
   n=$(git -C "$r" status --porcelain | wc -l | tr -d ' ')
-  [ "$n" -gt 0 ] && printf '  OBS: %s ocommittade ändringar i %s ligger UTANFÖR snapshoten.\n' "$n" "$r"
+  # `if`, inte `[ ] && printf`: när sista utcheckningen är ren returnerar
+  # testet 1, hela pipelinen returnerar 1, och under `set -euo pipefail` dog
+  # skriptet där — efter att ha skrivit "verifierad" men före
+  # återställningsraderna. Det rena enkelworktree-fallet är normalfallet.
+  if [ "$n" -gt 0 ]; then
+    printf '  OBS: %s ocommittade ändringar i %s ligger UTANFÖR snapshoten.\n' "$n" "$r"
+  fi
 done
-true
 
 # Sökvägen citeras: en katalog med mellanslag hade annars gjort raden obrukbar
 # i precis det läge man klistrar in den utan att tänka.
