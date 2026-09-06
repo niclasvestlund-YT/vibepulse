@@ -73,10 +73,19 @@ all) are left behind. `git bundle list-heads`, or the `.refs` file beside the
 snapshot, says what is actually in there. To bring back everything, after the
 clone:
 
-    git fetch <bundle> '+refs/*:refs/rescue/*' '+HEAD:refs/rescue-head/HEAD'
+    git fetch <bundle> '+refs/*:refs/rescue/*' \
+      '+HEAD:refs/rescue-head/HEAD' \
+      '+worktrees/*:refs/rescue-worktrees/*'
 
-Both destinations are outside `refs/heads/*` on purpose, and that is the part
-that took three attempts to get right. Fetching into `refs/*` aborts with
+Three refspecs because a bundle holds three shapes of name, and a wildcard
+over `refs/*` reaches only the first: named refs, the bare `HEAD` of a
+detached checkout, and `worktrees/<name>/HEAD` from a linked worktree. The
+last two are pseudo-refs living outside `refs/`, so each needs its own line;
+omit one and its commit comes back with no ref at all and goes away at the
+next `git gc --prune=now`. The refspecs that match nothing are harmless.
+
+All three destinations are outside `refs/heads/*` on purpose, and that is the
+part that took three attempts to get right. Fetching into `refs/*` aborts with
 `refusing to fetch into branch ... checked out` the moment the clone has any
 branch checked out, which it always does. And a fixed destination under
 `refs/heads/` overwrites itself: restore once, snapshot the result, and the
