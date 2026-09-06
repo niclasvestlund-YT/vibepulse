@@ -42,9 +42,16 @@ ICC profile are all dropped rather than trimmed. Check
 **Guards:** none automated yet — `test_docs_frame_drift.py` deliberately
 skips `NOT_FRAMES`, which is where every photograph lives, so the class is
 unguarded by construction. Backlog item, not a claim of safety.
-**Watch for:** the original blob is still in git history and on GitHub;
-stripping the working copy does not unpublish it. Removing it needs a
-history rewrite on a public repository, which is a maintainer decision.
+**Watch for:** the original blob is still on `main` and on GitHub. Stripping
+the working copy does not unpublish it. The rewrite was built and verified
+but could NOT be delivered: a repository ruleset refuses a force-push to
+`main` ("GH013: Cannot force-push to this branch"). Scope is small — exactly
+one blob (`e5e6190b4bb1`) carries GPS, and only 2 of the repository's 37
+branches reach it, `main` and the cleanup branch. To finish it: lift the
+force-push rule for `main`, then swap that blob for the stripped file with
+`git filter-repo --blob-callback` and force-push both refs. Note the clone
+this ran in was SHALLOW; `git fetch --unshallow` first, or the rewrite
+truncates history to whatever the clone happened to hold.
 
 ---
 
