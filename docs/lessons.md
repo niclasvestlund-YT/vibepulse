@@ -112,18 +112,17 @@ the repository you are in, not the one you just made:
     git -C <dir> fetch <bundle> '+refs/*:refs/rescue/*' \
       '+worktrees/*:refs/rescue-worktrees/*'
 
-    # each only if `git bundle list-heads <bundle>` prints that exact row:
-    git -C <dir> fetch <bundle> '+HEAD:refs/rescue-head/HEAD'
-    git -C <dir> fetch <bundle> '+ORIG_HEAD:refs/rescue-orig/ORIG_HEAD'
+    # then, for each bare pseudo-ref row `git bundle list-heads <bundle>`
+    # actually prints — HEAD, ORIG_HEAD, MERGE_HEAD, ...:
+    git -C <dir> fetch <bundle> '+<NAME>:refs/rescue-pseudo/<NAME>'
 
-Four refspecs because a bundle holds four shapes of name, and a wildcard
-over `refs/*` reaches only the first: named refs, the bare `HEAD` of a
-detached checkout, `worktrees/<name>/HEAD` from a linked worktree, and
-`ORIG_HEAD`. The last three are pseudo-refs living outside `refs/`, so each
-needs its own line; omit one and its commit comes back with no ref at all and
-goes away at the next `git gc --prune=now`. A wildcard refspec that matches
-nothing is harmless. `+HEAD:` and `+ORIG_HEAD:` are not wildcards, and that
-is why they stand on their own lines: an exact refspec that matches nothing
+Three shapes of name, and a wildcard over `refs/*` reaches only the first:
+named refs, `worktrees/<name>/...` from a linked worktree, and the bare
+pseudo-refs. Those live outside `refs/`, so each needs its own line; omit one
+and its commit comes back with no ref at all and goes away at the next
+`git gc --prune=now`. A wildcard refspec that matches nothing is harmless.
+A bare pseudo-ref refspec is not a wildcard, and that is why it goes on its
+own line, conditional on `list-heads`: an exact refspec that matches nothing
 aborts the whole fetch with `fatal: couldn't find remote ref HEAD`, and takes
 the ones that would have worked down with it. A bundle whose repository had
 no valid HEAD — only remote-tracking refs and tags, which is what a mirror
@@ -131,17 +130,25 @@ looks like — is exactly that case, and `tools/snapshot.sh` called such a
 bundle corrupt until it started asking `list-heads` first.
 
 **`--all` is not everything.** `git bundle create --all` means `refs/*` plus
-`HEAD`; `ORIG_HEAD` is outside both, and that is the commit a `git reset
---hard`, a rebase or a merge left behind — the recovery point a snapshot
-taken *before* a history rewrite exists to protect. Two commits, reset to the
-first, run the tool: the verified bundle held one commit and the former tip
-could not be read out of it. `tools/snapshot.sh` now passes `ORIG_HEAD`
-alongside `--all` when it resolves — **and one per linked worktree**, because
-`ORIG_HEAD` is per-checkout: a rebase done in a linked worktree, which is
+`HEAD`. Every other pseudo-ref is outside both, and each can be the last thing
+holding a commit: `ORIG_HEAD` after a `git reset --hard`, a rebase or a merge;
+`MERGE_HEAD` during a conflicted merge, which can be all that still points at
+a deleted topic branch; `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`,
+`BISECT_HEAD` the same way mid-operation. Two commits, reset to the first, run
+the tool: the verified bundle held one commit and the former tip could not be
+read out of it. `tools/snapshot.sh` now passes the whole list alongside
+`--all`, taking each one that resolves — fixing them one name at a time just
+buys one review round per name. Two are deliberately left out: `AUTO_MERGE`
+points at a *tree*, the derived mid-conflict merge result nobody needs back,
+and `FETCH_HEAD` is a multi-line file whose first entry is all `rev-parse`
+returns and whose contents came from a remote you still have.
+
+They are collected **per worktree** as well, because
+they are per-checkout: a rebase done in a linked worktree, which is
 exactly where you do risky things to avoid touching the main checkout, writes
 `worktrees/<id>/ORIG_HEAD` and the main worktree's `ORIG_HEAD` says nothing
 about it. (`worktrees/<id>/HEAD` needs no such handling: `--all` reads every
-worktree's HEAD already, just not their ORIG_HEADs.) The `+worktrees/*`
+worktree's HEAD already, just not the rest.) The `+worktrees/*`
 refspec above restores them without change.
 
 Those ids come from listing `.git/worktrees/`, not from `git worktree list`.

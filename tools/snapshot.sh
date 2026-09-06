@@ -141,46 +141,65 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # `--quiet` FÖRE filnamnet. Efter det tolkas det som ett rev-list-argument —
 # git accepterar det tyst och skriver ändå förloppet till en terminal.
 #
-# ORIG_HEAD tas med när den finns. `--all` betyder refs/* plus HEAD, och
-# ORIG_HEAD ligger utanför båda — men det är precis den commit ett
-# `git reset --hard`, en rebase eller en merge lämnade efter sig, alltså den
-# återvändo en fil som körs FÖRE en historikomskrivning finns till för att
-# skydda. Reproducerat: två commits, reset till den första, snapshot — den
+# PSEUDO-REFARNA tas med när de finns. `--all` betyder refs/* plus HEAD, och
+# de här ligger utanför båda — men var och en kan vara det enda som håller en
+# commit vid liv, och en fil som körs FÖRE en historikomskrivning finns till
+# för precis det. Listan är KLASSEN, inte ett fall: ORIG_HEAD först (den
+# vanligaste; reproducerat med två commits, reset till den första — den
 # verifierade bundlen höll en commit och den forna toppen gick inte att läsa
-# ur den. `--verify --quiet` i stället för `[ -f ]`: ORIG_HEAD kan vara en
-# symref eller peka på ett objekt som redan gallrats.
+# ur den), men MERGE_HEAD under en konfliktad merge kan lika gärna vara det
+# sista som pekar på en raderad topic-gren, vilket också reproducerats. Att
+# laga en i taget ger en ny runda per namn.
 #
-# ORIG_HEAD är dessutom PER UTCHECKNING. `repo` är huvudworktreen, så ett
-# `rev-parse ORIG_HEAD` där ser bara dess egen — en rebase eller ett reset i
-# en länkad worktree hade fallit utanför, och det är i en länkad worktree man
-# gör riskabla saker just för att slippa röra huvudcheckouten. Git exponerar
-# dem som `worktrees/<id>/ORIG_HEAD`. Reproducerat: commit och reset i en
-# länkad worktree gav en godkänd bundle utan den forna toppen.
+# Två namn är medvetet UTE. `AUTO_MERGE` pekar på ett TRÄD, inte en commit —
+# den automerge-nade mellanprodukten under en konflikt, härledd state ingen
+# behöver tillbaka; den går att lägga i en bundle men blir en ref mot ett träd
+# i en räddningsfil, alltså brus. `FETCH_HEAD` är en FLERRADSFIL där
+# `rev-parse` bara ger första posten, och dess innehåll kom från en remote du
+# fortfarande har.
+#
+# `--verify --quiet` i stället för `[ -f ]`: en pseudo-ref kan vara en symref
+# eller peka på ett objekt som redan gallrats.
+#
+# De är dessutom PER UTCHECKNING. `repo` är huvudworktreen, så ett
+# `rev-parse` där ser bara dess egna — en rebase eller ett reset i en länkad
+# worktree hade fallit utanför, och det är i en länkad worktree man gör
+# riskabla saker just för att slippa röra huvudcheckouten. Git exponerar dem
+# som `worktrees/<id>/<namn>`. Reproducerat: commit och reset i en länkad
+# worktree gav en godkänd bundle utan den forna toppen.
 # `worktrees/<id>/HEAD` behöver ingen egen rad — `--all` läser alla
-# utcheckningars HEAD redan, till skillnad från deras ORIG_HEAD.
+# utcheckningars HEAD redan, till skillnad från resten.
 #
 # Id:n läses ur `.git/worktrees/`, INTE ur listan över levande utcheckningar.
 # En worktree vars katalog raderats utan `git worktree remove` blir `prunable`
 # — den filtreras bort ur den listan, med rätta, för sökvägsvakten och
 # status-varningarna — men dess metadata ligger kvar tills någon kör
-# `git worktree prune`, och `ORIG_HEAD` där kan vara den enda referensen till
-# en commit. Reproducerat: commit, reset, `rm -rf` av worktreen — den forna
-# toppen fanns bara i den prunable registreringen. Att läsa katalogen är
-# dessutom vad `--all` självt gör: dess `worktrees/<id>/HEAD` kommer med även
-# för en prunable registrering.
+# `git worktree prune`, och en pseudo-ref där kan vara den enda referensen
+# till en commit. Reproducerat: commit, reset, `rm -rf` av worktreen — den
+# forna toppen fanns bara i den prunable registreringen. Att läsa katalogen
+# är dessutom vad `--all` självt gör: dess `worktrees/<id>/HEAD` kommer med
+# även för en prunable registrering. Liveness avgör var man får SKRIVA och
+# vems osparade filer som ska varnas om; den avgör inte vad som är värt att
+# rädda.
+pseudo_refs=(ORIG_HEAD MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD
+             BISECT_HEAD)
 revs=(--all)
-if git -C "$repo" rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
-  revs+=(ORIG_HEAD)
-fi
+for ps in "${pseudo_refs[@]}"; do
+  if git -C "$repo" rev-parse --verify --quiet "$ps" >/dev/null 2>&1; then
+    revs+=("$ps")
+  fi
+done
 wt_root="$(git -C "$repo" rev-parse --absolute-git-dir)/worktrees"
 if [ -d "$wt_root" ]; then
   for wt_meta in "$wt_root"/*; do
     [ -d "$wt_meta" ] || continue
     wt_id="${wt_meta##*/}"
-    if git -C "$repo" rev-parse --verify --quiet "worktrees/$wt_id/ORIG_HEAD" \
-         >/dev/null 2>&1; then
-      revs+=("worktrees/$wt_id/ORIG_HEAD")
-    fi
+    for ps in "${pseudo_refs[@]}"; do
+      if git -C "$repo" rev-parse --verify --quiet "worktrees/$wt_id/$ps" \
+           >/dev/null 2>&1; then
+        revs+=("worktrees/$wt_id/$ps")
+      fi
+    done
   done
 fi
 git -C "$repo" bundle create --quiet "$part" "${revs[@]}"
@@ -210,9 +229,11 @@ specs=('+refs/*:refs/p/*' '+worktrees/*:refs/p-wt/*')
 if grep -qx '[0-9a-f]* HEAD' <<<"$heads"; then
   specs+=('+HEAD:refs/p-head/HEAD')
 fi
-if grep -qx '[0-9a-f]* ORIG_HEAD' <<<"$heads"; then
-  specs+=('+ORIG_HEAD:refs/p-orig/ORIG_HEAD')
-fi
+for ps in "${pseudo_refs[@]}"; do
+  if grep -qx "[0-9a-f]* $ps" <<<"$heads"; then
+    specs+=("+$ps:refs/p-pseudo/$ps")
+  fi
+done
 if ! git -C "$probe" fetch "$part" "${specs[@]}" >/dev/null 2>&1; then
   echo "VERIFIERING MISSLYCKADES: paketet gick inte att packa upp." >&2
   echo "  $bundle skrevs aldrig — ingen falsk trygghet." >&2
@@ -310,6 +331,6 @@ printf '\nInnehåll:  git bundle list-heads %s\n' "$(q "$bundle")"
 printf '           (eller läs %s)\n' "$(basename "${bundle%.bundle}.refs")"
 printf 'Återställ: git clone %s <katalog>\n' "$(q "$bundle")"
 printf '           Klonen tar grenar och taggar. Innehåller listan ovan\n'
-printf '           HEAD, ORIG_HEAD eller worktrees/... är de commits ingen\n'
-printf '           gren når;\n'
+printf '           HEAD, ORIG_HEAD, MERGE_HEAD eller worktrees/... är de\n'
+printf '           commits ingen gren når;\n'
 printf '           hämta dem med en egen refspec, se docs/lessons.md.\n'
