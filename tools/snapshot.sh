@@ -211,9 +211,23 @@ printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
 # ett ord om att just deras ändringar ligger utanför.
 while IFS= read -r -d "" r; do
   [ -n "$r" ] && [ -d "$r" ] || continue
-  # Även med prunable bortsorterat får en oväntat trasig utcheckning aldrig
-  # avsluta skriptet efter att bundlen redan ligger på plats.
-  n=$(git -C "$r" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  # Ett BART repo listas som worktree men har inget arbetsträd: `git status`
+  # dör där med 128, och `2>/dev/null` tystar bara meddelandet — statusen går
+  # vidare genom `pipefail` och dödade skriptet på tilldelningen nedan. Efter
+  # "verifierad", före återställningsraderna, med exit 128 på en backup som
+  # faktiskt låg färdig och verifierad på disk. Reproducerat med en bar klon.
+  # Ett bart repo har heller inget osparat att varna om.
+  if [ "$(git -C "$r" rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
+    continue
+  fi
+  # Och går status ändå inte att läsa: säg det. Att tyst rapportera noll
+  # ändringar vore en falsk friskförklaring av precis det slag den här filen
+  # finns för att undvika — men det får aldrig avsluta skriptet efter att
+  # bundlen redan ligger på plats.
+  if ! n=$(git -C "$r" status --porcelain 2>/dev/null | wc -l | tr -d ' '); then
+    printf '  OBS: kunde inte läsa git status i %s — kontrollera själv vad som ligger osparat där.\n' "$r"
+    continue
+  fi
   # `if`, inte `[ ] && printf`: när sista utcheckningen är ren returnerar
   # testet 1, hela pipelinen returnerar 1, och under `set -euo pipefail` dog
   # skriptet där — efter att ha skrivit "verifierad" men före
