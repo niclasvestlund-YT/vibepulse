@@ -16,7 +16,7 @@
 # det första den här filen gör att vägra i det läget.
 set -euo pipefail
 
-repo="$(git rev-parse --show-toplevel)"
+repo="$(cd "$(git rev-parse --show-toplevel)" && pwd -P)"
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 keep="${TG_SNAPSHOT_KEEP:-10}"
 
@@ -28,13 +28,30 @@ if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = "true" ]; then
   exit 1
 fi
 
-# En backup får aldrig bo inuti det den säkerhetskopierar.
+# Noll behållna snapshots är ingen snapshot: `tail -n "+1"` hade matat in den
+# nyss skapade bundlen i rensningen längst ned, avslutat med 0 och ändå skrivit
+# ut en återställningsrad för en fil som inte finns kvar. Fångas före allt
+# arbete, inte efter.
+case "$keep" in ''|*[!0-9]*)
+  echo "VÄGRAR: TG_SNAPSHOT_KEEP måste vara ett heltal ≥ 1 (fick: $keep)." >&2
+  exit 1 ;;
+esac
+if [ "$keep" -lt 1 ]; then
+  echo "VÄGRAR: TG_SNAPSHOT_KEEP=$keep skulle radera snapshoten den just tog." >&2
+  exit 1
+fi
+
+# En backup får aldrig bo inuti det den säkerhetskopierar. Jämförelsen måste
+# ske på den UPPLÖSTA sökvägen: `TG_SNAPSHOT_DIR=.snap` och sökvägar med `..`
+# pekar in i repot utan att se ut att göra det, och en textjämförelse släpper
+# igenom dem — då hamnar räddningsfilen i trädet den ska överleva.
+mkdir -p "$dest"
+dest="$(cd "$dest" && pwd -P)"
 case "$dest" in "$repo"|"$repo"/*)
+  rmdir "$dest" 2>/dev/null || true
   echo "VÄGRAR: $dest ligger inuti repot. Sätt TG_SNAPSHOT_DIR utanför." >&2
   exit 1 ;;
 esac
-
-mkdir -p "$dest"
 stamp="$(date +%Y%m%d-%H%M%S)"
 bundle="$dest/$(basename "$repo")-$stamp.bundle"
 
