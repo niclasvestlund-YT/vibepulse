@@ -65,7 +65,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 ### Added
 
 - **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
-  pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`
+  pseudo-refs and autostash commits `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`
   and the rest, per worktree, including the extra parents a multi-line one
   holds), to run before anything that rewrites history. It refuses on a shallow clone, which is
   the trap that nearly cost 433 commits during the work above:

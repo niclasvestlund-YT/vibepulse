@@ -227,7 +227,7 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # sann OCH så en utebliven OID får verifieringen att fälla i stället för att
 # tiga. Ett objekt i filen som ingen kan hitta är inte en räddning.
 pseudo_refs=(ORIG_HEAD MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD
-             BISECT_HEAD FETCH_HEAD)
+             BISECT_HEAD FETCH_HEAD MERGE_AUTOSTASH)
 revs=(--all)
 extra_oids=()
 main_git="$(git -C "$repo" rev-parse --absolute-git-dir)"
@@ -260,8 +260,40 @@ collect_pseudo() {
   done < "$file"
 }
 
+# AUTOSTASHEN är ett undantag från filens egen "TÄCKER INTE ocommittade
+# ändringar". Under `git merge --autostash` och `git rebase --autostash`
+# stoppar git undan det osparade arbetet i en riktig STASH-COMMIT innan den
+# börjar, och den commiten når ingen ref. Filen säger att osparat ligger
+# utanför snapshoten, och det stämmer — men här har git redan sparat det åt
+# en, så det ÄR räddningsbart och ska med. Reproducerat: en konfliktad
+# `merge --autostash` med en fil i indexet gav en godkänd bundle där
+# stash-commiten saknades helt.
+#
+# `merge --autostash` exponerar den som pseudo-refen MERGE_AUTOSTASH (i
+# listan ovan). `rebase --autostash` gör INTE det — den lägger OID:t i en
+# vanlig fil, `rebase-merge/autostash` eller `rebase-apply/autostash`, som
+# `rev-parse` inte känner till. Den saknar alltså refnamn och går samma väg
+# som de namnlösa OID:na ur en flerradig pseudo-ref: objektet i paketet och
+# raden i `.refs`-filen bredvid.
+collect_autostash() {
+  local label="$1" file="$2" oid
+  [ -f "$file" ] || return 0
+  oid="$(head -n 1 "$file" 2>/dev/null || true)"
+  oid="${oid%%[$' \t']*}"
+  [ -n "$oid" ] || return 0
+  git -C "$repo" rev-parse --verify --quiet "$oid^{commit}" >/dev/null 2>&1 \
+    || return 0
+  [ -n "$(git -C "$repo" rev-list -1 "$oid" --not --all 2>/dev/null)" ] \
+    || return 0
+  revs+=("$oid")
+  extra_oids+=("$label $oid")
+}
+
 for ps in "${pseudo_refs[@]}"; do
   collect_pseudo "$ps" "$main_git/$ps"
+done
+for st in rebase-merge rebase-apply; do
+  collect_autostash "$st/autostash" "$main_git/$st/autostash"
 done
 wt_root="$main_git/worktrees"
 if [ -d "$wt_root" ]; then
@@ -270,6 +302,9 @@ if [ -d "$wt_root" ]; then
     wt_id="${wt_meta##*/}"
     for ps in "${pseudo_refs[@]}"; do
       collect_pseudo "worktrees/$wt_id/$ps" "$wt_meta/$ps"
+    done
+    for st in rebase-merge rebase-apply; do
+      collect_autostash "worktrees/$wt_id/$st/autostash" "$wt_meta/$st/autostash"
     done
     # En länkad worktree har också EGNA refs: `refs/worktree/*` som man kan
     # skriva till själv, `refs/bisect/*` under en bisect och
@@ -383,7 +418,8 @@ if [ ${#extra_oids[@]} -gt 0 ]; then
   {
     printf '# Commits i paketet UTAN refnamn. En bundle kan bara namnge refs,\n'
     printf '# och de här kom ur en flerradig pseudo-ref (octopus-merge,\n'
-    printf '# FETCH_HEAD). Objekten FINNS i filen, men ingen gren når dem.\n'
+    printf '# FETCH_HEAD) eller ur en rebase-autostash. Objekten FINNS i\n'
+    printf '# filen, men ingen gren når dem.\n'
     printf '# Rädda dem med\n'
     printf '#   git -C <katalog> branch rescue-N <oid>\n'
     printf '# direkt efter klonen, innan nästa gc.\n'

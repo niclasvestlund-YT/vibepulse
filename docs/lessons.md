@@ -135,7 +135,15 @@ holding a commit: `ORIG_HEAD` after a `git reset --hard`, a rebase or a merge;
 `MERGE_HEAD` during a conflicted merge, which can be all that still points at
 a deleted topic branch — and which can hold **several** lines, since a paused
 octopus merge lists every parent while `rev-parse` returns only the first; `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`,
-`BISECT_HEAD` the same way mid-operation. Two commits, reset to the first, run
+`BISECT_HEAD` the same way mid-operation. And the **autostash**, which is the
+one place this file's own "uncommitted work is outside the snapshot" stops
+being true: `merge --autostash` and `rebase --autostash` put the dirty tree
+into a real stash commit before they start, and a conflict leaves that commit
+sitting there with no ref on it. Git has already saved the work; the backup
+should not throw it away again. The two differ in shape — `merge` exposes
+`MERGE_AUTOSTASH` as a pseudo-ref, `rebase` only writes the OID into
+`rebase-merge/autostash`, so it has no name at all and travels as an unnamed
+object plus a sidecar line. Two commits, reset to the first, run
 the tool: the verified bundle held one commit and the former tip could not be
 read out of it. `tools/snapshot.sh` now passes the whole list alongside
 `--all`, taking each one that resolves, and reading the extra lines out of a

@@ -493,6 +493,94 @@ def scenario_vand_bit(work):
 
 # --------------------------------------------------------------------------
 
+def scenario_autostash(work):
+    """Autostashen: osparat arbete som git redan HAR sparat åt en.
+
+    Filens huvud säger att ocommittade ändringar ligger utanför snapshoten,
+    och det stämmer — utom här. `merge --autostash` och `rebase --autostash`
+    lägger undan arbetsträdet i en riktig stash-COMMIT innan de börjar, och
+    når konflikten stannar den commiten kvar utan att någon ref pekar på den.
+    Den är alltså räddningsbar, och en backup som utelämnar den tappar precis
+    det arbete användaren inte hunnit committa.
+
+    De två fallen har OLIKA mekanik och behöver därför båda testas:
+    `merge --autostash` exponerar pseudo-refen MERGE_AUTOSTASH, medan
+    `rebase --autostash` bara skriver OID:t i `rebase-merge/autostash`. Den
+    senare har inget refnamn alls, så den kan bara komma med som ett namnlöst
+    objekt plus en rad i `.refs`-filen.
+    """
+    def konflikt(path):
+        repo = make_repo(path)
+        (repo / "strid.txt").write_text("bas\n", encoding="utf-8")
+        git("add", "-A", cwd=repo)
+        git("commit", "-q", "-m", "bas", cwd=repo)
+        git("checkout", "-q", "-b", "sido", cwd=repo)
+        (repo / "strid.txt").write_text("sido\n", encoding="utf-8")
+        git("commit", "-q", "-am", "sido", cwd=repo)
+        git("checkout", "-q", "main", cwd=repo)
+        (repo / "strid.txt").write_text("main\n", encoding="utf-8")
+        git("commit", "-q", "-am", "main", cwd=repo)
+        # Det osparade arbetet. Innehållet är unikt så återställningen kan
+        # bevisas på innehåll, inte bara på att ett objekt finns.
+        (repo / "osparat.txt").write_text("arbete utan commit\n",
+                                          encoding="utf-8")
+        git("add", "osparat.txt", cwd=repo)
+        return repo
+
+    def raddad(dest, oid, vad):
+        published = bundles(dest)
+        assert len(published) == 1, "ingen bundle publicerades for {}".format(vad)
+        klon = Path(dest) / "klon-{}".format(vad)
+        git("clone", "-q", str(published[0]), str(klon))
+        # Sidecar-raden räknas med: utan den kan ingen HITTA ett namnlöst
+        # objekt, och ett objekt ingen hittar är inte en räddning.
+        sidecar = published[0].with_suffix(".refs").read_text(encoding="utf-8")
+        assert oid in sidecar, (
+            "{}: {} finns varken som ref eller i .refs-filen:\n{}".format(
+                vad, oid[:8], sidecar))
+        innehall = git("show", "{}:osparat.txt".format(oid), cwd=klon)
+        assert innehall.strip() == "arbete utan commit", (
+            "{}: stash-commiten kom inte tillbaka med sitt innehåll".format(vad))
+
+    # merge --autostash: pseudo-refen MERGE_AUTOSTASH
+    repo = konflikt(work / "merge")
+    git("merge", "--autostash", "sido", cwd=repo, check=False)
+    oid = git("rev-parse", "--verify", "--quiet", "MERGE_AUTOSTASH",
+              cwd=repo, check=False).strip()
+    assert oid, ("fixturen skulle lämna en MERGE_AUTOSTASH; utan den testar "
+                 "fallet ingenting")
+    dest = work / "merge-backups"
+    proc = snapshot(repo, dest)
+    assert proc.returncode == 0, detail("merge --autostash", proc)
+    raddad(dest, oid, "merge")
+
+    # rebase --autostash: bara en fil, inget refnamn
+    repo2 = konflikt(work / "rebase")
+    git("checkout", "-q", "sido", cwd=repo2)
+    (repo2 / "osparat.txt").write_text("arbete utan commit\n", encoding="utf-8")
+    git("add", "osparat.txt", cwd=repo2)
+    git("rebase", "--autostash", "main", cwd=repo2, check=False)
+    gitdir = Path(git("rev-parse", "--absolute-git-dir", cwd=repo2).strip())
+    stash_fil = next((gitdir / d / "autostash" for d in
+                      ("rebase-merge", "rebase-apply")
+                      if (gitdir / d / "autostash").is_file()), None)
+    assert stash_fil is not None, (
+        "fixturen skulle lämna en rebase-autostash; utan den testar fallet "
+        "ingenting")
+    oid2 = stash_fil.read_text(encoding="utf-8").split()[0]
+    assert not git("rev-parse", "--verify", "--quiet", "REBASE_AUTOSTASH",
+                   cwd=repo2, check=False).strip(), (
+        "rebase-autostashen antas SAKNA refnamn; annonserar git den numera "
+        "som pseudo-ref testar det här fallet inte längre den vägen")
+    dest2 = work / "rebase-backups"
+    proc2 = snapshot(repo2, dest2)
+    assert proc2.returncode == 0, detail("rebase --autostash", proc2)
+    raddad(dest2, oid2, "rebase")
+
+    print("OK: autostash — det osparade arbete git själv stashat följer med, "
+          "både som MERGE_AUTOSTASH och som namnlös rebase-autostash")
+
+
 SCENARIOS = (
     scenario_portabilitet,
     scenario_vanligt_repo,
@@ -504,6 +592,7 @@ SCENARIOS = (
     scenario_prunable_worktree,
     scenario_default_fran_lankad_worktree,
     scenario_vand_bit,
+    scenario_autostash,
 )
 
 
