@@ -45,12 +45,20 @@ umask 077
 # med "not a git repository" — vilket avslutade skriptet med 128 efter att
 # bundlen publicerats men före återställningsraderna. Git rapporterar
 # `prunable` självt; det är den signalen som gäller, inte en gissning.
-roots="$(git worktree list --porcelain | awk '
-  /^worktree /{p=substr($0,10); pr=0; next}
+# Listan läses NUL-terminerad (`-z`) och lagras i en fil, inte i en variabel:
+# en sökväg får innehålla radbrytningar, och då delar en radorienterad parser
+# posten mitt itu. Verifierat med en worktree på `/tmp/wt<radbrytning>break` —
+# den radorienterade varianten såg `/tmp/wt`, så ett mål inuti den riktiga
+# katalogen hade passerat vakten obemärkt. En shellvariabel kan inte bära NUL,
+# därför filen.
+part=""; probe=""
+roots_file="$(mktemp)"
+trap 'rm -f "$part" "$roots_file"; rm -rf "$probe"' EXIT
+git worktree list --porcelain -z | awk 'BEGIN{RS="\0"; ORS="\0"}
+  /^worktree /{if (p != "" && !pr) print p; p=substr($0,10); pr=0; next}
   /^prunable/{pr=1; next}
-  /^$/{if (p != "" && !pr) print p; p=""; pr=0; next}
-  END{if (p != "" && !pr) print p}')"
-repo="$(cd "$(printf '%s\n' "$roots" | head -1)" && pwd -P)"   # huvudcheckouten
+  END{if (p != "" && !pr) print p}' > "$roots_file"
+repo="$(cd "$(head -c -1 "$roots_file" | awk 'BEGIN{RS="\0"} NR==1{print; exit}')" && pwd -P)"
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = "true" ]; then
@@ -73,21 +81,22 @@ dest_was_created=0
 [ -d "$dest" ] || dest_was_created=1
 mkdir -p "$dest"
 dest="$(cd "$dest" && pwd -P)"
-printf '%s\n' "$roots" | while read -r r; do
-  [ -n "$r" ] || continue
-  # En worktree vars katalog raderats utan `git worktree remove` står kvar i
-  # listan som `prunable`. Ett `cd` dit failar, och utan det här hoppet blev
-  # svaret att målet ligger inuti en utcheckning — vilket är falskt, och gjorde
-  # att verktyget vägrade köra tills någon gissade sig till `git worktree
-  # prune`. En trasig registrering får inte stänga av säkerhetsnätet.
-  [ -d "$r" ] || continue
+# En FLAGGA, inte `exit` i loopen. Loopen läser numera från en fil i stället
+# för genom ett rör, alltså körs den i det här skalet — och då avslutade
+# `exit 1` hela skriptet direkt och hoppade över meddelandet som skulle
+# förklara varför. Vägran blev tyst: exit 1, tomt stderr. Fångat genom att
+# faktiskt köra fallet i stället för att läsa diffen.
+inside=0
+while IFS= read -r -d "" r; do
+  [ -n "$r" ] && [ -d "$r" ] || continue
   rp="$(cd "$r" && pwd -P)"
-  case "$dest" in "$rp"|"$rp"/*) exit 1 ;; esac
-done || {
+  case "$dest" in "$rp"|"$rp"/*) inside=1; break ;; esac
+done < "$roots_file"
+if [ "$inside" = 1 ]; then
   if [ "$dest_was_created" = 1 ]; then rmdir "$dest" 2>/dev/null || true; fi
   echo "VÄGRAR: $dest ligger inuti en utcheckning av repot. Sätt TG_SNAPSHOT_DIR utanför." >&2
   exit 1
-}
+fi
 
 # Namnet får inte kunna kollidera. En sekundstämpel räcker inte — två
 # körningar inom samma sekund får identisk sökväg och `git bundle create`
@@ -100,7 +109,6 @@ done || {
 # då något ingen kan förväxla med en färdig backup.
 stamp="$(date +%Y%m%d-%H%M%S)"
 part="$(mktemp "$dest/.incomplete-$stamp-XXXXXXXX")"
-trap 'rm -f "$part"' EXIT
 bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 
 git -C "$repo" bundle create "$part" --all --quiet
@@ -118,7 +126,6 @@ git -C "$repo" bundle create "$part" --all --quiet
 # tre refspecarna har skilda mål så de aldrig kan peka på samma ref, och
 # täcker även en bundle vars enda head är pseudo-refen HEAD.
 probe="$(mktemp -d)"
-trap 'rm -f "$part"; rm -rf "$probe"' EXIT
 git init -q --bare "$probe"
 if ! git -C "$probe" fetch "$part" \
        '+refs/*:refs/p/*' '+HEAD:refs/p-head/HEAD' '+worktrees/*:refs/p-wt/*' \
@@ -168,7 +175,7 @@ printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
 # `repo` blev huvudcheckouten hade en körning från en länkad worktree med
 # osparat arbete tigit still — den som stod där hade fått "verifierad" utan
 # ett ord om att just deras ändringar ligger utanför.
-printf '%s\n' "$roots" | while read -r r; do
+while IFS= read -r -d "" r; do
   [ -n "$r" ] && [ -d "$r" ] || continue
   # Även med prunable bortsorterat får en oväntat trasig utcheckning aldrig
   # avsluta skriptet efter att bundlen redan ligger på plats.
@@ -180,7 +187,7 @@ printf '%s\n' "$roots" | while read -r r; do
   if [ "$n" -gt 0 ]; then
     printf '  OBS: %s ocommittade ändringar i %s ligger UTANFÖR snapshoten.\n' "$n" "$r"
   fi
-done
+done < "$roots_file"
 
 # Sökvägen citeras: en katalog med mellanslag hade annars gjort raden obrukbar
 # i precis det läge man klistrar in den utan att tänka.

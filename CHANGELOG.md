@@ -76,6 +76,8 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   running them and getting a clean `git status`. Now gitignored, the way
   `platform/fonts/src/` is.
 
+### Fixed
+
 - **The OTA runbook told you the wrong gesture, on the terminal, while you
   stood at the panel.** `tools/ota-flash.sh` said "håll KEY3 ~3 s tills
   UPDATES ON-ringen syns" — in its header *and* in the line it prints while
