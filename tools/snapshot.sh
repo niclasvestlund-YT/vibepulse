@@ -64,9 +64,9 @@ umask 077
 # Av samma skäl har varje `mktemp` en egen mall: BSD mktemp kräver en, GNU:s
 # gör den valfri, och utan mall dör filen på rad ett på just den maskin där
 # AGENTS.md gör den obligatorisk före en historikomskrivning.
-part=""; probe=""
+part=""; probe=""; sidecar_pending=""
 roots_file="$(mktemp "${TMPDIR:-/tmp}/tg-snapshot-roots-XXXXXXXX")"
-trap 'rm -f "$part" "$roots_file"; rm -rf "$probe"' EXIT
+trap 'rm -f "$part" "$roots_file" "$sidecar_pending"; rm -rf "$probe"' EXIT
 git worktree list --porcelain -z | {
   cur=""; prunable=0
   emit() { if [ -n "$cur" ] && [ "$prunable" = 0 ]; then printf '%s\0' "$cur"; fi; }
@@ -175,8 +175,17 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # `git fetch /tmp/nånting HEAD` och sedan bort med källan lämnar FETCH_HEAD
 # som enda namnet på den commiten. Reproducerat. Den är med nu.
 #
-# `--verify --quiet` i stället för `[ -f ]`: en pseudo-ref kan vara en symref
-# eller peka på ett objekt som redan gallrats.
+# Existenskontrollen PEKAR PÅ COMMITEN: `rev-parse --verify --quiet ORIG_HEAD`
+# svarar med det lagrade objektnamnet även när objektet är gallrat, och namnet
+# gick då vidare till `bundle create`, som dog med "fatal: bad object
+# ORIG_HEAD" — hela den obligatoriska backupen uteblev, exit 128. En tidigare
+# kommentar här påstod att `--verify --quiet` täckte just det fallet; den var
+# fel. `^{commit}` tvingar fram uppslaget och fäller när objektet är borta.
+# Reproducerat med reset, `reflog expire` och `gc --prune=now`.
+#
+# En inaktuell FÖRSTA rad stoppar inte resten: refnamnet läggs bara till om
+# det pekar på något som finns, men filen läses ändå, så rad två och framåt
+# räddas även när rad ett är gallrad.
 #
 # De är dessutom PER UTCHECKNING. `repo` är huvudworktreen, så ett
 # `rev-parse` där ser bara dess egna — en rebase eller ett reset i en länkad
@@ -219,8 +228,10 @@ main_git="$(git -C "$repo" rev-parse --absolute-git-dir)"
 # $1 = refnamn sett från repot, $2 = filen bakom det
 collect_pseudo() {
   local ref="$1" file="$2" line first=1
-  git -C "$repo" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || return 0
-  revs+=("$ref")
+  if git -C "$repo" rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1
+  then
+    revs+=("$ref")
+  fi
   [ -f "$file" ] || return 0
   local oid
   while IFS= read -r line || [ -n "$line" ]; do
@@ -315,6 +326,43 @@ fi
 commits=$(git -C "$probe" rev-list --all --count)
 rm -rf "$probe"
 
+# Innehållsförteckningen skrivs FÖRE publiceringen, och läses ur `$part` —
+# samma fil, bara inte döpt än. Ordningen är inte kosmetisk: för OID:n ur en
+# flerradig pseudo-ref är den här filen den ENDA nedtecknade vägen tillbaka,
+# eftersom bundlen inte kan namnge dem. Skrevs den efter publiceringen och
+# disken tog slut däremellan, låg en till synes färdig `.bundle` kvar utan
+# sin förteckning, trappen rörde den inte, och de anonyma commitarna var
+# oåterkalleliga i praktiken. Nu finns förteckningen innan filen får sitt
+# riktiga namn; misslyckas publiceringen städas den bort igen.
+#
+# Den läses ur bundlen, inte ur repot: `git show-ref` listar bara vanliga
+# refs, alltså varken `HEAD` från en detached checkout eller
+# `worktrees/<namn>/HEAD` från en länkad worktree — precis de heads vars
+# commits ingen gren når och som därför är hela poängen med att spara dem. Och
+# i ett repo utan vanliga refs returnerar show-ref 1, vilket under `set -e`
+# hade dödat skriptet tyst.
+sidecar="${bundle%.bundle}.refs"
+if [ -e "$bundle" ] || [ -e "$sidecar" ]; then
+  echo "VÄGRAR: $bundle finns redan — skriver inte över en befintlig backup." >&2
+  exit 1
+fi
+sidecar_pending="$sidecar"
+git bundle list-heads "$part" > "$sidecar"
+
+refs=$(wc -l < "$sidecar" | tr -d ' ')
+# Efter räkningen, så de inte räknas som refs — de är motsatsen till en ref.
+if [ ${#extra_oids[@]} -gt 0 ]; then
+  {
+    printf '# Commits i paketet UTAN refnamn. En bundle kan bara namnge refs,\n'
+    printf '# och de här kom ur en flerradig pseudo-ref (octopus-merge,\n'
+    printf '# FETCH_HEAD). Objekten FINNS i filen, men ingen gren når dem.\n'
+    printf '# Rädda dem med\n'
+    printf '#   git -C <katalog> branch rescue-N <oid>\n'
+    printf '# direkt efter klonen, innan nästa gc.\n'
+    printf '%s\n' "${extra_oids[@]}"
+  } >> "$sidecar"
+fi
+
 # `ln` publicerar atomiskt OCH vägrar om målet finns — `mv` skriver över, och
 # `mv -n` gör tyst ingenting och returnerar 0, vilket vore värst av allt här.
 #
@@ -334,28 +382,8 @@ elif [ -e "$bundle" ]; then
 else
   mv "$part" "$bundle"
 fi
-
-# Innehållsförteckningen bredvid, så man ser vad en bundle höll utan att packa
-# upp den. Den läses ur BUNDLEN, inte ur repot: `git show-ref` listar bara
-# vanliga refs, alltså varken `HEAD` från en detached checkout eller
-# `worktrees/<namn>/HEAD` från en länkad worktree — precis de heads vars
-# commits ingen gren når och som därför är hela poängen med att spara dem. Och
-# i ett repo utan vanliga refs returnerar show-ref 1, vilket under `set -e`
-# hade dödat skriptet tyst efter att bundlen redan flyttats på plats.
-git bundle list-heads "$bundle" > "${bundle%.bundle}.refs"
-
-refs=$(wc -l < "${bundle%.bundle}.refs" | tr -d ' ')
-# Efter räkningen, så de inte räknas som refs — de är motsatsen till en ref.
-if [ ${#extra_oids[@]} -gt 0 ]; then
-  {
-    printf '# Commits i paketet UTAN refnamn. En bundle kan bara namnge refs,\n'
-    printf '# och de här kom ur en flerradig pseudo-ref (octopus-merge).\n'
-    printf '# Objekten FINNS i filen, men ingen gren når dem. Rädda dem med\n'
-    printf '#   git -C <katalog> branch rescue-N <oid>\n'
-    printf '# direkt efter klonen, innan nästa gc.\n'
-    printf '%s\n' "${extra_oids[@]}"
-  } >> "${bundle%.bundle}.refs"
-fi
+# Publicerad: förteckningen ska INTE städas bort längre.
+sidecar_pending=""
 size=$(du -h "$bundle" | cut -f1)
 printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
   "$bundle" "$refs" "$commits" "$size"
