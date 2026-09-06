@@ -182,6 +182,14 @@ jobs:
       # (SC1071, shellcheck kan inte läsa den alls), och `CDPATH= cd` i
       # install-local-skills.sh och preview-ui.sh ger SC1007 fast idiomet är
       # rätt. Att städa det är sitt eget ärende.
+      #
+      # --severity=warning, inte standardnivån. Info-nivån skiljer sig mellan
+      # shellcheck-versioner: runnerns version ger SC2015 på
+      # `[ -n "$r" ] && [ -d "$r" ] || continue` medan 0.11.0 tiger, och just
+      # där är varningen fel — att `continue` körs när A är sant men B falskt
+      # ÄR meningen. En grind som blir röd av att runnerimagen bytt version
+      # säger inget om koden. Fel och varningar (parsefel, SC1007, SC1071)
+      # fångas fortfarande.
       - name: Shellcheck the backup tool
         if: runner.os == 'Linux'
         run: |
@@ -189,7 +197,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends shellcheck
           fi
-          shellcheck tools/snapshot.sh
+          shellcheck --severity=warning tools/snapshot.sh
 
   firmware:
     name: ESP32-S3 firmware build
