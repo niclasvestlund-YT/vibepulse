@@ -479,6 +479,8 @@ of the full host-gate era; worth a signature here before it becomes a
 retry of) the unread body on early 4xx, and reproduce under load on a
 Windows box before trusting either — a wire test asserting a security
 boundary must not be loosened blindly.
+
+### OBS-28 · Pin logging config on purpose
 `firmware · S · open`
 `sdkconfig.defaults` deliberately pins flash, PSRAM, LVGL, and mbedTLS
 with reasoned comments — but nothing about logging: default level,
@@ -490,3 +492,20 @@ valve currently fails silently.
 **Fix:** pin `CONFIG_LOG_DEFAULT_LEVEL`, console, panic + TWDT choices
 (with the same style of comment the file already uses), enable
 `LV_USE_LOG` routed to `ESP_LOG`.
+
+### OBS-35 · A raised log level puts the relay secret back on the wire
+`firmware · S · open`
+The panel's own fetch logs are redacted: `torget_http.c` hands every
+failure line through `tg_net_log_target()`, which keeps scheme, host and
+route and drops the path — the relay's `/u/<secret>` is its whole access
+control (`docs/relay.md`). ESP-IDF's `HTTP_CLIENT` tag is not redacted:
+`esp_http_client.c` logs the full request line at `ESP_LOGD`
+("Write header[%d]: %s") and the `Location` header on a redirect, both of
+which contain the secret. Today that is inert — the inherited default log
+level compiles `ESP_LOGD` out — so this is a *latent* leak that OBS-28's
+"pin logging on purpose" would decide either way.
+**Fix:** when OBS-28 pins `CONFIG_LOG_DEFAULT_LEVEL`, pin
+`CONFIG_LOG_MAXIMUM_LEVEL` with it, and if a debug level is ever wanted
+on a relay-enabled build, clamp the `HTTP_CLIENT` tag
+(`esp_log_level_set("HTTP_CLIENT", ESP_LOG_INFO)`) rather than trusting
+the operator to remember.

@@ -21,6 +21,40 @@ point at the backlog item.
 
 ---
 
+## 2026-09-06 · The panel logged the credential it was told never to print
+
+**What happened:** all three failure paths in `torget_http.c` logged the
+address they had just failed on — `hämtning misslyckades: … (%s)`,
+`oväntad statuskod %d (%s)`, `kroppen större än … (%s)`. When the fetch had
+failed over to the numbers relay, that address was the cloud mailbox URL,
+whose path `/u/<secret>` *is* the access control: it reads the panel's
+figures and overwrites them. `docs/relay.md` has said "Never print the
+secret URL in logs or a shared transcript" since the relay shipped, so the
+code contradicted a written safety rule — and a relay outage is exactly the
+moment someone attaches a monitor and pastes the output into a thread.
+**Root cause:** the logs predate the relay. They were written when every
+address was a LAN address and a URL was just a URL; the relay added a
+credential-bearing address to the same helper and nobody revisited what the
+old lines print. Found by a Codex review on the #87 cleanup PR, on a file
+that PR did not touch.
+**The rule now:** a log may see scheme + host and which route was tried;
+the path never. The redaction is **unconditional** — it does not ask
+whether this particular address is the secret one — and it lives in the one
+helper every failure path already goes through, so a fourth path inherits
+it instead of having to remember it. The general shape: when a value
+becomes a credential, the code that *prints* it is as much a caller as the
+code that sends it.
+**Guards:** `components/torget_net/net_log_target.c` is pure string logic,
+host-tested by `test/test_net_log_target.c` (secret never survives, route
+survives truncation, short buffers neither overflow nor leak).
+`test/test_relay_boundary.py` parses every `ESP_LOG*` call in
+`torget_http.c` and fails if one names a raw address — it catches all three
+original lines. **Watch for:** ESP-IDF's own `HTTP_CLIENT` tag prints the
+full request line at `ESP_LOGD`. The inherited default log level compiles
+that out today; raising it reopens the leak (OBS-35, paired with OBS-28).
+
+---
+
 ## 2026-09-06 · A photo of the panel carried the coordinates it was taken at
 
 **What happened:** `docs/img/github/glass-live.png` was an iPhone 15 Pro

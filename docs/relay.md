@@ -67,6 +67,17 @@ end-to-end encrypted features described in
 [docs/interaction-relay.md](interaction-relay.md). Enabling this numbers relay
 never enables either encrypted activity feature.
 
+Because the URL *is* the credential, the panel treats it as one. A failed
+fetch used to log the whole address, so a serial capture or a pasted
+observability transcript handed over both read and write access to the
+figures. `torget_http.c` now sends every failure line through
+`tg_net_log_target()` (`components/torget_net/net_log_target.c`), which keeps
+what diagnoses — scheme, host, and whether LAN or the relay was tried — and
+drops the path, the query, the fragment and any userinfo. The redaction is
+unconditional rather than relay-only, so a future call site inherits it
+instead of having to remember it; `test/test_net_log_target.c` and the log
+guard in `test/test_relay_boundary.py` hold both halves of that.
+
 ## Multiple publishers
 
 Every quota pool carries its own observation timestamp

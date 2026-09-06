@@ -7,6 +7,25 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **The panel printed the relay's secret URL every time a cloud fetch
+  failed.** All three failure paths in `components/torget_net/torget_http.c`
+  logged the address they had just failed on. When the fetch had failed over
+  to the numbers relay that address was the cloud mailbox URL, and its path
+  `/u/<secret>` *is* the access control — anyone handed a serial capture or a
+  pasted observability log after a relay outage could read the panel's
+  figures and overwrite them. `docs/relay.md` has said "Never print the
+  secret URL in logs or a shared transcript" since the relay shipped; the
+  code had simply never been revisited after a credential-bearing address
+  started flowing through the same helper. Failure lines now name a redacted
+  target — `<scheme>://<host> via LAN` or `… via relä` — which still
+  separates a wrong hostname from a wrong port from a dead relay, and drops
+  the path, query, fragment and any userinfo. The redaction is unconditional
+  rather than relay-only, so a fourth failure path inherits it instead of
+  having to remember it, and it lives in one pure helper
+  (`net_log_target.c`) that `test/test_net_log_target.c` host-tests directly.
+  `test/test_relay_boundary.py` now parses every `ESP_LOG*` call in the fetch
+  client and fails if one names a raw address.
+
 - **A photo in `docs/img/` carried the coordinates it was taken at.**
   `docs/img/github/glass-live.png` was an iPhone photograph committed
   straight off the camera, and its EXIF held a full GPS IFD — latitude,
