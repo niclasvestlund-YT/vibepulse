@@ -134,7 +134,13 @@ bundle corrupt until it started asking `list-heads` first.
 taken *before* a history rewrite exists to protect. Two commits, reset to the
 first, run the tool: the verified bundle held one commit and the former tip
 could not be read out of it. `tools/snapshot.sh` now passes `ORIG_HEAD`
-alongside `--all` when it resolves. **The reflog itself still is not in
+alongside `--all` when it resolves — **and one per linked worktree**, because
+`ORIG_HEAD` is per-checkout: a rebase done in a linked worktree, which is
+exactly where you do risky things to avoid touching the main checkout, writes
+`worktrees/<id>/ORIG_HEAD` and the main worktree's `ORIG_HEAD` says nothing
+about it. (`worktrees/<id>/HEAD` needs no such handling: `--all` reads every
+worktree's HEAD already, just not their ORIG_HEADs.) The `+worktrees/*`
+refspec above restores them without change. **The reflog itself still is not in
 there** and cannot be — a bundle has no way to carry one. Everything an
 earlier reset or rebase orphaned lives in `git reflog` in the original clone
 and nowhere else, which is worth knowing before deleting that clone.

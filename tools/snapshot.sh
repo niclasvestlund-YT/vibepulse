@@ -149,10 +149,32 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # verifierade bundlen höll en commit och den forna toppen gick inte att läsa
 # ur den. `--verify --quiet` i stället för `[ -f ]`: ORIG_HEAD kan vara en
 # symref eller peka på ett objekt som redan gallrats.
+#
+# ORIG_HEAD är dessutom PER UTCHECKNING. `repo` är huvudworktreen, så ett
+# `rev-parse ORIG_HEAD` där ser bara dess egen — en rebase eller ett reset i
+# en länkad worktree hade fallit utanför, och det är i en länkad worktree man
+# gör riskabla saker just för att slippa röra huvudcheckouten. Git exponerar
+# dem som `worktrees/<id>/ORIG_HEAD`; id:t är katalognamnet under
+# `.git/worktrees/`, vilket `--absolute-git-dir` ger. Reproducerat: commit och
+# reset i en länkad worktree gav en godkänd bundle utan den forna toppen.
+# `worktrees/<id>/HEAD` behöver ingen egen rad — `--all` läser alla
+# utcheckningars HEAD redan, till skillnad från deras ORIG_HEAD.
 revs=(--all)
 if git -C "$repo" rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
   revs+=(ORIG_HEAD)
 fi
+while IFS= read -r -d "" r; do
+  [ -n "$r" ] && [ -d "$r" ] || continue
+  gd="$(git -C "$r" rev-parse --absolute-git-dir 2>/dev/null)" || continue
+  case "$gd" in
+    */worktrees/*) wt_id="${gd##*/}" ;;
+    *) continue ;;   # huvudworktreen; dess ORIG_HEAD heter bara ORIG_HEAD
+  esac
+  if git -C "$repo" rev-parse --verify --quiet "worktrees/$wt_id/ORIG_HEAD" \
+       >/dev/null 2>&1; then
+    revs+=("worktrees/$wt_id/ORIG_HEAD")
+  fi
+done < "$roots_file"
 git -C "$repo" bundle create --quiet "$part" "${revs[@]}"
 
 # En overifierad backup är ingen backup — men `git bundle verify` räcker inte
@@ -188,6 +210,12 @@ if ! git -C "$probe" fetch "$part" "${specs[@]}" >/dev/null 2>&1; then
   echo "  $bundle skrevs aldrig — ingen falsk trygghet." >&2
   exit 1
 fi
+# Antalet räknas i PROBEN, inte i repot. `git -C "$repo" rev-list --all --count`
+# räknar det `--all` når — och sedan ORIG_HEAD kom med håller bundlen commits
+# som `--all` inte når, så raden hade sagt "1 commits" om en fil med två.
+# Proben har hämtat exakt bundlens innehåll och inget annat; den är den enda
+# ärliga källan för vad som faktiskt ligger i filen.
+commits=$(git -C "$probe" rev-list --all --count)
 rm -rf "$probe"
 
 # `ln` publicerar atomiskt OCH vägrar om målet finns — `mv` skriver över, och
@@ -220,7 +248,6 @@ fi
 git bundle list-heads "$bundle" > "${bundle%.bundle}.refs"
 
 refs=$(wc -l < "${bundle%.bundle}.refs" | tr -d ' ')
-commits=$(git -C "$repo" rev-list --all --count)
 size=$(du -h "$bundle" | cut -f1)
 printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
   "$bundle" "$refs" "$commits" "$size"
