@@ -25,6 +25,14 @@
 # och innehållit en femtedel av historiken.
 set -euo pipefail
 
+# Allt den här filen skapar är privat för ägaren. En bundle är HELA repot i en
+# fil — varje gren, även opublicerade, och notes — och `git bundle create`
+# skriver 0644 under normal umask: mktemps 0600 överlever inte, för git
+# återskapar filen. På en delad maskin kunde vem som helst läsa hela
+# historiken ur räddningsfilen. Samma resonemang som gäller `secrets.h`:
+# säkerhetskopian får inte bli spridningsvägen.
+umask 077
+
 repo="$(cd "$(git rev-parse --show-toplevel)" && pwd -P)"
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 
