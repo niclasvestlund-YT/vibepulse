@@ -264,6 +264,27 @@ if [ -d "$wt_root" ]; then
     for ps in "${pseudo_refs[@]}"; do
       collect_pseudo "worktrees/$wt_id/$ps" "$wt_meta/$ps"
     done
+    # En länkad worktree har också EGNA refs: `refs/worktree/*` som man kan
+    # skriva till själv, `refs/bisect/*` under en bisect och
+    # `refs/rewritten/*` under en `rebase --rebase-merges`. De ligger under
+    # `.git/worktrees/<id>/refs/` och `--all` når dem INTE — bara varje
+    # utcheckningss HEAD. Reproducerat: en commit vars enda referens var
+    # `refs/worktree/saved` i en länkad worktree saknades i klonen av den
+    # verifierade bundlen. Huvudworktreens motsvarigheter ligger under
+    # `refs/` och täcks redan av `--all`.
+    #
+    # Katalogen läses, inte `git -C <worktree> for-each-ref`: metadatan finns
+    # kvar även för en prunable registrering vars katalog är borta, och det
+    # är samma skäl som för pseudo-refarna ovan.
+    if [ -d "$wt_meta/refs" ]; then
+      while IFS= read -r -d "" wt_ref_file; do
+        wt_ref="worktrees/$wt_id/${wt_ref_file#"$wt_meta/"}"
+        if git -C "$repo" rev-parse --verify --quiet "$wt_ref^{commit}" \
+             >/dev/null 2>&1; then
+          revs+=("$wt_ref")
+        fi
+      done < <(find "$wt_meta/refs" -type f -print0 2>/dev/null)
+    fi
   done
 fi
 git -C "$repo" bundle create --quiet "$part" "${revs[@]}"

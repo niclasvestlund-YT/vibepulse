@@ -166,7 +166,13 @@ they are per-checkout: a rebase done in a linked worktree, which is
 exactly where you do risky things to avoid touching the main checkout, writes
 `worktrees/<id>/ORIG_HEAD` and the main worktree's `ORIG_HEAD` says nothing
 about it. (`worktrees/<id>/HEAD` needs no such handling: `--all` reads every
-worktree's HEAD already, just not the rest.) The `+worktrees/*`
+worktree's HEAD already, just not the rest.) A linked worktree also has its
+own **refs**, not only its own pseudo-refs: `refs/worktree/*`, `refs/bisect/*`
+during a bisect and `refs/rewritten/*` during a `rebase --rebase-merges`, all
+under `.git/worktrees/<id>/refs/` and none of them reached by `--all`. A
+commit whose only reference was `refs/worktree/saved` in a linked worktree was
+missing from the clone of a snapshot that called itself verified. The main
+worktree's equivalents sit under `refs/` and were covered all along. The `+worktrees/*`
 refspec above restores them without change.
 
 Those ids come from listing `.git/worktrees/`, not from `git worktree list`.
