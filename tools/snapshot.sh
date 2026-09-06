@@ -65,6 +65,12 @@ mkdir -p "$dest"
 dest="$(cd "$dest" && pwd -P)"
 printf '%s\n' "$roots" | while read -r r; do
   [ -n "$r" ] || continue
+  # En worktree vars katalog raderats utan `git worktree remove` står kvar i
+  # listan som `prunable`. Ett `cd` dit failar, och utan det här hoppet blev
+  # svaret att målet ligger inuti en utcheckning — vilket är falskt, och gjorde
+  # att verktyget vägrade köra tills någon gissade sig till `git worktree
+  # prune`. En trasig registrering får inte stänga av säkerhetsnätet.
+  [ -d "$r" ] || continue
   rp="$(cd "$r" && pwd -P)"
   case "$dest" in "$rp"|"$rp"/*) exit 1 ;; esac
 done || {
