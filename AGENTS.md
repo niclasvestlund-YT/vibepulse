@@ -101,9 +101,13 @@ OTA. Icke förhandlingsbart, och skälen står i filen:
 - **Sändargrindarna finns för att ett gammalt arkiverat bygge en gång frös
   panelen**: nyaste binären vid sändning, versionen utskriven, `-dirty` nekas.
   Kringgå dem aldrig med `TG_OTA_ALLOW_DIRTY` utan att användaren sagt det.
-- **Efter ändringar i `tools/tokenserver/` måste launchd-tjänsten startas om**
-  (`launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`). Den körande
-  processen behåller annars gammal kod och panelen visar ärligt glappet.
+- **Efter ändringar i `tools/tokenserver/` måste tjänsten startas om.** Den
+  körande processen behåller annars gammal kod och panelen visar ärligt
+  glappet — du validerar då kod som inte kör. På macOS:
+  `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`. På Windows
+  finns ingen launchd; tjänsten körs av Task Scheduler och startas om genom
+  `tools/tokenserver/install-windows-task.ps1`, som stoppar den befintliga
+  uppgiften, väntar in att den dör och registrerar om den.
 
 ## Releaser och utåtriktad dokumentation
 

@@ -52,6 +52,17 @@ case "$dest" in "$repo"|"$repo"/*)
   echo "VÄGRAR: $dest ligger inuti repot. Sätt TG_SNAPSHOT_DIR utanför." >&2
   exit 1 ;;
 esac
+
+# Varje repo får ett eget namnrum under målkatalogen, döpt efter sin ÄLDSTA
+# commit — repots identitet, oberoende av var det är utcheckat. Basnamnet
+# räcker inte: två olika repon som råkar heta samma sak i en delad katalog
+# skrev till samma filnamn samma sekund och det ena skrev över det andras
+# enda backup. Två utcheckningar av SAMMA repo delar namnrum, vilket är rätt
+# — det är samma historia.
+repo_id="$(git -C "$repo" rev-list --max-parents=0 --all 2>/dev/null \
+  | sort | head -1 | cut -c1-12)"
+dest="$dest/$(basename "$repo")-${repo_id:-norootcommit}"
+mkdir -p "$dest"
 stamp="$(date +%Y%m%d-%H%M%S)"
 bundle="$dest/$(basename "$repo")-$stamp.bundle"
 
@@ -81,7 +92,7 @@ dirty=$(git -C "$repo" status --porcelain | wc -l | tr -d ' ')
 # Rensningen är begränsad till DET HÄR repots egna bundles: pekar
 # TG_SNAPSHOT_DIR på en delad katalog skulle ett bredare glob radera andra
 # repons enda säkerhetskopior, tyst och som en bieffekt av att vi tog vår.
-ls -1t "$dest/$(basename "$repo")"-*.bundle 2>/dev/null \
+ls -1t "$dest"/*.bundle 2>/dev/null \
   | tail -n "+$((keep+1))" | while read -r old; do
   rm -f "$old" "${old%.bundle}.refs"
   echo "  rensade $(basename "$old")"

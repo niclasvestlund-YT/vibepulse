@@ -18,8 +18,10 @@ script can; the sender gates (newest-binary-at-send, version printed,
 -dirty refused) exist because a stale archived build once froze the panel —
 never bypass them with TG_OTA_ALLOW_DIRTY without the user saying so; and
 after editing `tools/tokenserver/`, restart the launchd service
-(`launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`) — the running
-process keeps old code and the panel honestly shows the gap.
+(macOS: `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`;
+Windows has no launchd — the service runs under Task Scheduler and restarts
+via `tools/tokenserver/install-windows-task.ps1`) — the running process keeps
+old code and the panel honestly shows the gap.
 
 ## AMOLED visual work
 
