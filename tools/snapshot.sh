@@ -51,14 +51,37 @@ umask 077
 # den radorienterade varianten såg `/tmp/wt`, så ett mål inuti den riktiga
 # katalogen hade passerat vakten obemärkt. En shellvariabel kan inte bära NUL,
 # därför filen.
+#
+# Parsningen görs i skalet, inte i awk. `RS="\0"` fungerar i mawk och gawk men
+# inte i BSD awk — `/usr/bin/awk` på macOS, alltså maintainerns egen maskin —
+# där strängar är C-strängar: `"\0"` blir tom sträng, tom RS betyder styckeläge,
+# och vakten hade läst fel poster utan att säga ifrån. `read -r -d ""` är samma
+# primitiv som resten av filen redan använder, och behöver inget externt verktyg.
+# Av samma skäl har varje `mktemp` en egen mall: BSD mktemp kräver en, GNU:s
+# gör den valfri, och utan mall dör filen på rad ett på just den maskin där
+# AGENTS.md gör den obligatorisk före en historikomskrivning.
 part=""; probe=""
-roots_file="$(mktemp)"
+roots_file="$(mktemp "${TMPDIR:-/tmp}/tg-snapshot-roots-XXXXXXXX")"
 trap 'rm -f "$part" "$roots_file"; rm -rf "$probe"' EXIT
-git worktree list --porcelain -z | awk 'BEGIN{RS="\0"; ORS="\0"}
-  /^worktree /{if (p != "" && !pr) print p; p=substr($0,10); pr=0; next}
-  /^prunable/{pr=1; next}
-  END{if (p != "" && !pr) print p}' > "$roots_file"
-repo="$(cd "$(head -c -1 "$roots_file" | awk 'BEGIN{RS="\0"} NR==1{print; exit}')" && pwd -P)"
+git worktree list --porcelain -z | {
+  cur=""; prunable=0
+  emit() { if [ -n "$cur" ] && [ "$prunable" = 0 ]; then printf '%s\0' "$cur"; fi; }
+  while IFS= read -r -d "" line; do
+    case "$line" in
+      "worktree "*) emit; cur="${line#worktree }"; prunable=0 ;;
+      prunable*)    prunable=1 ;;
+    esac
+  done
+  emit
+} > "$roots_file"
+# Första posten är huvudutcheckningen. Ett tomt resultat är inte tänkbart —
+# git listar alltid minst en — men ett tyst `exit 1` från ett misslyckat `read`
+# vore precis den ordlösa vägran som redan bitit en gång i den här filen.
+if ! IFS= read -r -d "" repo < "$roots_file"; then
+  echo "VÄGRAR: git worktree list gav ingen levande utcheckning att utgå från." >&2
+  exit 1
+fi
+repo="$(cd "$repo" && pwd -P)"
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = "true" ]; then
@@ -111,7 +134,9 @@ stamp="$(date +%Y%m%d-%H%M%S)"
 part="$(mktemp "$dest/.incomplete-$stamp-XXXXXXXX")"
 bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 
-git -C "$repo" bundle create "$part" --all --quiet
+# `--quiet` FÖRE filnamnet. Efter det tolkas det som ett rev-list-argument —
+# git accepterar det tyst och skriver ändå förloppet till en terminal.
+git -C "$repo" bundle create --quiet "$part" --all
 
 # En overifierad backup är ingen backup — men `git bundle verify` räcker inte
 # som verifiering. Den läser huvudet och kontrollerar att förutsättningarna
@@ -122,14 +147,23 @@ git -C "$repo" bundle create "$part" --all --quiet
 #
 # Därför indexeras paketet på riktigt: en fetch in i ett tomt bart repo tvingar
 # git att packa upp och kontrollsummera varje objekt. Det kostar ~1,3 s på 13
-# MB, vilket är gratis jämfört med att upptäcka det efter en omskrivning. De
-# tre refspecarna har skilda mål så de aldrig kan peka på samma ref, och
-# täcker även en bundle vars enda head är pseudo-refen HEAD.
-probe="$(mktemp -d)"
+# MB, vilket är gratis jämfört med att upptäcka det efter en omskrivning.
+# Refspecarna har skilda mål så de aldrig kan peka på samma ref, och täcker
+# även en bundle vars enda head är pseudo-refen HEAD.
+#
+# `+HEAD:` läggs till bara om bundlen annonserar HEAD. En refspec med `*` är
+# tyst när inget matchar, men en EXAKT refspec är det inte: mot en bundle utan
+# HEAD — ett repo vars enda refs är remote-refs och taggar — avbryter fetchen
+# med "couldn't find remote ref HEAD", och skriptet hade då rapporterat ett
+# helt paket som trasigt och raderat backupen. Fel åt fel håll.
+probe="$(mktemp -d "${TMPDIR:-/tmp}/tg-snapshot-probe-XXXXXXXX")"
 git init -q --bare "$probe"
-if ! git -C "$probe" fetch "$part" \
-       '+refs/*:refs/p/*' '+HEAD:refs/p-head/HEAD' '+worktrees/*:refs/p-wt/*' \
-       >/dev/null 2>&1; then
+heads="$(git bundle list-heads "$part")"
+specs=('+refs/*:refs/p/*' '+worktrees/*:refs/p-wt/*')
+if grep -qx '[0-9a-f]* HEAD' <<<"$heads"; then
+  specs+=('+HEAD:refs/p-head/HEAD')
+fi
+if ! git -C "$probe" fetch "$part" "${specs[@]}" >/dev/null 2>&1; then
   echo "VERIFIERING MISSLYCKADES: paketet gick inte att packa upp." >&2
   echo "  $bundle skrevs aldrig — ingen falsk trygghet." >&2
   exit 1

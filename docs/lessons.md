@@ -74,15 +74,24 @@ snapshot, says what is actually in there. To bring back everything, after the
 clone:
 
     git fetch <bundle> '+refs/*:refs/rescue/*' \
-      '+HEAD:refs/rescue-head/HEAD' \
       '+worktrees/*:refs/rescue-worktrees/*'
+
+    # only if `git bundle list-heads <bundle>` prints a row ending in ` HEAD`:
+    git fetch <bundle> '+HEAD:refs/rescue-head/HEAD'
 
 Three refspecs because a bundle holds three shapes of name, and a wildcard
 over `refs/*` reaches only the first: named refs, the bare `HEAD` of a
 detached checkout, and `worktrees/<name>/HEAD` from a linked worktree. The
 last two are pseudo-refs living outside `refs/`, so each needs its own line;
 omit one and its commit comes back with no ref at all and goes away at the
-next `git gc --prune=now`. The refspecs that match nothing are harmless.
+next `git gc --prune=now`. A wildcard refspec that matches nothing is
+harmless. `+HEAD:` is not a wildcard, and that is why it stands on its own
+line: an exact refspec that matches nothing aborts the whole fetch with
+`fatal: couldn't find remote ref HEAD`, and takes the two that would have
+worked down with it. A bundle whose repository had no valid HEAD — only
+remote-tracking refs and tags, which is what a mirror looks like — is
+exactly that case, and `tools/snapshot.sh` called such a bundle corrupt
+until it started asking `list-heads` first.
 
 All three destinations are outside `refs/heads/*` on purpose, and that is the
 part that took three attempts to get right. Fetching into `refs/*` aborts with

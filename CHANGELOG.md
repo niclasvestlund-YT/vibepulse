@@ -52,7 +52,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   truncated, and a bundle taken from it restores a fraction of the history
   without complaining. It also refuses a destination inside the repository,
   verifies what it wrote by reading it back, and deletes the file if
-  verification fails. Now a work rule in `AGENTS.md`.
+  verification fails. Now a work rule in `AGENTS.md`. Written for BSD
+  userland as well as GNU: the first draft parsed worktrees with awk's
+  `RS="\0"`, trimmed with `head -c -1` and called `mktemp` without a
+  template — three things that work on Linux and none of which work on
+  macOS, the very machine where the rule makes the tool mandatory.
 
 - **`/repo-cleanup`** — a two-phase cleanup command. Phase one only produces
   an evidence table with a keep-list and an uncertainty list; phase two
