@@ -88,12 +88,6 @@ dirty=$(git -C "$repo" status --porcelain | wc -l | tr -d ' ')
 q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 qb="$(q "$bundle")"
 
-# Ett bart repo ärver inte vilken gren som är default. Utan det här steget
-# pekar dess HEAD på refs/heads/master, som inte finns i ett repo som heter
-# sin gren något annat — och klonen därifrån avbryter med "remote HEAD refers
-# to nonexistent ref" med alla 53 refs på plats. Namnet läses här, medan vi
-# vet det.
-head_branch="$(git -C "$repo" symbolic-ref --quiet --short HEAD 2>/dev/null || echo main)"
 
 # Refspecen är `refs/*`, inte `refs/heads/*`: bundlen sparar VARJE ref, så en
 # återställning som bara tar grenar lämnar taggar, notes och egna refs tyst
@@ -103,13 +97,22 @@ head_branch="$(git -C "$repo" symbolic-ref --quiet --short HEAD 2>/dev/null || e
 # `git init` sätter HEAD på refs/heads/master, och en fetch dit nekas med
 # "refusing to fetch into branch ... checked out" även när refen inte finns
 # än. Den varianten skrevs, testades och underkändes här.
+#
+# Inget grennamn interpoleras in i de utskrivna kommandona. Två skäl, båda
+# funna i granskning: ett grennamn får innehålla `$(...)`, och git accepterar
+# det — den som klistrar in raden kör då kommandot i stället för att återställa
+# grenen. Och namnet fanns inte alltid: från en detached HEAD gav uppslaget
+# ingenting, fallbacken pekade på en gren som kunde saknas, och bundlens lösa
+# commit — som ligger under pseudo-refen `HEAD`, inte under `refs/*` — hade
+# inte fått någon ref alls. Ett FAST räddningsnamn löser båda: `HEAD` hämtas
+# uttryckligen, och HEAD pekas på det, oavsett vad grenen heter.
 printf '\nÅterställ ALLT till ett nytt repo:\n'
 printf '  git init --bare <katalog>.git\n'
-printf "  git -C <katalog>.git fetch %s '+refs/*:refs/*'\n" "$qb"
-printf '  git -C <katalog>.git symbolic-ref HEAD refs/heads/%s\n' "$head_branch"
+printf "  git -C <katalog>.git fetch %s '+refs/*:refs/*' '+HEAD:refs/heads/rescue-head'\n" "$qb"
+printf '  git -C <katalog>.git symbolic-ref HEAD refs/heads/rescue-head\n'
 printf '  git clone <katalog>.git <katalog>       # arbetskopia\n'
 printf '\nEller in i ett befintligt repo, utan att röra utcheckade grenar:\n'
-printf "  git fetch %s '+refs/*:refs/rescue/*'\n" "$qb"
-printf '  git log --oneline refs/rescue/heads/main   # se vad som fanns\n'
-printf '  git reset --hard refs/rescue/heads/<gren>  # när du valt\n'
+printf "  git fetch %s '+refs/*:refs/rescue/*' '+HEAD:refs/rescue/HEAD'\n" "$qb"
+printf '  git for-each-ref refs/rescue                # se vad som fanns\n'
+printf '  git reset --hard refs/rescue/heads/<gren>   # när du valt\n'
 printf '\n  (git clone %s går också, men tar bara grenar och taggar.)\n' "$qb"
