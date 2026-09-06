@@ -21,6 +21,33 @@ point at the backlog item.
 
 ---
 
+## 2026-09-06 · The pusher reported a flash it had not performed
+
+**What happened:** `tools/ota-flash.sh` POSTed the firmware and then
+printed "202 = avbilden vald för nästa boot" unconditionally. Reproduced
+against a stub device answering 403: the script exited 0 and announced the
+image was selected for boot, having written nothing. Every documented
+rejection — 400, 401, 403, 408, 413, 500, 503 — read as success at the
+terminal. **Root cause:** `curl` reflects an HTTP error in its exit status
+only when asked (`--fail`/`--fail-with-body`); without it a 403 is a
+completed transfer. The status *was* on screen via `-w "HTTP %{http_code}"`
+— printed, never read — and `set -eu` gave a false sense that a failure
+would stop the script. **The rule now:** the sender treats the device's
+answer as a gate, not as decoration. Exactly `202 Accepted` — the device's
+own word that the image is written, verified and selected — is success;
+every other status aborts naming the code, its meaning and the device's
+error string — and a status that could not be read at all is reported as
+unknown, never as "nothing happened", because a link that dies after the
+slot is chosen looks the same from here. The status a script prints is not
+the status it checked.
+**Guards:** `test/test_ota_sender_gates.py` now *runs* the script against a
+fake device that answers each status the firmware can return, asserting a
+non-zero exit and no boot claim; it also parses the reason phrases out of
+`components/torget_ota/ota_service.c`, so a new rejection path fails the
+test until the pusher can explain it. Gate 5 in `docs/ota.md`.
+**Watch for:** the same shape anywhere else this repo pipes `curl` output
+around — a printed `%{http_code}` proves only that curl knew the answer.
+
 ## 2026-09-05 · Pinning a screenshot's size did not pin its content
 
 **What happened:** the global Wi-Fi indicator was redrawn in `d5be82d`

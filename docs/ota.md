@@ -117,7 +117,7 @@ host-tested module (`test/test_ota_notice_policy.c`).
 
 The device proves an image is *valid*; the pusher proves it is the
 *right* one. Four gates run at the moment of upload, all born from the
-2026-08-14 ghost incident:
+2026-08-14 ghost incident, and a fifth reads what comes back:
 
 1. **Newest binary at send time** — never a directory picked at script
    start while a build was mid-write.
@@ -127,6 +127,17 @@ The device proves an image is *valid*; the pusher proves it is the
 4. **CI bridge**: the commit in the version string must have a green CI
    run on GitHub (`TG_OTA_ALLOW_NO_CI=1` for offline emergencies). CI
    runs on every pushed branch for exactly this reason.
+5. **The device's answer is read.** `202 Accepted` is the *only* success:
+   the device sends it after the whole image is written, the SHA-256
+   matched and the inactive slot has been selected for the next boot.
+   Every other path through the handler is a `reject()` that leaves the
+   boot choice untouched. `curl` does not set an exit status on an HTTP
+   error unless it is asked to, so the status is captured and compared —
+   anything but 202 aborts the push, naming the code, what it means and
+   the device's own error string. Until 2026-09-06 it did not: a rejected
+   upload ended with "avbilden vald för nästa boot" on the terminal, and
+   an operator standing at the panel was told a flash had happened that
+   never did.
 
 ## Day-to-day developer workflow
 
@@ -164,6 +175,9 @@ SHA, the version line names the incoming image.
 | Upload gets 403 | Window not open | Hold KEY3, then pick UPDATE in SETTINGS — the hold alone only opens the menu; the glass must show the ring/UPDATES ON |
 | Upload gets 401 | Token mismatch or malformed | `TG_OTA_TOKEN` in `secrets.h`: exactly 64 lowercase hex |
 | Upload gets 400 "not a torget esp32s3 image" | Wrong file (bootloader? another project?) | Send `build*/torget.bin`, nothing else |
+| Upload gets 503 | Another upload is still running on the device | Wait for it to finish or time out; one upload at a time is by design |
+| Pusher aborts with "VÄGRAR: enheten svarade …, inte 202" | The device rejected the upload — the code says why | The row for that code above; the device's own error string is printed with it. Nothing was written: the panel keeps running its current build |
+| Pusher aborts with "inget svar lästes" | The link died before any status could be read — the device may have rejected on the headers and closed while the body was still going out, or answered too late to be heard | Read the running version on the panel before retrying. The pusher will not guess in either direction: unread is unknown, not "nothing happened" |
 | 202 but the old version still runs after reboot | Health gate rolled the image back | The new build is broken on-device; check it on USB with the console |
 | UPDATE READY never appears | Same version already running, or tokenserver older than the feature | `curl localhost:8737/api/tokens \| grep otaAvailable` |
 | Takeover shows but UPDATE does nothing | No pusher waiting on the Mac | Start `tools/ota-flash.sh <ip>` — the tap opens the window; the Mac must deliver |

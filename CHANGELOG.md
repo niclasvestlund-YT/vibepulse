@@ -7,6 +7,24 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **The OTA pusher called a rejected upload a successful flash.**
+  `tools/ota-flash.sh` posted the image and never looked at the status
+  that came back: `curl` only reflects an HTTP error in its exit status
+  when asked to (`--fail`/`--fail-with-body`), so a documented rejection —
+  403 for a closed window, 401 for a bad token, 400 for the wrong image or
+  a broken stream, 408, 413, 500, 503 — left the script exiting 0 and
+  printing "202 = avbilden vald för nästa boot". The operator standing at
+  the panel was told the flash worked while the inactive slot lay untouched
+  and the old build kept running. The status is now captured and compared:
+  only an exact 202 — the device's own word that the image was written,
+  SHA-256 verified and selected for boot — is success, and anything else
+  aborts with the code, what it means, and the device's error string.
+  `test/test_ota_sender_gates.py` grew a behavioural half that runs the
+  script against a fake device answering each status the firmware can
+  actually return, and cross-checks that list against the handler in
+  `components/torget_ota/ota_service.c` so a new rejection path cannot ship
+  without the sender learning to explain it.
+
 - **The OTA runbook told you the wrong gesture, on the terminal, while you
   stood at the panel.** `tools/ota-flash.sh` said "håll KEY3 ~3 s tills
   UPDATES ON-ringen syns" — in its header *and* in the line it prints while

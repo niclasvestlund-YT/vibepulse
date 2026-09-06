@@ -105,11 +105,70 @@ if [ "${TG_OTA_ALLOW_NO_CI:-0}" != "1" ]; then
 fi
 
 echo "fönstret öppet — laddar upp $BIN ($(wc -c < "$BIN" | tr -d ' ') byte):"
-curl -s --max-time 300 -X POST "http://$HOST/api/ota/firmware" \
+CURL_RC=0
+RESPONSE=$(curl -sS --max-time 300 -X POST "http://$HOST/api/ota/firmware" \
   -H "Authorization: Bearer $TOKEN" \
   -H "X-VibePulse-Project: torget" \
   -H "X-VibePulse-Chip: esp32s3" \
   -H "X-VibePulse-SHA256: $SHA" \
   --data-binary "@$BIN" \
-  -w "\nHTTP %{http_code} på %{time_total}s\n"
+  -w "\n%{http_code} %{time_total}") || CURL_RC=$?
+
+# SVARSGRINDEN: curl sätter INTE exitkod på HTTP-fel utan --fail, så
+# statusen MÅSTE läsas ur svaret. Utan den här kontrollen skrev raden
+# nedan "vald för nästa boot" också när enheten svarat 400/401/403/408/
+# 413/500/503 — operatören som stod vid panelen fick höra att flashen
+# gick igenom medan luckan låg orörd och det gamla bygget kördes vidare.
+# Enhetens handler (components/torget_ota/ota_service.c) svarar 202 ENDAST
+# efter att hela avbilden är skriven, SHA-256:an stämt och den inaktiva
+# luckan pekats ut som nästa boot; varje annan väg där går via reject()
+# och lämnar bootvalet orört. Därför: exakt 202, annars stopp.
+HTTP_STATUS=$(printf '%s\n' "$RESPONSE" | tail -1)
+DEVICE_BODY=$(printf '%s\n' "$RESPONSE" | sed '$d')
+HTTP_CODE=${HTTP_STATUS%% *}
+HTTP_TIME=${HTTP_STATUS#* }
+echo "HTTP $HTTP_CODE på ${HTTP_TIME}s"
+if [ -n "$DEVICE_BODY" ]; then
+  echo "enhetens svar: $DEVICE_BODY"
+fi
+
+if [ "$HTTP_CODE" != "202" ]; then
+  case "$HTTP_CODE" in
+    ""|000)
+      # Utan läst status vet vi inte vad enheten hann göra: den kan ha
+      # avvisat på headrarna och stängt medan kroppen fortfarande gick, och
+      # den kan ha hunnit välja luckan utan att svaret nådde hit. Säg inte
+      # mer än så — ärlighetsinvarianten gäller terminalen också.
+      HEADLINE="VÄGRAR: inget svar lästes från enheten (curl-fel $CURL_RC) — flashen är INTE bekräftad."
+      REASON="nätet, enheten föll bort, eller så avvisade den och stängde innan kroppen var skickad"
+      AFTER="Anta ingenting: läs enhetens version på glaset innan du försöker igen." ;;
+    *)
+      # Ett LÄST avslag är entydigt: varje sådan väg i enhetens handler
+      # går via reject(), som avbryter OTA-skrivningen och aldrig rör
+      # bootvalet. Den gamla luckan är kvar, orörd.
+      HEADLINE="VÄGRAR: enheten svarade $HTTP_CODE, inte 202 — INGEN avbild är vald för boot."
+      AFTER="Enheten kör kvar sitt nuvarande bygge. Felsökningstabell: docs/ota.md."
+      case "$HTTP_CODE" in
+        400) REASON="enheten förkastade avbilden (fel fil, fel SHA-256, eller bruten ström)" ;;
+        401) REASON="token avvisad — TG_OTA_TOKEN i secrets.h ska vara exakt 64 gemena hex, samma som enhetens bygge" ;;
+        403) REASON="underhållsfönstret var inte öppet — det stängdes under uppladdningen (tio minuter, eller ett kort KEY3-tryck)" ;;
+        408) REASON="enheten tröttnade på att vänta på kroppen" ;;
+        413) REASON="avbilden får inte plats i den inaktiva luckan" ;;
+        500) REASON="enheten misslyckades internt (flashskrivning, validering eller luckval)" ;;
+        503) REASON="en uppladdning pågår redan på enheten" ;;
+        *)   REASON="oväntad status — enheten dokumenterar bara 202/400/401/403/408/413/500/503" ;;
+      esac ;;
+  esac
+  echo "$HEADLINE" >&2
+  echo "        $REASON" >&2
+  echo "        $AFTER" >&2
+  exit 1
+fi
+
+if [ "$CURL_RC" -ne 0 ]; then
+  # 202 är enhetens ord, och det ordet gavs efter att luckan valts: att
+  # länken dog strax efter (omstarten kommer 1,5 s efter svaret) ändrar
+  # inte utfallet. Men det ska synas att det hände.
+  echo "(länken bröts efter svaret, curl-fel $CURL_RC — enheten hann svara 202)"
+fi
 echo "202 = avbilden vald för nästa boot; enheten startar om inom ett par sekunder."
