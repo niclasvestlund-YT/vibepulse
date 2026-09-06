@@ -269,17 +269,46 @@ sampled `heap:` figure never went below 16 384 across the whole session, so none
 of this is visible in the number a soak would normally watch. This is the open
 question OBS-35 carries forward.
 
-## An unanswered question, recorded as unanswered
+## The window that cannot be attributed — and why that is the finding
 
 Two maintenance windows opened at t=837 s and t=2156 s, before the three
-measured cycles began. It was asked whether the user opened those two, since a
-window that opens by itself would be a materially worse finding than one the
-user opened. **That question was never answered.** Windows 3, 4 and 5 (the three
-cycles) are confirmed user-initiated; windows 1 and 2 are unattributed. The
-OBS-35 correlation does not depend on the answer — the three measured cycles
-stand on their own — but the possibility of a self-opening window is not
-excluded by anything in this session and should be settled before §3, where a
-spontaneous window would corrupt the takeover tests.
+measured cycles. Asked whether he opened them, the operator answered: **no — he
+did not see it and was neither awake nor at the screen.**
+
+Both *automatic* open paths are excluded by the log:
+
+| Path | Condition | Result |
+|---|---|---|
+| Boot self-rearm (`ota_service.c:565–578`) | running partition must be `ESP_OTA_IMG_PENDING_VERIFY` | **no** — `boot-health: hälsogrinden vilar: ota_0 i tillstånd 0x2 (ej väntande)`, and zero `nyss uppdaterad avbild` lines |
+| Notice answered with JA (`ota_service.c:~446`) | the UPDATE READY pill is tapped | **no** — zero `notisen besvarad med JA` lines |
+
+The firmware is explicit that our case should stay closed: *"En esptool-flashad
+boot (UNDEFINED/VALID) har inget föregående håll och lämnas stängd."* That rule
+held — the window did not open at boot.
+
+**But the question cannot be settled, because KEY3 presses are not logged.** A
+3 s hold into SETTINGS followed by a tap on UPDATE (`main/main.c:751`) leaves no
+trace at all except the window-open line itself. The absence of preceding lines
+before t=837 s therefore proves nothing.
+
+What the log does show is that someone was at the panel shortly before the
+*second* window:
+
+```
+I (2142567) needs-you-net: skickade deny                        <- panic, i.e. a ~2 s KEY3 press
+I (2156363) ota-service: underhållsfönstret öppet i tio minuter
+```
+
+Fourteen seconds apart. The panic only appears in the log because it sends a
+network message; the gesture itself is invisible.
+
+So the honest finding is not "a window opened by itself". It is that **the
+consent model has no audit trail.** `CLAUDE.md` calls it non-negotiable that the
+maintenance window opens only from the device, and the panel cannot afterwards
+show that it did. A window open, its trigger source (hold-into-menu, notice pill,
+or boot re-arm), and the closing event should each be logged; without that, an
+open window is unattributable after the fact and this exact question is
+unanswerable — as it is here.
 
 ## `.ota-device` points at the wrong address
 

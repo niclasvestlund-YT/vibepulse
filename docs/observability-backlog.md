@@ -450,6 +450,40 @@ block dips under 11 520, or whether it retries and hides it.
 
 ---
 
+### OBS-36 · A maintenance window cannot be attributed after the fact
+`firmware · S · open` — found 2026-09-06 while trying to answer a simple
+question: did the operator open the window, or did it open itself?
+
+`CLAUDE.md` states as non-negotiable that the maintenance window opens **only**
+from the device — a 3 s KEY3 hold into SETTINGS, then UPDATE; or the UPDATE pill
+on the takeover. The panel cannot afterwards demonstrate that this happened.
+
+Two windows opened at t=837 s and t=2156 s on `v1.0.0-67-ge51b79f`. The operator
+states he did not open them and was not at the screen. Both automatic paths are
+excluded by the log — the running partition was `0x2`, not `PENDING_VERIFY`, so
+the boot re-arm at `ota_service.c:565–578` did not fire (and its own comment says
+an esptool-flashed boot is deliberately left closed), and there are zero
+`notisen besvarad med JA` lines. The remaining path, a hold into the menu
+followed by a tap (`main/main.c:751`), **leaves no log line at all**. The absence
+of evidence before the window therefore proves nothing, and the question is
+simply unanswerable.
+
+The only reason the second window has any context is an accident: a panic fired
+14 seconds earlier and happens to log because it sends a network message
+(`needs-you-net: skickade deny`). The gesture itself is invisible.
+
+Fix: log the window's open event **with its trigger source** — hold-into-menu,
+notice pill, or boot re-arm — and log the close with its cause (short tap,
+timeout, upload complete). One line each. Without it, the consent model is
+asserted but not evidenced, and any future "did someone open this?" incident
+ends where this one did.
+
+This is P1 rather than P3 because the evidence does not merely go missing; the
+log reads as though nothing happened, which is indistinguishable from a window
+that opened on its own.
+
+---
+
 ## P2 — stop making it worse
 
 ### OBS-13 · No backoff anywhere in the firmware
