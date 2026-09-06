@@ -63,18 +63,30 @@ repo_id="$(git -C "$repo" rev-list --max-parents=0 --all 2>/dev/null \
   | sort | head -1 | cut -c1-12)"
 dest="$dest/$(basename "$repo")-${repo_id:-norootcommit}"
 mkdir -p "$dest"
-stamp="$(date +%Y%m%d-%H%M%S)"
+# Sekundstämpeln ensam räcker inte som namn: två körningar inom samma sekund
+# — parallella worktrees, ett skript som loopar — får identisk sökväg, och
+# `git bundle create` TRUNKERAR en befintlig fil i stället för att vägra. Den
+# senare körningen kan alltså skriva över den enda kända goda bundlen. PID:en
+# gör namnet unikt.
+stamp="$(date +%Y%m%d-%H%M%S)-$$"
 bundle="$dest/$(basename "$repo")-$stamp.bundle"
 
-git -C "$repo" bundle create "$bundle" --all --quiet
+# Skriv först till ett namn som INTE slutar på .bundle, verifiera, och flytta
+# på plats sist. En avbruten körning lämnar då en .part som varken rensningen
+# eller en människa kan förväxla med en färdig backup — i stället för en
+# halvskriven fil med rätt namn.
+part="$dest/.incomplete-$stamp.part"
+trap 'rm -f "$part"' EXIT
+
+git -C "$repo" bundle create "$part" --all --quiet
 
 # En overifierad backup är ingen backup. Detta läser tillbaka filen och
 # kontrollerar att varje objekt den utlovar faktiskt finns i den.
-if ! git -C "$repo" bundle verify "$bundle" >/dev/null 2>&1; then
+if ! git -C "$repo" bundle verify "$part" >/dev/null 2>&1; then
   echo "VERIFIERING MISSLYCKADES: $bundle — tas bort, ingen falsk trygghet." >&2
-  rm -f "$bundle"
   exit 1
 fi
+mv "$part" "$bundle"
 
 # Reflistan bredvid, så man ser vad en bundle höll utan att packa upp den.
 git -C "$repo" show-ref > "${bundle%.bundle}.refs"
@@ -102,10 +114,13 @@ done
 # '+refs/heads/*:refs/heads/*'` in i en vanlig klon avbryter med "refusing to
 # fetch into branch ... checked out" så fort den utcheckade grenen finns i
 # bundlen — vilket den alltid gör i det läge man behöver den här filen. Därför
-# hämtas grenarna till ett eget namnrum, där de går att titta på före man
-# skriver över något.
+# hämtas allt till ett eget namnrum, där det går att titta på före man skriver
+# över något. Refspecen är `refs/*`, inte `refs/heads/*`: bundlen sparar VARJE
+# ref, så en återställning som bara tar grenar lämnar taggar, notes och egna
+# refs tyst borta — precis de som är svårast att märka att man saknar.
 printf '\nÅterställ till en ny katalog:\n  git clone %s <katalog>\n' "$bundle"
 printf '\nEller in i ett befintligt repo, utan att röra utcheckade grenar:\n'
-printf "  git fetch %s '+refs/heads/*:refs/rescue/*'\n" "$bundle"
-printf '  git log --oneline refs/rescue/main        # se vad som fanns\n'
-printf '  git reset --hard refs/rescue/<gren>       # när du valt\n'
+printf "  git fetch %s '+refs/*:refs/rescue/*'\n" "$bundle"
+printf '  git log --oneline refs/rescue/heads/main   # se vad som fanns\n'
+printf '  git reset --hard refs/rescue/heads/<gren>  # när du valt\n'
+printf '  (taggar hamnar under refs/rescue/tags/, notes under .../notes/)\n'
