@@ -67,10 +67,13 @@ only exists in your own commits, rebuild on the base with `cherry-pick` and
 fix the content on the way through; check `git merge-base HEAD origin/main`
 afterwards, and compare the final tree against the intended one.
 **Restoring from a snapshot:** `git clone <bundle> <dir>` covers branches and
-tags. Anything the bundle lists as `HEAD` or `worktrees/<name>/HEAD` is a
-commit no branch reaches — a detached checkout, a linked worktree — and a
-clone leaves it behind; fetch those explicitly, e.g.
-`git fetch <bundle> '+HEAD:refs/heads/recovered'`. `git bundle list-heads`
+tags — and nothing else. Every other namespace the bundle holds is left
+behind: `refs/notes/*`, any custom namespace, and the pseudo-refs `HEAD` and
+`worktrees/<name>/HEAD`, which are commits no branch reaches at all. Read the
+listing and restore what it shows, rather than assuming a clone was enough:
+`git fetch <bundle> '+refs/*:refs/*'` for the named ones and
+`git fetch <bundle> '+HEAD:refs/heads/recovered'` for a detached head (the
+pseudo-refs are outside `refs/*`, so they need their own line). `git bundle list-heads`
 (and the `.refs` file beside each snapshot) says which of them exist. No
 recipe is printed by the tool itself: eight review rounds found a new edge in
 those lines almost every time — lost tags and notes, a branch name containing

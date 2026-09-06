@@ -87,11 +87,23 @@ fi
 
 # `ln` publicerar atomiskt OCH vägrar om målet finns — `mv` skriver över, och
 # `mv -n` gör tyst ingenting och returnerar 0, vilket vore värst av allt här.
-if ! ln "$part" "$bundle" 2>/dev/null; then
+#
+# Men hårdlänkar finns inte överallt. exFAT, FAT och SMB-monteringar saknar
+# dem — och det är just sådana volymer man hänger på för externa backuper. Ett
+# `ln` som alltid failar där hade fått skriptet att påstå att målet redan finns
+# och sedan låta trappen radera den färdigverifierade bundlen. Därför skiljs
+# de två orsakerna åt: finns målet är det en vägran, annars saknar filsystemet
+# hårdlänkar och `mv` är det bästa som går att få. Fönstret mellan kontroll och
+# flytt är litet och på en FAT-volym finns ingen atomisk primitiv att välja i
+# stället.
+if ln "$part" "$bundle" 2>/dev/null; then
+  rm -f "$part"
+elif [ -e "$bundle" ]; then
   echo "VÄGRAR: $bundle finns redan — skriver inte över en befintlig backup." >&2
   exit 1
+else
+  mv "$part" "$bundle"
 fi
-rm -f "$part"
 
 # Innehållsförteckningen bredvid, så man ser vad en bundle höll utan att packa
 # upp den. Den läses ur BUNDLEN, inte ur repot: `git show-ref` listar bara
