@@ -48,18 +48,19 @@ case "$dest" in "$repo"|"$repo"/*)
   exit 1 ;;
 esac
 
-# Sekundstämpeln ensam räcker inte som namn: två körningar inom samma sekund
-# — parallella worktrees, ett skript som loopar — får identisk sökväg, och
-# `git bundle create` TRUNKERAR en befintlig fil i stället för att vägra.
-stamp="$(date +%Y%m%d-%H%M%S)-$$"
-bundle="$dest/$(basename "$repo")-$stamp.bundle"
-[ -e "$bundle" ] && { echo "VÄGRAR: $bundle finns redan." >&2; exit 1; }
-
-# Skriv först till ett namn som INTE slutar på .bundle, verifiera, och flytta
-# på plats sist. En avbruten körning lämnar då en .part som ingen kan förväxla
-# med en färdig backup — i stället för en halvskriven fil med rätt namn.
-part="$dest/.incomplete-$stamp.part"
+# Namnet får inte kunna kollidera. En sekundstämpel räcker inte — två
+# körningar inom samma sekund får identisk sökväg och `git bundle create`
+# TRUNKERAR en befintlig fil i stället för att vägra. PID räckte inte heller:
+# den är unik bara inom en PID-rymd, så två containrar som delar katalog kan
+# få samma. mktemp skapar filen EXKLUSIVT och ger slumpen som suffix; ingen
+# `[ -e ]`-kontroll behövs, och den hade ändå varit racy.
+#
+# Skrivs till ett namn som INTE slutar på .bundle. En avbruten körning lämnar
+# då något ingen kan förväxla med en färdig backup.
+stamp="$(date +%Y%m%d-%H%M%S)"
+part="$(mktemp "$dest/.incomplete-$stamp-XXXXXXXX")"
 trap 'rm -f "$part"' EXIT
+bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 
 git -C "$repo" bundle create "$part" --all --quiet
 
@@ -69,7 +70,14 @@ if ! git -C "$repo" bundle verify "$part" >/dev/null 2>&1; then
   echo "VERIFIERING MISSLYCKADES: $bundle skrevs aldrig, ingen falsk trygghet." >&2
   exit 1
 fi
-mv "$part" "$bundle"
+
+# `ln` publicerar atomiskt OCH vägrar om målet finns — `mv` skriver över, och
+# `mv -n` gör tyst ingenting och returnerar 0, vilket vore värst av allt här.
+if ! ln "$part" "$bundle" 2>/dev/null; then
+  echo "VÄGRAR: $bundle finns redan — skriver inte över en befintlig backup." >&2
+  exit 1
+fi
+rm -f "$part"
 
 # Innehållsförteckningen bredvid, så man ser vad en bundle höll utan att packa
 # upp den. Den läses ur BUNDLEN, inte ur repot: `git show-ref` listar bara
