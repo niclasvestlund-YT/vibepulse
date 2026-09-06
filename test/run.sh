@@ -264,6 +264,14 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -o /tmp/torget-service-discovery-policy-test
 /tmp/torget-service-discovery-policy-test
 
+# Reläets adress ÄR nyckeln. Redigeringen som håller den ur loggarna är ren
+# stränglogik och testas som sådan — inte bara som ett anrop i torget_http.c.
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/torget_net/net_log_target.c \
+  test_net_log_target.c \
+  -o /tmp/torget-net-log-target-test
+/tmp/torget-net-log-target-test
+
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_wifi/wifi_slots.c \
   test_wifi_slots.c \

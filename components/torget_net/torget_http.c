@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "net_log_target.h"
 #include "net_source_policy.h"
 #include "service_discovery.h"
 #include "vibepulse_recovery.h"
@@ -108,16 +109,32 @@ static bool http_get_timeout(const char *url, char *buf, size_t cap,
   esp_err_t err = esp_http_client_perform(client);
   int status = esp_http_client_get_status_code(client);
 
-  if (err != ESP_OK) {
-    ESP_LOGW(TAG, "hämtning misslyckades: %s (%s)", esp_err_to_name(err), url);
-  } else if (status != 200) {
-    ESP_LOGW(TAG, "oväntad statuskod %d (%s)", status, url);
-  } else if (body.overflow) {
-    ESP_LOGW(TAG, "kroppen större än %u byte, avvisad (%s)", (unsigned)cap, url);
-  } else {
+  if (err == ESP_OK && status == 200 && !body.overflow) {
     buf[body.len] = '\0';
     if (len_out) *len_out = body.len;
     ok = true;
+  } else {
+    /* Adressen får ALDRIG loggas rå. Reläets sökväg, `/u/<hemlighet>`, är
+     * hela åtkomstkontrollen (docs/relay.md), och det som hamnar här läses
+     * ur en seriedump eller klistras in i en felsökningstråd. Schema, värd
+     * och vilken väg som provades räcker för att skilja fel hamn från fel
+     * värd från ett dött relä.
+     *
+     * `cloud` är vägordet: den är sann exakt när hämtningen gick till
+     * reläet (TG_NET_SOURCE_RELAY), och redigeringen är ändå ovillkorlig —
+     * en felställd flagga får kosta fel vägord, aldrig en läckt sökväg. */
+    char target[TG_NET_LOG_TARGET_CAP];
+    tg_net_log_target(target, sizeof target, url, cloud);
+
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "hämtning misslyckades: %s (%s)", esp_err_to_name(err),
+               target);
+    } else if (status != 200) {
+      ESP_LOGW(TAG, "oväntad statuskod %d (%s)", status, target);
+    } else {
+      ESP_LOGW(TAG, "kroppen större än %u byte, avvisad (%s)", (unsigned)cap,
+               target);
+    }
   }
 
 done:
