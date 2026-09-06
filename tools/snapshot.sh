@@ -78,11 +78,23 @@ dirty=$(git -C "$repo" status --porcelain | wc -l | tr -d ' ')
 [ "$dirty" -gt 0 ] && printf '  OBS: %s ocommittade ändringar ligger UTANFÖR snapshoten.\n' "$dirty"
 
 # Behåll de nyaste; en backupkatalog som växer obegränsat slutar bli körd.
-ls -1t "$dest"/*.bundle 2>/dev/null | tail -n "+$((keep+1))" | while read -r old; do
+# Rensningen är begränsad till DET HÄR repots egna bundles: pekar
+# TG_SNAPSHOT_DIR på en delad katalog skulle ett bredare glob radera andra
+# repons enda säkerhetskopior, tyst och som en bieffekt av att vi tog vår.
+ls -1t "$dest/$(basename "$repo")"-*.bundle 2>/dev/null \
+  | tail -n "+$((keep+1))" | while read -r old; do
   rm -f "$old" "${old%.bundle}.refs"
   echo "  rensade $(basename "$old")"
 done
 
-printf '\nÅterställ:  git clone %s <katalog>\n' "$bundle"
-printf 'Eller in i ett befintligt repo:\n'
-printf "  git fetch %s '+refs/heads/*:refs/heads/*'\n" "$bundle"
+# Återställningen som faktiskt fungerar. `git fetch <bundle>
+# '+refs/heads/*:refs/heads/*'` in i en vanlig klon avbryter med "refusing to
+# fetch into branch ... checked out" så fort den utcheckade grenen finns i
+# bundlen — vilket den alltid gör i det läge man behöver den här filen. Därför
+# hämtas grenarna till ett eget namnrum, där de går att titta på före man
+# skriver över något.
+printf '\nÅterställ till en ny katalog:\n  git clone %s <katalog>\n' "$bundle"
+printf '\nEller in i ett befintligt repo, utan att röra utcheckade grenar:\n'
+printf "  git fetch %s '+refs/heads/*:refs/rescue/*'\n" "$bundle"
+printf '  git log --oneline refs/rescue/main        # se vad som fanns\n'
+printf '  git reset --hard refs/rescue/<gren>       # när du valt\n'

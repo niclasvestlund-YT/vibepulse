@@ -189,7 +189,7 @@ readable OAuth copy is expired:
 | `claudeProbe` | Meaning | What to do |
 |---|---|---|
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
-| `not_run` | Probe has not fired yet | It runs every 240 s (`LIMITS_EVERY_S`) — wait |
+| `not_run` | Probe has not fired yet | Waiting alone will not clear it: `get_limits()` starts the probe, and only `/api/tokens` calls it. Request `/api/tokens` once, or check the panel is polling. 240 s (`LIMITS_EVERY_S`) is the gap between *completed* probes |
 | `no_claude_oauth_token` | No Claude Desktop / Claude Code token found | Have them sign in to Claude Code on this computer |
 | `token_expired_…` | Token found but expired; Claude may still say logged in because login state and the exported usage credential are different | The service rechecks locally every 15 s. `claudeLocalUsage: fresh_applied` can keep the general week live; for Fable, start a **new Claude Code CLI turn** and send one short message so Claude's supported client refreshes Keychain |
 | `usage_http_401` / `usage_http_403` | Every token source rejected (on macOS the probe tries Claude Desktop's process token, then the keychain, and falls back automatically; on Windows there is only `%USERPROFILE%\.claude\.credentials.json`) | Re-authenticate in Claude Code |

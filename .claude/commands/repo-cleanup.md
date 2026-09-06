@@ -49,7 +49,10 @@ Rör inte dessa, oavsett hur oanvända de ser ut:
 - `third_party/`, `dependencies.lock`, `partitions.csv`, `sdkconfig.defaults`
 - `platform/fonts/*.c` — genererade men committade med flit (bygget ska
   varken behöva node eller nät)
-- Allt som `.gitignore` redan täcker — det ligger inte i repot att städa
+- Allt som `.gitignore` täcker **och som inte är spårat**. En fil slutar inte
+  vara spårad för att en ignore-regel tillkommer efteråt — den ligger kvar i
+  repot och är då en giltig kandidat i kategori 1. Fråga `git ls-files`, inte
+  `git check-ignore`
 - Git-historik. Ingen `filter-branch`, ingen BFG, ingen force-push.
 
 ### Fällor i just det här repot
@@ -61,7 +64,10 @@ Rör inte dessa, oavsett hur oanvända de ser ut:
   "oanvänt" dokument under `docs/superpowers/reviews/` kan vara det enda
   beviset ett test letar efter, eller en `locator:` i
   `spec/hardware-sources.yaml`. Greppa alltid `spec/`, `test/` och
-  `tools/*_test*.py` innan du föreslår ett dokument.
+  `tools/**/test_*.py` innan du föreslår ett dokument — mönstret är
+  `test_*.py`, inte `*_test*.py`, som matchar noll filer här och just därför
+  hade tystat `tools/test_hardware_registry.py`, som kräver ett dokument
+  under `docs/superpowers/plans/`.
 - **C-kod kan nås utan anropare** — via registermakro, Kconfig-symbol,
   `CMakeLists.txt`-post eller ett svagt symbolöverlagrat default. Grep efter
   namnet räcker inte; bygget är facit.
@@ -92,15 +98,31 @@ Committa inget. Fråga vad jag vill plocka.
 
 När jag har pekat ut vilka rader som gäller:
 
-1. **En commit per kategori**, aldrig en stor. En dålig bedömning ska kunna
+1. **Rent arbetsträd först.** `git status --porcelain` innan första
+   raderingen: är någon godkänd sökväg ändrad eller ospårad, stanna och
+   fråga. En radering plus commit kastar redigeringar gjorda efter
+   inventeringen, och att reverta committen ger tillbaka den *committade*
+   versionen — inte det som gick förlorat.
+2. **Grön baslinje först.** Kör grinden EN gång innan första raderingen och
+   skriv ner vad som är rött. Är den redan röd, rapportera det och stanna:
+   utan baslinje tillskrivs ett existerande fel den första raderingen, och
+   giltigt godkänt arbete revertas i onödan.
+3. **En commit per kategori**, aldrig en stor. En dålig bedömning ska kunna
    revertas ensam.
-2. **Grinden mellan varje commit**: `./test/run.sh` (hela värdgrinden, inte en
-   delmängd) och `idf.py build` när C-kod eller CMake rörts. Röd grind =
-   återställ den committen och rapportera, inte "fixa testet".
-3. **Minsta möjliga ändring.** Städa inte formatering, döp inte om, flytta
+4. **Grinden mellan varje commit**: `./test/run.sh` (hela värdgrinden, inte en
+   delmängd), plus `idf.py build` så fort något target-byggets indata rörts —
+   C, CMake, `Kconfig*`, `idf_component.yml`, `sdkconfig.defaults`,
+   `partitions.csv`. Värdgrinden konfigurerar inte målet, så en trasig
+   Kconfig-rad passerar den obemärkt. Röd grind = återställ den committen och
+   rapportera, inte "fixa testet".
+5. **Minsta möjliga ändring.** Städa inte formatering, döp inte om, flytta
    inte saker "medan du ändå är där". Ta bort det som godkändes.
-4. **Följdändringar hör till samma commit** — dör ett dokument ska länkarna
+6. **Följdändringar hör till samma commit** — dör ett dokument ska länkarna
    till det dö samtidigt. Lämna aldrig en trasig länk efter dig.
-5. **Ignorera inte i stället för att ta bort.** En ny `.gitignore`-rad tar inte
+7. **Ignorera inte i stället för att ta bort.** En ny `.gitignore`-rad tar inte
    bort filen ur historiken och löser ingenting; ta bort filen, eller låt bli.
-6. Committa på arbetsgrenen och pusha. Ingen PR om jag inte ber om det.
+8. **Pusha bara det du skapade.** Notera `git rev-parse @{u}` före arbetet
+   och jämför efteråt: ligger grenen före sin upstream med commits som inte
+   är dina städcommits, publicerar en naken `git push` dem också — och
+   godkännandet gällde rader i en rapport, inte någon annans halvfärdiga
+   arbete. Stanna och fråga i så fall. Ingen PR om jag inte ber om det.

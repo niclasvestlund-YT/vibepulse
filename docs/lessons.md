@@ -26,8 +26,8 @@ point at the backlog item.
 **What happened:** `docs/img/github/glass-live.png` was an iPhone 15 Pro
 photograph committed straight off the camera — 3024 × 4032, 6.9 MB, a
 quarter of the whole repository in one file. Its EXIF held a full GPS IFD:
-a position fix precise to ten metres, with the altitude and the
-minute it was taken. That is a home address, published, in a repository whose
+a position fix precise to ten metres, with the altitude and the minute it
+was taken. That is a home address, published, in a repository whose
 `.gitignore` deliberately keeps `.ota-device` and `secrets.h` off the disk
 because a LAN address is considered too revealing to share. **Root cause:**
 the secrets discipline was built around *text* — passwords, keys, IP
@@ -38,7 +38,12 @@ when the markdown renders it at 800 px. **The rule now:** a photograph
 entering `docs/img/` is resized to what the page actually renders and
 re-encoded through a fresh image with no `info` dict, so EXIF, XMP and the
 ICC profile are all dropped rather than trimmed. Check
-`Image.getexif().get_ifd(0x8825)` is empty before committing.
+`Image.getexif().get_ifd(0x8825)` is empty before committing. **And do not
+write the values into the write-up.** The first version of this entry quoted
+the exact latitude, longitude, altitude and timestamp in plaintext — more
+searchable than the EXIF it was describing, and it would have outlived any
+scrub of the image. A review bot caught it. Describe what the metadata was,
+never what it said.
 **Guards:** none automated yet — `test_docs_frame_drift.py` deliberately
 skips `NOT_FRAMES`, which is where every photograph lives, so the class is
 unguarded by construction. Backlog item, not a claim of safety.
