@@ -66,6 +66,17 @@ cost two rebuilds here before the pattern was obvious. To scrub a string that
 only exists in your own commits, rebuild on the base with `cherry-pick` and
 fix the content on the way through; check `git merge-base HEAD origin/main`
 afterwards, and compare the final tree against the intended one.
+**Restoring from a snapshot:** `git clone <bundle> <dir>` covers branches and
+tags. Anything the bundle lists as `HEAD` or `worktrees/<name>/HEAD` is a
+commit no branch reaches — a detached checkout, a linked worktree — and a
+clone leaves it behind; fetch those explicitly, e.g.
+`git fetch <bundle> '+HEAD:refs/heads/recovered'`. `git bundle list-heads`
+(and the `.refs` file beside each snapshot) says which of them exist. No
+recipe is printed by the tool itself: eight review rounds found a new edge in
+those lines almost every time — lost tags and notes, a branch name containing
+`$(...)`, an unnamed detached HEAD, a rescue ref that collided with itself on
+the second restore — and a recovery command that is wrong in the moment you
+need it does more harm than no command at all.
 
 ---
 

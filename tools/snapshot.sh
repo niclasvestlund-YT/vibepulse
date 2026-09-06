@@ -71,8 +71,14 @@ if ! git -C "$repo" bundle verify "$part" >/dev/null 2>&1; then
 fi
 mv "$part" "$bundle"
 
-# Reflistan bredvid, så man ser vad en bundle höll utan att packa upp den.
-git -C "$repo" show-ref > "${bundle%.bundle}.refs"
+# Innehållsförteckningen bredvid, så man ser vad en bundle höll utan att packa
+# upp den. Den läses ur BUNDLEN, inte ur repot: `git show-ref` listar bara
+# vanliga refs, alltså varken `HEAD` från en detached checkout eller
+# `worktrees/<namn>/HEAD` från en länkad worktree — precis de heads vars
+# commits ingen gren når och som därför är hela poängen med att spara dem. Och
+# i ett repo utan vanliga refs returnerar show-ref 1, vilket under `set -e`
+# hade dödat skriptet tyst efter att bundlen redan flyttats på plats.
+git bundle list-heads "$bundle" > "${bundle%.bundle}.refs"
 
 refs=$(wc -l < "${bundle%.bundle}.refs" | tr -d ' ')
 commits=$(git -C "$repo" rev-list --all --count)
@@ -83,36 +89,23 @@ printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
 dirty=$(git -C "$repo" status --porcelain | wc -l | tr -d ' ')
 [ "$dirty" -gt 0 ] && printf '  OBS: %s ocommittade ändringar ligger UTANFÖR snapshoten.\n' "$dirty"
 
-# Sökvägen citeras: en katalog med mellanslag hade annars gjort de utskrivna
-# kommandona obrukbara i precis det läge man klistrar in dem utan att tänka.
+# Sökvägen citeras: en katalog med mellanslag hade annars gjort raden obrukbar
+# i precis det läge man klistrar in den utan att tänka.
 q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-qb="$(q "$bundle")"
 
-
-# Refspecen är `refs/*`, inte `refs/heads/*`: bundlen sparar VARJE ref, så en
-# återställning som bara tar grenar lämnar taggar, notes och egna refs tyst
-# borta — de som är svårast att märka att man saknar. `git clone` gör samma
-# sak: den tar grenar och taggar men inte notes eller egna namnrum, så den
-# fullständiga vägen står först. Den vägen går via ett BART repo: ett vanligt
-# `git init` sätter HEAD på refs/heads/master, och en fetch dit nekas med
-# "refusing to fetch into branch ... checked out" även när refen inte finns
-# än. Den varianten skrevs, testades och underkändes här.
+# INGET fullständigt återställningsrecept skrivs ut här, och det är ett beslut
+# taget efter åtta granskningsrundor där nästan varje ny kant satt i just de
+# raderna: refspecar som tappade taggar och notes, ett grennamn som kunde
+# innehålla `$(...)`, en detached HEAD utan namn, en länkad worktree, och till
+# sist ett räddningsnamn som kolliderade med sig självt så fort man återställt
+# en gång. En återställning görs sällan, av en människa, en gång — den tål att
+# slås upp. Ett recept som är fel i det läget gör skada.
 #
-# Inget grennamn interpoleras in i de utskrivna kommandona. Två skäl, båda
-# funna i granskning: ett grennamn får innehålla `$(...)`, och git accepterar
-# det — den som klistrar in raden kör då kommandot i stället för att återställa
-# grenen. Och namnet fanns inte alltid: från en detached HEAD gav uppslaget
-# ingenting, fallbacken pekade på en gren som kunde saknas, och bundlens lösa
-# commit — som ligger under pseudo-refen `HEAD`, inte under `refs/*` — hade
-# inte fått någon ref alls. Ett FAST räddningsnamn löser båda: `HEAD` hämtas
-# uttryckligen, och HEAD pekas på det, oavsett vad grenen heter.
-printf '\nÅterställ ALLT till ett nytt repo:\n'
-printf '  git init --bare <katalog>.git\n'
-printf "  git -C <katalog>.git fetch %s '+refs/*:refs/*' '+HEAD:refs/heads/rescue-head'\n" "$qb"
-printf '  git -C <katalog>.git symbolic-ref HEAD refs/heads/rescue-head\n'
-printf '  git clone <katalog>.git <katalog>       # arbetskopia\n'
-printf '\nEller in i ett befintligt repo, utan att röra utcheckade grenar:\n'
-printf "  git fetch %s '+refs/*:refs/rescue/*' '+HEAD:refs/rescue/HEAD'\n" "$qb"
-printf '  git for-each-ref refs/rescue                # se vad som fanns\n'
-printf '  git reset --hard refs/rescue/heads/<gren>   # när du valt\n'
-printf '\n  (git clone %s går också, men tar bara grenar och taggar.)\n' "$qb"
+# Det som står kvar är sant utan förbehåll: filen, vad den innehåller, och det
+# enda kommandot som inte kan bli fel.
+printf '\nInnehåll:  git bundle list-heads %s\n' "$(q "$bundle")"
+printf '           (eller läs %s)\n' "$(basename "${bundle%.bundle}.refs")"
+printf 'Återställ: git clone %s <katalog>\n' "$(q "$bundle")"
+printf '           Klonen tar grenar och taggar. Innehåller listan ovan\n'
+printf '           HEAD eller worktrees/... är de commits ingen gren når;\n'
+printf '           hämta dem med en egen refspec, se docs/lessons.md.\n'
