@@ -105,14 +105,16 @@ tags — and nothing else. `refs/notes/*`, any custom namespace, and the
 pseudo-refs `HEAD`, `ORIG_HEAD` and `worktrees/<name>/HEAD` (commits no
 branch reaches at all) are left behind. `git bundle list-heads`, or the
 `.refs` file beside the snapshot, says what is actually in there. To bring
-back everything, after the clone:
+back everything, after the clone — note the `-C <dir>`, because `git clone`
+leaves you standing where you started and a bare `git fetch` here would update
+the repository you are in, not the one you just made:
 
-    git fetch <bundle> '+refs/*:refs/rescue/*' \
+    git -C <dir> fetch <bundle> '+refs/*:refs/rescue/*' \
       '+worktrees/*:refs/rescue-worktrees/*'
 
     # each only if `git bundle list-heads <bundle>` prints that exact row:
-    git fetch <bundle> '+HEAD:refs/rescue-head/HEAD'
-    git fetch <bundle> '+ORIG_HEAD:refs/rescue-orig/ORIG_HEAD'
+    git -C <dir> fetch <bundle> '+HEAD:refs/rescue-head/HEAD'
+    git -C <dir> fetch <bundle> '+ORIG_HEAD:refs/rescue-orig/ORIG_HEAD'
 
 Four refspecs because a bundle holds four shapes of name, and a wildcard
 over `refs/*` reaches only the first: named refs, the bare `HEAD` of a
