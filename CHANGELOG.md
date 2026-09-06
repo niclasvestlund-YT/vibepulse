@@ -64,8 +64,8 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
-- **`tools/snapshot.sh`** — one verified bundle of every ref, to run before
-  anything that rewrites history. It refuses on a shallow clone, which is
+- **`tools/snapshot.sh`** — one verified bundle of every ref (plus `ORIG_HEAD`,
+  which `--all` does not cover), to run before anything that rewrites history. It refuses on a shallow clone, which is
   the trap that nearly cost 433 commits during the work above:
   `git rev-parse --is-shallow-repository` answers `true` when the clone *is*
   truncated, and a bundle taken from it restores a fraction of the history

@@ -102,30 +102,42 @@ fix the content on the way through; check `git merge-base HEAD origin/main`
 afterwards, and compare the final tree against the intended one.
 **Restoring from a snapshot:** `git clone <bundle> <dir>` covers branches and
 tags — and nothing else. `refs/notes/*`, any custom namespace, and the
-pseudo-refs `HEAD` and `worktrees/<name>/HEAD` (commits no branch reaches at
-all) are left behind. `git bundle list-heads`, or the `.refs` file beside the
-snapshot, says what is actually in there. To bring back everything, after the
-clone:
+pseudo-refs `HEAD`, `ORIG_HEAD` and `worktrees/<name>/HEAD` (commits no
+branch reaches at all) are left behind. `git bundle list-heads`, or the
+`.refs` file beside the snapshot, says what is actually in there. To bring
+back everything, after the clone:
 
     git fetch <bundle> '+refs/*:refs/rescue/*' \
       '+worktrees/*:refs/rescue-worktrees/*'
 
-    # only if `git bundle list-heads <bundle>` prints a row ending in ` HEAD`:
+    # each only if `git bundle list-heads <bundle>` prints that exact row:
     git fetch <bundle> '+HEAD:refs/rescue-head/HEAD'
+    git fetch <bundle> '+ORIG_HEAD:refs/rescue-orig/ORIG_HEAD'
 
-Three refspecs because a bundle holds three shapes of name, and a wildcard
+Four refspecs because a bundle holds four shapes of name, and a wildcard
 over `refs/*` reaches only the first: named refs, the bare `HEAD` of a
-detached checkout, and `worktrees/<name>/HEAD` from a linked worktree. The
-last two are pseudo-refs living outside `refs/`, so each needs its own line;
-omit one and its commit comes back with no ref at all and goes away at the
-next `git gc --prune=now`. A wildcard refspec that matches nothing is
-harmless. `+HEAD:` is not a wildcard, and that is why it stands on its own
-line: an exact refspec that matches nothing aborts the whole fetch with
-`fatal: couldn't find remote ref HEAD`, and takes the two that would have
-worked down with it. A bundle whose repository had no valid HEAD — only
-remote-tracking refs and tags, which is what a mirror looks like — is
-exactly that case, and `tools/snapshot.sh` called such a bundle corrupt
-until it started asking `list-heads` first.
+detached checkout, `worktrees/<name>/HEAD` from a linked worktree, and
+`ORIG_HEAD`. The last three are pseudo-refs living outside `refs/`, so each
+needs its own line; omit one and its commit comes back with no ref at all and
+goes away at the next `git gc --prune=now`. A wildcard refspec that matches
+nothing is harmless. `+HEAD:` and `+ORIG_HEAD:` are not wildcards, and that
+is why they stand on their own lines: an exact refspec that matches nothing
+aborts the whole fetch with `fatal: couldn't find remote ref HEAD`, and takes
+the ones that would have worked down with it. A bundle whose repository had
+no valid HEAD — only remote-tracking refs and tags, which is what a mirror
+looks like — is exactly that case, and `tools/snapshot.sh` called such a
+bundle corrupt until it started asking `list-heads` first.
+
+**`--all` is not everything.** `git bundle create --all` means `refs/*` plus
+`HEAD`; `ORIG_HEAD` is outside both, and that is the commit a `git reset
+--hard`, a rebase or a merge left behind — the recovery point a snapshot
+taken *before* a history rewrite exists to protect. Two commits, reset to the
+first, run the tool: the verified bundle held one commit and the former tip
+could not be read out of it. `tools/snapshot.sh` now passes `ORIG_HEAD`
+alongside `--all` when it resolves. **The reflog itself still is not in
+there** and cannot be — a bundle has no way to carry one. Everything an
+earlier reset or rebase orphaned lives in `git reflog` in the original clone
+and nowhere else, which is worth knowing before deleting that clone.
 
 All three destinations are outside `refs/heads/*` on purpose, and that is the
 part that took three attempts to get right. Fetching into `refs/*` aborts with

@@ -3,8 +3,12 @@
 # historik — rebase, filter-repo, force-push — och löpande om du vill.
 #
 # TÄCKER: varje commit som nås från varje ref. Alla grenar, taggar, notes.
+# Plus ORIG_HEAD när den finns — se nedan.
 # TÄCKER INTE: ocommittade ändringar, ospårade filer, och allt .gitignore
-# döljer. Det betyder att `secrets.h` (WiFi-uppgifter + device key) och
+# döljer. Inte heller REFLOGEN: en bundle kan inte bära en. ORIG_HEAD
+# plockas ut ur den eftersom det är den vanligaste återvändon, men allt
+# annat ett tidigare reset eller en tidigare rebase lämnade utan ref bor
+# kvar i `git reflog` i den ursprungliga klonen och ingen annanstans. Det betyder att `secrets.h` (WiFi-uppgifter + device key) och
 # `.ota-device` INTE ligger här, med flit — en backup som sprider hemligheter
 # till en katalog du glömmer bort är en läcka, inte ett skydd. De två filerna
 # behöver sin egen plats; se docs/lessons.md.
@@ -136,7 +140,20 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 
 # `--quiet` FÖRE filnamnet. Efter det tolkas det som ett rev-list-argument —
 # git accepterar det tyst och skriver ändå förloppet till en terminal.
-git -C "$repo" bundle create --quiet "$part" --all
+#
+# ORIG_HEAD tas med när den finns. `--all` betyder refs/* plus HEAD, och
+# ORIG_HEAD ligger utanför båda — men det är precis den commit ett
+# `git reset --hard`, en rebase eller en merge lämnade efter sig, alltså den
+# återvändo en fil som körs FÖRE en historikomskrivning finns till för att
+# skydda. Reproducerat: två commits, reset till den första, snapshot — den
+# verifierade bundlen höll en commit och den forna toppen gick inte att läsa
+# ur den. `--verify --quiet` i stället för `[ -f ]`: ORIG_HEAD kan vara en
+# symref eller peka på ett objekt som redan gallrats.
+revs=(--all)
+if git -C "$repo" rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
+  revs+=(ORIG_HEAD)
+fi
+git -C "$repo" bundle create --quiet "$part" "${revs[@]}"
 
 # En overifierad backup är ingen backup — men `git bundle verify` räcker inte
 # som verifiering. Den läser huvudet och kontrollerar att förutsättningarna
@@ -162,6 +179,9 @@ heads="$(git bundle list-heads "$part")"
 specs=('+refs/*:refs/p/*' '+worktrees/*:refs/p-wt/*')
 if grep -qx '[0-9a-f]* HEAD' <<<"$heads"; then
   specs+=('+HEAD:refs/p-head/HEAD')
+fi
+if grep -qx '[0-9a-f]* ORIG_HEAD' <<<"$heads"; then
+  specs+=('+ORIG_HEAD:refs/p-orig/ORIG_HEAD')
 fi
 if ! git -C "$probe" fetch "$part" "${specs[@]}" >/dev/null 2>&1; then
   echo "VERIFIERING MISSLYCKADES: paketet gick inte att packa upp." >&2
@@ -255,5 +275,6 @@ printf '\nInnehåll:  git bundle list-heads %s\n' "$(q "$bundle")"
 printf '           (eller läs %s)\n' "$(basename "${bundle%.bundle}.refs")"
 printf 'Återställ: git clone %s <katalog>\n' "$(q "$bundle")"
 printf '           Klonen tar grenar och taggar. Innehåller listan ovan\n'
-printf '           HEAD eller worktrees/... är de commits ingen gren når;\n'
+printf '           HEAD, ORIG_HEAD eller worktrees/... är de commits ingen\n'
+printf '           gren når;\n'
 printf '           hämta dem med en egen refspec, se docs/lessons.md.\n'
