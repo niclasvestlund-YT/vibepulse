@@ -165,12 +165,15 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # sista som pekar på en raderad topic-gren, vilket också reproducerats. Att
 # laga en i taget ger en ny runda per namn.
 #
-# Två namn är medvetet UTE. `AUTO_MERGE` pekar på ett TRÄD, inte en commit —
+# Ett namn är medvetet UTE: `AUTO_MERGE` pekar på ett TRÄD, inte en commit —
 # den automerge-nade mellanprodukten under en konflikt, härledd state ingen
 # behöver tillbaka; den går att lägga i en bundle men blir en ref mot ett träd
-# i en räddningsfil, alltså brus. `FETCH_HEAD` är en FLERRADSFIL där
-# `rev-parse` bara ger första posten, och dess innehåll kom från en remote du
-# fortfarande har.
+# i en räddningsfil, alltså brus.
+#
+# `FETCH_HEAD` stod först på samma lista, med motiveringen att innehållet kom
+# från en remote man fortfarande har. Den motiveringen höll inte:
+# `git fetch /tmp/nånting HEAD` och sedan bort med källan lämnar FETCH_HEAD
+# som enda namnet på den commiten. Reproducerat. Den är med nu.
 #
 # `--verify --quiet` i stället för `[ -f ]`: en pseudo-ref kan vara en symref
 # eller peka på ett objekt som redan gallrats.
@@ -208,7 +211,7 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # sann OCH så en utebliven OID får verifieringen att fälla i stället för att
 # tiga. Ett objekt i filen som ingen kan hitta är inte en räddning.
 pseudo_refs=(ORIG_HEAD MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD
-             BISECT_HEAD)
+             BISECT_HEAD FETCH_HEAD)
 revs=(--all)
 extra_oids=()
 main_git="$(git -C "$repo" rev-parse --absolute-git-dir)"
@@ -219,13 +222,23 @@ collect_pseudo() {
   git -C "$repo" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || return 0
   revs+=("$ref")
   [ -f "$file" ] || return 0
+  local oid
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
     if [ "$first" = 1 ]; then first=0; continue; fi
-    git -C "$repo" rev-parse --verify --quiet "$line^{commit}" >/dev/null 2>&1 \
+    # Första fältet. MERGE_HEAD har bara ett OID per rad, men FETCH_HEAD
+    # skriver `<oid>\t[not-for-merge]\t<beskrivning>`.
+    oid="${line%%[$' \t']*}"
+    git -C "$repo" rev-parse --verify --quiet "$oid^{commit}" >/dev/null 2>&1 \
       || continue
-    revs+=("$line")
-    extra_oids+=("$ref $line")
+    # Bara de som INGEN ref når. Efter en vanlig `git fetch origin` har
+    # FETCH_HEAD en rad per ref, alla redan nådda av refs/remotes/* — att
+    # lista dem som namnlösa räddningsobjekt hade varit brus som döljer de
+    # få som faktiskt är i fara. Tom utdata = nåbar.
+    [ -n "$(git -C "$repo" rev-list -1 "$oid" --not --all 2>/dev/null)" ] \
+      || continue
+    revs+=("$oid")
+    extra_oids+=("$ref $oid")
   done < "$file"
 }
 

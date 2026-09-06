@@ -150,10 +150,16 @@ per OID — which makes the commit count honest and, more importantly, makes a
 missing object fail the snapshot instead of passing quietly. After restoring,
 `git -C <dir> branch rescue-N <oid>` before the next `gc` is what turns them
 back into something you can look at. An object in the file that nobody can
-find is not a rescue. Two are deliberately left out: `AUTO_MERGE`
-points at a *tree*, the derived mid-conflict merge result nobody needs back,
-and `FETCH_HEAD` is a multi-line file whose first entry is all `rev-parse`
-returns and whose contents came from a remote you still have.
+find is not a rescue. One is deliberately left out: `AUTO_MERGE`
+points at a *tree*, the derived mid-conflict merge result nobody needs back.
+`FETCH_HEAD` was on that list too, excluded on the reasoning that its contents
+came from a remote you still have — which is simply false for a one-off
+`git fetch /some/path HEAD` whose source is then deleted, leaving `FETCH_HEAD`
+as the only name that commit has. It is included now, and the extra OIDs are
+filtered to those no ref reaches, so an ordinary `git fetch origin` (one
+FETCH_HEAD line per ref, all already under `refs/remotes/*`) adds nothing to
+the rescue list. Noise there would hide the few entries that are actually in
+danger.
 
 They are collected **per worktree** as well, because
 they are per-checkout: a rebase done in a linked worktree, which is
