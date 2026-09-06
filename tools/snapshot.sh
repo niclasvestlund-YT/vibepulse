@@ -33,7 +33,14 @@ set -euo pipefail
 # säkerhetskopian får inte bli spridningsvägen.
 umask 077
 
-repo="$(cd "$(git rev-parse --show-toplevel)" && pwd -P)"
+# Alla utcheckningar av repot, inte bara den vi råkar stå i. Kört från en
+# länkad worktree under `.worktrees/` — vilket `.gitignore` uttryckligen
+# förutser här — pekar `--show-toplevel` på den nästlade katalogen, och både
+# defaultmålet och "ligger den inuti repot"-vakten hade då bara jämfört mot
+# den. Backupen landade inuti huvudcheckouten, och en `rm -rf` av den tar med
+# sig räddningsfilen.
+roots="$(git worktree list --porcelain | sed -n 's/^worktree //p')"
+repo="$(cd "$(printf '%s\n' "$roots" | head -1)" && pwd -P)"   # huvudcheckouten
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = "true" ]; then
@@ -56,11 +63,15 @@ dest_was_created=0
 [ -d "$dest" ] || dest_was_created=1
 mkdir -p "$dest"
 dest="$(cd "$dest" && pwd -P)"
-case "$dest" in "$repo"|"$repo"/*)
+printf '%s\n' "$roots" | while read -r r; do
+  [ -n "$r" ] || continue
+  rp="$(cd "$r" && pwd -P)"
+  case "$dest" in "$rp"|"$rp"/*) exit 1 ;; esac
+done || {
   if [ "$dest_was_created" = 1 ]; then rmdir "$dest" 2>/dev/null || true; fi
-  echo "VÄGRAR: $dest ligger inuti repot. Sätt TG_SNAPSHOT_DIR utanför." >&2
-  exit 1 ;;
-esac
+  echo "VÄGRAR: $dest ligger inuti en utcheckning av repot. Sätt TG_SNAPSHOT_DIR utanför." >&2
+  exit 1
+}
 
 # Namnet får inte kunna kollidera. En sekundstämpel räcker inte — två
 # körningar inom samma sekund får identisk sökväg och `git bundle create`
