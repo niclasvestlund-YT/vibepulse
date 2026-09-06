@@ -315,6 +315,12 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_ota_partition.py
 "$PYTHON_BIN" test_ota_reopen_wiring.py
 "$PYTHON_BIN" test_ota_sender_gates.py
+# Backupen AGENTS.md kräver före varje historikomskrivning. Testet bygger
+# syntetiska repon med git och kör verktyget mot dem på riktigt. Halva
+# svaret ligger dock i CI: tre av de fem defekter granskningen hittade i
+# snapshot.sh är osynliga på Linux, så jobbet "Snapshot tool" kör samma
+# fil även på macOS.
+"$PYTHON_BIN" test_snapshot_tool.py
 "$PYTHON_BIN" test_ota_gesture_docs.py
 "$PYTHON_BIN" test_wifi_setup_wiring.py
 "$PYTHON_BIN" test_settings_design.py
