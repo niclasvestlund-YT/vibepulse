@@ -40,10 +40,16 @@ fi
 # den UPPLÖSTA sökvägen: `TG_SNAPSHOT_DIR=.snap` och sökvägar med `..` pekar in
 # i repot utan att se ut att göra det, och en textjämförelse släpper igenom dem
 # — då hamnar räddningsfilen i trädet den ska överleva.
+# Städningen vid vägran gäller BARA en katalog den här körningen själv skapade.
+# Filen lovar att aldrig radera något; ett `rmdir` som inte skiljer på egen och
+# befintlig katalog bryter det löftet för den som redan lagt upp målet och
+# råkat peka det fel — rättigheter och annan metadata är hens, inte vår.
+dest_was_created=0
+[ -d "$dest" ] || dest_was_created=1
 mkdir -p "$dest"
 dest="$(cd "$dest" && pwd -P)"
 case "$dest" in "$repo"|"$repo"/*)
-  rmdir "$dest" 2>/dev/null || true
+  if [ "$dest_was_created" = 1 ]; then rmdir "$dest" 2>/dev/null || true; fi
   echo "VÄGRAR: $dest ligger inuti repot. Sätt TG_SNAPSHOT_DIR utanför." >&2
   exit 1 ;;
 esac
