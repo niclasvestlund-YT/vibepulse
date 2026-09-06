@@ -133,12 +133,24 @@ bundle corrupt until it started asking `list-heads` first.
 `HEAD`. Every other pseudo-ref is outside both, and each can be the last thing
 holding a commit: `ORIG_HEAD` after a `git reset --hard`, a rebase or a merge;
 `MERGE_HEAD` during a conflicted merge, which can be all that still points at
-a deleted topic branch; `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`,
+a deleted topic branch — and which can hold **several** lines, since a paused
+octopus merge lists every parent while `rev-parse` returns only the first; `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`,
 `BISECT_HEAD` the same way mid-operation. Two commits, reset to the first, run
 the tool: the verified bundle held one commit and the former tip could not be
 read out of it. `tools/snapshot.sh` now passes the whole list alongside
-`--all`, taking each one that resolves — fixing them one name at a time just
-buys one review round per name. Two are deliberately left out: `AUTO_MERGE`
+`--all`, taking each one that resolves, and reading the extra lines out of a
+multi-parent `MERGE_HEAD` as well — fixing them one name at a time just buys
+one review round per name.
+
+A bundle can only *name* refs, and those extra parents have no ref name. Their
+objects still go into the pack (passing the OID as a rev is enough, verified),
+so they survive; but nothing reaches them, so the tool records each one in the
+`.refs` sidecar next to the bundle, and the verification probe creates a ref
+per OID — which makes the commit count honest and, more importantly, makes a
+missing object fail the snapshot instead of passing quietly. After restoring,
+`git -C <dir> branch rescue-N <oid>` before the next `gc` is what turns them
+back into something you can look at. An object in the file that nobody can
+find is not a rescue. Two are deliberately left out: `AUTO_MERGE`
 points at a *tree*, the derived mid-conflict merge result nobody needs back,
 and `FETCH_HEAD` is a multi-line file whose first entry is all `rev-parse`
 returns and whose contents came from a remote you still have.

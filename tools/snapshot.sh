@@ -195,24 +195,50 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # även för en prunable registrering. Liveness avgör var man får SKRIVA och
 # vems osparade filer som ska varnas om; den avgör inte vad som är värt att
 # rädda.
+#
+# MERGE_HEAD kan ha FLERA RADER. En octopus-merge som stannat på en konflikt
+# listar varje förälder, och `rev-parse MERGE_HEAD` ger bara den första — de
+# övriga låg utanför. Reproducerat med tre föräldrar och alla tre grenarna
+# raderade: bundlen namngav en och tappade två.
+#
+# En bundle kan bara NAMNGE refs, och rad två och framåt har inget refnamn.
+# Objekten går ändå in i paketet genom att skicka OID:t som rev — verifierat,
+# de finns där efter en fetch — men de blir onåbara. Därför skrivs de i
+# `.refs`-filen bredvid, och proben skapar en ref per OID så räkningen är
+# sann OCH så en utebliven OID får verifieringen att fälla i stället för att
+# tiga. Ett objekt i filen som ingen kan hitta är inte en räddning.
 pseudo_refs=(ORIG_HEAD MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD
              BISECT_HEAD)
 revs=(--all)
+extra_oids=()
+main_git="$(git -C "$repo" rev-parse --absolute-git-dir)"
+
+# $1 = refnamn sett från repot, $2 = filen bakom det
+collect_pseudo() {
+  local ref="$1" file="$2" line first=1
+  git -C "$repo" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || return 0
+  revs+=("$ref")
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    if [ "$first" = 1 ]; then first=0; continue; fi
+    git -C "$repo" rev-parse --verify --quiet "$line^{commit}" >/dev/null 2>&1 \
+      || continue
+    revs+=("$line")
+    extra_oids+=("$ref $line")
+  done < "$file"
+}
+
 for ps in "${pseudo_refs[@]}"; do
-  if git -C "$repo" rev-parse --verify --quiet "$ps" >/dev/null 2>&1; then
-    revs+=("$ps")
-  fi
+  collect_pseudo "$ps" "$main_git/$ps"
 done
-wt_root="$(git -C "$repo" rev-parse --absolute-git-dir)/worktrees"
+wt_root="$main_git/worktrees"
 if [ -d "$wt_root" ]; then
   for wt_meta in "$wt_root"/*; do
     [ -d "$wt_meta" ] || continue
     wt_id="${wt_meta##*/}"
     for ps in "${pseudo_refs[@]}"; do
-      if git -C "$repo" rev-parse --verify --quiet "worktrees/$wt_id/$ps" \
-           >/dev/null 2>&1; then
-        revs+=("worktrees/$wt_id/$ps")
-      fi
+      collect_pseudo "worktrees/$wt_id/$ps" "$wt_meta/$ps"
     done
   done
 fi
@@ -258,6 +284,21 @@ fi
 # som `--all` inte når, så raden hade sagt "1 commits" om en fil med två.
 # Proben har hämtat exakt bundlens innehåll och inget annat; den är den enda
 # ärliga källan för vad som faktiskt ligger i filen.
+# De namnlösa OID:na får en ref i PROBEN, inte i repot: dels blir räkningen
+# sann, dels FÄLLER `update-ref` om objektet inte kom med i paketet — vilket
+# är precis vad som ska hända, för då lovar sidecar-filen något som inte finns.
+if [ ${#extra_oids[@]} -gt 0 ]; then
+  n=0
+  for e in "${extra_oids[@]}"; do
+    n=$((n + 1))
+    if ! git -C "$probe" update-ref "refs/p-extra/$n" "${e##* }" 2>/dev/null; then
+      echo "VERIFIERING MISSLYCKADES: en commit ur en flerradig pseudo-ref" >&2
+      echo "  (${e}) kom inte med i paketet." >&2
+      echo "  $bundle skrevs aldrig — ingen falsk trygghet." >&2
+      exit 1
+    fi
+  done
+fi
 commits=$(git -C "$probe" rev-list --all --count)
 rm -rf "$probe"
 
@@ -291,6 +332,17 @@ fi
 git bundle list-heads "$bundle" > "${bundle%.bundle}.refs"
 
 refs=$(wc -l < "${bundle%.bundle}.refs" | tr -d ' ')
+# Efter räkningen, så de inte räknas som refs — de är motsatsen till en ref.
+if [ ${#extra_oids[@]} -gt 0 ]; then
+  {
+    printf '# Commits i paketet UTAN refnamn. En bundle kan bara namnge refs,\n'
+    printf '# och de här kom ur en flerradig pseudo-ref (octopus-merge).\n'
+    printf '# Objekten FINNS i filen, men ingen gren når dem. Rädda dem med\n'
+    printf '#   git -C <katalog> branch rescue-N <oid>\n'
+    printf '# direkt efter klonen, innan nästa gc.\n'
+    printf '%s\n' "${extra_oids[@]}"
+  } >> "${bundle%.bundle}.refs"
+fi
 size=$(du -h "$bundle" | cut -f1)
 printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
   "$bundle" "$refs" "$commits" "$size"
