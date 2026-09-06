@@ -137,8 +137,16 @@ size=$(du -h "$bundle" | cut -f1)
 printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
   "$bundle" "$refs" "$commits" "$size"
 
-dirty=$(git -C "$repo" status --porcelain | wc -l | tr -d ' ')
-[ "$dirty" -gt 0 ] && printf '  OBS: %s ocommittade ändringar ligger UTANFÖR snapshoten.\n' "$dirty"
+# Varningen gäller VARJE levande utcheckning, inte bara huvudworktreen. Sedan
+# `repo` blev huvudcheckouten hade en körning från en länkad worktree med
+# osparat arbete tigit still — den som stod där hade fått "verifierad" utan
+# ett ord om att just deras ändringar ligger utanför.
+printf '%s\n' "$roots" | while read -r r; do
+  [ -n "$r" ] && [ -d "$r" ] || continue
+  n=$(git -C "$r" status --porcelain | wc -l | tr -d ' ')
+  [ "$n" -gt 0 ] && printf '  OBS: %s ocommittade ändringar i %s ligger UTANFÖR snapshoten.\n' "$n" "$r"
+done
+true
 
 # Sökvägen citeras: en katalog med mellanslag hade annars gjort raden obrukbar
 # i precis det läge man klistrar in den utan att tänka.
