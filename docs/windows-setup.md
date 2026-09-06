@@ -203,9 +203,33 @@ scheduled task, then restart the task so the running process picks it up:
 
 ```powershell
 py -3 -m pip install -r requirements-discovery.txt
-Stop-ScheduledTask -TaskName "VibePulse tokenserver" -ErrorAction SilentlyContinue
-Start-ScheduledTask -TaskName "VibePulse tokenserver"
 ```
+
+### Restarting the scheduled task
+
+Stop it, **wait for it to actually stop**, and only then start it:
+
+```powershell
+$Task = "VibePulse tokenserver"
+Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
+$Deadline = (Get-Date).AddSeconds(15)
+do {
+    Start-Sleep -Milliseconds 200
+} while ((Get-ScheduledTask -TaskName $Task).State -eq "Running" -and
+         (Get-Date) -lt $Deadline)
+if ((Get-ScheduledTask -TaskName $Task).State -eq "Running") {
+    throw "$Task did not stop; do not start it yet."
+}
+Start-ScheduledTask -TaskName $Task
+```
+
+The wait is not politeness. The task is registered with
+`-MultipleInstances IgnoreNew`, so a `Start-ScheduledTask` issued while the
+old instance is still shutting down is **silently discarded**: the service
+then stays down until the five-minute watchdog notices, and anything you
+validate in between is talking to nothing. `install-windows-task.ps1` polls
+the same way, to the same fifteen-second deadline, before it re-registers —
+its stop path is the reference for this one.
 
 Restart the task itself rather than rerunning the installer.
 `Register-ScheduledTask -Force` rebuilds the task's command line from the

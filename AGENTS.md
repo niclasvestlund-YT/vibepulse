@@ -106,8 +106,14 @@ OTA. Icke förhandlingsbart, och skälen står i filen:
   glappet — du validerar då kod som inte kör. På macOS:
   `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`. På Windows
   finns ingen launchd; tjänsten körs av Task Scheduler och startas om med
-  `Stop-ScheduledTask` följt av `Start-ScheduledTask` på uppgiften
-  `VibePulse tokenserver`. Starta INTE om genom att köra
+  `Stop-ScheduledTask`, en VÄNTAN på att den faktiskt stannat, och först
+  därefter `Start-ScheduledTask` på uppgiften `VibePulse tokenserver`.
+  Väntan är inte artighet: uppgiften är registrerad med
+  `-MultipleInstances IgnoreNew`, så en start medan den gamla instansen
+  fortfarande stänger ner kastas TYST — tjänsten ligger nere tills
+  femminuters-watchdoggen tar den, och det du validerar under tiden pratar
+  med ingenting. Färdig snutt under "Restarting the scheduled task" i
+  `docs/windows-setup.md`. Starta INTE om genom att köra
   `install-windows-task.ps1`: `Register-ScheduledTask -Force` bygger om
   uppgiftens kommandorad ur de argument just den körningen fick, så en
   argumentlös omstart tar tyst bort `-PublishUrl`, `-GithubRepo` och
