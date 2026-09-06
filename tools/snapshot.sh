@@ -85,7 +85,20 @@ if ! IFS= read -r -d "" repo < "$roots_file"; then
   echo "VÄGRAR: git worktree list gav ingen levande utcheckning att utgå från." >&2
   exit 1
 fi
-repo="$(cd "$repo" && pwd -P)"
+# Kanonisering som överlever en sökväg som SLUTAR på radbrytning.
+# Kommandosubstitution klipper alla avslutande radbrytningar, så
+# `$(cd "$d" && pwd -P)` gav `/tmp/wt` för katalogen `/tmp/wt<radbrytning>`.
+# Vakten nedan jämförde då mot fel sträng och släppte igenom ett mål inuti
+# utcheckningen — den publicerade backupen i trädet den ska överleva.
+# Reproducerat. Sentineln `x` gör den sista radbrytningen till en icke-sista;
+# resultatet lämnas i `$abs` i stället för att skrivas ut, för ett
+# `abs="$(abspath ...)"` hade klippt den igen och återinfört exakt buggen.
+abspath() {
+  local p
+  p="$(cd -- "$1" && pwd -P && printf x)" || return 1
+  abs="${p%$'\n'x}"
+}
+abspath "$repo" && repo="$abs"
 dest="${TG_SNAPSHOT_DIR:-$(dirname "$repo")/$(basename "$repo")-backups}"
 
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = "true" ]; then
@@ -107,7 +120,7 @@ fi
 dest_was_created=0
 [ -d "$dest" ] || dest_was_created=1
 mkdir -p "$dest"
-dest="$(cd "$dest" && pwd -P)"
+abspath "$dest" && dest="$abs"
 # En FLAGGA, inte `exit` i loopen. Loopen läser numera från en fil i stället
 # för genom ett rör, alltså körs den i det här skalet — och då avslutade
 # `exit 1` hela skriptet direkt och hoppade över meddelandet som skulle
@@ -116,7 +129,8 @@ dest="$(cd "$dest" && pwd -P)"
 inside=0
 while IFS= read -r -d "" r; do
   [ -n "$r" ] && [ -d "$r" ] || continue
-  rp="$(cd "$r" && pwd -P)"
+  abspath "$r" || continue
+  rp="$abs"
   case "$dest" in "$rp"|"$rp"/*) inside=1; break ;; esac
 done < "$roots_file"
 if [ "$inside" = 1 ]; then
