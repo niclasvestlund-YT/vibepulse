@@ -8,6 +8,7 @@ direct LAN client from accidentally becoming an activity transport.
 
 from pathlib import Path
 import plistlib
+import re
 
 root = Path(__file__).resolve().parents[1]
 read = lambda p: (root / p).read_text(encoding="utf-8")
@@ -18,6 +19,9 @@ github = read("components/app_tokens/github_net.c")
 agent = read("components/app_tokens/agent_net.c")
 needs_you = read("components/app_tokens/needs_you_net.c")
 http = read("components/torget_net/torget_http.c")
+log_target = read("components/torget_net/net_log_target.c")
+relay_doc = read("docs/relay.md")
+run_sh = read("test/run.sh")
 example = read("secrets.h.example")
 readme = read("README.md")
 agent_setup = read("docs/agent-setup.md")
@@ -76,6 +80,45 @@ assert "if (!relay_url || !relay_url[0])" in http, (
 # Only the LAN attempt may fall onwards; a dead relay must not bounce back
 # or two dead addresses spin a fetch in circles.
 assert "tg_net_source_may_fall_back(source)" in http
+
+# --- The secret URL may never reach a log --------------------------------
+# The relay's path IS its access control: `/u/<secret>` reads the panel's
+# figures and overwrites them. A serial capture or a pasted observability
+# transcript is shared far more casually than the address itself, so the
+# fetch client must never hand a raw address to ESP_LOG. The redaction sits
+# in ONE helper, so a fourth failure path inherits it instead of having to
+# remember it.
+assert "Never print the secret URL in logs or a shared transcript." in \
+    " ".join(relay_doc.split()), (
+        "docs/relay.md must keep stating the rule this guard enforces"
+    )
+assert "tg_net_log_target(target, sizeof target, url, cloud)" in http, (
+    "every logged fetch target must go through the redaction helper"
+)
+address_names = (
+    r"\b(url|lan_url|relay_url|configured_url|discovered|alternate)\b"
+)
+for call in re.findall(r"ESP_LOG[A-Z]\((?:[^;]*?)\);", http, re.DOTALL):
+    assert not re.search(address_names, call), (
+        "a fetch log must name the redacted target, never a raw address:\n"
+        + call
+    )
+
+# The helper keeps only what diagnoses — scheme, host, and which way was
+# tried — and it does so unconditionally, without asking whether this
+# particular address happens to be the secret one.
+assert 'strcspn(authority, "/?#")' in log_target, (
+    "path, query and fragment must all be cut, not just the path"
+)
+assert "if (authority[i] == '@') host_start = i + 1;" in log_target, (
+    "userinfo is a credential too and must never be logged"
+)
+assert 'relay ? "relä" : "LAN"' in log_target, (
+    "a redacted line must still say which route was taken"
+)
+assert "test_net_log_target.c" in run_sh, (
+    "the redaction core is pure logic and must be host-tested in the gate"
+)
 
 # --- The opt-in stays opt-in -------------------------------------------
 assert "/* #define TK_VIBEPULSE_RELAY_URL" in example, (

@@ -45,7 +45,7 @@ Eleven tags:
 |-----|-------|-------------|
 | `torget` | `main/main.c` | boot, WiFi candidate hunt, SNTP, heap, brightness, MADCTL |
 | `rotation` | `main/rotation.c` | IMU reads, display rotation |
-| `torget-http` | `components/torget_net/torget_http.c` | every GET: error name, status, cap, URL; `LAN svarade inte, provar reläet` when a fetch fails over to the relay |
+| `torget-http` | `components/torget_net/torget_http.c` | every failed GET: error name, status, cap, and a **redacted target** — `<scheme>://<host> via LAN` or `… via relä`, never the path; `LAN svarade inte, provar reläet` when a fetch fails over to the relay |
 | `tokens` | `components/app_tokens/net.c` | /api/tokens + /api/max-tracker polls |
 | `agent-net` | `components/app_tokens/agent_net.c` | /api/agent-status poll (1 Hz, log rate-limited to 30 s) |
 | `github-net` | `components/app_tokens/github_net.c` | the optional /api/github poll |
@@ -75,6 +75,11 @@ lines every 30 s and a `heap:` line every 10 s.
   coredump partition and no reboot counter (OBS-02, OBS-03).
 - The log level and console routing are inherited IDF defaults, not
   pinned in `sdkconfig.defaults` like everything else is (OBS-28).
+- Fetch failures name a *redacted* target (scheme, host, and whether LAN
+  or the relay was tried) because the relay URL's path is a credential.
+  ESP-IDF's own `HTTP_CLIENT` tag would print the whole request line at
+  `DEBUG`, but `ESP_LOGD` is compiled out at the inherited default level;
+  raising it reopens that (OBS-35).
 - Serial-monitoring a *running* board is physically unverified: the panel
   draw can bounce the board off a computer USB port
   (`docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md`).
@@ -274,7 +279,8 @@ Verbatim strings worth grepping for, and what they mean:
 |-----------|--------|------------------|
 | `WiFi tappat ("…", orsak 201)` | fw `torget` | network invisible: wrong SSID or 5 GHz-only. 15/204 = bad password. |
 | `ingen tid från SNTP ännu` | fw `torget` | clock unset — but fetches proceed anyway and TLS fails as generic transport errors (OBS-15). Treat later cert/transport noise as *this*. |
-| `hämtning misslyckades: ESP_ERR_… (http://…)` | fw `torget-http` | transport failure, with URL. Wrong hostname shows up here. |
+| `hämtning misslyckades: ESP_ERR_… (http://<värd>:8737 via LAN)` | fw `torget-http` | transport failure. The target is scheme + host + route only: the relay's path is `/u/<secret>` and *is* its access key, so no fetch log may carry a path (`docs/relay.md`). Wrong hostname and wrong port still show up here; *which* endpoint failed comes from the `tokens`/`github-net` line beside it. `okänd adress via …` means the address had no scheme or host at all. |
+| `oväntad statuskod 404 (https://<värd> via relä)` | fw `torget-http` | the target answered but not with 200. `via relä` says the cloud mailbox answered, `via LAN` the local tokenserver — the two are otherwise indistinguishable now that the path is gone. |
 | `kroppen större än … byte, avvisad` | fw `torget-http` | payload over cap — server-side schema growth. See lessons: the 1058-byte incident. |
 | `hämtningen avvisad, värden står kvar` | fw `tokens` | fetch rejected. If no `torget-http` line explains it, the parser rejected the schema — suspect server/firmware version skew (OBS-22). |
 | `agentstatus avvisad: transportfel ESP_FAIL` | fw `agent-net` | always literally `ESP_FAIL` — the real cause is discarded before logging (OBS-12). Only says "agent feed unhappy". |
