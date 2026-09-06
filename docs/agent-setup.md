@@ -189,7 +189,7 @@ readable OAuth copy is expired:
 | `claudeProbe` | Meaning | What to do |
 |---|---|---|
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
-| `not_run` | Probe has not fired yet | It runs every 120 s — wait |
+| `not_run` | Probe has not fired yet | It runs every 240 s (`LIMITS_EVERY_S`) — wait |
 | `no_claude_oauth_token` | No Claude Desktop / Claude Code token found | Have them sign in to Claude Code on this computer |
 | `token_expired_…` | Token found but expired; Claude may still say logged in because login state and the exported usage credential are different | The service rechecks locally every 15 s. `claudeLocalUsage: fresh_applied` can keep the general week live; for Fable, start a **new Claude Code CLI turn** and send one short message so Claude's supported client refreshes Keychain |
 | `usage_http_401` / `usage_http_403` | Every token source rejected (on macOS the probe tries Claude Desktop's process token, then the keychain, and falls back automatically; on Windows there is only `%USERPROFILE%\.claude\.credentials.json`) | Re-authenticate in Claude Code |
@@ -499,7 +499,7 @@ workflow, consent model and troubleshooting live in [ota.md](ota.md).
 | No `/dev/cu.usbmodem*` or Windows `COM` port | Not in download mode | Hold BOOT, tap RESET, release BOOT |
 | Flash starts then dies; board hangs | USB port cannot power the panel | Download mode to flash; own PSU to run |
 | Numbers freeze and go stale | Service, LAN, or the panel's application HTTP path dropped | Last good values are kept deliberately. Run `doctor`; compare source freshness, recent panel polling, and physical glass before restarting anything |
-| `./test/run.sh` refuses to start | Unpinned PyYAML/Pillow | See [Hardware knowledge](../README.md#hardware-knowledge) |
+| `./test/run.sh` refuses to start | Unpinned PyYAML/Pillow, or `cryptography` missing — the encrypted-interaction vectors are part of the host gate | See [Hardware knowledge](../README.md#hardware-knowledge) |
 
 ## Simulator only (no board)
 
@@ -529,7 +529,8 @@ so use the venv:
 
 ```sh
 python3.12 -m venv .venv && . .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt \
+  -r requirements-interaction-relay.txt
 ./test/run.sh
 ```
 

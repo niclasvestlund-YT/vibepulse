@@ -679,7 +679,7 @@ network once; every visit after that it joins by itself.
   &nbsp;
   <img src="docs/img/vibepulse-wifi-setup.png" width="31%" alt="VibePulse Wi-Fi setup screen with a large phone-scannable QR code and one Manual Setup control">
   &nbsp;
-  <img src="docs/img/vibepulse-wifi-signal.png" width="31%" alt="The shared launcher with a neutral three-bar Wi-Fi signal icon at the top right">
+  <img src="docs/img/vibepulse-wifi-signal.png" width="31%" alt="The shared launcher with the neutral Wi-Fi indicator at the top right">
 </p>
 <p align="center"><em>Real 480×480 frames from the shared LVGL firmware renderer: recovery, phone-first QR setup, and the global signal indicator.</em></p>
 
@@ -714,10 +714,10 @@ keychain (macOS asks you — that prompt is the consent), hands it to the panel
 over its temporary access point, and gives the Mac's Wi-Fi back. The phone
 flow remains the universal path and needs no computer or command line.
 
-The small neutral Wi-Fi symbol is global: zero bars plus a slash means the
-panel is disconnected; one to three bars describe only its connection to the
-local access point. It **does not mean internet** access, tokenserver reachability,
-or relay health. During setup the complete symbol means setup mode, not a
+The small neutral Wi-Fi symbol is global and two-state: a slashed fan means
+the panel is not joined to an access point, a complete fan means it is. It
+shows no signal strength, and it **does not mean internet** access,
+tokenserver reachability, or relay health. During setup the complete symbol means setup mode, not a
 successful destination join.
 
 The setup window opens on its own after 90 seconds without a network, or
@@ -870,7 +870,8 @@ need a reproducible Python:
 ```sh
 python3.12 -m venv .venv
 . .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt \
+  -r requirements-interaction-relay.txt
 ./test/run.sh
 ```
 

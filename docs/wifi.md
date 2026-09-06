@@ -33,7 +33,7 @@ rescue.
   &nbsp;
   <img src="img/vibepulse-wifi-setup.png" width="31%" alt="The temporary VibePulse Wi-Fi setup network with a phone-scannable QR and one Manual Setup control">
   &nbsp;
-  <img src="img/vibepulse-wifi-signal.png" width="31%" alt="The launcher with the global neutral three-bar Wi-Fi indicator">
+  <img src="img/vibepulse-wifi-signal.png" width="31%" alt="The launcher with the global neutral Wi-Fi indicator">
 </p>
 <p align="center"><em>Exact 480×480 captures from the same shared LVGL trees compiled into the panel firmware—not design mockups.</em></p>
 
@@ -109,12 +109,17 @@ cannot drift apart silently.
 
 ### What the top-right Wi-Fi symbol means
 
-The one neutral 28-pixel symbol is shared by the launcher, every app, Needs
-You, OTA, and Wi-Fi setup:
+The one neutral 20 x 18 symbol is shared by the launcher, every app, Needs
+You, OTA, and Wi-Fi setup, and it has exactly two drawn states:
 
-- slash + faint silhouette: disconnected;
-- one, two, or three bright bars: local access-point signal strength;
-- complete bright symbol while the setup window is open: setup mode.
+- slashed fan: not joined to an access point;
+- complete fan: joined to one. Signal strength is NOT shown. The weak and
+  medium silhouettes exist in `platform/wifi_status_assets.c` but read as a
+  broken or undersized icon at this size, so `platform/torget_ui.c` never
+  draws them and `test/test_lvgl_layer_safety.py` asserts they stay unused.
+
+While the setup window is open the complete fan means setup mode rather than
+a join — the window is the context that tells them apart.
 
 It deliberately **does not mean internet** access, DNS success, tokenserver
 reachability, Cloudflare relay health, or that the destination join has

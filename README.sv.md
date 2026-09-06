@@ -127,7 +127,8 @@ Install development tools in a Python 3.11+ virtual environment:
 ```sh
 python3.12 -m venv .venv
 . .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt \
+  -r requirements-interaction-relay.txt
 ```
 
 `./test/run.sh` uses the activated environment's Python by default. Set
