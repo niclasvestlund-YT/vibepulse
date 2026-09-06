@@ -44,6 +44,35 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **`tools/snapshot.sh` has host tests, on macOS as well as Linux.** The
+  backup `AGENTS.md` makes mandatory before any history rewrite had no
+  coverage at all: no entry in `test/run.sh`, no test file, no shellcheck.
+  Three consecutive review rounds each found a real defect in that one file,
+  and every one was found by a reviewer building a repository shape by hand.
+  `test/test_snapshot_tool.py` now runs the tool against ten synthetic
+  repositories and asserts both the exit code and the published artifacts: an
+  ordinary repository publishes a `.bundle` plus its `.refs` sidecar at mode
+  0600 and clones back; a bare repository and a repository whose bundle
+  advertises no HEAD both exit 0; a shallow clone is refused with
+  `--unshallow` named; a destination inside a checkout is refused directly,
+  via `..`, via a linked worktree, and via a worktree whose path contains a
+  newline; a `prunable` registration neither refuses nor crashes; a run from a
+  linked worktree lands beside the **main** checkout; and a byte flipped in
+  the pack is caught — by the tool's own fetch into a temp bare repository,
+  because `git bundle verify` reads the header only and calls a corrupted
+  pack "okay".
+
+  The portability half is not decoration. Three of the five defects — `awk`
+  with NUL as `RS`, `head -c -1`, `mktemp` without a template — are invisible
+  on Linux, where GNU's tools do exactly what the script asks; they only bite
+  on the maintainer's own machine. A new `Snapshot tool` CI job therefore runs
+  the same file on `ubuntu-latest` **and** `macos-latest`, and the test carries
+  static guards for that class so a reintroduced GNU-ism goes red on ubuntu
+  the minute it is written. `shellcheck tools/snapshot.sh` runs alongside as a
+  complement, not a substitute: it flags neither `RS="\0"` nor a missing
+  `mktemp` template. Each of the five defects was reverted one at a time and
+  the test watched go red before this landed.
+
 - **The screenshots in `docs/img/` are checked against the simulator.**
   `test/test_docs_frame_drift.py` compares every checked-in 480 × 480 frame
   with what this build actually renders, and the answer is blunt: of
