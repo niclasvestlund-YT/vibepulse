@@ -21,6 +21,33 @@ point at the backlog item.
 
 ---
 
+## 2026-09-06 · A photo of the panel carried the coordinates it was taken at
+
+**What happened:** `docs/img/github/glass-live.png` was an iPhone 15 Pro
+photograph committed straight off the camera — 3024 × 4032, 6.9 MB, a
+quarter of the whole repository in one file. Its EXIF held a full GPS IFD:
+a position fix precise to ten metres, with the altitude and the
+minute it was taken. That is a home address, published, in a repository whose
+`.gitignore` deliberately keeps `.ota-device` and `secrets.h` off the disk
+because a LAN address is considered too revealing to share. **Root cause:**
+the secrets discipline was built around *text* — passwords, keys, IP
+addresses in files someone would read. A binary nobody opens was never in
+scope, and a camera writes the location in by default. The size made it
+into the repository the same way: nobody looks at a photo's dimensions
+when the markdown renders it at 800 px. **The rule now:** a photograph
+entering `docs/img/` is resized to what the page actually renders and
+re-encoded through a fresh image with no `info` dict, so EXIF, XMP and the
+ICC profile are all dropped rather than trimmed. Check
+`Image.getexif().get_ifd(0x8825)` is empty before committing.
+**Guards:** none automated yet — `test_docs_frame_drift.py` deliberately
+skips `NOT_FRAMES`, which is where every photograph lives, so the class is
+unguarded by construction. Backlog item, not a claim of safety.
+**Watch for:** the original blob is still in git history and on GitHub;
+stripping the working copy does not unpublish it. Removing it needs a
+history rewrite on a public repository, which is a maintainer decision.
+
+---
+
 ## 2026-09-05 · Pinning a screenshot's size did not pin its content
 
 **What happened:** the global Wi-Fi indicator was redrawn in `d5be82d`
