@@ -242,6 +242,214 @@ Physical dedicated-power acceptance remains separate evidence.
 
 ---
 
+### OBS-35 · The panel runs below its own freeze threshold, and the 10 s sample cannot see it
+`firmware · M · open` — on `v1.0.0-67-ge51b79f`, physically observed
+2026-09-06 over ~30 minutes of uptime on `torget-home-01`. Two distinct
+signals, which should not be conflated:
+
+**1. Memory.** The firmware's own guard fires essentially every 10 s sample
+from t=23 s onward — 76 occurrences and counting:
+
+```
+W (307120) torget: LÅGT DMA-block: 19456 byte (flush behöver 11520) — nära fryströskeln
+```
+
+The sampled largest DMA block stays in a **19 456–31 744 B** band, but the
+separately tracked lowest-ever figure fell to **11 143 B**, which is **377
+bytes below the 11 520 B a display flush requires**. The dips happen between
+samples and are invisible to the periodic `heap:` line, which never observed
+anything under 19 456. **Any soak watching the sampled figure alone will report
+"steady" straight through this condition** — that is the part that makes this
+P1: the evidence lies. The low-water progression was
+`44199 → 19167 (t=33 s) → 18451 (t=605 s) → 11191 (t=843 s) → 11143 (t=935 s)`,
+then flat; it did not continue to fall.
+
+**2. Lock contention.** Seventeen occurrences of, verbatim:
+
+```
+E (316778) esp_lvgl:adapter: esp_lv_adapter_lock(751): Failed to acquire LVGL lock
+```
+
+roughly one every two minutes, not escalating. This is a mutex acquisition
+timeout — someone holds the LVGL lock too long — and is **not** the same
+failure mode as the DMA figure above. Treating them as one thing was the first
+wrong turn in the investigation.
+
+**Comparison against the previous image.** The panel previously ran
+`v1.0.0-33-g51e8d0e-dirty`, which showed a 40 960 B block with a 76 435 B
+low-water mark and no warnings at all. The difference is not the new overlays —
+all three report `internt +0 B`, and opening and closing SETTINGS twelve times
+inside two minutes did **not** move the lowest-ever figure off 11 143. The
+difference is that the old image **did no TLS at all**: zero
+`esp-x509-crt-bundle: Certificate validated` lines across its whole uptime, no
+encrypted interaction relay, and every payload marked `stale=1`. Its roomy heap
+was the heap of a panel that was not doing its job. The new image completes a
+handshake every ~2.5 s.
+
+**Correlation result — no client is implicated.** For all 17 lock failures,
+the interval back to the nearest preceding handshake was `min 178 ms, max
+3495 ms, mean 1795 ms` against a handshake interval of ~2461 ms. Causation
+would cluster these near zero; a uniform distribution would mean ~1230 ms. The
+observed spread is broader than uniform, so `Certificate validated` precedes
+the failures only because it precedes everything. **The TLS hypothesis is
+unsupported by this data.** One outlier has a plausible mechanism and deserves
+a look before TLS does: `t=826595` is preceded not by a handshake but by a
+display rotation (`rotation: roterade till läge 0`, `MADCTL 0xA0`), which holds
+the LVGL lock while the panel redraws.
+
+**Cheapest bisection, if one is run.** Four clients are plain `#ifdef` gates in
+`secrets.h` and can all be removed in a single rebuild:
+
+| Client | Flag | Gate |
+|---|---|---|
+| Quota poll | `TK_TOKENS_URL` | `components/app_tokens/net.c:45` |
+| Max tracker | `TK_MAX_TRACKER_URL` | `components/app_tokens/net.c:170` |
+| Agent status | `TK_AGENT_STATUS_URL` | `components/app_tokens/agent_net.c:32` |
+| Numbers relay | `TK_VIBEPULSE_RELAY_URL` | `components/app_tokens/app_tokens_config.h:22` |
+
+Together they account for most of the handshakes. If the lock failures survive
+that build, TLS is excluded and the rotation path becomes the prime suspect.
+
+Two clients cannot be disabled this way and are traps for anyone trying:
+`TK_VIBEPULSE_INTERACTION_RELAY_URL` is read by CMake directly out of
+`secrets.h` (`components/app_tokens/CMakeLists.txt:26–41`) and its absence is a
+configure-time `FATAL_ERROR`, not a disabled client — the off switch is
+`TK_VIBEPULSE_INTERACTION_RELAY` in menuconfig. `SG_GLANCE_URL` has no `#ifdef`
+anywhere and is referenced once, at
+`~/Solelkollen/components/app_solelkollen/net.c:59`, outside this repo;
+removing the define breaks that component's build, so Solelkollen is switched
+off by pointing `TORGET_SOLELKOLLEN_DIR` elsewhere.
+
+**UPDATE, same session — the OTA listener is implicated, not TLS.** Two more
+low-water drops were captured after the above was written, and both coincide
+with the maintenance window being open. The window was open for a total of
+~12 seconds out of ~2 180 seconds of uptime:
+
+```
+window 1:  open t=837.1 s -> closed t=846.1 s
+           low-water fell 18 371 -> 11 191 at t=843 s      (inside the window)
+
+(1 200 s with no window, uninterrupted TLS churn: low-water moves 4 bytes,
+ 11 143 -> 11 139)
+
+window 2:  open t=2156.4 s -> closed t=2159.0 s
+           low-water fell 11 139 -> 10 179 at t=2164 s     (immediately after)
+```
+
+Two out of two, inside 0.5 % of the uptime, while twenty minutes of handshakes
+every 2.5 s moved the figure by four bytes. The mechanism is documented in the
+firmware and announced in its own log: `OTA-lyssnaren uppe på port 80` on open,
+`OTA-lyssnaren stoppad — minnet åter till apparna` on close. `ota_service.c`
+states the design directly — the httpd server is born in the guard task when
+the window opens and dies when it closes, so a boot without an update has the
+same memory profile as a build with no OTA at all.
+
+The `ota` overlay's `internt +0 B` covers the UI layer only, not the listener;
+conflating them was the second wrong turn in this investigation.
+
+**This supersedes the bisection plan above.** Do not spend a build on the four
+`#ifdef` clients first. The cheap experiment is: open the maintenance window,
+watch `lägsta någonsin`, close it, repeat. If the drop reproduces per open, the
+listener's allocation is the target and TLS is a bystander.
+
+Note the operational consequence: the block is pushed to its lowest observed
+value **precisely while the update window is open** — the moment the panel is
+drawing progress UI and is about to receive a firmware image. Lowest observed so
+far is 10 179 B against a flush requirement of 11 520 B.
+
+**SECOND UPDATE, same session — the listener is a constant cost, not the
+cause.** The claim above was made on two coincidences. Three measured
+open/close cycles were then run deliberately, reading the heap before, during
+and after each:
+
+| | cycle 1 | cycle 2 | cycle 3 |
+|---|---|---|---|
+| window open for | ~55 s | 141 s | ~50 s |
+| internal free, stable while open | ~47 970 | ~47 960 | ~47 970 |
+| largest block while open | 17 408–18 432 | 16 384–23 552 | 17 408–21 504 |
+| low-water before -> after | 10 179 -> 9 623 | 9 623 -> 9 623 | 9 623 -> 9 623 |
+| memory returned on close | full | full | full |
+
+What the listener actually does is now measured rather than inferred: it costs a
+**constant ~7 kB of internal RAM**, pinning internal free at ~47 965 within ten
+bytes across all three cycles and independent of how long the window stays open,
+and it **returns all of it on close** — free and largest block come back to, or
+slightly above, the pre-open values. There is no leak across cycles.
+
+Critically, **it does not lower the low-water mark per open.** Cycles 2 and 3
+moved it by zero. Cycle 1's 556-byte drop was a transient that happened to
+coincide with an open window, not a consequence of opening one. A prediction of
+~-556 B per cycle was made from cycle 1 and is refuted by cycles 2 and 3.
+
+So the honest state of this item, after three wrong turns:
+
+1. The DMA-block figure and the LVGL lock failures were first treated as one
+   problem. They are two: one is memory, the other is a mutex timeout.
+2. TLS was blamed next. The interval analysis refutes it — the handshakes
+   precede everything because they happen every 2.5 s.
+3. The OTA listener was blamed third, on two coincidences. Three measured
+   cycles refute that too.
+
+**What remains unexplained is the thing to chase:** the low-water mark walked
+from 44 199 down to 9 623 over ~45 minutes in steps
+(`44199 -> 19167 -> 18451 -> 11191 -> 11143 -> 11139 -> 10179 -> 9623`) with no
+identified trigger for any single step, while the sampled block never went below
+16 384. Whatever allocates deeply enough to set those minima is still
+unidentified, and the 10 s sample cannot see it. A ring buffer of the last N
+allocation failures, or logging the allocation site when a new low-water is set,
+would turn this from inference into evidence — and that, not the bisection, is
+the fix this item should carry.
+
+Longer opens do drift the sampled block down somewhat (18 432 -> 16 384 over
+141 s) without setting a new minimum; worth a look but not the main thread.
+
+**SIX-HOUR UNATTENDED SOAK, 2026-09-06 02:03–08:03 — the low-water plateaus.**
+Passive reading only; no interaction at the panel, no build, no window opened.
+
+| hour | samples | block min | block max | low-water | lock fails | `LÅGT` | free MiB |
+|---|---|---|---|---|---|---|---|
+| 1 | 348 | 19 456 | 31 744 | 9 391 | 14 | 139 | 193 |
+| 2 | 350 | 19 456 | 31 744 | 9 391 | 4 | 142 | 1 671 |
+| 3 | 354 | 19 456 | 31 744 | 9 371 | 0 | 162 | 1 655 |
+| 4 | 355 | 18 432 | 31 744 | 9 355 | 0 | 141 | 1 573 |
+| 5 | 355 | 19 456 | 31 744 | 9 355 | 1 | 150 | 1 520 |
+| 6 | 356 | 19 456 | 31 744 | 9 355 | 0 | 136 | 1 496 |
+
+Three results, and the first changes how serious this item is:
+
+1. **The walk stops.** The low-water moved **36 bytes across six hours**
+   (9 391 -> 9 355), against **34 576 bytes in the first 45 minutes**
+   (44 199 -> 9 623). It settled at 9 355 by hour 4 and did not move again. The
+   descent was a warm-up and settling phenomenon, not ongoing degradation, and
+   nothing is heading toward zero. The panel still sits 2 165 B below the
+   11 520 B a flush requires at its worst-ever moment, but that floor is stable.
+
+2. **Lock failures track interaction, not uptime.** 14 in hour 1 — which still
+   contained the tail of the interactive session — then 4, 0, 0, 1, 0. Nineteen
+   in six hours, effectively none once the panel was left alone. This supports
+   the rotation outlier noted above and points the LVGL-lock question at UI
+   activity rather than at any network client. Whatever the cause, it is not a
+   background process.
+
+3. **The block range never moved.** 19 456–31 744 for six hours, one hour
+   touching 18 432. Stable oscillation, no drift.
+
+The panel was still drawing at the end, at ~7.2 hours of uptime, and no alarm
+condition fired (low-water < 8 000, log stall, or disk < 60 MiB).
+
+**Correction to the frequency claimed above:** the `LÅGT DMA-block` warning was
+described as firing on essentially every 10 s sample. It does not. Over the full
+session it fired **1 083 times against 2 527 heap samples — about 43 %**,
+tracking the low half of the block's normal oscillation. The warning is noisier
+than a real threshold breach, which is itself worth noting: a guard that fires
+on 43 % of samples is close to being ignorable, and it fired identically during
+the hours when nothing at all was wrong.
+
+Not yet investigated: whether the flush allocation actually fails when the
+block dips under 11 520, or whether it retries and hides it.
+
+---
+
 ## P2 — stop making it worse
 
 ### OBS-13 · No backoff anywhere in the firmware

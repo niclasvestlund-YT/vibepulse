@@ -1,0 +1,343 @@
+# Flash session 2026-09 — KEY3 physical review — 2026-09-06
+
+## Outcome
+
+**DRAFT, FOR REVIEW. USB FLASH TO `v1.0.0-67-ge51b79f` PASSED AND THE `settings`
+INTERNAL-RAM QUESTION IS SETTLED AT `+0 B`. §2 BOOT-LOG EVIDENCE IS COMPLETE. A
+DEFECT WAS FOUND AND MEASURED: THE PANEL RUNS BELOW ITS OWN FREEZE THRESHOLD
+(OBS-35). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
+ALL NOT EXERCISED. §5 IS RUNNING UNATTENDED FOR SIX HOURS AS PASSIVE
+OBSERVATION ONLY. §3.5 CODEX AND MANUAL-TEST 4.4/4.5 ARE NOT EXERCISED.**
+
+The evening's substance is the flash and the OBS-35 investigation, not the
+checklist. Three deliberate OTA-window cycles were measured because the
+investigation needed them; they are not manual-test 4.1/4.2 results, because
+4.1–4.3 were never walked as written and their pass criteria (menu route,
+countdown, `KEY3 CLOSES` footer, early close with no upload) were not checked.
+
+The physical unit `torget-home-01` now runs `v1.0.0-67-ge51b79f`, flashed over
+USB on 2026-09-06 at 01:10. The run sheet `docs/flash-session-2026-09.md` was
+followed; three of its premises turned out to be wrong on this machine and are
+corrected below.
+
+## Deviations from the run sheet
+
+1. **The inventory was wrong about what was on the glass.** The sheet and
+   `spec/device-units.yaml` both said `v1.0.0-25-g054db68` (flashed
+   2026-08-30). The boot banner said `v1.0.0-33-g51e8d0e-dirty`, compile time
+   `Sep 2 2026 23:37:55` — eight commits further along, built three days after
+   the recorded flash, and **built from a dirty tree**. The exact source of the
+   running image was therefore not reconstructible. The sheet's behavioural
+   premise still held: #72, #73, #76 and #77 are all absent from `51e8d0e`, so
+   the image had no SETTINGS menu, no overlay cost lines and no QR fix.
+
+2. **The OTA delivery path in §1 could not work.** The running image logged
+   `ota-service: inget OTA-token i secrets.h — uppladdning avstängd`, i.e. the
+   `#else` branch of `components/torget_ota/ota_service.c:549`: `TG_OTA_TOKEN`
+   was undefined at compile time. `s_token_usable` gates only the upload
+   endpoint's authorization check (`ota_service.c:195`), so the maintenance
+   window would still have opened and drawn its ring while every upload was
+   rejected. Delivery over the air was impossible; the flash went over USB with
+   explicit user authorization. This checkout's `secrets.h` has a valid token
+   (64 lowercase hex, verified without printing it), so the flashed image has
+   OTA receiving enabled again and the rest of the session can go over the air.
+
+3. **`python3` in the sheet is the wrong interpreter here.** Bare `python3` is
+   the system 3.9.6, which has no `tomllib`, so `tools/vibepulse_setup.py
+   doctor` crashes on import. The service runs `.venv/bin/python` (3.12.13);
+   that is what doctor and smoke were run with.
+
+Two smaller notes: `idf.py flash monitor` cannot be run from a non-TTY context
+(`Monitor requires standard input to be attached to TTY`) — the monitor must be
+started in its own terminal, as §0.5 already says. And attaching the serial
+monitor to a *running* panel reboots it (`rst:0x15 USB_UART_CHIP_RESET`,
+firmware reports `omstartsorsak USB-reset (11)`). `docs/lessons.md` (2026-08-13)
+listed serial-monitoring a running board as unverified; it is now verified, with
+the answer "works, but costs a reboot".
+
+## Companion provenance
+
+Buddy was excluded, as the build's own line confirms:
+`Torget: Vibbe/Buddy är bortvald (TORGET_WITH_BUDDY=OFF, frysläxan 2026-08-14)`.
+`~/Buddy` is at `b7002f0`, clean, and was not compiled in.
+
+Solelkollen **was** compiled in, and cannot be attested the way the sheet asks:
+
+```
+Companion: Solelkollen
+  Path:          ~/Solelkollen/components/app_solelkollen
+  git describe:  UNAVAILABLE — the directory is not a git checkout, and there
+                 is no .git anywhere in the chain up to /
+  Contents:      8 files, 48 KB, modified 2026-08-12..13
+  sha256:        0b14f6bfea1390b7b7550384424d656aef2e6a4ec27e249a1ba16d75d6418869
+  In spec/hardware-sources.yaml: no
+```
+
+The user authorized the flash with this component included and unversioned,
+recorded here by path and content hash. `spec/hardware-sources.yaml` lists only
+Buddy (lines 87–90) and should gain a Solelkollen entry.
+
+## §2 — boot log
+
+Banner, on the flashed image:
+
+```
+I (986)  app_init: App version:  v1.0.0-67-ge51b79f
+I (991)  app_init: Compile time: Sep  6 2026 00:39:48
+I (1100) torget: boot: torget v1.0.0-67-ge51b79f (byggd Sep  6 2026 00:39:48,
+         IDF v5.5.2), omstartsorsak USB-reset (11)
+```
+
+No `-dirty`. Identical to the checkout, the build and the binary.
+
+The three overlay cost lines, logged once each at boot:
+
+```
+overlaykostnad wifi-setup: LVGL-pool +7572 B (pool 79100/251948 använt), internt +0 B (kvar 143275)
+overlaykostnad settings:   LVGL-pool +3520 B (pool 82620/251516 använt), internt +0 B (kvar 143275)
+overlaykostnad ota:        LVGL-pool +2504 B (pool 85124/251204 använt), internt +0 B (kvar 143275)
+```
+
+**`settings` costs `+0 B` of internal RAM.** That is the figure the AMOLED rule
+asked for, and it retires the internal-RAM worry with evidence: the FEATURES row
+has no internal budget to fit under. All three overlays live entirely in the
+LVGL pool, which is 34 % used with all three accounted for.
+
+## §2 — the heap drop is the relays working, not a regression
+
+Steady-state internal heap is roughly half what the previous image showed:
+
+| | old `v1.0.0-33` (55 min up) | new `v1.0.0-67` (95 s up) |
+|---|---|---|
+| internal free, stable | ~117 000 | ~55 000 |
+| largest DMA block | 40 960 | 19 456–23 552 |
+| lowest ever | 76 435 | 19 167 |
+
+It is not a leak: the figure is flat from t=33 s onward and recovers to 59 027 by
+t=95 s. Comparing the relay and transport lines in the two boot logs explains the
+level, and the explanation is decisive:
+
+| | old `v1.0.0-33` | new `v1.0.0-67` |
+|---|---|---|
+| `esp-x509-crt-bundle: Certificate validated` | **0** in 55 min | **412** in 17 min (one per 2.5 s) |
+| `interaction-relay: krypterad reläkanal startad` | absent | present, t=9.4 s |
+| `tokens: hämtning` | `stale claude=1`, 0.00 Mtok, 0 sessions | `stale claude=0`, 7.54 Mtok, 1 session |
+| `tokens: max tracker` | `stale=1`, streak 0 days | `stale=0`, streak 28 days |
+
+**The old image did no TLS at all.** Zero handshakes across its whole uptime,
+no encrypted interaction relay, and every payload marked stale. Its roomy heap
+was the heap of a panel that was not doing its job. The new image runs a
+continuous stream of TLS sessions — the encrypted interaction relay, the numbers
+relay, the tokenserver fetches that now succeed, and Solelkollen's HTTPS API —
+and mbedTLS session buffers are internal/DMA-capable, which is exactly where the
+~60 kB went and why the largest contiguous DMA block fell.
+
+Conclusion: the drop is the cost of working relays, not a cost of the new
+overlays — which is consistent with all three overlays reporting `internt +0 B`.
+The number to watch in §5 is therefore the largest DMA block under repeated
+SETTINGS opens, which by the overlay accounting should not move at all.
+
+One item for the backlog falls out of this: **412 handshakes in 17 minutes, one
+every 2.5 seconds**, suggests TLS connections are not being reused across polls.
+That is heap churn and radio time for no obvious benefit.
+
+## Observability findings
+
+- `W torget-http: oväntad statuskod 502 (https://solelkollen.se/api/glance)`,
+  followed by `solelkollen: hämtningen avvisad, värden står kvar`. The companion
+  fails soft against an upstream 502. Seen repeatedly (t=11.5 s, t=43.1 s).
+- `E QMI8658: Failed to read WHO_AM_I register`, immediately followed by
+  `QMI8658 initialized successfully`. Present on **both** images, so not a
+  regression from this flash.
+- TLS handshake rate, as above.
+
+## Not exercised
+
+- **§3.5 Codex smoke test** — not run tonight, by user decision. `doctor`
+  reports four blocking FIX items: the `vibepulse@torget` plugin is not
+  installed, the MCP bridge is not registered with its 130 s timeout,
+  `approval_policy=never` would silently hide permission cards (the #82
+  finding), and hooks trust is not machine-readable. A real APPROVE tap
+  returning `answered`/`option_index: 0` was therefore not obtainable.
+- **manual-test 4.4** — needs a second pushed build with green CI; not attempted.
+- **manual-test 4.5** — the post-delivery re-arm belongs to the OTA delivery
+  path, which was not used; the image arrived over USB.
+
+## Host state
+
+Tokenserver restarted from this checkout before the session
+(`rev e51b79f`); `doctor` reports `Tokenserver source: live fingerprint matches
+this checkout`; `tools/tokenserver/smoke.py` 10 ok / 0 warnings / 0 errors. The
+panel's LAN polling is confirmed live in the serial log.
+
+The Mac's disk was **100 % full** (117 MiB free) at preflight and had to be
+cleared before anything could be built; a full disk had already broken one tool
+invocation with `ENOSPC`. Package caches and the stale 2026-08-30 build tree
+were removed with user approval. Removing that tree also permanently retired the
+stale-binary hazard the sheet warns about in §1 — it is no longer merely outside
+the `build*` glob, it is gone.
+
+## FINDING: the panel runs below its own freeze threshold
+
+Discovered from the serial log before the §1 gesture tests had produced a
+single result. The firmware carries its own guard for this and it has been
+firing continuously since 23 seconds after boot:
+
+```
+W (307120) torget: LÅGT DMA-block: 19456 byte (flush behöver 11520) — nära fryströskeln
+E (316778) esp_lvgl:adapter: esp_lv_adapter_lock(751): Failed to acquire LVGL lock
+```
+
+Counts over ~20 minutes of uptime on `v1.0.0-67-ge51b79f`:
+
+| Signal | Count |
+|---|---|
+| `LÅGT DMA-block … nära fryströskeln` | **76** — essentially every 10 s sample since t=23 s |
+| `esp_lv_adapter_lock: Failed to acquire LVGL lock` | **10**, clustered at t≈317–335 s, t≈819–827 s, t=1188 s |
+
+The decisive number is the lowest-ever largest DMA block, which the periodic
+`heap:` line tracks separately from the sampled value:
+
+```
+t=13 s   lägsta 44199
+t=33 s   lägsta 19167
+t=340 s  lägsta 18991
+t=605 s  lägsta 18451
+t=843 s  lägsta 11191
+t=935 s  lägsta 11143     <-- flush needs 11520
+```
+
+**11 143 < 11 520.** At some point around t=843–935 s the largest contiguous
+DMA-capable block fell 377 bytes below what a display flush requires. The panel
+did not freeze — it is still rendering, and the sampled block recovers to
+19 456–23 552 — but the margin against the freeze this repo has history with is
+gone, and was already gone before any manual test ran.
+
+The 10 s `heap:` sampling never observes anything below 19 456; every dip below
+that is invisible to it and only shows up in `lägsta någonsin`. Any soak that
+watches the sampled figure alone will report "steady" through exactly this
+condition.
+
+This connects directly to the relay finding above. The old image did zero TLS
+and held a 40 960 B block with a 76 435 B low-water mark. The new image runs a
+TLS handshake every 2.5 s, and mbedTLS session buffers are internal and
+DMA-capable — the churn fragments precisely the pool the display flush allocates
+from. The LVGL lock failures cluster near the low-water drops, which is
+consistent with contention while an allocation stalls.
+
+The overlays are not implicated: all three report `internt +0 B`, and the
+condition was already present before SETTINGS was ever opened.
+
+This is the §5 result, obtained without the soak. It should be treated as a
+defect against `v1.0.0-67`, not as a run-sheet checkbox.
+
+
+## The OTA window measured, three cycles
+
+Run deliberately as part of the OBS-35 investigation, not as manual-test
+4.1/4.2. The user held KEY3 for 3 s, chose UPDATE, waited for a heap reading,
+then short-tapped to close.
+
+| | cycle 1 | cycle 2 | cycle 3 |
+|---|---|---|---|
+| window open for | ~55 s | 141 s | ~50 s |
+| internal free before | 55 079 | 65 075 | 55 075 |
+| internal free, stable while open | ~47 970 | ~47 960 | ~47 970 |
+| largest block while open | 17 408–18 432 | 16 384–23 552 | 17 408–21 504 |
+| internal free after close | 56 859–58 879 | 55 087–68 843 | — |
+| low-water before -> after | 10 179 -> 9 623 | 9 623 -> 9 623 | 9 623 -> 9 623 |
+
+The listener costs a constant ~7 kB, pins internal free at ~47 965 within ten
+bytes regardless of how long the window is open, and returns all of it on close.
+It does not lower the low-water mark per open.
+
+## The low-water walk, unexplained
+
+```
+t=13 s    44199        t=843 s   11191
+t=23 s    43935        t=935 s   11143
+t=33 s    19167        t=2129 s  11139
+t=340 s   18991        t=2164 s  10179
+t=360 s   18795        t=2506 s  9623
+t=605 s   18451
+t=625 s   18371
+```
+
+Eight downward steps over roughly 45 minutes, ending 1 897 B below the 11 520 B
+a display flush requires. No trigger is identified for any single step. The
+sampled `heap:` figure never went below 16 384 across the whole session, so none
+of this is visible in the number a soak would normally watch. This is the open
+question OBS-35 carries forward.
+
+## An unanswered question, recorded as unanswered
+
+Two maintenance windows opened at t=837 s and t=2156 s, before the three
+measured cycles began. It was asked whether the user opened those two, since a
+window that opens by itself would be a materially worse finding than one the
+user opened. **That question was never answered.** Windows 3, 4 and 5 (the three
+cycles) are confirmed user-initiated; windows 1 and 2 are unattributed. The
+OBS-35 correlation does not depend on the answer — the three measured cycles
+stand on their own — but the possibility of a self-opening window is not
+excluded by anything in this session and should be settled before §3, where a
+spontaneous window would corrupt the takeover tests.
+
+## `.ota-device` points at the wrong address
+
+```
+.ota-device:        192.168.1.135
+panel's actual IP:  192.168.1.5   (esp_netif_handlers, t=9.2 s)
+```
+
+`tools/ota-flash.sh "$(cat .ota-device)"` would have sent to an address the
+panel does not hold. Had §1 gone over the air as the run sheet intends, this
+would have surfaced as a second failure — after the missing OTA token, and after
+the user had already stood at the panel and opened a window. The file is
+git-ignored and was not modified. It must be corrected before §3 and before any
+future OTA delivery.
+
+## What was not run
+
+Nothing in `docs/manual-test-key3.md` was walked as written. Specifically:
+
+- **§1 gesture (1.1–1.5)** — not run. The 1.2 timing the run sheet asks to be
+  recorded (how long the ~2 s press lasted) was never measured, and the
+  2026-08-16 class of bug it guards against is therefore unretested on this
+  image.
+- **§2 without a network (2.1–2.8)** — not run. The AP was never taken down.
+  2.4 (ABOUT shows a dash, not `0.0.0.0`) and 2.8 (no leftover QR over
+  `NO NETWORK`, the newest fix and the least proven) remain unverified, as does
+  the 2.7 self-open timing.
+- **§3 menu vs takeover (3.1–3.6)** — not run. No staged build was made; no
+  `build-stage/` exists. 3.3's timing (how soon after the takeover the short tap
+  came) was not measured.
+- **§4.1–4.3** — not run. The three measured window cycles above are not a
+  substitute: they exercised open and close, but not the menu route's pass
+  criteria, the ten-minute countdown, the `KEY3 CLOSES` footer, or 4.3's
+  hold-inside-an-open-window shortcut to WIFI SETUP.
+- **§3.5 Codex smoke test** — not run, by decision, with four blocking `doctor`
+  FIX items outstanding.
+- **manual-test 4.4 and 4.5** — not exercised, as recorded above.
+- **§5 soak** — a six-hour unattended passive observation ran 02:03–08:03 and
+  completed with no alarm. It is **not** the run sheet's §5, which also requires
+  a dozen SETTINGS opens under watch; those were done earlier as part of the
+  OBS-35 investigation, not as §5. Results are in OBS-35: the low-water
+  plateaued at 9 355 (36 bytes of movement in six hours, against 34 576 bytes in
+  the first 45 minutes), lock failures fell to effectively zero once the panel
+  was left alone, and the block range held at 19 456–31 744. The panel was still
+  drawing at ~7.2 hours uptime.
+
+## Host state at end of session
+
+The Mac's free disk fell from 1.5 GiB to **251 MiB** during the evening because
+`~/.cache/codex-runtimes` (~1.6 GB) was re-downloaded by a running Codex after
+being deleted earlier in the session. Deleting it again would repeat. The soak's
+own footprint is ~1 MiB over six hours and fits, but the margin against anything
+else growing overnight is thin, and the soak logs free disk each hour and flags
+a drop below 100 MiB.
+
+`spec/device-units.yaml` was updated to `installed_firmware:
+v1.0.0-67-ge51b79f` and `last_physical_verification: "2026-09-06"`.
+
+Nothing was committed. `README.md`'s SETTINGS section still says no panel has
+been flashed with the menu; that sentence cannot be changed yet, because §3 has
+not passed — it has not been attempted.
