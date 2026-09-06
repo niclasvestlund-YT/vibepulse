@@ -64,9 +64,16 @@ umask 077
 # Av samma skäl har varje `mktemp` en egen mall: BSD mktemp kräver en, GNU:s
 # gör den valfri, och utan mall dör filen på rad ett på just den maskin där
 # AGENTS.md gör den obligatorisk före en historikomskrivning.
-part=""; probe=""; sidecar_pending=""
+part=""; probe=""; sidecar_pending=""; bundle_pending=""
 roots_file="$(mktemp "${TMPDIR:-/tmp}/tg-snapshot-roots-XXXXXXXX")"
-trap 'rm -f "$part" "$roots_file" "$sidecar_pending"; rm -rf "$probe"' EXIT
+trap 'rm -f "$part" "$roots_file" "$sidecar_pending" "$bundle_pending"; rm -rf "$probe"' EXIT
+# INT och TERM görs uttryckliga så de går genom EXIT-trappen ovan i stället för
+# att bero på skalets default. Ett Ctrl-C mitt i publiceringen ska lämna
+# ANTINGEN ett komplett par ELLER ingenting — aldrig en bundle utan sin
+# innehållsförteckning, som för OID:n ur en flerradig pseudo-ref är det enda
+# som kan hitta dem igen.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 git worktree list --porcelain -z | {
   cur=""; prunable=0
   emit() { if [ -n "$cur" ] && [ "$prunable" = 0 ]; then printf '%s\0' "$cur"; fi; }
@@ -395,16 +402,25 @@ fi
 # hårdlänkar och `mv` är det bästa som går att få. Fönstret mellan kontroll och
 # flytt är litet och på en FAT-volym finns ingen atomisk primitiv att välja i
 # stället.
+# `$bundle` läggs i trappen FÖRE publiceringen, inte efter. Annars finns ett
+# fönster mellan `ln` och raden som nollar variabeln där ett Ctrl-C tog bort
+# förteckningen och lämnade kvar bundlen — en till synes färdig backup vars
+# namnlösa OID:n ingen kan hitta. Kontrollen ovan har redan slagit fast att
+# målet inte fanns, så trappen kan bara radera en fil den här körningen
+# skapade.
+bundle_pending="$bundle"
 if ln "$part" "$bundle" 2>/dev/null; then
   rm -f "$part"
 elif [ -e "$bundle" ]; then
+  # Dök upp mellan kontrollen och nu: den är inte vår att radera.
+  bundle_pending=""
   echo "VÄGRAR: $bundle finns redan — skriver inte över en befintlig backup." >&2
   exit 1
 else
   mv "$part" "$bundle"
 fi
-# Publicerad: förteckningen ska INTE städas bort längre.
-sidecar_pending=""
+# Paret är komplett: varken bundlen eller förteckningen ska städas bort.
+sidecar_pending=""; bundle_pending=""
 size=$(du -h "$bundle" | cut -f1)
 printf 'Snapshot: %s\n  %s refs, %s commits, %s — verifierad\n' \
   "$bundle" "$refs" "$commits" "$size"
