@@ -140,7 +140,16 @@ exactly where you do risky things to avoid touching the main checkout, writes
 `worktrees/<id>/ORIG_HEAD` and the main worktree's `ORIG_HEAD` says nothing
 about it. (`worktrees/<id>/HEAD` needs no such handling: `--all` reads every
 worktree's HEAD already, just not their ORIG_HEADs.) The `+worktrees/*`
-refspec above restores them without change. **The reflog itself still is not in
+refspec above restores them without change.
+
+Those ids come from listing `.git/worktrees/`, not from `git worktree list`.
+A worktree whose directory was deleted without `git worktree remove` is
+`prunable` and rightly drops out of that list — but its metadata, `ORIG_HEAD`
+included, survives until someone runs `git worktree prune`, and it can be the
+only reference a commit has left. Reading the directory is also what `--all`
+itself does: it picks up `worktrees/<id>/HEAD` from a prunable registration
+too. Live-ness matters for where you may write and whose dirty files to warn
+about; it does not decide what is worth saving. **The reflog itself still is not in
 there** and cannot be — a bundle has no way to carry one. Everything an
 earlier reset or rebase orphaned lives in `git reflog` in the original clone
 and nowhere else, which is worth knowing before deleting that clone.

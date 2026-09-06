@@ -154,27 +154,35 @@ bundle="$dest/$(basename "$repo")-$stamp-${part##*-}.bundle"
 # `rev-parse ORIG_HEAD` där ser bara dess egen — en rebase eller ett reset i
 # en länkad worktree hade fallit utanför, och det är i en länkad worktree man
 # gör riskabla saker just för att slippa röra huvudcheckouten. Git exponerar
-# dem som `worktrees/<id>/ORIG_HEAD`; id:t är katalognamnet under
-# `.git/worktrees/`, vilket `--absolute-git-dir` ger. Reproducerat: commit och
-# reset i en länkad worktree gav en godkänd bundle utan den forna toppen.
+# dem som `worktrees/<id>/ORIG_HEAD`. Reproducerat: commit och reset i en
+# länkad worktree gav en godkänd bundle utan den forna toppen.
 # `worktrees/<id>/HEAD` behöver ingen egen rad — `--all` läser alla
 # utcheckningars HEAD redan, till skillnad från deras ORIG_HEAD.
+#
+# Id:n läses ur `.git/worktrees/`, INTE ur listan över levande utcheckningar.
+# En worktree vars katalog raderats utan `git worktree remove` blir `prunable`
+# — den filtreras bort ur den listan, med rätta, för sökvägsvakten och
+# status-varningarna — men dess metadata ligger kvar tills någon kör
+# `git worktree prune`, och `ORIG_HEAD` där kan vara den enda referensen till
+# en commit. Reproducerat: commit, reset, `rm -rf` av worktreen — den forna
+# toppen fanns bara i den prunable registreringen. Att läsa katalogen är
+# dessutom vad `--all` självt gör: dess `worktrees/<id>/HEAD` kommer med även
+# för en prunable registrering.
 revs=(--all)
 if git -C "$repo" rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
   revs+=(ORIG_HEAD)
 fi
-while IFS= read -r -d "" r; do
-  [ -n "$r" ] && [ -d "$r" ] || continue
-  gd="$(git -C "$r" rev-parse --absolute-git-dir 2>/dev/null)" || continue
-  case "$gd" in
-    */worktrees/*) wt_id="${gd##*/}" ;;
-    *) continue ;;   # huvudworktreen; dess ORIG_HEAD heter bara ORIG_HEAD
-  esac
-  if git -C "$repo" rev-parse --verify --quiet "worktrees/$wt_id/ORIG_HEAD" \
-       >/dev/null 2>&1; then
-    revs+=("worktrees/$wt_id/ORIG_HEAD")
-  fi
-done < "$roots_file"
+wt_root="$(git -C "$repo" rev-parse --absolute-git-dir)/worktrees"
+if [ -d "$wt_root" ]; then
+  for wt_meta in "$wt_root"/*; do
+    [ -d "$wt_meta" ] || continue
+    wt_id="${wt_meta##*/}"
+    if git -C "$repo" rev-parse --verify --quiet "worktrees/$wt_id/ORIG_HEAD" \
+         >/dev/null 2>&1; then
+      revs+=("worktrees/$wt_id/ORIG_HEAD")
+    fi
+  done
+fi
 git -C "$repo" bundle create --quiet "$part" "${revs[@]}"
 
 # En overifierad backup är ingen backup — men `git bundle verify` räcker inte
