@@ -166,7 +166,7 @@ for required in (
         "relay enable-status --yes-e2e-cloud",
         "relay disable-status",
         "CONFIG_TK_VIBEPULSE_AGENT_STATUS_RELAY=y",
-        "2,816-byte", "15 seconds", "20 seconds", "five seconds",
+        "2,816-byte", "20 seconds", "ten seconds", "30 seconds",
         "project basenames"):
     assert required.lower() in interaction_guide.lower(), (
         f"interaction guide must pin live-status contract: {required}"

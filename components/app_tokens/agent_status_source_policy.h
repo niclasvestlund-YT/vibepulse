@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define TK_AGENT_LAN_FRESH_MS 5000u
-#define TK_AGENT_RELAY_STALE_MS 20000u
+#define TK_AGENT_RELAY_STALE_MS 30000u
 
 typedef struct {
   uint64_t last_lan_ms;

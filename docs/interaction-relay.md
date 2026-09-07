@@ -149,9 +149,11 @@ The repository's Worker logs only route kind, status, and duration.
 
 For live status the Worker sees the same kind of metadata plus one fixed-size
 latest-value status ciphertext. It cannot see project basenames or activity.
-The Mac replaces that slot about every five seconds; the encrypted inner copy
-expires after **15 seconds**, and the Worker deletes the outer slot after no
-more than **20 seconds**.
+The Mac replaces that slot about every ten seconds; the encrypted inner copy
+expires after **20 seconds**, and the Worker deletes the outer slot after no
+more than **20 seconds**. The panel polls it every ten seconds and keeps the
+last good status on screen for 30 seconds, so one missed poll or one failed
+publish does not blank the view.
 
 Cloudflare never receives those fields in plaintext: question text, command
 text, project name, or verdict. It also never receives the device key or the
@@ -190,8 +192,8 @@ the same time. If both paths fail, the decision stays on the computer.
 
 At the default five-second question poll and ten-second status poll, one panel
 makes roughly 26,000 idle requests per day, and one host publishing live status
-every five seconds adds about 17,300 more. Together with the numbers relay
-(about 9,000 per day) one host and one panel stay near 52,000 requests per day.
+every ten seconds adds about 8,700 more. Together with the numbers relay
+(about 9,000 per day) one host and one panel stay near 43,000 requests per day.
 The Workers free plan caps the whole account, every Worker and every Pages
 Function combined, at 100,000 requests per day, so a second host or a busy
 site on the same account can still cross it; the 2026-09-07 92 % alert came
@@ -205,8 +207,9 @@ before deploying. The protocol does not depend on a free tier. Increase
 status) and rebuild if your account needs a lower poll rate; that increases
 worst-case delivery latency by the same amount. On the host,
 `STATUS_PUBLISH_INTERVAL_S` in `tools/tokenserver/interaction_relay.py` sets
-the publish cadence; keep it well under the 15-second content expiry or the
-panel flickers between live and empty.
+the publish cadence; keep it under the 20-second content expiry and the
+panel's 30-second `TK_AGENT_RELAY_STALE_MS` window or the panel flickers
+between live and empty.
 
 ## Disable, remove, Rotate, Revoke, Update
 

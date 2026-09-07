@@ -8,10 +8,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 ### Changed
 
 - **Relay traffic cut roughly in half to stay under the Cloudflare free
-  plan.** The host now publishes live agent status every 5 s instead of 2 s
+  plan.** The host now publishes live agent status every 10 s instead of 2 s
   and the panel polls it every 10 s instead of 5 s (question polling stays at
-  5 s, so approval latency is unchanged). One host and one panel drop from
-  about 85,000 to about 52,000 Worker requests per day; the previous cadence
+  5 s, so approval latency is unchanged). To keep the slower cadence from
+  flickering, the encrypted status expiry grows from 15 s to 20 s and the
+  panel keeps the last good relay status for 30 s instead of 20 s. One host
+  and one panel drop from about 85,000 to about 43,000 Worker requests per
+  day; the previous cadence
   triggered Cloudflare's 92 % daily-limit alert and, because the limit is
   shared by every Worker and Pages Function on the account, would have taken
   unrelated sites on the same account down with the panel. See

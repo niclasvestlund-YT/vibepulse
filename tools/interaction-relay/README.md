@@ -79,8 +79,8 @@ Create and verdict retries must be byte-identical; conflicting bodies return
 409.
 
 Status uses a fixed **2,816-byte** authenticated plaintext frame plus its GCM
-tag and one latest-value row. The host replaces it about every five seconds;
-the encrypted content expires after 15 seconds and the Worker removes the row
+tag and one latest-value row. The host replaces it about every ten seconds;
+the encrypted content expires after 20 seconds and the Worker removes the row
 after no more than **20 seconds**. The Worker can see timing, connection IPs,
 mailbox ID and fixed size, but it has no content key.
 
