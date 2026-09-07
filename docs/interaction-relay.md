@@ -149,7 +149,7 @@ The repository's Worker logs only route kind, status, and duration.
 
 For live status the Worker sees the same kind of metadata plus one fixed-size
 latest-value status ciphertext. It cannot see project basenames or activity.
-The Mac replaces that slot about every two seconds; the encrypted inner copy
+The Mac replaces that slot about every five seconds; the encrypted inner copy
 expires after **15 seconds**, and the Worker deletes the outer slot after no
 more than **20 seconds**.
 
@@ -188,14 +188,25 @@ accept, an offline network, DNS failure, TLS interception, or blocked Worker
 domains still prevents delivery. The direct LAN path can continue working at
 the same time. If both paths fail, the decision stays on the computer.
 
-At the default five-second panel poll, one panel can make roughly 17,280 idle
-requests per day. Cloudflare pricing and quotas change, so check the current
+At the default five-second question poll and ten-second status poll, one panel
+makes roughly 26,000 idle requests per day, and one host publishing live status
+every five seconds adds about 17,300 more. Together with the numbers relay
+(about 9,000 per day) one host and one panel stay near 52,000 requests per day.
+The Workers free plan caps the whole account, every Worker and every Pages
+Function combined, at 100,000 requests per day, so a second host or a busy
+site on the same account can still cross it; the 2026-09-07 92 % alert came
+from the earlier two-second status publish alone using 43,000 of them.
+Cloudflare pricing and quotas change, so check the current
 [Cloudflare pricing for SQLite Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/),
 [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/),
 and [Cloudflare Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/)
 before deploying. The protocol does not depend on a free tier. Increase
-`TK_IR_POLL_INTERVAL_MS` and rebuild if your account needs a lower poll rate;
-that increases worst-case delivery latency by the same amount.
+`TK_IR_POLL_INTERVAL_MS` (questions) or `TK_IR_STATUS_POLL_INTERVAL_MS` (live
+status) and rebuild if your account needs a lower poll rate; that increases
+worst-case delivery latency by the same amount. On the host,
+`STATUS_PUBLISH_INTERVAL_S` in `tools/tokenserver/interaction_relay.py` sets
+the publish cadence; keep it well under the 15-second content expiry or the
+panel flickers between live and empty.
 
 ## Disable, remove, Rotate, Revoke, Update
 

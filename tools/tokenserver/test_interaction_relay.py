@@ -492,7 +492,7 @@ class StatusPublisherTests(unittest.TestCase):
         keys = derive_keys(decode_device_key(DEVICE_KEY_HEX), MAILBOX)
         return decode_status(keys, MAILBOX, envelope)
 
-    def test_publishes_immediately_then_at_most_every_two_seconds(self):
+    def test_publishes_immediately_then_at_most_every_five_seconds(self):
         relay = self.make_relay()
         relay.run_once()
         first = self.transport.status_envelope
@@ -505,8 +505,8 @@ class StatusPublisherTests(unittest.TestCase):
         self.assertNotIn("pending", snapshot)
 
         calls = len(self.transport.calls)
-        self.clock.advance(1.999)
-        self.wall.advance(1.999)
+        self.clock.advance(4.999)
+        self.wall.advance(4.999)
         relay.run_once()
         self.assertEqual(len(self.transport.calls), calls)
         self.clock.advance(0.001)
@@ -529,8 +529,8 @@ class StatusPublisherTests(unittest.TestCase):
         self.wall.advance(0.5)
         relay.run_once()
         self.assertEqual(self.transport.calls[-1]["body"], first)
-        self.clock.advance(2.0)
-        self.wall.advance(2.0)
+        self.clock.advance(5.0)
+        self.wall.advance(5.0)
         relay.run_once()
         self.assertNotEqual(self.transport.calls[-1]["body"], first)
 

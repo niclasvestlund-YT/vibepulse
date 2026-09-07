@@ -35,6 +35,7 @@
 #include "torget_http.h"
 
 #define TK_IR_POLL_INTERVAL_MS 5000u
+#define TK_IR_STATUS_POLL_INTERVAL_MS 10000u
 #define TK_IR_HTTP_TIMEOUT_MS 5000u
 #define TK_IR_GATE_TIMEOUT_MS 7000u
 #define TK_IR_LOOP_MS 100u
@@ -722,7 +723,7 @@ static void relay_task(void *argument) {
       if (poll_status(&poll_client)) {
         tk_ir_backoff_wifi_recovered(&status_backoff);
         next_status_poll_ms =
-            now_ms + TK_IR_POLL_INTERVAL_MS + jitter_ms(500u);
+            now_ms + TK_IR_STATUS_POLL_INTERVAL_MS + jitter_ms(500u);
       } else {
         atomic_fetch_add(&s_failures, 1u);
         next_status_poll_ms = now_ms + tk_ir_backoff_fail(
