@@ -14,6 +14,29 @@ It is the same data the Usage page shows, aimed at a different question.
 
 ## Turning it on
 
+The Value page is already included in the current firmware. The settings
+below supply its data; they are not an on/off switch.
+
+### When the display says UNPRICED
+
+`SOME MODELS ARE NOT PRICED` means more than 2% of this month's counted tokens
+belong to models the loaded price table does not know. The comparison is
+withheld; this is different from a missing subscription cost.
+
+Refresh the catalogue with `python3 tools/tokenserver/update_prices.py`, review
+the generated changes and run the pricing tests. Update the snapshot in the
+checkout the service actually runs, then restart the existing service using
+its saved configuration: prices and per-file priced records are cached in
+memory. Rewriting the JSON alone does not update a running process. Verify
+`value.prices_as_of`, `value.unpriced_token_share` and `value.state` from
+`/api/tokens` after its initial scan. No board flash is needed.
+
+If the new catalogue still lacks a model, keep it unpriced or supply a
+[verified override](#adding-or-correcting-a-rate); do not guess an alias or
+assign a zero price. This remains a list-price estimate, not an API invoice.
+
+### Supply the subscription cost
+
 Nothing to install. Run the tokenserver with what you actually pay:
 
 ```sh
