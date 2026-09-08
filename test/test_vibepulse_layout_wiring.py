@@ -25,7 +25,9 @@ for enum_literal in (
     "VIEW_TRACKER_CLAUDE = 4",
     "VIEW_TRACKER_CODEX = 5",
     "VIEW_GITHUB = 6",
-    "VIEW_VALUE = 7",
+    # Value moves with the optional GitHub tile so the indices stay dense; a
+    # fixed 7 put it past the end of ui.tiles whenever GitHub was disabled.
+    "VIEW_VALUE = 6 + TK_GITHUB_SCREEN_ENABLED",
 ):
     assert enum_literal in app_header
 assert "VIEW_VOLUME" not in app_header
