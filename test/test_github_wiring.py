@@ -25,22 +25,19 @@ class GitHubWiringTests(unittest.TestCase):
         self.assertNotEqual(screen, notification)
         net = read("components/app_tokens/github_net.c")
         self.assertIn(
-            "(TK_GITHUB_SCREEN_ENABLED || TK_GITHUB_NOTIFICATIONS_ENABLED)",
+            "!tk_labs_active(TK_LABS_GITHUB) && !tk_labs_active(TK_LABS_STAR_POPUP)",
             net)
 
     def test_github_is_one_optional_seventh_view(self):
         header = read("components/app_tokens/usage_screen.h")
         app = read("components/app_tokens/app_tokens.h")
         ui = read("components/app_tokens/usage_screen.c")
-        # Six base tiles + the optional GitHub tile + the always-present Value
-        # tile: GitHub stays at index 6, Value is the new last tile at 7.
-        self.assertIn("(6 + TK_GITHUB_SCREEN_ENABLED + 1)", header)
-        self.assertIn("VIEW_GITHUB = 6", app)
-        # Value must MOVE with the optional GitHub tile rather than sit at a
-        # fixed index past it: a fixed 7 put the tile one slot beyond the end of
-        # ui.tiles whenever GitHub was disabled, which is an out-of-bounds write
-        # plus a hole no swipe could cross.
-        self.assertIn("VIEW_VALUE = 6 + TK_GITHUB_SCREEN_ENABLED", app)
+        # Semantic IDs are stable. The pure C test exhausts all 32 dense maps.
+        policy = read("components/app_tokens/labs_features.h")
+        self.assertIn("VIEW_GITHUB = 6", policy)
+        self.assertIn("VIEW_VALUE = 7", policy)
+        self.assertIn("tk_labs_view_position(index)", ui)
+        self.assertIn("lv_tileview_add_tile(ui.tileview, position, 0, direction)", ui)
         self.assertIn("_Static_assert(VIEW_VALUE < TK_USAGE_SCREEN_VIEWS", ui)
         self.assertIn("set_star_hero", ui)
         self.assertIn('"FORKS"', ui)

@@ -64,23 +64,9 @@ WIFI_OPEN_QR_SIZE = 196
 
 
 def _screen_views():
-    """The tile count the SIMULATOR renders. The header now defines
-    TK_USAGE_SCREEN_VIEWS as an expression (six base tiles +
-    TK_GITHUB_SCREEN_ENABLED + the always-present value tile) rather than a
-    bare integer, and the simulator opts GitHub in via sim/CMakeLists.txt.
-    Read that toggle and evaluate the header's own expression so this stays
-    in lockstep with both files instead of hard-coding 8."""
-    header = (ROOT / "components/app_tokens/usage_screen.h").read_text(
-        encoding="utf-8")
-    expr = re.search(
-        r"^#define TK_USAGE_SCREEN_VIEWS \((.+)\)$", header, re.MULTILINE
-    ).group(1)
-    cmake = (ROOT / "sim/CMakeLists.txt").read_text(encoding="utf-8")
-    github_enabled = int(
-        re.search(r"TK_GITHUB_SCREEN_ENABLED=(\d+)", cmake).group(1)
-    )
-    return eval(expr, {"__builtins__": {}},
-                {"TK_GITHUB_SCREEN_ENABLED": github_enabled})
+    # Standard fixture runs opt in to all five LABS. Runtime subsets are tested
+    # by test_labs_features and the real LVGL --vibepulse-labs-qa mode.
+    return 8
 
 
 SCREEN_VIEWS = _screen_views()
@@ -226,6 +212,10 @@ EXPECTED = {
     "torget-wifi-joined.bmp",
     "torget-wifi-failed-password.bmp",
     "torget-settings-menu.bmp",
+    "torget-settings-labs-analytics.bmp",
+    "torget-settings-labs-pending.bmp",
+    "torget-settings-labs-github.bmp",
+    "torget-settings-labs-return.bmp",
     "torget-settings-over-wifi-searching.bmp",
     "torget-settings-notice-takes-over.bmp",
     "torget-settings-wifi-handoff-closed.bmp",
@@ -322,6 +312,14 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         )
         subprocess.run(
             [str(ROOT / "sim/build/torget-sim"), "--vibepulse-static-qa"],
+            cwd=ROOT,
+            env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir)},
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [str(ROOT / "sim/build/torget-sim"), "--vibepulse-labs-captures"],
             cwd=ROOT,
             env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir)},
             check=True,
@@ -663,28 +661,51 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
                     sum(p == (255, 255, 255)
                         for p in header.get_flattened_data()), 300)
                 # Three row outlines, each with muted border ink present.
-                for i in range(3):
-                    top = 120 + i * 100
-                    row = image.crop((74, top, 406, top + 84))
+                for i in range(4):
+                    top = 108 + i * 78
+                    row = image.crop((74, top, 406, top + 66))
                     self.assertIn(
                         (0x92, 0x98, 0xA2), row.get_flattened_data(),
                         f"row {i} lost its muted outline")
 
         def white_in_label(image, index):
-            top = 120 + index * 100
-            box = image.crop((100, top + 20, 380, top + 64))
+            top = 108 + index * 78
+            box = image.crop((100, top + 14, 380, top + 52))
             return sum(p == (255, 255, 255) for p in box.get_flattened_data())
 
         # With an address every label is white; without one, UPDATE alone
         # goes muted while WIFI and ABOUT stay white.
-        for index in range(3):
+        for index in range(4):
             self.assertGreater(white_in_label(menu, index), 50,
                                f"row {index} should be white with an address")
         self.assertEqual(white_in_label(no_addr, 0), 0,
                          "UPDATE must not stay white without an address")
-        for index in (1, 2):
+        for index in (1, 2, 3):
             self.assertGreater(white_in_label(no_addr, index), 50,
                                "WIFI and ABOUT stay selectable with no address")
+
+    def test_labs_switches_keep_controls_and_saved_state_visible(self):
+        for tag in ("analytics", "github", "pending"):
+            image = self.image(f"torget-settings-labs-{tag}.bmp")
+            for top in (108, 186, 264, 342):
+                self.assertEqual(image.getpixel((74, top + 32)), (148,154,165))
+            self.assertGreater(sum(p == (255,255,255) for p in
+                image.crop((140,24,340,80)).get_flattened_data()), 200)
+        enabled = self.image("torget-settings-labs-analytics.bmp")
+        pending = self.image("torget-settings-labs-pending.bmp")
+        self.assertGreater(sum(p == (255,255,255) for p in
+            enabled.crop((100,278,380,315)).get_flattened_data()), 50)
+        self.assertEqual(sum(p == (255,255,255) for p in
+            pending.crop((100,278,380,315)).get_flattened_data()), 0)
+        self.assertNotEqual(enabled.crop((80,442,400,470)).tobytes(),
+                            pending.crop((80,442,400,470)).tobytes())
+        returned = self.image("torget-settings-labs-return.bmp")
+        # This is the RGB565 framebuffer, not the XRGB object snapshot used
+        # for the historical menu fixture. Check controls and the title ink.
+        for top in (108, 186, 264, 342):
+            self.assertEqual(returned.getpixel((74, top + 32)), (148,154,165))
+        self.assertGreater(sum(p == (255,255,255) for p in
+            returned.crop((100,24,380,80)).get_flattened_data()), 1000)
 
     def test_settings_stays_on_top_of_the_no_network_page(self):
         """The composite state, proven from pixels rather than from layer

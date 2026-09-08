@@ -53,6 +53,19 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -o /tmp/torget-core-test
 /tmp/torget-core-test
 
+# Both the legacy header fallback and fresh-install template seed.
+for labs_default in 0 1; do
+  for github_default in 0 1 2 3; do
+    cc -std=c11 -Wall -Wextra -Werror -O1 \
+      -DTK_LABS_ANALYTICS_DEFAULT=$labs_default \
+      -DTK_GITHUB_SCREEN_ENABLED=$((github_default & 1)) \
+      -DTK_GITHUB_NOTIFICATIONS_ENABLED=$(((github_default >> 1) & 1)) \
+      ../components/app_tokens/labs_features.c test_labs_features.c \
+      -o /tmp/torget-labs-test
+    /tmp/torget-labs-test
+  done
+done
+
 # cJSON kompilerar med sin egen varningsprofil; -Werror gäller VÅRA filer.
 cc -std=c11 -O1 -c ../third_party/cjson/cJSON.c -o /tmp/torget-cjson.o
 
@@ -343,6 +356,7 @@ cd ..
 "$PYTHON_BIN" tools/vibepulse_studio/design.py --check
 "$PYTHON_BIN" test/test_vibepulse_studio_wiring.py
 "$PYTHON_BIN" test/test_vibepulse_visual_landmarks.py
+"$PYTHON_BIN" test/test_labs_render.py
 "$PYTHON_BIN" test/test_docs_frame_drift.py
 "$PYTHON_BIN" test/test_shared_amoled_skill.py
 "$PYTHON_BIN" test/test_token_body_capacity.py

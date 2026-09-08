@@ -5,6 +5,9 @@
 
 #define LV_COLOR_DEPTH 16
 #define LV_USE_SDL 1
+/* Labs QA reads the one composed framebuffer through the public display API. */
+#define LV_SDL_RENDER_MODE LV_DISPLAY_RENDER_MODE_DIRECT
+#define LV_SDL_BUF_COUNT 1
 /* Brews SDL2-CMake-target pekar include-sökvägen IN i SDL2-katalogen, så
  * LVGL:s default <SDL2/SDL.h> missar. <SDL.h> är formen som matchar. */
 #define LV_SDL_INCLUDE_PATH <SDL.h>

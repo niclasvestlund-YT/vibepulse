@@ -18,8 +18,9 @@ static const char *TAG = "github-net";
 #define GITHUB_FETCH_EVERY_MS 30000
 #define GITHUB_BODY_MAX 768
 
-#if defined(TK_GITHUB_URL) && \
-    (TK_GITHUB_SCREEN_ENABLED || TK_GITHUB_NOTIFICATIONS_ENABLED)
+#ifndef TK_GITHUB_URL
+#define TK_GITHUB_URL NULL
+#endif
 
 static void github_net_task(void *arg) {
   (void)arg;
@@ -48,13 +49,10 @@ static void github_net_task(void *arg) {
 }
 
 void tokens_github_net_start(void) {
-  xTaskCreate(github_net_task, "github", 5120, NULL, 4, NULL);
+  if (!tk_labs_active(TK_LABS_GITHUB) && !tk_labs_active(TK_LABS_STAR_POPUP)) {
+    ESP_LOGI(TAG, "GitHub-sida och stjärnnotiser är avstängda");
+    return;
+  }
+  if (xTaskCreate(github_net_task, "github", 5120, NULL, 4, NULL) != pdPASS)
+    ESP_LOGE(TAG, "GitHub-tasken kunde inte starta");
 }
-
-#else
-
-void tokens_github_net_start(void) {
-  ESP_LOGI(TAG, "GitHub-sida och stjärnnotiser är avstängda");
-}
-
-#endif

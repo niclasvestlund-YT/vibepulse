@@ -29,8 +29,17 @@
 #define TK_GITHUB_RELAY_URL      NULL
 #endif
 
+/* Old secrets.h files lack this macro: retain their analytics on upgrade.
+ * The fresh-install template explicitly sets 0. NVS choices override defaults. */
+#ifndef TK_LABS_ANALYTICS_DEFAULT
+#define TK_LABS_ANALYTICS_DEFAULT 1
+#endif
+#if TK_LABS_ANALYTICS_DEFAULT != 0 && TK_LABS_ANALYTICS_DEFAULT != 1
+#error "TK_LABS_ANALYTICS_DEFAULT must be 0 or 1"
+#endif
+
 /* The GitHub page and star popup are deliberately independent. A fresh clone
- * remains Claude/Codex-only until the user opts in through secrets.h. */
+ * starts with both off. These macros seed LABS on the first boot only. */
 #ifndef TK_GITHUB_SCREEN_ENABLED
 #define TK_GITHUB_SCREEN_ENABLED 0
 #endif

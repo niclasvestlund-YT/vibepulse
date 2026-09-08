@@ -5,6 +5,15 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Added
+
+- SETTINGS → LABS stores independent choices for burn rate, Max Tracker,
+  API-equivalent Value, the GitHub page and star popups. Choices apply after
+  restart. Fresh sample configurations start with quotas/activity; upgrades
+  using existing configurations retain their initial views. Disabled pages
+  and optional polling tasks are not created. Physical selector review is
+  pending; standalone clocks and quotes remain future experiments.
+
 ### Fixed
 
 - **The panel printed the relay's secret URL every time a cloud fetch

@@ -225,7 +225,8 @@ void tokens_net_start(void) {
 #endif
 
 #ifdef TK_MAX_TRACKER_URL
-  xTaskCreate(max_tracker_task, "max-tracker", 6144, NULL, 5, NULL);
+  if (tk_labs_active(TK_LABS_TRACKER))
+    xTaskCreate(max_tracker_task, "max-tracker", 6144, NULL, 5, NULL);
 #else
   ESP_LOGW(TAG,
            "TK_MAX_TRACKER_URL saknas i secrets.h — Max Tracker visar streck");

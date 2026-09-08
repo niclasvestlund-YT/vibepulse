@@ -9,10 +9,12 @@ Work through **Preflight** first — half of all setup failures are decided
 there.
 
 For installation scope, use the [Vibe Labs catalogue](labs/README.md): it
-separates today's built-in pages from optional integrations and future
-experiments. Start with local Claude/Codex usage. Add interactions, relays or
-GitHub only when the user chooses them. The leaner page profile and on-screen
-feature selector are planned, not setup commands that work today.
+separates the quota/activity base from optional analytics, integrations and
+future experiments. New installs using the sample configuration start with
+the base. Add existing display features under SETTINGS → LABS, then restart
+the panel; configure their computer data sources first. Add interactions,
+relays or GitHub only when the user chooses them. Keep an existing
+`secrets.h` when upgrading so its initial display choices are preserved.
 
 For a Windows host, keep
 [Windows host setup and recovery](windows-setup.md) open beside this hardware

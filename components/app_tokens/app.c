@@ -13,6 +13,7 @@
 #endif
 #include "torget.h"
 #include "usage_screen.h"
+#include "settings_menu.h"
 
 #ifdef ESP_PLATFORM
 #include "secrets.h"
@@ -139,6 +140,13 @@ void tokens_net_start(void);
 static void create(lv_obj_t *root) {
   memset(&app, 0, sizeof app);
   tk_agent_source_policy_init(&app.agent_source);
+  tk_labs_init();
+  const tg_settings_labs labs = {
+    .name = tk_labs_name, .selected = tk_labs_selected,
+    .toggle = tk_labs_toggle, .pending = tk_labs_pending,
+    .storage_error = tk_labs_storage_error,
+  };
+  torget_settings_bind_labs(&labs);
   usage_screen_create(root);
   lv_timer_create(tick_cb, TICK_EVERY_MS, NULL);
 
