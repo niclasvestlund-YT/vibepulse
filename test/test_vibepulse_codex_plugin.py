@@ -8,6 +8,8 @@ import io
 import hashlib
 import json
 import os
+import atexit
+import shutil
 from pathlib import Path
 import plistlib
 import re
@@ -186,6 +188,18 @@ def closed_port():
 # well under a second when it answers at all, so a wedge is still caught.
 SCRIPT_HANG_TIMEOUT_SECONDS = 30
 
+# Every script under test runs against THIS empty Codex home unless a test
+# hands it another one. session_start.py reads `$CODEX_HOME/config.toml`
+# (falling back to ~/.codex) and reports a saved `approval_policy = "never"`
+# BEFORE it looks at service health, which is correct in production and
+# turned five service-health tests red on any developer whose real config
+# says so (#93): the tests inherited the developer's settings and asserted
+# on a reading those settings had pre-empted. An empty directory means "no
+# config.toml", which the hook treats as nothing to warn about; the tests
+# that verify the warning itself pass an explicit CODEX_HOME and still do.
+ISOLATED_CODEX_HOME = tempfile.mkdtemp(prefix="vibepulse-test-codex-home-")
+atexit.register(shutil.rmtree, ISOLATED_CODEX_HOME, ignore_errors=True)
+
 
 def run_script(name, stdin=b"", *, port=None, env=None,
                timeout=SCRIPT_HANG_TIMEOUT_SECONDS):
@@ -196,6 +210,7 @@ def run_script(name, stdin=b"", *, port=None, env=None,
     for key in ("VIBEPULSE_PORT", "VIBEPULSE_CWD", "VIBEPULSE_SESSION_ID",
                 "VIBEPULSE_TURN_ID", "_VIBEPULSE_TEST_READ_TIMEOUT"):
         process_env.pop(key, None)
+    process_env["CODEX_HOME"] = ISOLATED_CODEX_HOME
     if port is not None:
         process_env["VIBEPULSE_PORT"] = str(port)
     if env:
@@ -807,6 +822,56 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("Permission decisions remain subject to Codex policy", context)
         self.assertIn("VibePulse startup health: SERVER UNAVAILABLE", context)
         self.assertNotIn(str(ROOT), context)
+
+    def test_service_health_ignores_the_developers_own_codex_config(self):
+        """#93: the five service-health tests in this class inherited the
+        developer's real Codex settings. A saved `approval_policy = "never"`
+        is reported before the service is even contacted (correctly, see
+        the next test), so on such a machine every one of them read FIX
+        where it expected HEALTHY, SERVER UNAVAILABLE and the rest.
+
+        Simulate that developer: the parent process exports a CODEX_HOME
+        whose config says never, and no test asks for it. The harness must
+        still run the hook against its own empty home, so the reading is
+        about the service and nothing else.
+        """
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {"status": "ready", "expiresInMin": 480},
+            "interactions": {"claude": True, "codex": True,
+                             "panel": {"status": "ready", "ageS": 1}},
+        }
+        routes = {"/": {"body": compact(root).encode()},
+                  "/api/tokens": {"body": compact({
+                      "claudeWeekStale": False,
+                      "claudeModelWeekStale": False,
+                      "codexWeekStale": False,
+                  }).encode()}}
+        with tempfile.TemporaryDirectory() as developer_home:
+            Path(developer_home, "config.toml").write_text(
+                'approval_policy = "never"\n', encoding="utf-8")
+            with mock.patch.dict(os.environ,
+                                 {"CODEX_HOME": developer_home}), \
+                    LocalServer(routes=routes) as server:
+                completed = run_script(
+                    "session_start.py", compact(payload).encode(),
+                    port=server.port)
+            context = json.loads(completed.stdout)["hookSpecificOutput"][
+                "additionalContext"]
+            self.assertIn("startup health: HEALTHY", context)
+            self.assertNotIn("approval_policy", context)
+            # The isolation is a harness default, not a hidden production
+            # change: handed that same home explicitly, the hook still warns.
+            with LocalServer(routes=routes) as server:
+                completed = run_script(
+                    "session_start.py", compact(payload).encode(),
+                    port=server.port, env={"CODEX_HOME": developer_home})
+            context = json.loads(completed.stdout)["hookSpecificOutput"][
+                "additionalContext"]
+            self.assertIn("approval_policy is never", context)
 
     def test_startup_health_names_saved_codex_modes_that_hide_cards(self):
         """The failure that looks exactly like a broken panel.
