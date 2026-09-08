@@ -9,6 +9,8 @@
 ## Verification
 
 - [ ] Relevant focused tests pass.
+- [ ] New tests are registered in the host runner and relevant CI steps;
+      optional-feature changes cover enabled and disabled paths where relevant.
 - [ ] `./test/run.sh` passes, or the exact omission and reason are stated.
 - [ ] No secret, credential, raw session content, production payload, or
       `torget.bin` is included.
@@ -35,3 +37,6 @@
 ## Not tested / remaining risk
 
 <!-- Be explicit. “None” is acceptable only after checking. -->
+
+<!-- A documented local omission does not waive required GitHub checks.
+     See CONTRIBUTING.md for the review and merge process. -->

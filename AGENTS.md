@@ -81,6 +81,10 @@ AMOLED-skillen och mäts på panelen.
   Tokenmätaren, blev andra användaren — det är mallen).
 - **Ärlighetsinvarianten:** aldrig påhittade nollor — utan data visas
   streck; räknare backar aldrig; copyn säger vad siffran faktiskt mäter.
+- **Bidrag och merge:** följ `CONTRIBUTING.md` och
+  `docs/maintaining-contributions.md`. Även egna ändringar går via PR med
+  gröna obligatoriska kontroller. Dokumenterade testundantag ersätter inte
+  GitHubs mergekrav.
 - **Snapshot före allt som skriver om historik.** `tools/snapshot.sh` före
   rebase, filter-repo eller force-push. Den vägrar på en shallow klon, av
   skäl som står i `docs/lessons.md`. Push till GitHub är backup för det
