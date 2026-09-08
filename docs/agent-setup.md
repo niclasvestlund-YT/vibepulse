@@ -8,6 +8,12 @@ deeper documentation is Swedish, which is fine to read as-is.
 Work through **Preflight** first — half of all setup failures are decided
 there.
 
+For installation scope, use the [Vibe Labs catalogue](labs/README.md): it
+separates today's built-in pages from optional integrations and future
+experiments. Start with local Claude/Codex usage. Add interactions, relays or
+GitHub only when the user chooses them. The leaner page profile and on-screen
+feature selector are planned, not setup commands that work today.
+
 For a Windows host, keep
 [Windows host setup and recovery](windows-setup.md) open beside this hardware
 runbook. It covers the standalone Codex CLI, Task Scheduler, Private firewall,
