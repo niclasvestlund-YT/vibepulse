@@ -2187,16 +2187,30 @@ class SetupPlanTests(unittest.TestCase):
                 self.assertEqual((saved.claude_interactions,
                                   saved.codex_interactions), pair)
                 self.assertFalse(saved.interaction_detail)
-                self.assertEqual(len(runner.calls), 13)
-                self.assertEqual(
-                    [call[0] for call in runner.calls[5:10]],
-                    setup.plan_codex_install(
-                        ROOT, Path(sys.executable), Path("/codex")))
                 self.assertTrue(all(isinstance(call[0], list)
                                     and call[1].get("shell") is False
                                     for call in runner.calls))
-                self.assertIn("/hooks", out.getvalue())
                 self.assertIn("computer fallback", out.getvalue().lower())
+
+                # A choice that does not include Codex owns no Codex resources,
+                # so it mutates none and needs no Codex CLI (#65). Demanding one
+                # made the documented "claude" choice unreachable on a machine
+                # that has only Claude -- which is every machine we hand a panel
+                # to. The Codex choices still do the full transaction.
+                if providers in {"codex", "both"}:
+                    self.assertEqual(len(runner.calls), 13)
+                    self.assertEqual(
+                        [call[0] for call in runner.calls[5:10]],
+                        setup.plan_codex_install(
+                            ROOT, Path(sys.executable), Path("/codex")))
+                    self.assertIn("/hooks", out.getvalue())
+                else:
+                    self.assertEqual(
+                        [call for call in runner.calls
+                         if "codex" in " ".join(str(a) for a in call[0]).lower()],
+                        [], "a Claude-only install must issue no Codex commands")
+                    # Nothing to review in a program the user may not have.
+                    self.assertNotIn("/hooks", out.getvalue())
 
             path = Path(tmp) / "detail" / "config.json"
             setup.main(
