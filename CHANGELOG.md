@@ -7,6 +7,19 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **CI now walks the usage screen with the GitHub page off as well as on.**
+  #92 fixed a Value tile that indexed one past the array whenever the
+  optional page was off — the default in a fresh clone — and neither the
+  simulator nor the firmware CI job ever built that configuration. The
+  simulator's GitHub page is a CMake option now (`TORGET_SIM_GITHUB_PAGE`,
+  ON by default), a new `--vibepulse-view-qa` mode asks the real usage
+  screen whether every index has a tile, whether showing each one lands on
+  it, and whether the `[` `]` walk visits every page and ends on Value, and
+  `test/test_vibepulse_view_navigation.py` builds both settings and asserts
+  on the printed evidence. A second `_Static_assert` pins Value as the last
+  page; reverting the #92 header fails the GitHub-off build at compile time.
+  (#94)
+
 - **The host gate could not pass west of UTC.** The Max Tracker fixtures
   wrote `"<day>T10:00:00Z"` and asserted on `<day>`, but the store — like the
   live scanner — attributes an event to the *local* date of its timestamp,

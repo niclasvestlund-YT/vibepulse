@@ -105,10 +105,25 @@ add_executable(torget-sim
 # Simulatorn läser de riktiga fixture-filerna genom de delade parsrarna.
 get_filename_component(FIXTURES_ABS "${CMAKE_CURRENT_SOURCE_DIR}/../sim-fixtures" ABSOLUTE)
 target_compile_definitions(torget-sim PRIVATE
-  FIXTURES_DIR="${FIXTURES_ABS}"
-  TK_GITHUB_SCREEN_ENABLED=1
-  TK_GITHUB_NOTIFICATIONS_ENABLED=1
-  TK_GITHUB_SOUND_ENABLED=1)
+  FIXTURES_DIR="${FIXTURES_ABS}")
+
+# The optional GitHub page. ON is the bench's default (the landmark captures
+# and the README frames show it); OFF is the target's default in a fresh clone
+# (app_tokens_config.h), the configuration in which the Value tile once
+# indexed past the array (#92). test_vibepulse_view_navigation.py builds
+# both and walks every tile in each. Notifications and sound follow the page.
+option(TORGET_SIM_GITHUB_PAGE "Bygg in GitHub-sidan i simulatorn" ON)
+if(TORGET_SIM_GITHUB_PAGE)
+  target_compile_definitions(torget-sim PRIVATE
+    TK_GITHUB_SCREEN_ENABLED=1
+    TK_GITHUB_NOTIFICATIONS_ENABLED=1
+    TK_GITHUB_SOUND_ENABLED=1)
+else()
+  target_compile_definitions(torget-sim PRIVATE
+    TK_GITHUB_SCREEN_ENABLED=0
+    TK_GITHUB_NOTIFICATIONS_ENABLED=0
+    TK_GITHUB_SOUND_ENABLED=0)
+endif()
 
 target_include_directories(torget-sim PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"

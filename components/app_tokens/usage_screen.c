@@ -442,6 +442,12 @@ static void apply_github_page(const tk_github_status *status) {
  * GitHub-sidan var bortvald, och det kostade en skrivning utanför arrayen. */
 _Static_assert(VIEW_VALUE < TK_USAGE_SCREEN_VIEWS,
                "VIEW_VALUE ligger utanför ui.tiles — indexen är inte täta");
+/* Och värdesidan är alltid SISTA sidan: sex bassidor, GitHub om den är på,
+ * sedan Value. Skulle någon flytta den framför GitHub utan att ändra
+ * räkningen öppnar sig hålet igen — i motsatt riktning. Gäller båda värdena
+ * av TK_GITHUB_SCREEN_ENABLED, i target såväl som simulator. */
+_Static_assert(VIEW_VALUE == TK_USAGE_SCREEN_VIEWS - 1,
+               "VIEW_VALUE måste vara sista sidan");
 
 static lv_obj_t *new_tile(int index) {
   lv_dir_t direction = index == 0 ? LV_DIR_RIGHT :
@@ -1136,4 +1142,9 @@ int usage_screen_current_view(void) {
     if (ui.tiles[i] == active) return i;
   }
   return VIEW_CLAUDE_FABLE;
+}
+
+bool usage_screen_has_view(int index) {
+  if (index < 0 || index >= TK_USAGE_SCREEN_VIEWS) return false;
+  return ui.tiles[index] != NULL;
 }

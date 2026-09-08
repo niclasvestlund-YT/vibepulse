@@ -75,10 +75,13 @@ def _screen_views():
     expr = re.search(
         r"^#define TK_USAGE_SCREEN_VIEWS \((.+)\)$", header, re.MULTILINE
     ).group(1)
+    # The page is a CMake option now (TORGET_SIM_GITHUB_PAGE); the default
+    # build these landmarks capture is whatever the option defaults to.
     cmake = (ROOT / "sim/CMakeLists.txt").read_text(encoding="utf-8")
-    github_enabled = int(
-        re.search(r"TK_GITHUB_SCREEN_ENABLED=(\d+)", cmake).group(1)
-    )
+    default = re.search(
+        r'option\(TORGET_SIM_GITHUB_PAGE "[^"]*" (ON|OFF)\)', cmake
+    ).group(1)
+    github_enabled = 1 if default == "ON" else 0
     return eval(expr, {"__builtins__": {}},
                 {"TK_GITHUB_SCREEN_ENABLED": github_enabled})
 

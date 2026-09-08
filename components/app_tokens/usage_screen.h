@@ -27,5 +27,10 @@ void usage_screen_tick(int64_t now_us);
 void usage_screen_set_stale(bool stale);
 void usage_screen_show_view(int index);
 int usage_screen_current_view(void);
+/* True when a tile was created at `index`. The tileview only knows the tiles
+ * it was given, so every index below TK_USAGE_SCREEN_VIEWS must answer yes or
+ * a swipe has a hole to fall into — the bug #92 fixed, and what the
+ * simulator's --vibepulse-view-qa proves for both GitHub settings. */
+bool usage_screen_has_view(int index);
 
 #endif

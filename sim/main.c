@@ -753,6 +753,16 @@ static void qa_key3_tap(void) {
  * LVGL:s SDL-drivrutin
  * pumpar eventen, så ren tangentbordspollning räcker — ingen indev-
  * rördragning för ett bänkverktyg. */
+/* The [ and ] keys: one page left or right, wrapping at both ends. Shared
+ * with --vibepulse-view-qa so the walk the test proves is the walk a human
+ * at the bench gets. */
+static void step_usage_view(int delta) {
+  int view = usage_screen_current_view() + delta;
+  if (view < 0) view = TK_USAGE_SCREEN_VIEWS - 1;
+  if (view >= TK_USAGE_SCREEN_VIEWS) view = 0;
+  tokens_show_view(view);
+}
+
 static void poll_keys(lv_timer_t *t) {
   (void)t;
   static bool held[12];
@@ -802,10 +812,7 @@ static void poll_keys(lv_timer_t *t) {
       else if (i == 7) torget_app_next();
       else if (i == 8 || i == 9) {
         torget_app_show(SIM_APP_VIBEPULSE);
-        int view = usage_screen_current_view() + (i == 8 ? -1 : 1);
-        if (view < 0) view = TK_USAGE_SCREEN_VIEWS - 1;
-        if (view >= TK_USAGE_SCREEN_VIEWS) view = 0;
-        tokens_show_view(view);
+        step_usage_view(i == 8 ? -1 : 1);
       }
       else if (i == 10)
         apply_max_tracker_fixture(max_tracker_fixture_idx + 1);
@@ -1719,6 +1726,64 @@ static int run_vibepulse_needs_you_qa(void) {
   return capture_failures == 0 ? 0 : 1;
 }
 
+/* --vibepulse-view-qa: the tile indices are dense and Value is reachable,
+ * in THIS build's GitHub setting. Issue #94: the Value tile once indexed one
+ * past the array whenever the optional GitHub page was off (#92), and every
+ * automated build had the page on, so nothing ever walked the configuration
+ * that ships by default. This mode runs under both settings in CI
+ * (test/test_vibepulse_view_navigation.py builds the simulator twice) and
+ * asks the real usage screen rather than the header: every index below
+ * TK_USAGE_SCREEN_VIEWS has a tile, showing each one lands on it, the [ ]
+ * key walk visits every page in order and ends on Value, and wrapping
+ * backwards from the first page lands on Value too. Prints one line per
+ * fact so the test asserts on evidence, not on an exit code alone. */
+static int run_vibepulse_view_qa(void) {
+  int failures = 0;
+  torget_app_show(SIM_APP_VIBEPULSE);
+  printf("view-qa: github=%d views=%d value=%d\n",
+         TK_GITHUB_SCREEN_ENABLED, TK_USAGE_SCREEN_VIEWS, VIEW_VALUE);
+
+  for (int i = 0; i < TK_USAGE_SCREEN_VIEWS; i++) {
+    bool present = usage_screen_has_view(i);
+    printf("view-qa: tile %d %s\n", i, present ? "present" : "MISSING");
+    if (!present) failures++;
+  }
+  if (usage_screen_has_view(TK_USAGE_SCREEN_VIEWS)) {
+    printf("view-qa: tile %d present PAST THE END\n", TK_USAGE_SCREEN_VIEWS);
+    failures++;
+  }
+
+  for (int i = 0; i < TK_USAGE_SCREEN_VIEWS; i++) {
+    tokens_show_view(i);
+    int landed = usage_screen_current_view();
+    printf("view-qa: show %d -> %d\n", i, landed);
+    if (landed != i) failures++;
+  }
+
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  for (int step = 1; step < TK_USAGE_SCREEN_VIEWS; step++) {
+    step_usage_view(1);
+    int landed = usage_screen_current_view();
+    printf("view-qa: step %d -> %d\n", step, landed);
+    if (landed != step) failures++;
+  }
+  if (usage_screen_current_view() != VIEW_VALUE) {
+    printf("view-qa: walk did not end on VIEW_VALUE\n");
+    failures++;
+  }
+
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  step_usage_view(-1);
+  {
+    int landed = usage_screen_current_view();
+    printf("view-qa: wrap back from 0 -> %d\n", landed);
+    if (landed != VIEW_VALUE) failures++;
+  }
+
+  printf("view-qa: %s\n", failures == 0 ? "OK" : "FAILED");
+  return failures == 0 ? 0 : 1;
+}
+
 static int run_vibepulse_needs_you_render_qa(void) {
   size_t len = 0;
   char *json = read_fixture("agent-status-needs-you-codex-question.json", &len);
@@ -1784,6 +1849,10 @@ int main(int argc, char **argv) {
     free(json);
   }
 #endif
+
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-view-qa") == 0) {
+    return run_vibepulse_view_qa();
+  }
 
   if (argc == 2 && strcmp(argv[1], "--vibepulse-static-qa") == 0) {
     return run_vibepulse_static_qa();
