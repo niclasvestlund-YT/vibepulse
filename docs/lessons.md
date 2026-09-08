@@ -21,6 +21,34 @@ point at the backlog item.
 
 ---
 
+## 2026-09-08 · A test asserted UTC days against a store that counts local days
+
+**What happened:** `./test/run.sh` could not go green west of UTC
+(issue #66). The Max Tracker stress test
+`test_seeded_randomized_schedule_counts_every_event_exactly_once` failed
+deterministically under `TZ=America/Los_Angeles` with a nine-token surplus on
+one day; at UTC-11 (`Pacific/Pago_Pago`) thirteen tests in the same file
+failed, at UTC+14 nineteen. Stockholm and UTC were green, so nobody saw it.
+**Root cause:** the store is right and the fixtures were wrong. Backfill
+attributes an event to the LOCAL calendar date of its timestamp
+(`_handle_claude_event` → `ts.astimezone().date()`), the same day boundary
+the live scanner in `tokenserver.py` uses — so both channels agree and no
+user's heatmap was mis-attributed. The fixtures wrote `"<day>T10:00:00Z"`
+and asserted on `<day>`: that only holds between UTC-10 and UTC+13, and the
+stress test randomised the hour over 0–22, which drifts a day for any
+negative offset at all. The helper comment said "comfortably pre-rollover
+under any real-clock cutoff" — true, but the cutoff was never the problem.
+**The rule now:** a fixture that names a day must build its timestamp from
+that day's local wall clock, with the machine's offset spelled out
+(`_local_iso(day, hour)` in `test_max_tracker.py`); never write `Z` and
+expect a local-date consumer to agree. **Guards:** `test_max_tracker.py`
+passes under `TZ=UTC`, `Europe/Stockholm`, `America/Los_Angeles`,
+`Pacific/Pago_Pago` and `Pacific/Kiritimati`. **Watch for:** the same `Z`
+pattern in any new test that feeds `_local_date_str` or `_parse_file`; a
+green Stockholm run says nothing about the Americas.
+
+---
+
 ## 2026-09-06 · The panel logged the credential it was told never to print
 
 **What happened:** all three failure paths in `torget_http.c` logged the

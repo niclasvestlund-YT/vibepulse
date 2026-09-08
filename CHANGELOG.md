@@ -7,6 +7,21 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **The host gate could not pass west of UTC.** The Max Tracker fixtures
+  wrote `"<day>T10:00:00Z"` and asserted on `<day>`, but the store — like the
+  live scanner — attributes an event to the *local* date of its timestamp,
+  so a Los Angeles run put the seeded stress test's early-morning events on
+  the previous day and the assertion failed by nine tokens; at UTC-11 thirteen
+  tests in the file failed. The store was right, and no user's heatmap was
+  mis-attributed. The fixtures now build timestamps from local wall-clock
+  time with the machine's offset spelled out, and the file is green under
+  five time zones from UTC-11 to UTC+14. (#66)
+
+- **The `secrets.h` placeholder check in `docs/agent-setup.md` cried wolf on
+  every correct file.** `DIN-MAC` also appears in the comment that tells you
+  to replace it, so the unanchored grep always matched. It is now scoped to
+  `#define` lines. (#64)
+
 - **The panel printed the relay's secret URL every time a cloud fetch
   failed.** All three failure paths in `components/torget_net/torget_http.c`
   logged the address they had just failed on. When the fetch had failed over
