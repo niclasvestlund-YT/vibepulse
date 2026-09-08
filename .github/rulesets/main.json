@@ -1,0 +1,44 @@
+{
+  "name": "protect-main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": ["~DEFAULT_BRANCH"]
+    }
+  },
+  "bypass_actors": [],
+  "rules": [
+    {"type": "deletion"},
+    {"type": "non_fast_forward"},
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {"context": "Host gate (./test/run.sh)", "integration_id": 15368},
+          {"context": "Encrypted interaction Worker", "integration_id": 15368},
+          {"context": "Numbers relay Worker", "integration_id": 15368},
+          {"context": "Tokenserver tests (ubuntu-latest)", "integration_id": 15368},
+          {"context": "Tokenserver tests (macos-latest)", "integration_id": 15368},
+          {"context": "Tokenserver tests (windows-latest)", "integration_id": 15368},
+          {"context": "Snapshot tool (ubuntu-latest)", "integration_id": 15368},
+          {"context": "Snapshot tool (macos-latest)", "integration_id": 15368},
+          {"context": "ESP32-S3 firmware build", "integration_id": 15368}
+        ]
+      }
+    }
+  ]
+}

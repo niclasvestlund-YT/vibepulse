@@ -1,5 +1,9 @@
 Read `README.md` for the repository structure and build workflow.
 
+Follow `CONTRIBUTING.md` and `docs/maintaining-contributions.md` for contributions
+and merging. Maintainer changes also go through a PR with passing required
+checks. Documented local test omissions do not waive GitHub's merge requirements.
+
 Setting this repo up for someone (secrets, build, flash, tokenserver)? Follow
 `docs/agent-setup.md` — step-by-step, with verifications and a symptom→fix
 table. Never flash the board without the user explicitly asking you to.
