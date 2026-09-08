@@ -105,10 +105,12 @@ exactly as before. With it, several computers may advertise simultaneously;
 the panel pins one healthy origin and changes only after failure. On Windows,
 `ipconfig` plus a DHCP reservation still makes the compiled fallback durable.
 
-**Verify:** `secrets.h` has a non-empty SSID and no `DIN-MAC` placeholder:
+**Verify:** `secrets.h` has a non-empty SSID and no `DIN-MAC` placeholder
+left in a define (the comment that tells you to replace it also says
+`DIN-MAC`, so the match is anchored to `#define` lines):
 
 ```sh
-grep -q 'DIN-MAC' secrets.h && echo "PLACEHOLDER STILL THERE" || echo "host set"
+grep -q '#define.*DIN-MAC' secrets.h && echo "PLACEHOLDER STILL THERE" || echo "host set"
 ```
 
 It must print `host set`. If the placeholder is still there,
