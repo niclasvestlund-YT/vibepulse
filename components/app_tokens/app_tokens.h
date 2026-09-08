@@ -7,6 +7,8 @@
 
 #include "torget_app.h"
 
+#include "app_tokens_config.h"   /* TK_GITHUB_SCREEN_ENABLED */
+
 #include "tokens.h"
 #include "agent_status.h"
 #include "github_status.h"
@@ -31,7 +33,19 @@ enum {
   VIEW_TRACKER_CLAUDE = 4,
   VIEW_TRACKER_CODEX = 5,
   VIEW_GITHUB = 6,
-  VIEW_VALUE = 7,
+  /* GitHub-sidan är VALFRI, och indexen måste vara TÄTA: `ui.tiles` är precis
+   * TK_USAGE_SCREEN_VIEWS lång, och tileviewen har ingen tile på index 6 att
+   * svepa förbi när sidan är bortvald.
+   *
+   * Med ett fast VIEW_VALUE 7 blev båda fel så snart GitHub var av — vilket är
+   * standardläget i en färsk klon. TK_USAGE_SCREEN_VIEWS blir då 7, alltså
+   * giltiga index 0-6, och värdesidan hamnade ett steg BORTOM det:
+   * `ui.tiles[VIEW_VALUE]` skrev utanför arrayen, och mellan trackern och
+   * värdesidan fanns ett hål som varken svep eller knapp kunde ta sig över.
+   *
+   * VIEW_GITHUB behåller sitt nummer även när sidan är av: ingen tile skapas
+   * där och ingenting indexerar det. Det är VIEW_VALUE som måste flytta. */
+  VIEW_VALUE = 6 + TK_GITHUB_SCREEN_ENABLED,
 };
 
 /* Ett lyckat /api/tokens-svar. Snappar tickern, stämplar färskhet och
