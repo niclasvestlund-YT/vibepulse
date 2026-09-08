@@ -73,6 +73,10 @@ def worst_case_payload() -> dict:
         "claudeWeekStale": False,
         "claudeModelWeekStale": False,
         "codexWeekStale": False,
+        # #62: only while the first scan runs and a same-day snapshot from
+        # the previous run is being served -- still part of the ceiling.
+        "usageRefreshing": True,
+        "usageSnapshotAt": "2026-12-31T23:59:59+00:00",
     }
     for prefix in ("claude", "codex"):
         payload[f"{prefix}ForecastState"] = "unavailable"

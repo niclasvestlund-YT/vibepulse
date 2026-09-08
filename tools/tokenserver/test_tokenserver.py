@@ -71,6 +71,42 @@ class _FakeUsageResponse:
         return json.dumps(self._payload).encode()
 
 
+# #62: every test in this module runs with the usage snapshot file redirected
+# into one temporary directory, so no test can read a real snapshot from the
+# developer's state directory or leave one behind there.
+_SNAPSHOT_DIR = None
+
+
+def setUpModule():
+    global _SNAPSHOT_DIR, _snapshot_path_patch
+    _SNAPSHOT_DIR = tempfile.TemporaryDirectory(prefix="vibepulse-usage-snap-")
+    _snapshot_path_patch = mock.patch.object(
+        tokenserver, "_usage_snapshot_path",
+        return_value=Path(_SNAPSHOT_DIR.name) / "usage-snapshot.json")
+    _snapshot_path_patch.start()
+
+
+def tearDownModule():
+    _snapshot_path_patch.stop()
+    _SNAPSHOT_DIR.cleanup()
+
+
+def warm_usage_cache(projects_dir=Path("/unused")):
+    """Seed the /api/tokens cache the way the server's first scan does.
+
+    get_snapshot never computes on the calling thread since #62 -- with an
+    empty cache it starts a background scan and serves a saved snapshot or
+    raises UsageRefreshing -- so a test that wants the mocked _compute's
+    totals served synchronously runs the scan itself first."""
+    tokenserver._last_result = None
+    tokenserver._last_computed = 0.0
+    tokenserver._snapshot_refreshing = False
+    tokenserver._startup_base_loaded = False
+    # The seed is not a real scan: no snapshot file is written for it, so
+    # the tests that count atomic writes see only the writes they cause.
+    with mock.patch.object(tokenserver, "_persist_usage_snapshot"):
+        tokenserver._refresh_usage_totals(projects_dir)
+
 class ClaudePlanUsageFallbackTests(unittest.TestCase):
     NOW = 1_800_000_000
 
@@ -1016,8 +1052,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                                   return_value={}), \
                 mock.patch.object(
                     tokenserver, "_persist_quota_records_async"):
-            tokenserver._last_result = None
-            tokenserver._last_computed = 0.0
+            warm_usage_cache()
             snapshot = tokenserver.get_snapshot(
                 Path("/unused"), history=StubHistory(),
                 now_ts=1_800_000_000,
@@ -1599,8 +1634,7 @@ class UsageSnapshotTests(unittest.TestCase):
                                   return_value=claude or {}), \
                 mock.patch.object(tokenserver, "_read_codex_limits",
                                   return_value=codex or {}):
-            tokenserver._last_result = None
-            tokenserver._last_computed = 0.0
+            warm_usage_cache()
             return tokenserver.get_snapshot(
                 Path("/unused"), history=history, now_ts=now_ts,
                 quota_cache=quota_cache)
@@ -2872,8 +2906,7 @@ class MaxTrackerLiveHookTests(unittest.TestCase):
                                   return_value=claude or {}), \
                 mock.patch.object(tokenserver, "_read_codex_limits",
                                   return_value=codex or {}):
-            tokenserver._last_result = None
-            tokenserver._last_computed = 0.0
+            warm_usage_cache()
             return tokenserver.get_snapshot(
                 Path("/unused"), history=StubHistory(), now_ts=now_ts,
                 quota_cache=QuotaCache(Path(temp_dir) / "quota.json",
@@ -4258,3 +4291,327 @@ class ProbeTransitionLogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartupScanTests(unittest.TestCase):
+    """#62: /api/tokens answers within seconds of process start while the
+    first history scan runs, the scan never runs on a request thread, its
+    result replaces the startup state atomically, and a failed state write
+    keeps the previous file."""
+
+    def setUp(self):
+        self.saved = (
+            tokenserver._last_result, tokenserver._last_computed,
+            tokenserver._snapshot_refreshing, tokenserver._usage_scan_started,
+            tokenserver._startup_base, tokenserver._startup_base_loaded,
+            tokenserver._compute_failing_since,
+            tokenserver._last_compute_error_logged,
+            tokenserver._snapshot_save_failing_since,
+            tokenserver._last_snapshot_save_error_logged,
+        )
+        tokenserver._last_result = None
+        tokenserver._last_computed = 0.0
+        tokenserver._snapshot_refreshing = False
+        tokenserver._usage_scan_started = None
+        tokenserver._startup_base = None
+        tokenserver._startup_base_loaded = False
+        tokenserver._compute_failing_since = None
+        tokenserver._last_compute_error_logged = None
+        tokenserver._snapshot_save_failing_since = None
+        tokenserver._last_snapshot_save_error_logged = None
+        self.temp = tempfile.TemporaryDirectory(prefix="vibepulse-startup-")
+        self.snapshot_path = Path(self.temp.name) / "usage-snapshot.json"
+        self.path_patch = mock.patch.object(
+            tokenserver, "_usage_snapshot_path",
+            return_value=self.snapshot_path)
+        self.path_patch.start()
+
+    def tearDown(self):
+        self.path_patch.stop()
+        self.temp.cleanup()
+        (tokenserver._last_result, tokenserver._last_computed,
+         tokenserver._snapshot_refreshing, tokenserver._usage_scan_started,
+         tokenserver._startup_base, tokenserver._startup_base_loaded,
+         tokenserver._compute_failing_since,
+         tokenserver._last_compute_error_logged,
+         tokenserver._snapshot_save_failing_since,
+         tokenserver._last_snapshot_save_error_logged) = self.saved
+
+    @staticmethod
+    def _base(day_tokens=123):
+        return {
+            "v": 1, "dayTokens": day_tokens, "dayTokensPerHour": 4,
+            "daySessions": 2, "monthTokens": 99_999,
+            "claudeSourcePresent": True,
+            "value": {"state": "unavailable"},
+            "at": "2026-09-08T12:00:00+02:00",
+        }
+
+    def _get(self, quota_cache):
+        return tokenserver.get_snapshot(
+            Path("/unused"), history=StubHistory(), now_ts=1_800_000_000,
+            quota_cache=quota_cache)
+
+    def _serve(self, path="/api/tokens"):
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        handler.path = path
+        handler.projects_dir = Path("/unused")
+        handler.max_tracker_store = None
+        handler._send = mock.Mock()
+        handler._drain_request_body = mock.Mock()
+        handler.do_GET()
+        return handler._send.call_args.args
+
+    def test_tokens_answers_at_once_while_the_first_scan_is_blocked(self):
+        """The acceptance test: a deliberately blocked scan, and the route
+        answers in well under two seconds with an explicit refreshing
+        state instead of queuing behind it -- then the completed scan
+        replaces that state atomically and the next answer is real."""
+        scan_started = threading.Event()
+        release = threading.Event()
+
+        def blocked_compute(_projects_dir, _store=None):
+            scan_started.set()
+            release.wait(timeout=5)
+            return self._base(day_tokens=777)
+
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(tokenserver, "_compute",
+                                  side_effect=blocked_compute), \
+                mock.patch.object(tokenserver, "get_limits",
+                                  return_value={}), \
+                mock.patch.object(tokenserver, "_read_codex_limits",
+                                  return_value={}), \
+                mock.patch.object(tokenserver, "_record_panel_poll",
+                                  create=True):
+            cache = QuotaCache(Path(temp_dir) / "quota.json")
+            try:
+                before = time.perf_counter()
+                with self.assertRaises(tokenserver.UsageRefreshing) as raised:
+                    self._get(cache)
+                elapsed = time.perf_counter() - before
+                self.assertLess(elapsed, 2.0)
+                self.assertTrue(scan_started.wait(timeout=1))
+                self.assertEqual(raised.exception.payload["usageScanStatus"],
+                                 "refreshing")
+                self.assertTrue(raised.exception.payload["usageRefreshing"])
+                self.assertEqual(raised.exception.payload["error"],
+                                 "usage refreshing")
+
+                # The HTTP route: 503 with that body, never a 500 and never
+                # a hang; GET / names the state for the doctor.
+                code, body = self._serve()
+                self.assertEqual(code, 503)
+                self.assertEqual(body["usageScanStatus"], "refreshing")
+                _, root = self._serve("/")
+                self.assertEqual(root["usageScanStatus"], "refreshing")
+                self.assertIsInstance(root["usageScanForS"], int)
+                self.assertTrue(root["usageComputeOk"])
+            finally:
+                release.set()
+            for _ in range(200):
+                if not tokenserver._snapshot_refreshing:
+                    break
+                time.sleep(0.01)
+            self.assertFalse(tokenserver._snapshot_refreshing)
+            snapshot = self._get(cache)
+            self.assertEqual(snapshot["dayTokens"], 777)
+            self.assertNotIn("usageRefreshing", snapshot)
+            _, root = self._serve("/")
+            self.assertEqual(root["usageScanStatus"], "ready")
+            self.assertIsNone(root["usageScanForS"])
+            # The completed scan was persisted for the next start.
+            self.assertTrue(self.snapshot_path.exists())
+            saved = json.loads(self.snapshot_path.read_text())
+            self.assertEqual(saved["base"]["dayTokens"], 777)
+            self.assertEqual(saved["day"], tokenserver._local_day())
+            self.assertEqual(sorted(saved["base"]),
+                             sorted(tokenserver._USAGE_SNAPSHOT_KEYS))
+
+    def test_a_same_day_snapshot_is_served_marked_refreshing(self):
+        tokenserver._persist_usage_snapshot(self._base(day_tokens=555))
+        release = threading.Event()
+
+        def blocked_compute(_projects_dir, _store=None):
+            release.wait(timeout=5)
+            return self._base(day_tokens=556)
+
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(tokenserver, "_compute",
+                                  side_effect=blocked_compute), \
+                mock.patch.object(tokenserver, "get_limits",
+                                  return_value={}), \
+                mock.patch.object(tokenserver, "_read_codex_limits",
+                                  return_value={}):
+            cache = QuotaCache(Path(temp_dir) / "quota.json")
+            try:
+                snapshot = self._get(cache)
+            finally:
+                release.set()
+            self.assertEqual(snapshot["dayTokens"], 555)
+            self.assertTrue(snapshot["usageRefreshing"])
+            self.assertEqual(snapshot["usageSnapshotAt"],
+                             "2026-09-08T12:00:00+02:00")
+            self.assertEqual(snapshot["v"], 2)
+            # Quota fields are still resolved -- the probe does not wait
+            # for the scan -- and honest: nothing live, so nothing fresh.
+            self.assertIsNone(snapshot["claudeWeekPct"])
+            self.assertFalse(snapshot["claudeWeekStale"])
+            for _ in range(200):
+                if not tokenserver._snapshot_refreshing:
+                    break
+                time.sleep(0.01)
+            self.assertEqual(self._get(cache)["dayTokens"], 556)
+
+    def test_yesterdays_snapshot_is_not_served(self):
+        tokenserver._persist_usage_snapshot(self._base(), today="2000-01-01")
+        self.assertIsNone(tokenserver._load_usage_snapshot())
+        with mock.patch.object(tokenserver, "_start_usage_refresh_locked"):
+            with self.assertRaises(tokenserver.UsageRefreshing):
+                self._get(QuotaCache(Path(self.temp.name) / "quota.json"))
+
+    def test_a_corrupt_or_foreign_snapshot_reads_as_absent(self):
+        today = tokenserver._local_day()
+        cases = {
+            "not json": b"{",
+            "not an object": b"[]",
+            "wrong version": json.dumps({"v": 2, "day": today,
+                                         "base": self._base()}).encode(),
+            "missing counters": json.dumps({"v": 1, "day": today,
+                                            "base": {"at": "x"}}).encode(),
+            "non-finite": json.dumps({"v": 1, "day": today, "base": dict(
+                self._base(), dayTokens="1e999")}).encode(),
+            "bool counter": json.dumps({"v": 1, "day": today, "base": dict(
+                self._base(), daySessions=True)}).encode(),
+            "oversized": b" " * (tokenserver._USAGE_SNAPSHOT_MAX_BYTES + 1),
+        }
+        for name, raw in cases.items():
+            with self.subTest(name=name):
+                self.snapshot_path.write_bytes(raw)
+                self.assertIsNone(tokenserver._load_usage_snapshot())
+        # Extra keys are dropped on the way in: only the allowlist is
+        # served, whatever the file says.
+        self.snapshot_path.write_text(json.dumps({
+            "v": 1, "day": today,
+            "base": dict(self._base(), projectPath="/Users/x/secret",
+                         claudeSourcePresent="yes", value="nope")}))
+        loaded = tokenserver._load_usage_snapshot()
+        self.assertNotIn("projectPath", loaded)
+        self.assertNotIn("claudeSourcePresent", loaded)
+        self.assertNotIn("value", loaded)
+        self.assertEqual(loaded["dayTokens"], 123)
+
+    def _wait_for_scan(self):
+        for _ in range(500):
+            if not tokenserver._snapshot_refreshing:
+                return
+            time.sleep(0.01)
+        self.fail("the background scan never finished")
+
+    def test_a_failed_first_scan_is_retried_on_the_recompute_cadence(self):
+        with mock.patch.object(tokenserver, "_compute",
+                               side_effect=RuntimeError("boom")) as compute, \
+                mock.patch.object(tokenserver, "get_limits",
+                                  return_value={}), \
+                mock.patch.object(tokenserver, "_read_codex_limits",
+                                  return_value={}):
+            cache = QuotaCache(Path(self.temp.name) / "quota.json")
+            with self.assertLogs("tokenserver", level="ERROR"):
+                with self.assertRaises(tokenserver.UsageRefreshing):
+                    self._get(cache)
+                self._wait_for_scan()
+            self.assertEqual(compute.call_count, 1)
+            # A second request inside the cadence does NOT start another
+            # scan: a crashing compute must not be hammered once per poll.
+            with self.assertRaises(tokenserver.UsageRefreshing) as raised:
+                self._get(cache)
+            self.assertEqual(raised.exception.payload["usageScanStatus"],
+                             "failed")
+            self.assertEqual(compute.call_count, 1)
+            _, root = self._serve("/")
+            self.assertEqual(root["usageScanStatus"], "failed")
+            self.assertIsInstance(root["usageScanForS"], int)
+            self.assertFalse(root["usageComputeOk"])
+            # Past the cadence it retries.
+            tokenserver._last_computed -= tokenserver.RECOMPUTE_EVERY_S + 1
+            with self.assertRaises(tokenserver.UsageRefreshing):
+                self._get(cache)
+            self._wait_for_scan()
+            self.assertEqual(compute.call_count, 2)
+
+    def test_max_tracker_route_reports_stale_while_refreshing(self):
+        store = mock.Mock()
+        store.snapshot.return_value = {"v": 1, "weeks": []}
+        handler = tokenserver.Handler.__new__(tokenserver.Handler)
+        handler.path = "/api/max-tracker"
+        handler.projects_dir = Path("/unused")
+        handler.max_tracker_store = store
+        handler.plans = {"claude": None, "codex": None}
+        handler._send = mock.Mock()
+        handler._drain_request_body = mock.Mock()
+        with mock.patch.object(tokenserver, "_start_usage_refresh_locked"):
+            handler.do_GET()
+        code, payload = handler._send.call_args.args
+        self.assertEqual(code, 200)
+        self.assertTrue(payload["stale"])
+
+    def test_a_failed_snapshot_write_keeps_the_previous_file_and_memory(self):
+        """The low-disk acceptance test: ENOSPC on the atomic write leaves
+        the previous snapshot file byte-identical, keeps the in-memory
+        totals, logs once (throttled), and reports stateSaveOk false on
+        GET / until a write succeeds again."""
+        tokenserver._persist_usage_snapshot(self._base(day_tokens=1))
+        before = self.snapshot_path.read_bytes()
+        enospc = OSError(28, "No space left on device")
+        with mock.patch.object(tokenserver.os, "replace", side_effect=enospc):
+            with self.assertLogs("tokenserver", level="ERROR") as captured:
+                self.assertFalse(tokenserver._persist_usage_snapshot(
+                    self._base(day_tokens=2)))
+            self.assertIn("usage-snapshot", "\n".join(captured.output))
+            with self.assertNoLogs("tokenserver"):
+                self.assertFalse(tokenserver._persist_usage_snapshot(
+                    self._base(day_tokens=3)))
+        self.assertEqual(self.snapshot_path.read_bytes(), before)
+        self.assertEqual([p.name for p in Path(self.temp.name).iterdir()],
+                         ["usage-snapshot.json"], "temp file left behind")
+        _, root = self._serve("/")
+        self.assertFalse(root["stateSaveOk"])
+        self.assertIsInstance(root["stateSaveFailingForS"], int)
+
+        # The refresh path survives it too: memory keeps the new totals.
+        with mock.patch.object(tokenserver.os, "replace", side_effect=enospc), \
+                mock.patch.object(tokenserver, "_compute",
+                                  return_value=self._base(day_tokens=4)):
+            tokenserver._refresh_usage_totals(Path("/unused"))
+        self.assertEqual(tokenserver._last_result["dayTokens"], 4)
+        self.assertEqual(self.snapshot_path.read_bytes(), before)
+
+        with self.assertLogs("tokenserver", level="INFO") as captured:
+            self.assertTrue(tokenserver._persist_usage_snapshot(
+                self._base(day_tokens=5)))
+        self.assertIn("lyckades igen", "\n".join(captured.output))
+        _, root = self._serve("/")
+        self.assertTrue(root["stateSaveOk"])
+        self.assertIsNone(root["stateSaveFailingForS"])
+
+    def test_a_failed_max_tracker_write_keeps_the_previous_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = MaxTrackerStore(Path(temp_dir) / "max-tracker.json",
+                                    Path(temp_dir) / "codex",
+                                    Path(temp_dir) / "claude")
+            store.observe_volume("claude", "2026-09-01", 100)
+            store.save(today="2026-09-08")
+            before = store.path.read_bytes()
+            store.observe_volume("claude", "2026-09-02", 100)
+            with mock.patch.object(
+                    tokenserver.os, "replace",
+                    side_effect=OSError(28, "No space left on device")):
+                with self.assertRaises(OSError):
+                    store.save(today="2026-09-08")
+            self.assertEqual(store.path.read_bytes(), before)
+            self.assertEqual([p.name for p in Path(temp_dir).iterdir()],
+                             ["max-tracker.json"])
+            # Memory kept both days; the next save writes them.
+            store.save(today="2026-09-08")
+            saved = json.loads(store.path.read_text())
+            self.assertIn("2026-09-02", saved["claude"]["days"])

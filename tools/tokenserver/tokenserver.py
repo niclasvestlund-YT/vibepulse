@@ -46,6 +46,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -402,6 +403,33 @@ _price_table = None
 _last_result = None
 _last_computed = 0.0
 _snapshot_refreshing = False
+# Issue #62: the first history scan used to run INSIDE _cache_lock on
+# whichever thread asked first, so with a large ~/.claude/projects every
+# /api/tokens request queued behind it -- 211 s on one real Mac -- and the
+# panel read STALE after every restart of a healthy service. Now no request
+# thread ever scans. The scan runs on one background thread (started by
+# main() before the port binds, or lazily by get_snapshot), and until it
+# finishes /api/tokens answers within milliseconds with the previous run's
+# last snapshot of TODAY, marked usageRefreshing, or -- when there is none --
+# a 503 whose body says exactly that (UsageRefreshing below). The panel
+# rejects the 503 and keeps its last good values, which is what it did
+# after the timeout too, only now without the wait. GET / carries the state
+# as usageScanStatus / usageScanForS so the doctor, the smoke test and the
+# SessionStart hook can tell a startup refresh from provider-stale data and
+# from a crashed recompute.
+_usage_scan_started = None          # monotonic when the running scan began
+USAGE_SNAPSHOT_FILE = "usage-snapshot.json"
+_USAGE_SNAPSHOT_MAX_BYTES = 64 * 1024
+# The only keys the snapshot file carries: the counters, their meaning flag,
+# the value payload and the compute time. Numbers and one timestamp -- no
+# paths, no prompts, no identities -- so serving it back is as safe as
+# serving a fresh _compute.
+_USAGE_SNAPSHOT_KEYS = ("v", "dayTokens", "dayTokensPerHour", "daySessions",
+                        "monthTokens", "claudeSourcePresent", "value", "at")
+_startup_base = None                # (day, base) loaded once from disk
+_startup_base_loaded = False
+_snapshot_save_failing_since = None
+_last_snapshot_save_error_logged = None
 # Omräkningens hälsa: kraschar _compute serveras förra snapshotet vidare —
 # rätt beteende, men det får inte ske TYST (då fryser siffrorna för alltid
 # och ser färska ut). failing_since driver usageComputeOk på GET / och
@@ -1894,11 +1922,12 @@ _ERROR_LOG_THROTTLE_S = 300.0  # ihållande fel: en loggrad per 5 min räcker
 _last_save_error_logged = None  # None = aldrig loggat (0.0 sväljer första
                                 # felet på en nystartad maskin — monotonic
                                 # räknar från boot)
+_max_tracker_save_failing_since = None  # stateSaveOk på GET / (#62)
 
 
 def _max_tracker_writer(store):
     global _max_tracker_dirty, _max_tracker_writer_running, \
-        _last_save_error_logged
+        _last_save_error_logged, _max_tracker_save_failing_since
     while True:
         with _max_tracker_writer_lock:
             if not _max_tracker_dirty:
@@ -1907,6 +1936,7 @@ def _max_tracker_writer(store):
             _max_tracker_dirty = False
         try:
             store.save()
+            _max_tracker_save_failing_since = None
             if _last_save_error_logged is not None:
                 # Lyckad skrivning stänger felepisoden: logga slutet och
                 # nollställ strypningen, så nästa fel (en NY episod) loggar
@@ -1919,6 +1949,8 @@ def _max_tracker_writer(store):
             # försöker igen — ingen het loop, ingen tyst dataförlust.
             # Loggen är strypt: ett trasigt skrivmål ska inte fylla filen.
             now = time.monotonic()
+            if _max_tracker_save_failing_since is None:
+                _max_tracker_save_failing_since = now
             if (_last_save_error_logged is None or
                     now - _last_save_error_logged >= _ERROR_LOG_THROTTLE_S):
                 _last_save_error_logged = now
@@ -2016,7 +2048,8 @@ def _add_forecast(result, prefix, forecast):
 
 def _refresh_usage_totals(projects_dir, max_tracker_store=None):
     global _last_result, _last_computed, _snapshot_refreshing, \
-        _compute_failing_since, _last_compute_error_logged
+        _usage_scan_started, _compute_failing_since, \
+        _last_compute_error_logged
     try:
         refreshed = _compute(projects_dir, max_tracker_store)
     except Exception:
@@ -2042,11 +2075,196 @@ def _refresh_usage_totals(projects_dir, max_tracker_store=None):
             _last_result = refreshed
         _last_computed = time.monotonic()
         _snapshot_refreshing = False
+        _usage_scan_started = None
+    if refreshed is not None:
+        # Off the lock: a slow or failing disk must never hold a request.
+        _persist_usage_snapshot(refreshed)
+
+
+class UsageRefreshing(Exception):
+    """get_snapshot has no token totals to serve yet: the first scan is
+    still running (or has failed and waits for its retry) and there is no
+    same-day snapshot from the previous run. do_GET answers 503 with
+    ``payload``; the panel treats it as a failed fetch and keeps its last
+    good values, and the body names the state so nothing has to guess."""
+
+    def __init__(self, status, for_s):
+        super().__init__("usage refreshing")
+        self.status = status
+        self.for_s = for_s
+        self.payload = {
+            "error": "usage refreshing",
+            "usageRefreshing": True,
+            "usageScanStatus": status,
+            "usageScanForS": for_s,
+            "v": 2,
+        }
+
+
+def _usage_snapshot_path():
+    return _state_dir() / USAGE_SNAPSHOT_FILE
+
+
+def _local_day(now=None):
+    return (datetime.now() if now is None else now).astimezone().date(
+        ).isoformat()
+
+
+def _persist_usage_snapshot(base, path=None, today=None):
+    """Write the freshly computed base atomically (sibling temp file, fsync,
+    rename, mode 0600) so the next start can serve it while its own scan
+    runs. A failed write -- ENOSPC on the nearly full disk that the #62
+    session also saw -- keeps the previous file exactly as it was and never
+    touches the in-memory snapshot; it is logged once per episode, throttled
+    like the other writers, and reported on GET / as stateSaveOk."""
+    global _snapshot_save_failing_since, _last_snapshot_save_error_logged
+    path = _usage_snapshot_path() if path is None else Path(path)
+    payload = {"v": 1, "day": _local_day() if today is None else today,
+               "base": {key: base[key] for key in _USAGE_SNAPSHOT_KEYS
+                        if key in base}}
+    temp_path = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp",
+                delete=False) as stream:
+            temp_path = Path(stream.name)
+            os.chmod(temp_path, 0o600)
+            json.dump(payload, stream, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+    except OSError:
+        now = time.monotonic()
+        if _snapshot_save_failing_since is None:
+            _snapshot_save_failing_since = now
+        if (_last_snapshot_save_error_logged is None or
+                now - _last_snapshot_save_error_logged >=
+                _ERROR_LOG_THROTTLE_S):
+            _last_snapshot_save_error_logged = now
+            log.exception("usage-snapshot: kunde inte spara — förra filen "
+                          "står kvar, minnet påverkas inte, nästa "
+                          "omräkning försöker igen")
+        return False
+    else:
+        if _snapshot_save_failing_since is not None:
+            log.info("usage-snapshot: sparning lyckades igen efter %.0f s",
+                     time.monotonic() - _snapshot_save_failing_since)
+            _snapshot_save_failing_since = None
+            _last_snapshot_save_error_logged = None
+        return True
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
+def _finite_number(value):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _load_usage_snapshot(path=None, today=None):
+    """The previous run's last base, if it was computed TODAY (local day);
+    else None. Yesterday's day counters would be wrong for today and the
+    month total may have rolled, so an older file is simply not served.
+    Strict on the way in: size cap, a JSON object, allowlisted keys, finite
+    numbers -- a corrupt or foreign file reads as absent, never as data."""
+    path = _usage_snapshot_path() if path is None else Path(path)
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    if len(raw) > _USAGE_SNAPSHOT_MAX_BYTES:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("v") != 1:
+        return None
+    if data.get("day") != (_local_day() if today is None else today):
+        return None
+    base = data.get("base")
+    if not isinstance(base, dict):
+        return None
+    for key in ("dayTokens", "dayTokensPerHour", "daySessions",
+                "monthTokens"):
+        if not _finite_number(base.get(key)):
+            return None
+    if not isinstance(base.get("at"), str):
+        return None
+    result = {key: base[key] for key in _USAGE_SNAPSHOT_KEYS if key in base}
+    if "claudeSourcePresent" in result and not isinstance(
+            result["claudeSourcePresent"], bool):
+        del result["claudeSourcePresent"]
+    if "value" in result and not isinstance(result["value"], dict):
+        del result["value"]
+    return result
+
+
+def _start_usage_refresh_locked(projects_dir, max_tracker_store):
+    """Start one background recompute. The caller holds _cache_lock."""
+    global _snapshot_refreshing, _usage_scan_started
+    _snapshot_refreshing = True
+    _usage_scan_started = time.monotonic()
+    threading.Thread(
+        target=_refresh_usage_totals,
+        args=(projects_dir, max_tracker_store),
+        name="usage-total-refresh",
+        daemon=True,
+    ).start()
+
+
+def _startup_base_locked():
+    """Today's snapshot from the previous run, or None. Loaded from disk
+    once; the day check repeats on every call so a file loaded before
+    midnight stops being served after it. The caller holds _cache_lock."""
+    global _startup_base, _startup_base_loaded
+    if not _startup_base_loaded:
+        _startup_base_loaded = True
+        base = _load_usage_snapshot()
+        _startup_base = None if base is None else (_local_day(), base)
+    if _startup_base is None or _startup_base[0] != _local_day():
+        return None
+    return _startup_base[1]
+
+
+def _usage_scan_state_locked():
+    """(status, seconds) for GET / and the 503 body. The caller holds
+    _cache_lock. ready = a computed snapshot is being served; refreshing =
+    a scan is running and nothing computed exists yet; failed = the first
+    scan crashed and waits for its retry; pending = not started."""
+    now = time.monotonic()
+    if _last_result is not None:
+        return "ready", None
+    if _snapshot_refreshing:
+        started = _usage_scan_started
+        return "refreshing", int(now - started) if started is not None else 0
+    if _compute_failing_since is not None:
+        return "failed", int(now - _compute_failing_since)
+    return "pending", None
+
+
+def _usage_scan_state():
+    with _cache_lock:
+        return _usage_scan_state_locked()
 
 
 def get_snapshot(projects_dir: Path, history=None, now_ts=None,
                  quota_cache=None, max_tracker_store=None):
     """Build the /api/tokens v2 payload.
+
+    Never scans on the calling thread (#62): with nothing computed yet it
+    starts the background scan if none is running, then serves today's
+    snapshot from the previous run marked ``usageRefreshing`` -- or raises
+    :class:`UsageRefreshing` when there is none. Callers that cannot use a
+    503 (the Max Tracker route, the relay publisher) catch it.
 
     ``max_tracker_store`` is the Max Tracker live-rollup hook: omitted
     (``None``, the default), every Max Tracker call below is a no-op, which
@@ -2055,21 +2273,29 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     so live percentages/volume only ever reach the on-disk history for
     actual requests, never for a caller that didn't ask for it.
     """
-    global _last_result, _last_computed, _snapshot_refreshing
     with _cache_lock:
         if _last_result is None:
-            _last_result = _compute(projects_dir, max_tracker_store)
-            _last_computed = time.monotonic()
-        elif (time.monotonic() - _last_computed > RECOMPUTE_EVERY_S and
-              not _snapshot_refreshing):
-            _snapshot_refreshing = True
-            threading.Thread(
-                target=_refresh_usage_totals,
-                args=(projects_dir, max_tracker_store),
-                name="usage-total-refresh",
-                daemon=True,
-            ).start()
-        result = dict(_last_result)
+            # A failed first scan is retried on the same 30 s cadence as
+            # the periodic recompute, never once per request.
+            if not _snapshot_refreshing and (
+                    _last_computed == 0.0 or
+                    time.monotonic() - _last_computed > RECOMPUTE_EVERY_S):
+                _start_usage_refresh_locked(projects_dir, max_tracker_store)
+            base = _startup_base_locked()
+            if base is None:
+                status, for_s = _usage_scan_state_locked()
+                raise UsageRefreshing(status, for_s)
+            result = dict(base)
+            # Additive keys (tokens_parse.c skips unknown top-level keys):
+            # the counters are a lower bound as of usageSnapshotAt, not the
+            # live figure, and the reader that cares can see that.
+            result["usageRefreshing"] = True
+            result["usageSnapshotAt"] = base.get("at")
+        else:
+            if (time.monotonic() - _last_computed > RECOMPUTE_EVERY_S and
+                    not _snapshot_refreshing):
+                _start_usage_refresh_locked(projects_dir, max_tracker_store)
+            result = dict(_last_result)
 
     # null = ärlig frånvaro (nyckelring/probe/loggar otillgängliga) — skärmen
     # visar streck, aldrig hittade procent. Samma regel som sharePct.
@@ -2583,11 +2809,17 @@ class Handler(BaseHTTPRequestHandler):
         # hooks inside it) -- calling it here both feeds today's peaks and
         # gives us the exact "*Stale: false" signal to mirror, so the top-
         # level stale flag below is never an invented second clock.
-        quota_snapshot = get_snapshot(
-            self.projects_dir, max_tracker_store=self.max_tracker_store)
+        try:
+            quota_snapshot = get_snapshot(
+                self.projects_dir, max_tracker_store=self.max_tracker_store)
+        except UsageRefreshing:
+            # No quota reading has been published yet this run: the honest
+            # top-level flag is stale, never "fresh because nothing said
+            # otherwise". The page keeps its saved history either way.
+            quota_snapshot = None
         today = datetime.now().astimezone().date().isoformat()
         payload = self.max_tracker_store.snapshot(today, self.plans)
-        payload["stale"] = bool(
+        payload["stale"] = quota_snapshot is None or bool(
             quota_snapshot.get("claudeWeekStale") or
             quota_snapshot.get("codexWeekStale"))
         return payload
@@ -2604,6 +2836,15 @@ class Handler(BaseHTTPRequestHandler):
         att klienten försvann."""
         try:
             payload = produce()
+        except UsageRefreshing as refreshing:
+            # Not a server error: the scan is running and the body says so.
+            # No log line per poll -- the warmup logs the episode once, and
+            # GET / carries usageScanStatus for anyone who asks.
+            try:
+                self._send(503, refreshing.payload)
+            except OSError:
+                pass
+            return
         except Exception:
             log.exception("500 på %s", self.path)
             try:
@@ -2899,6 +3140,11 @@ class Handler(BaseHTTPRequestHandler):
         # emellan ge None i subtraktionen (500 på själva diagnostikrutten)
         # och en nystartad episod ge ok=true med varaktighet bredvid.
         failing_since = _compute_failing_since
+        scan_status, scan_for_s = _usage_scan_state()
+        save_failing_since = (
+            _snapshot_save_failing_since
+            if _snapshot_save_failing_since is not None
+            else _max_tracker_save_failing_since)
         endpoints = ["/api/tokens", "/api/agent-status",
                      "/api/max-tracker", "/api/github"]
         return {"service": "torget-tokenserver",
@@ -2921,6 +3167,18 @@ class Handler(BaseHTTPRequestHandler):
                 "usageComputeFailingForS":
                     (int(time.monotonic() - failing_since)
                      if failing_since is not None else None),
+                # #62: ready | refreshing | failed | pending, and how long
+                # the current refresh or failure has lasted. Refreshing is
+                # a startup state, not a fault -- /api/tokens answers 503
+                # or today's saved snapshot until it clears.
+                "usageScanStatus": scan_status,
+                "usageScanForS": scan_for_s,
+                # A failed atomic state write (ENOSPC) keeps the previous
+                # file and the in-memory state; this says it is happening.
+                "stateSaveOk": save_failing_since is None,
+                "stateSaveFailingForS":
+                    (int(time.monotonic() - save_failing_since)
+                     if save_failing_since is not None else None),
                 "discovery": {
                     "status": self.discovery_status,
                     **({"reason": self.discovery_reason}
@@ -3446,13 +3704,36 @@ def main():
     # och värmer i bakgrunden: agent-status och hookarna är incrementella och
     # svarar meningsfullt på en gång, /api/tokens svarar när skanningen är
     # klar (skärmen visar streck/stale tills dess, precis som vid nätfel).
+    # #62: the first scan is THE background scan, not a warmup of a cache
+    # that a request could otherwise fill. Mark it running before the port
+    # binds so no request thread starts a second one, and let every
+    # /api/tokens in the meantime answer at once: today's snapshot from the
+    # previous run if there is one, otherwise 503 "usage refreshing".
+    global _snapshot_refreshing, _usage_scan_started
+    with _cache_lock:
+        _snapshot_refreshing = True
+        _usage_scan_started = time.monotonic()
+        has_today = _startup_base_locked() is not None
+
     def _first_scan_warmup():
         t0 = time.monotonic()
-        try:
-            snap = get_snapshot(Handler.projects_dir)
-        except Exception:
-            log.exception("förstaskanningen kraschade — /api/tokens värmer "
-                          "vid första anropet i stället")
+        log.info("förstaskanning startad — /api/tokens %s tills den är klar",
+                 "serverar dagens senast sparade siffror (usageRefreshing)"
+                 if has_today else "svarar 503 usage refreshing")
+        # get_snapshot used to start the Claude probe as a side effect of
+        # this warmup; the probe does not need the scan, so kick it now and
+        # let the two run side by side.
+        get_limits()
+        _refresh_usage_totals(Handler.projects_dir)
+        with _cache_lock:
+            snap = _last_result
+        if snap is None:
+            # _refresh_usage_totals logged the crash; the retry happens on
+            # the next /api/tokens after RECOMPUTE_EVERY_S.
+            log.error("förstaskanningen misslyckades efter %.1f s — "
+                      "/api/tokens svarar 503 usage refreshing och "
+                      "försöker igen om %d s", time.monotonic() - t0,
+                      RECOMPUTE_EVERY_S)
             return
         # Samma ärlighet som net.c och simulatorn: utan Claude-källa är
         # nollorna inte mätningar, och "0 tokens idag" i starthändelsen
@@ -3543,13 +3824,22 @@ def main():
         # medvetet inte — reläet bär siffror, aldrig aktivitet (samma gräns
         # som firmwarens test/test_relay_boundary.py håller).
         def _tokens_payload():
-            return get_snapshot(Handler.projects_dir,
-                                max_tracker_store=Handler.max_tracker_store)
+            try:
+                return get_snapshot(
+                    Handler.projects_dir,
+                    max_tracker_store=Handler.max_tracker_store)
+            except UsageRefreshing:
+                # Nothing to publish yet: the mailbox keeps what it last
+                # received rather than an error body.
+                return None
 
         def _tracker_payload():
-            quota_snapshot = get_snapshot(
-                Handler.projects_dir,
-                max_tracker_store=Handler.max_tracker_store)
+            try:
+                quota_snapshot = get_snapshot(
+                    Handler.projects_dir,
+                    max_tracker_store=Handler.max_tracker_store)
+            except UsageRefreshing:
+                return None
             today = datetime.now().astimezone().date().isoformat()
             payload = Handler.max_tracker_store.snapshot(today, Handler.plans)
             payload["stale"] = bool(

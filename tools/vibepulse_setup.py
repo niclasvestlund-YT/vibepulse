@@ -1653,10 +1653,49 @@ def _doctor(
                 print("PASS Tokenserver source: live fingerprint matches "
                       "this checkout", file=stdout)
             _doctor_panel_lan_contact(interactions, stdout)
+            if not _doctor_usage_scan(payload, stdout):
+                fixes = True
             if config.claude_interactions and not _doctor_claude_quota(
                     payload, stdout):
                 fixes = True
     return not fixes
+
+
+def _doctor_usage_scan(payload: dict, stdout) -> bool:
+    """#62: the startup history scan and the state writers, from GET /.
+
+    Refreshing is a WAIT, not a FIX: /api/tokens answers with a bounded
+    same-day snapshot or a 503 that says so until the scan completes, and
+    restarting the service would only start the scan over. A failed scan
+    and a failing state write are FIX. An older service without the keys
+    is not judged. Prints durations only -- never a path or a count."""
+    ok = True
+    scan = payload.get("usageScanStatus")
+    for_s = payload.get("usageScanForS")
+    since = (f" ({for_s} s so far)" if isinstance(for_s, int)
+             and not isinstance(for_s, bool) else "")
+    if scan in ("refreshing", "pending"):
+        print(f"WAIT Usage scan: still scanning local history{since}; "
+              "/api/tokens serves a bounded refreshing state until it "
+              "completes, and the panel may read STALE meanwhile",
+              file=stdout)
+    elif scan == "failed":
+        print(f"FIX Usage scan: the first history scan failed{since} and "
+              "is retried automatically; read the tokenserver log",
+              file=stdout)
+        ok = False
+    elif scan == "ready":
+        print("PASS Usage scan: token totals are computed", file=stdout)
+    if payload.get("stateSaveOk") is False:
+        failing = payload.get("stateSaveFailingForS")
+        since = (f" for {failing} s" if isinstance(failing, int)
+                 and not isinstance(failing, bool) else "")
+        print(f"FIX State persistence: a state file could not be written"
+              f"{since}; the previous file and in-memory state are kept, "
+              "but free disk space (ENOSPC is the usual cause)",
+              file=stdout)
+        ok = False
+    return ok
 
 
 def _doctor_panel_lan_contact(interactions: dict, stdout) -> None:

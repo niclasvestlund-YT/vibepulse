@@ -7,6 +7,25 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **A restart of a healthy tokenserver made the panel read STALE for as long
+  as the first history scan took.** The first scan of `~/.claude/projects`
+  ran inside the cache lock on whichever thread asked first, so every
+  `/api/tokens` request queued behind it — 211 s on one real Mac with a
+  large history — and timed out on the panel. The scan now runs on one
+  background thread that main() starts before the port binds, and until it
+  completes `/api/tokens` answers within milliseconds: with today's last
+  snapshot from the previous run, marked `usageRefreshing: true`, or with a
+  `503` whose body says `usage refreshing`. The panel treats the 503 as the
+  failed fetch it already knew how to keep last-good values through, only
+  without the wait. The completed scan replaces that state atomically and is
+  persisted for the next start. `GET /` carries `usageScanStatus` /
+  `usageScanForS` and `stateSaveOk` / `stateSaveFailingForS`; the doctor,
+  the smoke test and the SessionStart hook name a startup refresh apart from
+  stale provider data and from a crashed recompute. A failed atomic state
+  write (ENOSPC) keeps the previous file and the in-memory state, proven by
+  test. The relay publisher publishes nothing while the scan runs instead of
+  an error body. (#62)
+
 - **CI now walks the usage screen with the GitHub page off as well as on.**
   #92 fixed a Value tile that indexed one past the array whenever the
   optional page was off — the default in a fresh clone — and neither the

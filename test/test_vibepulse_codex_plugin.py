@@ -29,7 +29,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "8772b9339e93"
+HOST_SOURCE_FINGERPRINT = "0b1a172970bf"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -1096,6 +1096,77 @@ class SessionStartTests(unittest.TestCase):
         context = json.loads(completed.stdout)["hookSpecificOutput"][
             "additionalContext"]
         self.assertIn("HEALTHY AFTER DEVICE SELF-RECOVERY", context)
+
+    def test_startup_health_names_the_startup_refresh_before_anything_else(self):
+        """#62: while the first history scan runs, /api/tokens is a 503 or
+        a bounded same-day snapshot. That is a startup state -- not a
+        degraded API, not stale provider data -- and it must be named as
+        such even when the tokens route answers nothing usable."""
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {"status": "ready", "expiresInMin": 480},
+            "usageScanStatus": "refreshing", "usageScanForS": 17,
+            "interactions": {"claude": True, "codex": True,
+                             "panel": {"status": "ready", "ageS": 1}},
+        }
+        refreshing_503 = {"status": 503, "body": compact({
+            "error": "usage refreshing", "usageRefreshing": True,
+            "usageScanStatus": "refreshing", "usageScanForS": 17,
+            "v": 2}).encode()}
+        with LocalServer(routes={"/": {"body": compact(root).encode()},
+                                 "/api/tokens": refreshing_503}) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(),
+                port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: STARTUP REFRESH", context)
+        self.assertIn("for 17 s", context)
+        self.assertIn("do not restart", context)
+        self.assertNotIn("LOCAL API DEGRADED", context)
+        self.assertNotIn("PROVIDER DATA STALE", context)
+
+        # A same-day snapshot served with the refreshing marker reads the
+        # same: the state lives on GET /, not on which body tokens gave.
+        tokens = {"claudeWeekStale": False, "claudeModelWeekStale": False,
+                  "codexWeekStale": False, "usageRefreshing": True}
+        with LocalServer(routes={
+                "/": {"body": compact(root).encode()},
+                "/api/tokens": {"body": compact(tokens).encode()}}) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(),
+                port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: STARTUP REFRESH", context)
+
+        failed = dict(root, usageScanStatus="failed", usageScanForS=120)
+        with LocalServer(routes={"/": {"body": compact(failed).encode()},
+                                 "/api/tokens": refreshing_503}) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(),
+                port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: USAGE SCAN FAILED", context)
+        self.assertNotIn(str(ROOT), context)
+
+        # A ready scan changes nothing about the readings that follow.
+        ready = dict(root, usageScanStatus="ready", usageScanForS=None)
+        with LocalServer(routes={
+                "/": {"body": compact(ready).encode()},
+                "/api/tokens": {"body": compact({
+                    "claudeWeekStale": False, "claudeModelWeekStale": False,
+                    "codexWeekStale": False}).encode()}}) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(),
+                port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: HEALTHY", context)
 
     def test_plugin_expected_host_fingerprint_matches_checkout(self):
         script = (SCRIPTS / "session_start.py").read_text(encoding="utf-8")
@@ -2966,6 +3037,58 @@ class RelaySetupTests(unittest.TestCase):
                     if status != "ready":
                         self.assertIn("relay-only use may still be healthy",
                                       output.getvalue())
+
+    def test_doctor_classifies_the_startup_scan_and_state_writes(self):
+        """#62: refreshing is a WAIT (restarting would only start the scan
+        over), a failed scan and a failing state write are FIX, ready is
+        PASS, and an older service without the keys is not judged. Only
+        durations are printed, never a path or a count."""
+        setup = load_setup()
+        cases = (
+            ({"usageScanStatus": "refreshing", "usageScanForS": 33},
+             ["WAIT Usage scan: still scanning local history (33 s so far)"],
+             ["FIX Usage scan", "PASS Usage scan"]),
+            ({"usageScanStatus": "failed", "usageScanForS": 61},
+             ["FIX Usage scan: the first history scan failed (61 s so far)"],
+             ["WAIT Usage scan"]),
+            ({"usageScanStatus": "ready", "usageScanForS": None,
+              "stateSaveOk": False, "stateSaveFailingForS": 9},
+             ["PASS Usage scan: token totals are computed",
+              "FIX State persistence: a state file could not be written "
+              "for 9 s"],
+             []),
+            ({"usageScanStatus": "ready", "usageScanForS": None,
+              "stateSaveOk": True, "stateSaveFailingForS": None},
+             ["PASS Usage scan"], ["State persistence"]),
+            ({}, [], ["Usage scan", "State persistence"]),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            setup.save_config(path, setup.VibePulseConfig(
+                codex_interactions=True))
+            for extra, expected, absent in cases:
+                with self.subTest(extra=extra):
+                    body = json.loads(panel_diagnostics("ready"))
+                    body.update(extra)
+                    raw = json.dumps(body).encode()
+                    output = io.StringIO()
+                    setup.main(
+                        ["doctor"], config_path=path,
+                        python=Path(sys.executable), codex=Path("/codex"),
+                        run=FakeRunner([
+                            python_probe_ok(), codex_probe_ok(),
+                            json_result(plugin_listing()),
+                            json_result([owned_mcp()]),
+                        ]),
+                        urlopen=lambda *_args, _body=raw, **_kwargs:
+                            BytesResponse(_body),
+                        stdout=output)
+                    text = output.getvalue()
+                    for line in expected:
+                        self.assertIn(line, text)
+                    for line in absent:
+                        self.assertNotIn(line, text)
+                    self.assertNotIn(tmp, text)
 
     def test_disable_and_uninstall_preserve_non_target_state(self):
         setup = load_setup()

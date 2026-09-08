@@ -451,3 +451,49 @@ class RunExitCodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartupScanCheckTests(unittest.TestCase):
+    """#62: the first history scan on GET /. Refreshing is a startup state
+    (VARN: run again shortly), failed is a FAIL, a failing state write is
+    a VARN, and an older server without the keys is not judged."""
+
+    def test_refreshing_is_a_warning_not_a_failure(self):
+        root = dict(HEALTHY_ROOT, usageScanStatus="refreshing",
+                    usageScanForS=42)
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        self.assertNotIn(smoke.FAIL, levels(results))
+        warnings = [text for level, text in results if level == smoke.VARN]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("förstaskanningen pågår", warnings[0])
+        self.assertIn("42", warnings[0])
+
+    def test_failed_scan_is_a_failure(self):
+        root = dict(HEALTHY_ROOT, usageScanStatus="failed",
+                    usageScanForS=90)
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        fails = [text for level, text in results if level == smoke.FAIL]
+        self.assertEqual(len(fails), 1)
+        self.assertIn("kraschat", fails[0])
+        self.assertIn("90", fails[0])
+
+    def test_failing_state_write_is_a_warning(self):
+        root = dict(HEALTHY_ROOT, usageScanStatus="ready",
+                    usageScanForS=None, stateSaveOk=False,
+                    stateSaveFailingForS=7)
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        warnings = [text for level, text in results if level == smoke.VARN]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("tillståndsfil", warnings[0])
+        self.assertIn("disken full", warnings[0])
+
+    def test_ready_scan_adds_nothing(self):
+        root = dict(HEALTHY_ROOT, usageScanStatus="ready",
+                    usageScanForS=None, stateSaveOk=True,
+                    stateSaveFailingForS=None)
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        self.assertEqual(levels(results), [smoke.OK, smoke.OK, smoke.OK])

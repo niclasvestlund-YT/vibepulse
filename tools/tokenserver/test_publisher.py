@@ -217,3 +217,27 @@ class PublisherTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NothingToPublishYetTests(unittest.TestCase):
+    """#62: a producer that returns None has nothing to publish yet -- the
+    tokenserver's producers do that while its first history scan runs.
+    Not an error, not a send, and the other producers still publish."""
+
+    def test_a_none_payload_is_skipped_silently(self):
+        sent = []
+        clock = {"now": 1000.0}
+        publisher = Publisher(
+            "https://relay.example", "mac",
+            {"/api/tokens": lambda: None,
+             "/api/github": lambda: {"ok": 1}},
+            post=lambda url, body: sent.append((url, body)) or True,
+            clock=lambda: clock["now"])
+        with self.assertNoLogs("tokenserver.publisher"):
+            self.assertEqual(publisher.publish_once(), 1)
+        self.assertEqual([url for url, _ in sent],
+                         ["https://relay.example/api/github"])
+        # Once the scan is done the same producer publishes as usual.
+        publisher.producers["/api/tokens"] = lambda: {"dayTokens": 1}
+        self.assertEqual(publisher.publish_once(), 1)
+        self.assertEqual(sent[-1][0], "https://relay.example/api/tokens")

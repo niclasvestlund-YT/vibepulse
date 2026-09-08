@@ -21,7 +21,33 @@ point at the backlog item.
 
 ---
 
-## 2026-09-08 · A test asserted UTC days against a store that counts local days
+## 2026-09-08 · The first scan held the lock every request needed
+
+**What happened:** on a Mac with a large Codex/Claude history the tokenserver
+bound its port at once (the 2026-08-26 fix) but `/api/tokens` timed out for
+211 seconds after every restart, and the panel read STALE while the service,
+the credentials, discovery and the relay were all healthy (issue #62).
+**Root cause:** `get_snapshot()` computed the first snapshot *inside*
+`_cache_lock` on whichever thread asked first — the warmup thread, usually —
+and every HTTP handler for the route took that same lock to read the cache.
+Moving the scan off the bind path had made the port open; it had not made
+the route answer. A background scan that still holds the lock the readers
+need is a foreground scan with extra steps.
+**The rule now:** a request thread never scans. The scan runs on one thread
+that main() marks running before the port binds; the lock is held only to
+swap the result in; and until then the route answers *something explicit*
+within milliseconds — today's saved snapshot marked `usageRefreshing`, or a
+503 whose body says `usage refreshing` — so a slow disk shows as a named
+startup state, never as a timeout that looks like a dead service. The same
+shape applies to state writes: a failed write (ENOSPC, seen the same day)
+keeps the previous file and the memory, and says so on `GET /`.
+**Guards:** `StartupScanTests` in `test_tokenserver.py` (a deliberately
+blocked scan answers in under two seconds; atomic swap; the ENOSPC write
+leaves the previous file byte-identical); the smoke test, doctor and
+SessionStart hook classify `usageScanStatus`. **Watch for:** any new cache
+in the handlers whose *first* fill happens under the lock its readers take.
+
+ against a store that counts local days
 
 **What happened:** `./test/run.sh` could not go green west of UTC
 (issue #66). The Max Tracker stress test

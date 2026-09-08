@@ -17,7 +17,7 @@ DEFAULT_PORT = 8737
 HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
-EXPECTED_HOST_SOURCE_FINGERPRINT = "8772b9339e93"
+EXPECTED_HOST_SOURCE_FINGERPRINT = "0b1a172970bf"
 CODEX_CONFIG_MAX_BYTES = 64 * 1024
 # Only the three top-level string settings that decide whether a permission
 # card can reach a user at all. Anchored and quote-matched so a value inside
@@ -80,6 +80,23 @@ def classify_startup_health(root, tokens):
                 "plugin and live tokenserver are from different source "
                 "revisions; repair all integrations from one durable checkout "
                 "and run the tokenserver smoke test.")
+    # #62: a service that is still scanning local history answers
+    # /api/tokens with 503 or with a bounded same-day snapshot. That is a
+    # startup state, not a degraded API and not stale provider data, so it
+    # is named before either of those readings can be reached.
+    scan = root.get("usageScanStatus")
+    if scan in ("refreshing", "pending"):
+        for_s = root.get("usageScanForS")
+        since = (f" for {for_s} s" if isinstance(for_s, int) and
+                 not isinstance(for_s, bool) else "")
+        return ("VibePulse startup health: STARTUP REFRESH; the service is "
+                f"still scanning local history{since}, so token totals are "
+                "bounded or withheld until it completes. Recheck shortly; "
+                "do not restart a healthy tokenserver for this.")
+    if scan == "failed":
+        return ("VibePulse startup health: USAGE SCAN FAILED; the first "
+                "history scan crashed and is retried automatically. Read "
+                "the tokenserver log; run the setup doctor.")
     interactions = root.get("interactions")
     if not isinstance(interactions, dict) or not isinstance(tokens, dict):
         return ("VibePulse startup health: LOCAL API DEGRADED. Run the setup "

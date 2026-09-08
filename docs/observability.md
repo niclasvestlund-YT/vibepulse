@@ -179,6 +179,20 @@ Returns live server state, added after real debugging nights:
   are frozen at their last good value while *looking* fresh; the smoke
   test turns this into a FAIL, and the log has the cause
   (`usage-omräkningen kraschade`).
+- `usageScanStatus` / `usageScanForS` — the first history scan after start
+  (#62): `refreshing` while it runs, `ready` once totals are computed,
+  `failed` when it crashed and waits for its 30 s retry. While it is not
+  `ready`, `/api/tokens` answers at once — with today's snapshot from the
+  previous run marked `usageRefreshing: true`, or a `503` whose body says
+  `usage refreshing` — instead of queuing behind the scan. The smoke test
+  and doctor say WAIT for `refreshing`, FAIL/FIX for `failed`; the
+  SessionStart hook reports STARTUP REFRESH before any other reading.
+- `stateSaveOk` / `stateSaveFailingForS` — `false` when an atomic state
+  write (the usage snapshot or the Max Tracker file) is failing, ENOSPC
+  being the usual cause. The previous file and the in-memory state are
+  kept and the next write retries; the log has one throttled line per
+  episode (`usage-snapshot: kunde inte spara`, `max-tracker: save
+  misslyckades`).
 - `interactions.relay` / `interactions.agentStatusRelay` — independent saved readiness for
   encrypted approvals and encrypted live rows. `off` is the safe default;
   `disabled` includes a content-free reason, never agent/project text.
@@ -293,6 +307,8 @@ Verbatim strings worth grepping for, and what they mean:
 | `hittar inte … — finns Claude Code på den här maskinen?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
 | `500 på /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 på` line above it is doubly interesting. |
 | `usage-omräkningen kraschade` | server log | `/api/tokens` is serving frozen totals that look fresh. `usage-omräkningen frisk igen` closes the episode; until it appears, distrust the day/month numbers. |
+| `förstaskanning startad — /api/tokens svarar 503 …` / `… serverar dagens senast sparade siffror` | server log | Startup, not a fault: the first history scan runs in the background and the route answers at once with the state the line names. `förstaskanning N s: …` closes it. A panel can read STALE for those N seconds; `förstaskanningen misslyckades` means the scan crashed and retries in 30 s (`usageScanStatus: failed` on `/`). |
+| `usage-snapshot: kunde inte spara` | server log | A state write failed (disk full?). Memory and the previous file are intact; `stateSaveOk: false` on `/` until `sparning lyckades igen`. |
 | `ratelimit-header: …` | server stdout | the *fallback* probe engaged — the primary usage endpoint returned nothing mappable. Not part of a healthy boot despite what the README implies (OBS-23). |
 | `claudeProbe: usage_http_429 + backoff_until_…` | `GET /` | rate-limited; probe is resting ≥10 min. Do not restart the server to "fix" it — that resets the backoff and feeds the penalty (see lessons: the 429 night). |
 

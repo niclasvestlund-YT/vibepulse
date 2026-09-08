@@ -155,6 +155,11 @@ class Publisher:
             except Exception:
                 log.exception("publicering: %s-producenten föll", path)
                 continue
+            if payload is None:
+                # Nothing to publish yet (#62: the first history scan is
+                # still running). Not an error, not a send: the mailbox
+                # keeps whatever it last received.
+                continue
             fingerprint = payload_fingerprint(payload)
             current_stale = stale_fields(payload)
             last_fingerprint, sent_at, last_stale = self._state.get(

@@ -238,6 +238,24 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
         results.append((VARN, f"okända rate-limit-buckets: {unknown} — "
                               f"uppströms har fått ett nytt fönster; värt en "
                               f"post i docs/observability-backlog.md"))
+    # #62: förstaskanningen. refreshing är ett startläge (VARN, kör om
+    # strax), failed är ett fel. Saknas nyckeln: äldre server, bedöms inte.
+    scan = root.get("usageScanStatus")
+    scan_for_s = root.get("usageScanForS")
+    if scan in ("refreshing", "pending"):
+        results.append((VARN, f"förstaskanningen pågår ({scan_for_s or 0} s) "
+                              f"— /api/tokens svarar 503 eller dagens sparade "
+                              f"snapshot tills den är klar; kör om röktestet "
+                              f"om en stund"))
+    elif scan == "failed":
+        results.append((FAIL, f"förstaskanningen har kraschat (i "
+                              f"{scan_for_s or 0} s) — /api/tokens svarar "
+                              f"503 tills omförsöket lyckas; läs loggfilen"))
+    if root.get("stateSaveOk") is False:
+        results.append((VARN, f"en tillståndsfil kunde inte skrivas (i "
+                              f"{root.get('stateSaveFailingForS') or 0} s) "
+                              f"— förra filen och minnet står kvar; "
+                              f"disken full?"))
     # Saknas nyckeln pratar vi med en äldre server — inget att bedöma då.
     if root.get("usageComputeOk") is False:
         secs = root.get("usageComputeFailingForS") or 0

@@ -22,6 +22,25 @@ from unittest import mock
 from tools.tokenserver import codex_usage, tokenserver
 
 
+
+def _seed_usage_cache(projects_dir, snapshot_dir):
+    """Run the first scan the way the server's own scan thread does (#62).
+
+    get_snapshot never computes on the calling thread any more: with an
+    empty cache it starts a background scan and answers 503 "usage
+    refreshing" until that scan has swapped its result in. These tests want
+    the REAL _compute to meet the absent directory synchronously, so they
+    run the scan themselves first -- the snapshot file it writes goes to a
+    temporary directory, never to the developer's state directory."""
+    tokenserver._last_result = None
+    tokenserver._last_computed = 0.0
+    tokenserver._snapshot_refreshing = False
+    tokenserver._startup_base_loaded = False
+    with mock.patch.object(tokenserver, "_usage_snapshot_path",
+                           return_value=Path(snapshot_dir) / "snap.json"):
+        tokenserver._refresh_usage_totals(projects_dir)
+
+
 class ProviderGateTest(unittest.TestCase):
     """``_any_provider_dir``: endera leverantören räcker."""
 
@@ -137,8 +156,7 @@ class CodexOnlySnapshotTest(unittest.TestCase):
                                       return_value={}), \
                     mock.patch.object(
                         tokenserver, "_persist_quota_records_async"):
-                tokenserver._last_result = None
-                tokenserver._last_computed = 0.0
+                _seed_usage_cache(absent, temp_dir)
                 snapshot = tokenserver.get_snapshot(absent,
                                                     now_ts=1_800_000_000)
 
@@ -176,13 +194,14 @@ class CodexOnlyEndToEndTest(unittest.TestCase):
         self.codex_sessions.mkdir(parents=True)
         self.addCleanup(codex_usage.reset_cache)
 
-    def _tokens_payload(self):
+    def _tokens_payload(self, seed=True):
         handler = tokenserver.Handler.__new__(tokenserver.Handler)
         handler.path = "/api/tokens"
         handler.projects_dir = self.claude_absent
         handler.max_tracker_store = None
         handler.agent_status = mock.Mock()
         handler._send = mock.Mock()
+        handler._drain_request_body = mock.Mock()
 
         with mock.patch.object(codex_usage, "DEFAULT_SESSIONS_DIR",
                                self.codex_sessions), \
@@ -194,13 +213,38 @@ class CodexOnlyEndToEndTest(unittest.TestCase):
                                   return_value={}), \
                 mock.patch.object(tokenserver,
                                   "_persist_quota_records_async"):
-            tokenserver._last_result = None
-            tokenserver._last_computed = 0.0
+            if seed:
+                _seed_usage_cache(self.claude_absent, self._tmp.name)
+            else:
+                # No scan has run and none may start: the route must answer
+                # on its own, and a real background scan here would outlive
+                # the mocks and read the developer's own ~/.codex.
+                tokenserver._last_result = None
+                tokenserver._last_computed = 0.0
+                tokenserver._snapshot_refreshing = False
+                tokenserver._startup_base_loaded = False
+                with mock.patch.object(tokenserver,
+                                       "_start_usage_refresh_locked"), \
+                        mock.patch.object(tokenserver, "_usage_snapshot_path",
+                                          return_value=Path(self._tmp.name)
+                                          / "absent.json"):
+                    handler.do_GET()
+                handler._send.assert_called_once()
+                return handler._send.call_args.args
             handler.do_GET()
 
         handler._send.assert_called_once()
         code, payload = handler._send.call_args.args
         return code, payload
+
+    def test_serves_503_usage_refreshing_before_the_first_scan(self):
+        """#62: before the scan has run the route does not scan, does not
+        hang and does not invent zeros -- it says it is refreshing."""
+        code, payload = self._tokens_payload(seed=False)
+        self.assertEqual(code, 503)
+        self.assertEqual(payload["error"], "usage refreshing")
+        self.assertTrue(payload["usageRefreshing"])
+        self.assertNotIn("dayTokens", payload)
 
     def test_serves_200_with_no_claude_directory(self):
         code, payload = self._tokens_payload()
