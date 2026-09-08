@@ -286,16 +286,44 @@ static void test_plain_glass(void) {
 
 static void test_outputs_are_always_fully_written(void) {
   /* Anroparen får aldrig läsa skräp: varje fält skrivs varje gång. Svepet ser
-   * hela tabellen, så ett tidigt return skulle synas här. */
+   * hela tabellen, så ett tidigt return skulle synas här.
+   *
+   * Skräpet måste läsas som BYTE, inte via fälten. Fälten är _Bool, och en
+   * oskriven _Bool som bär 0xAA är odefinierad att läsa — kompilatorn räknar
+   * dem som 0 eller 1 och optimerar därefter. Den gamla varianten OR:ade ihop
+   * fälten och jämförde med <= 1, vilket därför var både tautologiskt
+   * (clang bröt bygget på -Werror,-Wtautological-constant-compare) och
+   * overksamt: det villkoret kan inte bli falskt oavsett vad skiljedomen
+   * skriver.
+   *
+   * Vi anropar tg_button_arbitrate direkt i stället för genom arb(), eftersom
+   * arb() returnerar structen per värde — den kopian läser fälten och är alltså
+   * exakt den odefinierade läsning vi försöker upptäcka. */
   for (int k = 0; k < 4; k++) {
     for (int bits = 0; bits < 16; bits++) {
-      tg_button_outputs o =
-          arb(ALL_KEYS[k], bits & 1, bits & 2, bits & 4, bits & 8);
-      /* Bool-fälten är antingen 0 eller 1 — aldrig 0xAA. */
-      check("every output field is written",
-            (o.close_menu | o.menu_foreground | o.close_setup |
-             o.close_maintenance | o.request_setup_open | o.open_menu |
-             o.next_app | o.panic) <= 1);
+      const tg_button_inputs in = {
+          .key = ALL_KEYS[k],
+          .setup_owns_input = bits & 1,
+          .maintenance_open = bits & 2,
+          .notice_visible = bits & 4,
+          .menu_open = bits & 8,
+      };
+      tg_button_outputs out;
+      memset(&out, 0xAA, sizeof out);
+      tg_button_arbitrate(&in, &out);
+
+      /* Structen är åtta bool-fält utan utfyllnad, så varje byte hör till ett
+       * fält. Går den likheten sönder när någon lägger till ett fält av annan
+       * typ säger assert:en det, i stället för att svepet tyst slutar täcka. */
+      _Static_assert(sizeof(tg_button_outputs) == 8,
+                     "byte-svepet förutsätter åtta packade bool-fält");
+
+      const unsigned char *bytes = (const unsigned char *)&out;
+      bool unwritten = false;
+      for (size_t b = 0; b < sizeof out; b++) {
+        if (bytes[b] == 0xAA) unwritten = true;
+      }
+      check("every output field is written", !unwritten);
     }
   }
 }
