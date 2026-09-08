@@ -120,7 +120,13 @@ jobs:
       - name: Run setup integration tests on Windows
         if: runner.os == 'Windows'
         shell: powershell
-        run: python test/test_vibepulse_codex_plugin.py
+        run: |
+          # PowerShell does not stop on a native command's non-zero exit, and
+          # the runner only checks the LAST exit code — so the first failure
+          # would be masked without this guard.
+          python test/test_vibepulse_codex_plugin.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python test/test_vibepulse_setup_claude_only.py
       - name: Validate the Windows Task Scheduler installer without installing
         if: runner.os == 'Windows'
         shell: powershell
