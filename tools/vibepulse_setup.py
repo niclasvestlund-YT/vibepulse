@@ -1917,11 +1917,22 @@ def _failed_step_with_publish_state(
     return failed_step
 
 
+def _providers_need_codex(providers: str) -> bool:
+    """Whether this provider choice touches Codex resources at all."""
+    return providers in {"codex", "both"}
+
+
 def _install_transaction(
         *, path: Path, providers: str, detail: bool,
         legacy_claude_panel_v1: bool, repo_root: Path,
-        python: Path, codex: Path, run, stdout) -> bool:
-    """Mutate owned Codex resources and publish routing transactionally."""
+        python: Path, codex: Path | None, run, stdout) -> bool:
+    """Mutate owned Codex resources and publish routing transactionally.
+
+    A Claude-only install owns no Codex resources, so it mutates none: the
+    marketplace/plugin/MCP steps are skipped and `codex` may be None. Running
+    them anyway was harmless in effect but fatal in practice, because it made
+    a Codex CLI a hard prerequisite of a Claude-only panel (#65).
+    """
     with config_lock(_setup_transaction_path(path)):
         with config_lock(path):
             snapshot = load_config(path)
@@ -1934,10 +1945,18 @@ def _install_transaction(
                 print("FIX Python executable: install Python 3.11 or newer",
                       file=stdout)
                 return False
-            if not _codex_probe_ok(codex, run):
+            if _providers_need_codex(providers) and not _codex_probe_ok(
+                    codex, run):
                 print("FIX Codex executable: candidate is not Codex",
                       file=stdout)
                 return False
+            if not _providers_need_codex(providers):
+                # Nothing external to mutate, so nothing to compensate: go
+                # straight to publishing the chosen configuration.
+                failed_step = "configuration publish"
+                _publish_config(path, snapshot, target)
+                return True
+
             failed_step = "resource ownership preflight"
             before = _inspect_external(
                 repo_root=repo_root, python=python, codex=codex, run=run,
@@ -2165,8 +2184,18 @@ def main(
             print("FIX --legacy-claude-panel-v1 requires Claude in "
                   "--providers", file=output)
             return 1
-        if codex_path is None or python_path is None:
-            print("FIX Python or Codex executable not found", file=output)
+        # Codex is a requirement of the CODEX half only. Demanding it for a
+        # Claude-only install made the documented "choose claude" flow
+        # unreachable on a machine that has no Codex CLI, and the single
+        # combined message blamed Python for a missing Codex (#65). Report
+        # them apart, and ask only for what the chosen providers need.
+        if python_path is None:
+            print("FIX Python executable not found: install Python 3.11 "
+                  "or newer", file=output)
+            return 1
+        if _providers_need_codex(providers) and codex_path is None:
+            print(f"FIX Codex executable not found, and --providers "
+                  f"{providers} needs it", file=output)
             return 1
         if not _install_transaction(
                 path=path, providers=providers, detail=detail,
@@ -2175,8 +2204,12 @@ def main(
                 codex=codex_path, run=run, stdout=output):
             return 1
         print("PASS Installed the local VibePulse package", file=output)
-        print("Review and trust the exact VibePulse commands in Codex /hooks.",
-              file=output)
+        # Only say this when it is true: a Claude-only install on a machine
+        # with no Codex CLI has no /hooks to review, and telling someone to go
+        # trust hooks in a program they do not have reads as a failed step.
+        if _providers_need_codex(providers):
+            print("Review and trust the exact VibePulse commands in "
+                  "Codex /hooks.", file=output)
         print("If the panel is unavailable, Codex uses computer fallback.",
               file=output)
         return 0
