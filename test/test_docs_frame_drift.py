@@ -89,7 +89,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # The page-shell authority remains --vibepulse-static-qa, the flow that runs
 # capture_global_wifi_matrix() and therefore the only one whose captures show
 # the page shell the panel actually draws. The additional LABS mode captures
-# only its opaque settings overlay from RGB565, with explicit full-frame pins;
+# only its opaque settings overlay, with explicit full-frame pins;
 # it is not another source for accepting blank Wi-Fi indicators.
 QA_MODE = "--vibepulse-static-qa"
 

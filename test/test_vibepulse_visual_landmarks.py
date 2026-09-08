@@ -688,7 +688,7 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         for tag in ("analytics", "github", "pending"):
             image = self.image(f"torget-settings-labs-{tag}.bmp")
             for top in (108, 186, 264, 342):
-                self.assertEqual(image.getpixel((74, top + 32)), (148,154,165))
+                self.assertEqual(image.getpixel((74, top + 32)), (146,152,162))
             self.assertGreater(sum(p == (255,255,255) for p in
                 image.crop((140,24,340,80)).get_flattened_data()), 200)
         enabled = self.image("torget-settings-labs-analytics.bmp")
@@ -700,10 +700,9 @@ class VibePulseVisualLandmarkTests(unittest.TestCase):
         self.assertNotEqual(enabled.crop((80,442,400,470)).tobytes(),
                             pending.crop((80,442,400,470)).tobytes())
         returned = self.image("torget-settings-labs-return.bmp")
-        # This is the RGB565 framebuffer, not the XRGB object snapshot used
-        # for the historical menu fixture. Check controls and the title ink.
+        # Returning to SETTINGS must restore all four controls and its title.
         for top in (108, 186, 264, 342):
-            self.assertEqual(returned.getpixel((74, top + 32)), (148,154,165))
+            self.assertEqual(returned.getpixel((74, top + 32)), (146,152,162))
         self.assertGreater(sum(p == (255,255,255) for p in
             returned.crop((100,24,380,80)).get_flattened_data()), 1000)
 

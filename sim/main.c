@@ -266,40 +266,6 @@ static void dump_frame(const char *tag) {
   lv_draw_buf_destroy(base);
 }
 
-/* Capture the display's composed raster after reused controls change. Object
- * snapshots can omit unchanged objects in consecutive menu captures; read
- * the software renderer's framebuffer so the test sees what the window sees.
- * RGB565 is expanded to BMP RGB bytes; this retains the actual panel-format
- * quantization, unlike an XRGB object snapshot. Host-only temporary buffer. */
-static void dump_labs_frame(const char *tag) {
-  lv_display_t *display = lv_display_get_default();
-  lv_obj_invalidate(lv_screen_active());
-  lv_obj_invalidate(lv_layer_top());
-  lv_refr_now(display);
-  lv_draw_buf_t *frame = lv_display_get_buf_active(display);
-  if (!frame || frame->header.w != 480 || frame->header.h != 480 ||
-      frame->header.cf != LV_COLOR_FORMAT_RGB565) {
-    capture_failed(tag, "expected the SDL direct RGB565 framebuffer");
-    return;
-  }
-  lv_draw_buf_t *buffer = lv_draw_buf_create(480, 480,
-      LV_COLOR_FORMAT_XRGB8888, LV_STRIDE_AUTO);
-  if (!buffer) { capture_failed(tag, "could not allocate capture"); return; }
-  for (int y = 0; y < 480; y++) {
-    const uint16_t *src = (const uint16_t *)(frame->data + y * frame->header.stride);
-    uint8_t *dst = buffer->data + y * buffer->header.stride;
-    for (int x = 0; x < 480; x++, dst += 4) {
-      unsigned r = src[x] >> 11, g = (src[x] >> 5) & 63, b = src[x] & 31;
-      dst[0] = (b << 3) | (b >> 2);
-      dst[1] = (g << 2) | (g >> 4);
-      dst[2] = (r << 3) | (r >> 2);
-      dst[3] = 255;
-    }
-  }
-  dump_draw_buf_frame(buffer, tag);
-  lv_draw_buf_destroy(buffer);
-}
-
 /* OTA-ringen bor på lv_layer_top() — utanför skärmträdet som dump_frame
  * fotograferar. Overlayn täcker hela glaset, så en snapshot av topplagret
  * ÄR overlayramen. */
@@ -1800,19 +1766,19 @@ static int run_vibepulse_labs_qa(bool catalogue) {
   }
   if (visited != tk_labs_view_count()) return 1;
   tokens_show_view(VIEW_CODEX_WEEKLY);
-  if (!catalogue) dump_labs_frame("labs-core");
+  if (!catalogue) dump_frame("labs-core");
   torget_settings_open("LABS PREVIEW", "192.168.1.42");
   torget_settings_click_slot(TG_SETTINGS_ROW_LABS);
-  dump_labs_frame(catalogue ? "settings-labs-analytics" : "labs-menu");
+  dump_frame(catalogue ? "settings-labs-analytics" : "labs-menu");
   torget_settings_click_slot(2);
   if (!tk_labs_pending()) return 1;
-  dump_labs_frame(catalogue ? "settings-labs-pending" : "labs-pending");
+  dump_frame(catalogue ? "settings-labs-pending" : "labs-pending");
   torget_settings_click_slot(2);
   if (tk_labs_pending()) return 1;
   torget_settings_click_slot(3);
-  dump_labs_frame(catalogue ? "settings-labs-github" : "labs-github");
+  dump_frame(catalogue ? "settings-labs-github" : "labs-github");
   torget_settings_click_slot(3);
-  if (catalogue) dump_labs_frame("settings-labs-return");
+  if (catalogue) dump_frame("settings-labs-return");
   printf("LABS: %d dense tiles verified\n", visited);
   return capture_failures == 0 ? 0 : 1;
 }

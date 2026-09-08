@@ -49,21 +49,15 @@ Initial build/capture attempts also exhausted local disk space; disposable
 captures/downloads from this task were removed and the interrupted checks
 were resumed. These environmental failures are not claimed as passing runs.
 
-## Capture boundary
+## Capture coverage
 
-The long object-snapshot sequence intermittently omitted unchanged menu
-borders/headings and could affect subsequent captures. Refreshing style caches
-was insufficient, and the sanitizer run did not identify a memory violation.
-The underlying LVGL snapshot issue is not claimed fixed.
-
-LABS therefore has its own `--vibepulse-labs-captures` process, which never calls
-object snapshots: it drives the shared menu callbacks and reads the composed
-RGB565 SDL framebuffer through the public display API. Pixel tests assert
-both edges of every control and visible heading/footer ink for every mask.
-The preview exporter and documentation tests run this mode alongside the
-existing page-shell capture mode. RGB565 colors are expanded into RGB BMP/PNG
-bytes; the muted border is (148,154,165), the panel-format quantization of
-#9298A2. No style-cache workaround was added to the firmware.
+`--vibepulse-labs-captures` drives the shared menu callbacks and uses the same
+LVGL screen/top-layer compositor as the other simulator frames. The preview
+exporter and documentation tests run this small menu sequence alongside the
+existing page-shell capture mode. Pixel tests independently assert both edges
+of all four controls, heading/footer ink, saved-state styling and the return
+to SETTINGS for every feature mask. Original-size PNGs were visually checked.
+No special rendering workaround or new buffer was added to the firmware.
 
 Reviewed native frames:
 

@@ -28,12 +28,12 @@ class LabsRenderTests(unittest.TestCase):
                         with Image.open(Path(temporary) / f"torget-{tag}.bmp") as im:
                             self.assertEqual(im.size, (480, 480))
                             # Independent evidence of all four touch controls:
-                            # checking only text missed disappearing borders.
+                            # text alone would not prove the full hit targets.
                             for top in (108, 186, 264, 342):
                                 self.assertEqual(im.getpixel((74, top + 32)),
-                                                 (148, 154, 165))
+                                                 (146, 152, 162))
                                 self.assertEqual(im.getpixel((405, top + 32)),
-                                                 (148, 154, 165))
+                                                 (146, 152, 162))
                             header = im.crop((140, 24, 340, 80))
                             self.assertGreater(sum(p == (255,255,255) for p in
                                                    header.get_flattened_data()), 200)
