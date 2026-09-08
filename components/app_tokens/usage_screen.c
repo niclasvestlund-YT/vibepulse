@@ -438,6 +438,11 @@ static void apply_github_page(const tk_github_status *status) {
 }
 #endif
 
+/* Varje vy måste rymmas i `ui.tiles`. Det var precis det som inte gällde när
+ * GitHub-sidan var bortvald, och det kostade en skrivning utanför arrayen. */
+_Static_assert(VIEW_VALUE < TK_USAGE_SCREEN_VIEWS,
+               "VIEW_VALUE ligger utanför ui.tiles — indexen är inte täta");
+
 static lv_obj_t *new_tile(int index) {
   lv_dir_t direction = index == 0 ? LV_DIR_RIGHT :
                        index == TK_USAGE_SCREEN_VIEWS - 1 ? LV_DIR_LEFT :
@@ -1127,6 +1132,7 @@ void usage_screen_show_view(int index) {
 int usage_screen_current_view(void) {
   lv_obj_t *active = lv_tileview_get_tile_active(ui.tileview);
   for (int i = 0; i < TK_USAGE_SCREEN_VIEWS; i++) {
+    if (!ui.tiles[i]) continue;   /* bortvald sida: inget index att matcha */
     if (ui.tiles[i] == active) return i;
   }
   return VIEW_CLAUDE_FABLE;

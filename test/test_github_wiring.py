@@ -36,7 +36,12 @@ class GitHubWiringTests(unittest.TestCase):
         # tile: GitHub stays at index 6, Value is the new last tile at 7.
         self.assertIn("(6 + TK_GITHUB_SCREEN_ENABLED + 1)", header)
         self.assertIn("VIEW_GITHUB = 6", app)
-        self.assertIn("VIEW_VALUE = 7", app)
+        # Value must MOVE with the optional GitHub tile rather than sit at a
+        # fixed index past it: a fixed 7 put the tile one slot beyond the end of
+        # ui.tiles whenever GitHub was disabled, which is an out-of-bounds write
+        # plus a hole no swipe could cross.
+        self.assertIn("VIEW_VALUE = 6 + TK_GITHUB_SCREEN_ENABLED", app)
+        self.assertIn("_Static_assert(VIEW_VALUE < TK_USAGE_SCREEN_VIEWS", ui)
         self.assertIn("set_star_hero", ui)
         self.assertIn('"FORKS"', ui)
         self.assertNotIn("ISSUES", ui)
