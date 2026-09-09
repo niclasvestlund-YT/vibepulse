@@ -105,13 +105,19 @@ exactly as before. With it, several computers may advertise simultaneously;
 the panel pins one healthy origin and changes only after failure. On Windows,
 `ipconfig` plus a DHCP reservation still makes the compiled fallback durable.
 
-**Verify:** `secrets.h` has a non-empty SSID and no `DIN-MAC` placeholder:
+**Verify:** `secrets.h` has a non-empty SSID and no `DIN-MAC` placeholder
+left in the URL:
 
 ```sh
-grep -q 'DIN-MAC' secrets.h && echo "PLACEHOLDER STILL THERE" || echo "host set"
+grep -q '://DIN-MAC' secrets.h && echo "PLACEHOLDER STILL THERE" || echo "host set"
 ```
 
-It must print `host set`. If the placeholder is still there,
+It must print `host set`. The match is anchored to `://` on purpose:
+`secrets.h.example` also says `DIN-MAC` in the comment that tells you to
+replace it, and that comment is meant to survive the edit, so an unanchored
+grep cried wolf on every correct setup (issue #64). The define itself spans
+two lines, which is why the anchor is the URL and not `#define`. If the
+placeholder is still there,
 the board's fallback will name a host that does not exist. Discovery may still
 find an advertising service, but a release must not depend on hiding a broken
 fallback. On macOS, replace a raw IP with the Bonjour name. On Windows,
