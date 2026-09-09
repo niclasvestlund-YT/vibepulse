@@ -34,6 +34,32 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   previous file and memory intact. Not done here: the glass itself still
   shows the placeholder zeros as `0` for the length of the scan, because
   dashing them needs the firmware to read `usageTotals` (OBS-36).
+- **The host gate could not go green anywhere but Europe.** Every Max
+  Tracker test stamped its synthetic records at a fixed UTC hour such as
+  `T10:00:00Z` and expected the store to file them under that same calendar
+  date. The store deliberately owns a record by its *local* day
+  (`max_tracker.py`: "dygnsgränsen är Macens, inte UTC:s"), so west of
+  UTC-10 the record was the previous evening and at UTC+12 a noon stamp was
+  already the next morning. Issue #66 reported the seeded ownership test
+  from Los Angeles; the same class took down thirteen more tests in
+  Pacific/Pago_Pago and one in Auckland, and one in `test_tokenserver.py`.
+  A `_local_stamp(day, hour)` helper now builds every stamp from local
+  wall-clock time and converts it to UTC, so expectation and store apply
+  one rule. The seeded test records ground truth against the local owning
+  day of the stamp it actually wrote. Verified green in seven zones from
+  UTC-11 to UTC+14. No user-facing data was ever affected: the store was
+  right, the expectations were not.
+- **The `secrets.h` check in the setup runbook failed every correct setup.**
+  Step 1 of `docs/agent-setup.md` verified the host placeholder with an
+  unanchored `grep -q 'DIN-MAC' secrets.h`. `secrets.h.example` says
+  `DIN-MAC` twice: in the `TK_VIBEPULSE_BASE_URL` define and in the comment
+  telling you to replace it. Following the runbook replaces the define and
+  keeps the comment, so the check printed `PLACEHOLDER STILL THERE` on every
+  correct file. This is the guard for the mistake that once cost an evening
+  of network debugging (`docs/lessons.md`, 2026-08-17); a guard that always
+  fires teaches the reader to ignore it. The match is now anchored to the
+  URL (`://DIN-MAC`) rather than to `#define`, because the define spans two
+  lines, and the runbook says why. Reported in issue #64.
 
 - **The panel printed the relay's secret URL every time a cloud fetch
   failed.** All three failure paths in `components/torget_net/torget_http.c`
