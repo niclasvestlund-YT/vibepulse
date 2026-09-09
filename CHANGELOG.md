@@ -7,6 +7,18 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **The `secrets.h` check in the setup runbook failed every correct setup.**
+  Step 1 of `docs/agent-setup.md` verified the host placeholder with an
+  unanchored `grep -q 'DIN-MAC' secrets.h`. `secrets.h.example` says
+  `DIN-MAC` twice: in the `TK_VIBEPULSE_BASE_URL` define and in the comment
+  telling you to replace it. Following the runbook replaces the define and
+  keeps the comment, so the check printed `PLACEHOLDER STILL THERE` on every
+  correct file. This is the guard for the mistake that once cost an evening
+  of network debugging (`docs/lessons.md`, 2026-08-17); a guard that always
+  fires teaches the reader to ignore it. The match is now anchored to the
+  URL (`://DIN-MAC`) rather than to `#define`, because the define spans two
+  lines, and the runbook says why. Reported in issue #64.
+
 - **The panel printed the relay's secret URL every time a cloud fetch
   failed.** All three failure paths in `components/torget_net/torget_http.c`
   logged the address they had just failed on. When the fetch had failed over
