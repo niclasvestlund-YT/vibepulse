@@ -316,7 +316,9 @@ can be served.
 headers on failure; assemble status into a local and publish once.
 
 ### OBS-19 · Slow-client and backfill blind spots
-`server · S · open`
+`server · S · in progress` — (b) done with OBS-25 (2026-09-10): the
+backfill loop logs one `max-tracker backfill step failed: <class>: <text>`
+line per ten minutes instead of swallowing. (a) still open.
 (a) No handler `timeout`/`protocol_version` on the HTTP handler
 (`tokenserver.py:1465`): a half-open LAN connection parks a worker
 thread in `readline()` forever, uncounted and unlogged.
