@@ -7,6 +7,18 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **`effort` was null for every Claude job.** `agent_status.py` read it
+  from inside the API `message`, beside `model`. Claude Code writes it on
+  the transcript *record*, beside `type` and `version`: measured on a live
+  2.1.267 transcript, 125 of 125 assistant records carried `effort` at the
+  top level and none nested, while `model` really does live inside
+  `message`. `/api/agent-status` therefore served `effort: null` for every
+  Claude job since the field was added. The classifier now falls back to the
+  record's own `effort` when the nested one is absent, through the same
+  12-byte control-free bound; `tool_input` is still never a source. Found
+  by the companion-features audit (`docs/companion-features-brainstorm.md`,
+  "Fix first").
+
 - **The panel printed the relay's secret URL every time a cloud fetch
   failed.** All three failure paths in `components/torget_net/torget_http.c`
   logged the address they had just failed on. When the fetch had failed over
