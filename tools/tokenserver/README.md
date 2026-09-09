@@ -441,6 +441,20 @@ De nya delta- och prognosfälten är frivilliga för äldre skärmkod och `null`
 när underlaget saknas. Prognosen blir först aktiv efter minst tre punkter,
 90 minuters spann och en procents faktisk rörelse i samma resetcykel.
 
+## Uppstart: platshållare tills första skanningen är klar
+
+Första historikskanningen kan ta minuter på en stor `~/.claude`/`~/.codex`.
+Den körs i bakgrunden; under tiden svarar `/api/tokens` direkt med
+volymräknarna på noll och kvotprocenten live, och blocket
+`usageTotals` säger vad räknarna är: `{"state": "refreshing", "sinceS": N}`
+tills skanningen gått i mål, sedan `{"state": "ready", "ageS": N}`, och
+`{"state": "failing", "ageS": N}` om omräkningen kraschar efter en lyckad
+första körning (då är räknarna frysta; `usageComputeOk` på `GET /` har
+detaljen). Samma block finns på `GET /`. Relä-publiceraren skickar inga
+platshållare, så en panel bakom reläet behåller sina senaste riktiga
+värden. Panelen på LAN visar nollorna tills firmwaren läser blocket
+(OBS-36 i `docs/observability-backlog.md`).
+
 ## Kvotcache och stale-kontrakt
 
 Senaste auktoritativa Claude- och Codex-värden för generell vecka och

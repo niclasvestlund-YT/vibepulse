@@ -27,7 +27,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "8772b9339e93"
+HOST_SOURCE_FINGERPRINT = "78eb818013c0"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -949,6 +949,61 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("PROVIDER DATA STALE (Claude)", context)
         self.assertIn("active Claude probe is live", context)
         self.assertNotIn("DEVICE PATH STALE", context)
+
+    def test_startup_health_names_a_warming_service_as_neither_stale_nor_broken(self):
+        """Issue #62: the first history scan can run for minutes after a
+        restart. Quota is live, volume counters are placeholders, nothing is
+        broken -- and none of the existing classes says that."""
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "interactions": {"claude": True, "codex": True,
+                             "panel": {"status": "ready", "ageS": 1}},
+        }
+        tokens = {
+            "claudeWeekStale": False,
+            "claudeModelWeekStale": False,
+            "codexWeekStale": False,
+            "usageTotals": {"state": "refreshing", "sinceS": 48},
+        }
+        routes = {
+            "/": {"body": compact(root).encode()},
+            "/api/tokens": {"body": compact(tokens).encode()},
+        }
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("SERVICE WARMING UP", context)
+        self.assertIn("for 48 s", context)
+        self.assertIn("quota data is live", context)
+        self.assertNotIn("PROVIDER DATA STALE", context)
+        self.assertNotIn("HEALTHY", context)
+        self.assertNotIn("sinceS", context)
+
+        # Stale provider data still outranks the warm-up: it names a repair.
+        stale = dict(tokens, claudeWeekStale=True)
+        routes["/api/tokens"] = {"body": compact(stale).encode()}
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("PROVIDER DATA STALE (Claude)", context)
+        self.assertNotIn("SERVICE WARMING UP", context)
+
+        # Once the scan is done the ordinary classes apply again.
+        ready = dict(tokens, usageTotals={"state": "ready", "ageS": 2})
+        routes["/api/tokens"] = {"body": compact(ready).encode()}
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: HEALTHY", context)
 
     def test_startup_health_reports_ready_and_credential_risk_separately(self):
         payload = {"hook_event_name": "SessionStart", "session_id": "s"}
@@ -2901,6 +2956,54 @@ class RelaySetupTests(unittest.TestCase):
                     if status != "ready":
                         self.assertIn("relay-only use may still be healthy",
                                       output.getvalue())
+
+    def test_doctor_separates_warm_up_from_frozen_totals_and_failed_saves(self):
+        # Issue #62: three different things, three different verdicts.
+        setup = load_setup()
+        cases = (
+            ({"usageTotals": {"state": "refreshing", "sinceS": 41}},
+             "WAIT Tokenserver usage totals: the first history scan is "
+             "still running for 41 s", False),
+            ({"usageTotals": {"state": "ready", "ageS": 3}}, None, False),
+            ({"usageTotals": {"state": "failing", "ageS": 900}},
+             "FIX Tokenserver usage totals: the recompute is failing, so "
+             "the served volume counters are frozen (900 s old)", True),
+            ({"maxTrackerSaveOk": False, "maxTrackerSaveFailingForS": 77},
+             "FIX Max Tracker save: the state file cannot be written for "
+             "77 s", True),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            setup.save_config(path, setup.VibePulseConfig(
+                codex_interactions=True))
+            for extra, expected, is_fix in cases:
+                with self.subTest(extra=extra):
+                    output = io.StringIO()
+                    diagnostics = json.loads(healthy_diagnostics())
+                    diagnostics.update(extra)
+                    body = json.dumps(diagnostics).encode()
+                    setup.main(
+                        ["doctor"], config_path=path,
+                        python=Path(sys.executable), codex=Path("/codex"),
+                        run=FakeRunner([
+                            python_probe_ok(), codex_probe_ok(),
+                            json_result(plugin_listing()),
+                            json_result([owned_mcp()]),
+                        ]),
+                        urlopen=lambda *_args, _body=body, **_kwargs:
+                            BytesResponse(_body),
+                        stdout=output)
+                    text = output.getvalue()
+                    self.assertIn("PASS Tokenserver", text)
+                    if expected is None:
+                        self.assertNotIn("usage totals", text)
+                        self.assertNotIn("Max Tracker save", text)
+                    else:
+                        self.assertIn(expected, text)
+                    self.assertEqual(
+                        ("FIX Tokenserver usage totals" in text or
+                         "FIX Max Tracker save" in text), is_fix)
+                    self.assertNotIn(str(tmp), text)
 
     def test_disable_and_uninstall_preserve_non_target_state(self):
         setup = load_setup()

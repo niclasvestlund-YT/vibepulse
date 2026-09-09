@@ -17,7 +17,7 @@ DEFAULT_PORT = 8737
 HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
-EXPECTED_HOST_SOURCE_FINGERPRINT = "8772b9339e93"
+EXPECTED_HOST_SOURCE_FINGERPRINT = "78eb818013c0"
 CODEX_CONFIG_MAX_BYTES = 64 * 1024
 # Only the three top-level string settings that decide whether a permission
 # card can reach a user at all. Anchored and quote-matched so a value inside
@@ -111,6 +111,17 @@ def classify_startup_health(root, tokens):
             action = "Run the setup doctor and tokenserver smoke test."
         return (f"VibePulse startup health: PROVIDER DATA STALE ({providers}). "
                 f"{action}{risk}")
+
+    totals = tokens.get("usageTotals")
+    if isinstance(totals, dict) and totals.get("state") == "refreshing":
+        # Not stale and not broken: the service is seconds to minutes old
+        # and still reading history. Quota is live; volume is placeholder.
+        since = totals.get("sinceS")
+        since_text = f" for {since} s" if isinstance(since, int) else ""
+        return ("VibePulse startup health: SERVICE WARMING UP; quota data "
+                "is live but the first history scan is still running"
+                f"{since_text}, so volume counters are placeholders, not "
+                f"measurements. Recheck shortly.{risk}")
 
     panel = interactions.get("panel")
     if not isinstance(panel, dict):

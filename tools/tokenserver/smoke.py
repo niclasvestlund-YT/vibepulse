@@ -244,6 +244,20 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
         results.append((FAIL, f"usage-omräkningen har kraschat (i {secs} s) "
                               f"— /api/tokens serverar frysta siffror som "
                               f"ser färska ut; läs loggfilen"))
+    totals = root.get("usageTotals")
+    if isinstance(totals, dict) and totals.get("state") == "refreshing":
+        secs = totals.get("sinceS")
+        secs = secs if isinstance(secs, int) else "?"
+        results.append((VARN, f"första skanningen pågår ({secs} s) — "
+                              f"/api/tokens serverar platshållare "
+                              f"(usageTotals=refreshing); kvoten är live, "
+                              f"volymen inte mätt än"))
+    if root.get("maxTrackerSaveOk") is False:
+        secs = root.get("maxTrackerSaveFailingForS") or 0
+        results.append((VARN, f"max-tracker kan inte spara (i {secs} s) — "
+                              f"observationerna står kvar i minnet och "
+                              f"nästa försök kommer; kontrollera "
+                              f"diskutrymme och rättigheter"))
     return results
 
 

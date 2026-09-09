@@ -157,6 +157,30 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(p.publish_once(), 0)
         self.assertEqual(len(sent), 1)
 
+    def test_a_startup_placeholder_is_not_published(self):
+        # Issue #62: the tokenserver answers its first history scan with
+        # zeros marked usageTotals=refreshing. A relay mailbox must not
+        # learn those as the day's numbers; the far panel keeps its last
+        # good values, and the first real payload goes out at once.
+        payloads = [{"dayTokens": 0, "usageTotals": {"state": "refreshing",
+                                                     "sinceS": 3}},
+                    {"dayTokens": 0, "usageTotals": {"state": "refreshing",
+                                                     "sinceS": 33}},
+                    {"dayTokens": 4321, "usageTotals": {"state": "ready",
+                                                        "ageS": 1}}]
+        p, sent, clock = self._publisher({
+            "/api/tokens": lambda: payloads.pop(0),
+            "/api/github": lambda: {"stars": 5},
+        })
+        self.assertEqual(p.publish_once(), 1)
+        self.assertEqual([url for url, _ in sent],
+                         ["https://relay.example/u/s3cret/api/github"])
+        clock["now"] += 30
+        self.assertEqual(p.publish_once(), 0)
+        clock["now"] += 30
+        self.assertEqual(p.publish_once(), 1)
+        self.assertIn(b'"dayTokens": 4321', sent[-1][1])
+
     def test_a_broken_producer_does_not_stop_the_others(self):
         def broken():
             raise RuntimeError("boom")

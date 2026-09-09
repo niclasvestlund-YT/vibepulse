@@ -493,6 +493,22 @@ valve currently fails silently.
 (with the same style of comment the file already uses), enable
 `LV_USE_LOG` routed to `ESP_LOG`.
 
+### OBS-36 · The glass shows placeholder zeros as measurements during the first scan
+`firmware · S · open`
+Since issue #62 the tokenserver answers `/api/tokens` at once while its
+first history scan runs, with the four volume counters at zero and an
+additive `usageTotals.state == "refreshing"` block saying so. The firmware
+contract requires numbers for the counters (`tokens_parse.c`:
+`if (!num(root, "dayTokens", &day)) goto done;`), so the server cannot
+send `null`, and the parser ignores the new block, so the panel prints
+`0.00 Mtok idag` for the length of the scan — minutes on a large history.
+Same honesty gap as `claudeSourcePresent` had before the flag existed.
+**Fix:** parse `usageTotals.state` (optional, default `ready` for older
+servers); when `refreshing`, draw the volume counters as dashes and keep
+the quota rings live. Visual change → AMOLED skill gate applies. Until
+then the server side is honest (`GET /`, the hook, the doctor, the smoke
+test and the relay publisher all read the block).
+
 ### OBS-35 · A raised log level puts the relay secret back on the wire
 `firmware · S · open`
 The panel's own fetch logs are redacted: `torget_http.c` hands every

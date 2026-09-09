@@ -7,6 +7,34 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **A healthy service restart showed STALE on the glass for minutes.** The
+  tokenserver's first history scan ran *under the cache lock* inside
+  `get_snapshot`, so every `/api/tokens` request queued behind it. On a Mac
+  with a large Claude/Codex history the scan took 211 s, the panel's polls
+  timed out one after another, and the glass went STALE two minutes into
+  every restart of a service whose credentials, discovery and relay were
+  all fine (issue #62). The first request now answers at once: the scan
+  runs in the background, the response carries placeholder zeros for the
+  four volume counters (the firmware contract requires numbers there) and
+  live quota percentages, and a new additive block `usageTotals` says
+  which of three things the counters are: `refreshing` (placeholder,
+  `sinceS` since start), `ready` (`ageS` old) or `failing` (frozen since
+  the recompute began crashing, OBS-08). The completed scan is swapped in
+  atomically; a scan that crashes is retried on the normal thirty-second
+  cadence, never per request. The same block is on `GET /`, the numbers
+  publisher does not send a placeholder to the relay (the far panel keeps
+  its last good values instead of learning zeros), the SessionStart hook
+  reports `SERVICE WARMING UP` as its own class between stale and healthy,
+  the setup doctor prints `WAIT` for a warm-up and `FIX` for frozen totals,
+  and the smoke test warns instead of failing. A full disk is now visible
+  too: `GET /` carries `maxTrackerSaveOk` / `maxTrackerSaveFailingForS`
+  while the state file cannot be written (the observations stay in memory
+  and retry, as OBS-10 already arranged), the doctor and smoke test name
+  it, and a test proves one `ENOSPC` on the atomic write leaves both the
+  previous file and memory intact. Not done here: the glass itself still
+  shows the placeholder zeros as `0` for the length of the scan, because
+  dashing them needs the firmware to read `usageTotals` (OBS-36).
+
 - **The panel printed the relay's secret URL every time a cloud fetch
   failed.** All three failure paths in `components/torget_net/torget_http.c`
   logged the address they had just failed on. When the fetch had failed over

@@ -1284,6 +1284,34 @@ class MaxTrackerStorePersistenceTests(unittest.TestCase):
             if os.name == "posix":
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_a_full_disk_leaves_the_previous_file_and_memory_intact(self):
+        # Issue #62: one ENOSPC on the atomic write must neither crash the
+        # store nor erase what was on disk, and the next save must succeed
+        # with everything observed in between.
+        import errno
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "max-tracker.json"
+            store, codex_root, claude_root = _new_store(directory, path=path)
+            store.observe_volume("claude", "2026-08-07", 400)
+            store.save()
+            before = path.read_bytes()
+
+            store.observe_volume("claude", "2026-08-08", 250)
+            with mock.patch("os.replace", side_effect=OSError(
+                    errno.ENOSPC, "No space left on device")):
+                with self.assertRaises(OSError):
+                    store.save()
+
+            self.assertEqual(path.read_bytes(), before)
+            leftovers = [p for p in path.parent.iterdir() if p != path]
+            self.assertEqual(leftovers, [])
+            self.assertEqual(
+                store._state["claude"]["days"]["2026-08-08"]["vol"], 250)
+
+            store.save()
+            reloaded = MaxTrackerStore(path, codex_root, claude_root)
+            self.assertIn("2026-08-08", reloaded._state["claude"]["days"])
+
     def test_reloaded_store_produces_an_identical_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "max-tracker.json"

@@ -21,6 +21,33 @@ point at the backlog item.
 
 ---
 
+## 2026-09-10 · A background scan still blocked every request through the lock
+
+**What happened:** after a restart on a Mac with a large Claude/Codex
+history, the light health endpoints answered but every `/api/tokens` request
+timed out for 211 s, and the panel went STALE two minutes into a restart of
+a perfectly healthy service (issue #62). **Root cause:** the first usage
+scan had been moved *off* the startup thread in August (lesson 2026-08-26),
+but `get_snapshot` still ran it inline, under `_cache_lock`, whenever no
+result existed yet. Every HTTP worker took the same lock to read the result
+and queued behind the one doing the scan. The warm-up thread did not help:
+it was just the first caller to take that lock. **The rule now:** a request
+handler never does the expensive thing under the lock that serves the
+cheap thing. If there is no result yet, say so in the response and let one
+background thread produce it; readers take the lock only to copy. And the
+"no result yet" state is *named* (`usageTotals.state`), so a placeholder
+never looks like a measurement to the doctor, the hook, the smoke test or
+the relay publisher. **Guards:** `StartupSnapshotTests` in
+`test_tokenserver.py` time the first request with the scan blocked, prove
+one scan for many requests and the cadence-bounded retry after a crash;
+`test_publisher.py` proves a placeholder is not sent; the doctor, hook and
+smoke suites each classify the state. **Watch for:** a new producer that
+computes under `_cache_lock`, and any consumer that reads the four volume
+counters without checking `usageTotals.state`. The glass is that consumer
+today (OBS-36).
+
+---
+
 ## 2026-09-06 · The panel logged the credential it was told never to print
 
 **What happened:** all three failure paths in `torget_http.c` logged the

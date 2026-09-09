@@ -74,6 +74,22 @@ def payload_fingerprint(payload) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
+def is_startup_placeholder(payload) -> bool:
+    """True while ``/api/tokens`` serves placeholder volume counters.
+
+    The tokenserver answers at once during its first history scan with
+    zeros and ``usageTotals.state == "refreshing"`` (issue #62). A relay
+    mailbox must not learn those zeros as the day's numbers: the panel on
+    the far side keeps its last good values instead, exactly as it does
+    across a LAN outage, and the first real scan is published the moment
+    it lands.
+    """
+    if not isinstance(payload, dict):
+        return False
+    totals = payload.get("usageTotals")
+    return isinstance(totals, dict) and totals.get("state") == "refreshing"
+
+
 def stale_fields(payload) -> frozenset[str]:
     """Return only explicit top-level stale flags from a numbers payload."""
     if not isinstance(payload, dict):
@@ -155,6 +171,8 @@ class Publisher:
             except Exception:
                 log.exception("publicering: %s-producenten föll", path)
                 continue
+            if path == "/api/tokens" and is_startup_placeholder(payload):
+                continue  # första skanningen pågår: inget att publicera än
             fingerprint = payload_fingerprint(payload)
             current_stale = stale_fields(payload)
             last_fingerprint, sent_at, last_stale = self._state.get(
