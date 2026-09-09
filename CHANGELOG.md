@@ -7,6 +7,18 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **Five SessionStart tests inherited the developer's own Codex settings.**
+  `session_start.py` reads the saved `approval_policy`, `approvals_reviewer`
+  and `sandbox_mode` from `$CODEX_HOME/config.toml`, else
+  `~/.codex/config.toml`, *before* it checks service health, on purpose: a
+  saved `never` is the failure that looks exactly like a broken panel. Run
+  on a machine whose real config says `never`, that same rule turned five
+  service-health tests red on an unchanged checkout (issue #93). The test
+  harness now hands every script an empty `CODEX_HOME` unless a test
+  supplies its own; the explicit permission-mode tests still pass theirs
+  and still prove the production check. A new test poisons the fallback
+  home directory and asserts the isolation wins.
+
 - **The panel printed the relay's secret URL every time a cloud fetch
   failed.** All three failure paths in `components/torget_net/torget_http.c`
   logged the address they had just failed on. When the fetch had failed over
