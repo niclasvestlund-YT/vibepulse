@@ -17,7 +17,7 @@ DEFAULT_PORT = 8737
 HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
-EXPECTED_HOST_SOURCE_FINGERPRINT = "8772b9339e93"
+EXPECTED_HOST_SOURCE_FINGERPRINT = "f2e2a6edb1c3"
 CODEX_CONFIG_MAX_BYTES = 64 * 1024
 # Only the three top-level string settings that decide whether a permission
 # card can reach a user at all. Anchored and quote-matched so a value inside
@@ -233,7 +233,7 @@ def main():
             "\n").encode("utf-8")
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
-    except Exception:
+    except Exception:  # noqa: S110 - a hook must exit 0 quietly; Codex treats any noise as a failure
         pass
     return 0
 

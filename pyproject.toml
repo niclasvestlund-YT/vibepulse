@@ -1,0 +1,36 @@
+# Lint only. This file does not make the repository a Python package; the
+# host service stays a plain directory of scripts (see tools/tokenserver/).
+#
+# OBS-25 (docs/observability-backlog.md): ~10 k lines of Python had no
+# linter, and the audit's "bare except / swallowed exception" findings are
+# exactly what ruff flags mechanically. Rule choice is deliberately narrow:
+# bug-shaped rules only, no style rules, so a finding is worth reading.
+#
+#   F       pyflakes: undefined names, unused imports/variables, shadowing
+#   E722    bare `except:`
+#   B       bugbear: loop-variable closures, zip without strict, raise
+#           without from, assertRaises(Exception), mutable defaults ...
+#   S110    try/except/pass -- every remaining one is a named boundary
+#           (`# noqa: S110 - <why>`), never an unexplained swallow
+#   PLE     pylint errors (things that cannot work)
+#   PLW0602 `global` declared for a name the function never assigns
+#
+# Not enabled, on purpose: BLE001 (catching Exception) fires 74 times and
+# every site is a resilience boundary in a service that must not die on a
+# hostile transcript line; PLW0603 (global statement) is the tokenserver's
+# module-state style, tracked by the English/refactor issues, not a bug.
+#
+# Run: ruff check .   (test/run.sh and CI's host gate run it for you)
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "build",
+    "managed_components",
+    "sim/build",
+    "third_party",
+]
+
+[tool.ruff.lint]
+select = ["F", "E722", "B", "S110", "PLE", "PLW0602"]

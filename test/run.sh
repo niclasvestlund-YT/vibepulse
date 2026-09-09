@@ -45,6 +45,18 @@ then
   exit 1
 fi
 
+# Lint first: bug-shaped rules only (pyproject.toml explains each). ruff is
+# pinned in requirements-dev.txt, so a missing binary is a stale venv, and
+# the gate says so instead of silently skipping the lint (OBS-25).
+if ! "$PYTHON_BIN" -m ruff --version >/dev/null 2>&1; then
+  printf '%s\n' \
+    'ERROR: ruff saknas i Python-miljön (pinnad i requirements-dev.txt).' \
+    '  .venv/bin/python -m pip install -r requirements-dev.txt' >&2
+  exit 1
+fi
+(cd .. && "$PYTHON_BIN" -m ruff check .)
+echo "OK: ruff hittade inget"
+
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_fmt/fmt_sv.c \
   ../components/torget_ticker/ticker.c \

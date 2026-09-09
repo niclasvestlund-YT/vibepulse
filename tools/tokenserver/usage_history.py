@@ -210,7 +210,7 @@ class UsageHistory:
         if denominator <= 0:
             return Forecast(state="collecting")
         slope = sum((x - mean_x) * (y - mean_y)
-                    for x, y in zip(xs, ys)) / denominator
+                    for x, y in zip(xs, ys, strict=True)) / denominator
         if not math.isfinite(slope) or slope <= 0:
             return Forecast(state="unavailable")
 
