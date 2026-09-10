@@ -378,8 +378,12 @@ def check_log_file(path):
     if tracebacks:
         results.append((WARN, f"{tracebacks} traceback(s) in the log{suffix} "
                               f"— grep -n Traceback {path}*"))
-    starts = (text.count("serving http://")
-              + old_text.count("serving http://"))
+    # Both signatures: the log survives an upgrade and is only rotated at
+    # the size cap, so starts logged by the older Swedish build
+    # ("serverar http://") sit above the current ones, and a respawn loop
+    # spanning the upgrade must still add up (Codex review of #112).
+    starts = sum(text.count(marker) + old_text.count(marker)
+                 for marker in ("serving http://", "serverar http://"))
     if starts >= RESPAWN_SUSPICION_COUNT:
         service = "the autostart" if os.name == "nt" else "launchd"
         results.append((WARN, f"{starts} start lines in the log{suffix} — "

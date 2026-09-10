@@ -350,6 +350,20 @@ class LogFileCheckTests(unittest.TestCase):
         self.assertIn("traceback", results[1][1])
         self.assertIn("respawn", results[2][1])
 
+    def test_start_lines_from_the_older_build_still_count(self):
+        # Codex review of #112: after an upgrade the persistent log holds
+        # the older build's Swedish start lines above the new ones; a
+        # respawn loop spanning the upgrade must not slip under the
+        # threshold because only the new signature is counted.
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.log"
+            f.write_text("serverar http://0.0.0.0:8737\n" * 9
+                         + "serving http://0.0.0.0:8737\n")
+            results = smoke.check_log_file(f)
+        self.assertEqual(levels(results), [smoke.OK, smoke.WARN])
+        self.assertIn("10 start lines", results[1][1])
+        self.assertIn("respawn", results[1][1])
+
     def test_rotated_tail_evidence_is_still_seen(self):
         # Right after a rotation the fresh evidence lives in .old -- a
         # clean, newly truncated file must not hide it.
