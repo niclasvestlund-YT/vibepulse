@@ -44,6 +44,26 @@ invalid JSON, non-UTF-8 bytes and wrong shape (`{}` included, after a
 Codex review caught that gap), and for the parent fsync after the rename.
 **Watch for:** a new store that catches `OSError` broadly and returns
 empty, and a loader that accepts a partial shape "to be lenient".
+## 2026-09-10 · The parser read a field where the docs put it, not where the writer puts it
+
+**What happened:** `/api/agent-status` served `effort: null` for every
+Claude job since the field was added; the panel had a column for it and
+never a value. **Root cause:** `_claude_event` read `effort` inside the
+API `message` object, beside `model`. Claude Code writes it on the
+transcript *record*, beside `type` and `version`. Nobody had opened a real
+transcript and counted: measured on a live 2.1.267 session, 125 of 125
+assistant records carried `effort` at the top level and none nested, while
+`model` really does live inside `message`. **The rule now:** a new field
+in an upstream file is located by *measurement on a real file* (count the
+records, count where the key appears), never by analogy with a sibling
+field or by the API shape. Write the count into the commit. **Guards:**
+`test_claude_reads_effort_from_the_record_top_level` and its three
+siblings in `test_agent_status.py` (nested still wins, bounded, never from
+`tool_input`); the classifier reads the nested place first and falls back
+to the record, so either layout keeps working. **Watch for:** the same
+mistake on the next Claude Code field; `docs/companion-features-brainstorm.md`
+lists two more measured shapes (`result` records, Codex `payload.info`)
+that code must not assume.
 
 ---
 
