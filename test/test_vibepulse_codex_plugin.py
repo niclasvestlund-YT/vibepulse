@@ -1782,15 +1782,54 @@ class PluginPackageTests(unittest.TestCase):
         self.assertNotIn("eventual `v0.7.1` tag", release)
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("## Latest release: v1.0.0", readme)
-        self.assertIn("Compare v0.7.1...v1.0.0", readme)
-        self.assertIn("### Windows v1 verification", readme)
-        self.assertIn("788 tests, 11 named skips, 0 failures/errors", readme)
-        self.assertIn("14/14 and 7/7 jobs", readme)
+        self.assertIn("## Latest release: v1.1.0", readme)
+        self.assertIn("Compare v1.0.0...v1.1.0", readme)
+        self.assertIn("### v1.1.0 verification", readme)
         self.assertIn("windows-v1-full-lifecycle.md", readme)
         self.assertNotIn(
             "latest sanitized checkpoint is explicitly\n"
             "  **[PARTIAL]", readme)
+
+    def test_v110_release_is_honest_about_unflashed_firmware(self):
+        release = (ROOT / "docs/releases/"
+                   "2026-09-10-settings-and-evidence.md").read_text(
+                       encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertFalse(release.lstrip().startswith("# "))
+        for required in (
+                "VibePulse v1.1.0", "SETTINGS on the glass",
+                "An honest warm-up", "Evidence after a crash",
+                "not yet flashed or physically verified",
+                "v1.0.0-25-g054db68", "partition-table-flash",
+                "What was not re-verified", "bee5d8c", "not inherited",
+                "source-only", "Do not attach `torget.bin`",
+                "v1.0.0...v1.1.0", "serving http://", "usage recompute crashed"):
+            self.assertIn(required, release)
+        for image in (
+                "vibepulse-settings-menu.png",
+                "vibepulse-settings-no-address.png",
+                "vibepulse-settings-about.png"):
+            self.assertIn(
+                "https://raw.githubusercontent.com/"
+                "niclasvestlund-YT/vibepulse/v1.1.0/docs/img/" + image,
+                release)
+        # The README's release section carries the same evidence boundary.
+        self.assertIn("NOT YET FLASHED", readme)
+        self.assertIn("Pinned to v1.0.0's runtime `bee5d8c`", readme)
+        self.assertIn("## v1.1.0 — 2026-09-10", changelog)
+        self.assertIn("2026-09-10-settings-and-evidence.md", changelog)
+        self.assertLess(changelog.index("## Unreleased"),
+                        changelog.index("## v1.1.0"))
+        self.assertLess(changelog.index("## v1.1.0"),
+                        changelog.index("## v1.0.0"))
+        # The cut left nothing behind: Unreleased is empty until the next change.
+        between = changelog[changelog.index("## Unreleased"):
+                            changelog.index("## v1.1.0")]
+        self.assertEqual(between.strip(), "## Unreleased")
+        for forbidden in ("oauth token:", "refresh token:",
+                          "account id:", "relay address:"):
+            self.assertNotIn(forbidden, release.lower())
 
     def test_v100_release_is_major_windows_honest_and_source_only(self):
         release = (ROOT / "docs/releases/"
