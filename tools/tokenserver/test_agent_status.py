@@ -267,6 +267,63 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(agent_status.normalize_model("gpt-5.6-luna"),
                          "GPT-5.6 LUNA")
 
+    def test_unmapped_model_ids_are_typeset_on_arrival(self):
+        """OBS-30: the panel mixed `OPUS 5` with a raw, mid-string-clipped
+        `claude-haiku-4-5-2025100` depending on which model the agent
+        picked. The label is derived from the id now; the map is for
+        exceptions only."""
+        cases = {
+            "claude-opus-4-8": "OPUS 4.8",
+            "claude-haiku-4-5-20251001": "HAIKU 4.5",
+            "claude-haiku-4-5": "HAIKU 4.5",
+            "claude-3-7-sonnet-20250219": "SONNET 3.7",
+            "claude-sonnet-4-20250514": "SONNET 4",
+            "claude-fable-5-1": "FABLE 5.1",
+            "claude-mythos-preview": "MYTHOS PREVIEW",
+            "claude-mythos-5": "MYTHOS 5",
+            "gpt-5.4-mini": "GPT-5.4 MINI",
+            "gpt-5.2-pro-2025-12-11": "GPT-5.2 PRO",
+            "gpt-5-codex": "GPT-5 CODEX",
+            "gpt-4o": "GPT-4O",
+            "gpt-4.1-nano-2025-04-14": "GPT-4.1 NANO",
+            "o4-mini": "O4 MINI",
+            "codex-mini-latest": "CODEX MINI LATEST",
+            "ft:gpt-4o-2024-08-06": "GPT-4O",
+            "Claude-Opus-4-8 ": "OPUS 4.8",
+        }
+        for model_id, expected in cases.items():
+            with self.subTest(model_id=model_id):
+                self.assertEqual(agent_status.normalize_model(model_id),
+                                 expected)
+        # The hand-picked exceptions still win over derivation.
+        self.assertEqual(agent_status.normalize_model("claude-fable-5"),
+                         "FABLE 5")
+
+    def test_every_priced_model_derives_a_label_that_fits_the_panel(self):
+        prices = json.loads((Path(__file__).resolve().parent /
+                             "prices.json").read_text(encoding="utf-8"))
+        ids = set()
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "models" and isinstance(value, dict):
+                        ids.update(value)
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+        walk(prices)
+        self.assertGreater(len(ids), 100)
+        for model_id in sorted(ids):
+            with self.subTest(model_id=model_id):
+                label = agent_status.normalize_model(model_id)
+                self.assertIsNotNone(label)
+                self.assertLessEqual(len(label.encode("utf-8")), 24)
+                self.assertEqual(label, label.upper())
+                self.assertNotIn("CLAUDE", label)
+                self.assertFalse(label.startswith("-"))
+
     def test_screen_labels_fit_the_firmware_model_buffer(self):
         """TK_AGENT_MODEL_CAP är 25 (24 tecken + NUL). En etikett som
         spränger den klipps mitt i ordet på panelen."""

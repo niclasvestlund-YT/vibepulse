@@ -53,11 +53,12 @@ ACTIVITIES = {
     "waiting_approval",
 }
 
-# Skärmetiketter för de modeller agenterna faktiskt rapporterar. Okända
-# id:n faller igenom som råa gemener (se normalize_model) — dvs. sol får
-# "GPT-5.6 SOL" medan dess syskon terra/luna skulle visas som "gpt-5.6-terra".
-# Prislistan känner alla tre; skärmen ska göra det också. (OBS-30 spårar att
-# fallet igenom fortfarande gäller resten av prices.json.)
+# Screen labels are DERIVED from the model id (family, version, variant --
+# uppercased, dated suffix dropped), so a model the agent picks tomorrow is
+# typeset on arrival instead of on the next hand edit (OBS-30: the panel
+# used to mix "OPUS 5" with a raw, mid-string-clipped
+# "claude-haiku-4-5-2025100"). MODEL_LABELS is for exceptions only: ids
+# whose derived label would be wrong or worse than a hand-picked one.
 MODEL_LABELS = {
     "claude-fable-5": "FABLE 5",
     "claude-opus-5": "OPUS 5",
@@ -66,6 +67,35 @@ MODEL_LABELS = {
     "gpt-5.6-sol": "GPT-5.6 SOL",
     "gpt-5.6-terra": "GPT-5.6 TERRA",
 }
+_DATED_SUFFIX = re.compile(r"-(?:20\d{6}|20\d\d-\d\d-\d\d)$")
+_VERSION_TOKEN = re.compile(r"^\d+(?:\.\d+)*$")
+
+
+def derive_model_label(model_id: str) -> str:
+    """Typeset a model id the way the hand-picked labels are typeset.
+
+    ``claude-opus-4-8`` -> ``OPUS 4.8``; ``claude-haiku-4-5-20251001`` ->
+    ``HAIKU 4.5``; ``claude-3-7-sonnet-20250219`` -> ``SONNET 3.7``;
+    ``claude-mythos-preview`` -> ``MYTHOS PREVIEW``; ``gpt-5.4-mini`` ->
+    ``GPT-5.4 MINI``; ``gpt-4o`` -> ``GPT-4O``; ``o4-mini`` -> ``O4 MINI``;
+    ``codex-mini-latest`` -> ``CODEX MINI LATEST``. Pure string work on a
+    bounded, control-free input; never raises.
+    """
+    base = _DATED_SUFFIX.sub("", model_id.strip().lower())
+    if base.startswith("ft:"):
+        base = base[3:]
+    tokens = [token for token in base.split("-") if token]
+    if not tokens:
+        return model_id.upper()
+    if tokens[0] == "claude" and len(tokens) > 1:
+        names = [t for t in tokens[1:] if not _VERSION_TOKEN.match(t)]
+        version = ".".join(t for t in tokens[1:] if _VERSION_TOKEN.match(t))
+        label = " ".join(t.upper() for t in names)
+        return f"{label} {version}".strip() if version else label
+    if tokens[0] == "gpt" and len(tokens) > 1:
+        head = f"GPT-{tokens[1].upper()}"
+        return " ".join([head, *(t.upper() for t in tokens[2:])])
+    return " ".join(t.upper() for t in tokens)
 
 
 def _bounded_display(value: Any, max_bytes: int) -> Optional[str]:
@@ -87,10 +117,18 @@ def _bounded_display(value: Any, max_bytes: int) -> Optional[str]:
 
 
 def normalize_model(value: Any) -> Optional[str]:
-    bounded = _bounded_display(value, 24)
-    if bounded is None:
+    # Bound the raw id first (a hostile transcript line stays bounded and
+    # control-free) but wide enough that a dated id survives whole --
+    # clipping at the panel width BEFORE deriving turned
+    # "claude-haiku-4-5-20251001" into "HAIKU 4.5.2025100". Then derive,
+    # then bound to the panel's 24-byte column.
+    raw = _bounded_display(value, 64)
+    if raw is None:
         return None
-    return MODEL_LABELS.get(bounded.lower(), bounded)
+    label = MODEL_LABELS.get(raw.lower())
+    if label is None:
+        label = derive_model_label(raw)
+    return _bounded_display(label, 24)
 
 
 def normalize_effort(value: Any) -> Optional[str]:
