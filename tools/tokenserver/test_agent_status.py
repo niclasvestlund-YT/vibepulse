@@ -64,6 +64,54 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(event.effort, "XHIGH")
         self.assertNotIn("OPUS", repr(event))
 
+    def test_claude_reads_effort_from_the_record_top_level(self):
+        """Where Claude Code actually writes it.
+
+        A real transcript puts ``effort`` beside ``type`` and ``version``
+        on the record, while ``model`` sits inside the API ``message``.
+        Reading only ``message.effort`` served ``effort: null`` for every
+        Claude job while the panel had a column for it.
+        """
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "effort": "max"})
+        entry["message"]["model"] = "claude-fable-5"
+        entry["effort"] = "high"
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.model, "FABLE 5")
+        self.assertEqual(event.effort, "HIGH")
+
+    def test_claude_nested_effort_still_wins_over_the_top_level(self):
+        entry = claude_event("assistant", tool_name="Bash")
+        entry["message"]["effort"] = "xhigh"
+        entry["effort"] = "low"
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.effort, "XHIGH")
+
+    def test_claude_top_level_effort_is_bounded_and_never_from_tool_input(self):
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "effort": "max"})
+        entry["effort"] = "max\n" + "å" * 20
+
+        event = classify_claude(entry)
+
+        self.assertLessEqual(len(event.effort.encode("utf-8")), 12)
+        self.assertNotIn("\n", event.effort)
+        self.assertTrue(event.effort.startswith("MAX"))
+
+    def test_claude_non_string_top_level_effort_is_ignored(self):
+        entry = claude_event("assistant", tool_name="Bash")
+        entry["effort"] = {"level": "high"}
+
+        event = classify_claude(entry)
+
+        self.assertIsNone(event.effort)
+
     def test_claude_does_not_take_model_from_nested_tool_input(self):
         entry = claude_event(
             "assistant", tool_name="Bash",
