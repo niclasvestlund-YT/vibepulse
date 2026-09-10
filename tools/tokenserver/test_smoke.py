@@ -99,6 +99,18 @@ class ServerCheckTests(unittest.TestCase):
         self.assertIn("usage_http_401", warn[0])
         self.assertIn("agent-setup", warn[0])
 
+    def test_probe_warning_names_the_backoff_state_when_served(self):
+        root = dict(HEALTHY_ROOT, claudeProbe="usage_http_401",
+                    claudeProbeStreak=3, claudeProbeIntervalS=480,
+                    claudeProbeCooldownLeftS=None)
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        warn = [text for level, text in results if level == smoke.VARN]
+        self.assertEqual(len(warn), 1)
+        self.assertIn("3 missar i rad", warn[0])
+        self.assertIn("480 s", warn[0])
+        self.assertNotIn("429-vila", warn[0])
+
     def test_expiring_credential_warns_before_probe_fails(self):
         root = dict(HEALTHY_ROOT, claudeCredential={
             "status": "expiring", "expiresInMin": 19})

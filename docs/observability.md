@@ -158,11 +158,30 @@ Returns live server state, added after real debugging nights:
   `usage_http_200 + ok` (healthy), `no_claude_oauth_token`,
   `usage_http_401`, `usage_http_429 + backoff_until_HH:MM`,
   `usage_request_failed: <Type>`, `probe_crashed: <Type>` (the probe
-  itself hit a bug — the log has the traceback).
+  itself hit a bug — the log has the traceback). On macOS a
+  `no_claude_oauth_token` carries the keychain's own word after a colon
+  (OBS-20): `keychain_denied_or_locked (exit N)` is the prompt clicked
+  Deny or a locked keychain, `keychain_no_entry` never logged in on this
+  account, `keychain_timeout` a prompt left unanswered,
+  `keychain_security_missing` / `keychain_malformed` the tool or the
+  record itself. The string is assembled per probe cycle and published
+  once, so it never reads half-built.
+- `claudeProbeStreak` / `claudeProbeIntervalS` / `claudeProbeCooldownLeftS`
+  / `claudeProbeAgeS` — the backoff behind `claudeProbe` (OBS-18):
+  consecutive failed cycles, the current gap between cycles (240 s,
+  doubling per miss to 960 s; 15 s while waiting on a local token), seconds left
+  of a 429 rest (`null` when not resting) and seconds since the last
+  completed cycle (`null` before the first). Dashes on the screen look
+  the same whether the probe is failing every four minutes or resting;
+  these say which. The smoke test prints them beside a non-ok status.
+  All of them, the status string, the credential block and the header
+  evidence are copied under one lock, so a response never pairs one
+  cycle's status with another's numbers.
 - `claudeCredential` — the content-free pre-expiry guard for the saved Claude
   Code credential: `ready`, `expiring`, `expired`, `unavailable`, or
-  `unknown`, plus whole `expiresInMin` when known. It never contains OAuth
-  token values or account data. Startup, doctor, and the smoke test warn 30
+  `unknown`, plus whole `expiresInMin` when known, and on macOS a `reason`
+  beside `unavailable` (the same keychain word as in `claudeProbe`). It
+  never contains OAuth token values or account data. Startup, doctor, and the smoke test warn 30
   minutes before expiry instead of waiting for Fable to become stale.
 - `claudeLocalUsage` — the passive Claude Desktop fallback for the general
   week: `fresh_applied` means the official local plan history is newer than
@@ -172,7 +191,10 @@ Returns live server state, added after real debugging nights:
   `invalid*`, and `unsupported` explain why the local file was not trusted.
   This fallback never marks the named Fable/Opus model pool fresh.
 - `ratelimitHeaders` / `unknownRateLimitBuckets` — header names seen by
-  the fallback probe. A non-empty `unknownRateLimitBuckets` means
+  the fallback probe in the **most recent** cycle; a cycle that never
+  reached the fallback (the usage contract answered, or every token was
+  rejected first) publishes them empty, so they never sit hours-old
+  beside a current failure. A non-empty `unknownRateLimitBuckets` means
   Anthropic added a bucket we don't map yet: file it.
 - `usageComputeOk` / `usageComputeFailingForS` — whether the recompute
   behind `/api/tokens` is healthy. `false` means the served token totals

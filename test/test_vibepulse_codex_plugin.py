@@ -28,7 +28,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "5e46924fb17c"
+HOST_SOURCE_FINGERPRINT = "235b084f6b41"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",

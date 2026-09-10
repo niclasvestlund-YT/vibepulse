@@ -207,8 +207,19 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
                               f"({LIMITS_EVERY_S} s-cykel) "
                               "— kör om röktestet om en stund"))
     else:
-        results.append((VARN, f"claude-proben: {probe} — se tabellen i "
-                              f"docs/agent-setup.md"))
+        # OBS-18: say whether the probe is hammering or resting — dashes
+        # look the same either way from the screen.
+        detail = ""
+        streak = root.get("claudeProbeStreak")
+        interval = root.get("claudeProbeIntervalS")
+        cooldown = root.get("claudeProbeCooldownLeftS")
+        if isinstance(streak, int) and isinstance(interval, int):
+            detail = f" ({streak} missar i rad, nästa försök om ≤{interval} s"
+            if isinstance(cooldown, int):
+                detail += f", 429-vila {cooldown} s kvar"
+            detail += ")"
+        results.append((VARN, f"claude-proben: {probe}{detail} — se "
+                              f"tabellen i docs/agent-setup.md"))
     credential = root.get("claudeCredential")
     if isinstance(credential, dict):
         credential_status = credential.get("status")
