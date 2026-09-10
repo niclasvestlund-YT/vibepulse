@@ -306,7 +306,13 @@ pin TWDT config in `sdkconfig.defaults` (OBS-28). With OBS-01, a WDT
 reset then becomes a *diagnosed* event instead of a mystery.
 
 ### OBS-18 · Probe backoff state is invisible, and stale probe data lingers
-`server · S · open`
+`server · S · done (2026-09-10)` — `GET /` carries `claudeProbeStreak`,
+`claudeProbeIntervalS`, `claudeProbeCooldownLeftS` and `claudeProbeAgeS`
+(smoke prints them beside a non-ok status); every cycle starts with
+empty header evidence and publishes only what it saw; the status string
+is assembled in a per-cycle outcome and swapped in once under
+`_limits_lock` (`_ProbeOutcome`, `_publish_probe_outcome`). Original
+problem:
 Three small holes in the probe's observability:
 (a) `_probe_failure_streak` and the slowed interval
 (`tokenserver.py:305,673-679`) appear in no payload — dashes can mean
@@ -333,7 +339,13 @@ spins silently forever.
 one-per-type-per-30 s pattern agent_status already uses).
 
 ### OBS-20 · Keychain failure is one undifferentiated shrug
-`server · S · open`
+`server · S · done (2026-09-10)` — `_read_keychain_oauth` catches
+narrowly: missing binary, timeout, exit 44 (no entry), any other exit
+(Deny on the prompt or a locked keychain), malformed record, record
+without a token. The word rides on `claudeProbe` after
+`no_claude_oauth_token:` and in `claudeCredential.reason`, the runbook
+table maps each to its fix, and `claude-keychain: X -> Y` logs the
+transitions (OBS-04). Original problem:
 A blanket `except Exception` around the `security` call
 (`tokenserver.py:357-368`) collapses four distinct situations — binary
 missing, **user clicked Deny on the keychain prompt**, malformed JSON,

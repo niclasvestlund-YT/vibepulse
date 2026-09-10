@@ -216,6 +216,24 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   three names it only reads. Catching `Exception` (74 sites, all
   deliberate) and the `global` statement itself are not enabled; the config
   says why.
+- **The Claude probe says why it is idle, and never half a status (OBS-18,
+  OBS-20).** `GET /` now carries the probe's backoff beside `claudeProbe`:
+  `claudeProbeStreak`, `claudeProbeIntervalS`, `claudeProbeCooldownLeftS`
+  and `claudeProbeAgeS`, so dashes on the screen can be told apart as
+  "failing every two minutes" versus "resting after a 429"; the smoke test
+  prints them next to a non-ok status. The status string is assembled per
+  cycle and published once under the lock the HTTP threads read with,
+  where it used to grow with `+=` on the probe thread and could be served
+  half-built, and header evidence (`ratelimitHeaders`,
+  `unknownRateLimitBuckets`) is now the current cycle's only, never
+  hours-old names beside a fresh failure. On macOS the keychain read no
+  longer folds every failure into one shrug: `no_claude_oauth_token`
+  carries `keychain_denied_or_locked (exit N)` (Deny on the prompt, or a
+  locked keychain), `keychain_no_entry`, `keychain_timeout`,
+  `keychain_security_missing`, `keychain_malformed` or
+  `keychain_entry_without_token`, the same word sits in
+  `claudeCredential.reason`, `docs/agent-setup.md` maps each to its fix,
+  and `claude-keychain: X -> Y` logs the transitions.
 
 - **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
   pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`

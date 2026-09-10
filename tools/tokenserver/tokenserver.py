@@ -702,6 +702,11 @@ _probe_unknown_buckets = []
 _probe_cooldown_until = 0.0
 _probe_failure_streak = 0
 _probe_status_logged = None  # senast loggade status — övergångar loggas, tillstånd inte
+# OBS-20: why the keychain gave no token, as a content-free word ("None" =
+# it gave one, or was never asked). Set on the probe thread, logged on
+# change only, and carried into claudeProbe/claudeCredential on GET /.
+_keychain_reason = None
+_keychain_reason_logged = None
 # Content-free credential readiness captured on the probe thread. GET / must
 # never reread Keychain synchronously: startup health has a sub-second budget.
 _claude_credential = {"status": "unknown"}
@@ -763,18 +768,63 @@ def _read_process_oauth_token():
     return None
 
 
+def _note_keychain_reason(reason):
+    """Publish the keychain outcome; one log line per change (OBS-04)."""
+    global _keychain_reason, _keychain_reason_logged
+    _keychain_reason = reason
+    if reason != _keychain_reason_logged:
+        log.info("claude-keychain: %s -> %s",
+                 _keychain_reason_logged or "start", reason or "ok")
+        _keychain_reason_logged = reason
+
+
 def _read_keychain_oauth():
-    """Nyckelringsposten som ``(token, expires_at_ms)`` — det ``/login`` skrev."""
+    """Nyckelringsposten som ``(token, expires_at_ms)`` — det ``/login`` skrev.
+
+    OBS-20: a blanket ``except Exception`` used to fold "no ``security``
+    binary", "the user clicked Deny on the keychain prompt", "the prompt sat
+    unanswered until the timeout" and "the entry is not JSON" into one
+    ``(None, None)``. Each cause is its own word now, published through
+    ``_note_keychain_reason`` so the probe status and ``GET /`` can say
+    which one, and the log says when it changed. Exit 44 is
+    ``errSecItemNotFound`` (no entry: never logged in on this account);
+    any other non-zero exit is the keychain refusing us — Deny on the
+    prompt, or a locked keychain — which is the case the README coaches
+    people through.
+    """
+    token = expires_at = None
+    reason = None
     try:
-        raw = subprocess.run(
+        completed = subprocess.run(
             ["security", "find-generic-password",
              "-s", "Claude Code-credentials", "-w"],
             capture_output=True, text=True, timeout=10,
-        ).stdout.strip()
-        oauth = json.loads(raw).get("claudeAiOauth") or {}
-        return oauth.get("accessToken"), oauth.get("expiresAt")
-    except Exception:
-        return None, None
+        )
+    except FileNotFoundError:
+        reason = "keychain_security_missing"
+    except subprocess.TimeoutExpired:
+        reason = "keychain_timeout"  # the prompt sat unanswered
+    except OSError as error:
+        reason = f"keychain_spawn_failed: {type(error).__name__}"
+    else:
+        if completed.returncode == 44:
+            reason = "keychain_no_entry"
+        elif completed.returncode != 0:
+            reason = (f"keychain_denied_or_locked "
+                      f"(exit {completed.returncode})")
+        else:
+            try:
+                record = json.loads((completed.stdout or "").strip())
+                oauth = record.get("claudeAiOauth") or {}
+                token = oauth.get("accessToken")
+                expires_at = oauth.get("expiresAt")
+            except (ValueError, AttributeError):
+                reason = "keychain_malformed"
+            else:
+                if not token:
+                    reason = "keychain_entry_without_token"
+    _note_keychain_reason(reason)
+    return token, expires_at
 
 
 def _credentials_file_path():
@@ -1137,10 +1187,68 @@ def _hold_probe_lock():
         return None
 
 
+class _ProbeOutcome:
+    """One probe cycle's evidence, assembled off the shared globals.
+
+    OBS-18 (c): the status used to be built with ``+=`` on the probe
+    thread while HTTP threads read it unlocked, so ``GET /`` could serve
+    half a status ("usage_http_401" with the "; fallback_…" suffix still
+    to come). The cycle now writes here and ``_publish_probe_outcome``
+    swaps everything in at once, under ``_limits_lock``. Headers start
+    empty every cycle (OBS-18 b): a cycle that never reaches the fallback
+    probe leaves no hours-old header names beside a current failure.
+    """
+
+    def __init__(self, status):
+        self.status = status
+        self.headers = []
+        self.unknown_buckets = []
+        self.credential = None
+
+
+def _publish_probe_outcome(outcome):
+    global _probe_status, _probe_headers, _probe_unknown_buckets, \
+        _claude_credential
+    with _limits_lock:
+        _probe_status = outcome.status
+        _probe_headers = list(outcome.headers)
+        _probe_unknown_buckets = list(outcome.unknown_buckets)
+        if outcome.credential is not None:
+            _claude_credential = outcome.credential
+
+
+def _publish_probe_status(status):
+    """A status-only outcome (nothing was probed): evidence stays as is."""
+    global _probe_status
+    with _limits_lock:
+        _probe_status = status
+
+
+def _probe_diagnostics():
+    """OBS-18 (a): the backoff behind ``claudeProbe``, content-free.
+
+    Dashes on the screen used to look the same whether the probe was
+    failing every 120 s or resting at 480 s after a streak; ``GET /`` now
+    says which. Read under the lock the probe thread publishes with.
+    """
+    with _limits_lock:
+        streak = _probe_failure_streak
+        interval_s = _probe_interval_s()
+        probed_at = _last_probed
+    cooldown_left = _probe_cooldown_until - time.time()
+    return {
+        "claudeProbeStreak": streak,
+        "claudeProbeIntervalS": int(interval_s),
+        "claudeProbeCooldownLeftS": (int(math.ceil(cooldown_left))
+                                     if cooldown_left > 0 else None),
+        "claudeProbeAgeS": (int(time.monotonic() - probed_at)
+                            if probed_at else None),
+    }
+
+
 def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
-    global _probe_status
     _load_probe_state()
     if time.time() < _probe_cooldown_until:
         # I nedkylning efter 429 — statusen står kvar på backoff-strängen.
@@ -1149,7 +1257,7 @@ def _probe_limits():
     if lock is None:
         # En annan instans äger upstream-trafiken just nu. Ingen nätaktivitet
         # härifrån — den andra instansens svar fyller ändå enhetens behov.
-        _probe_status = "probe_held_by_other_instance"
+        _publish_probe_status("probe_held_by_other_instance")
         return None
     try:
         return _probe_limits_locked()
@@ -1158,12 +1266,30 @@ def _probe_limits():
 
 
 def _probe_limits_locked():
-    global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _probe_cooldown_until, _claude_credential
+    """Run one cycle and publish its evidence once (see _ProbeOutcome).
+
+    A cycle that raises publishes nothing: ``_refresh_limits`` records the
+    crash as its own status, and the previous evidence stands meanwhile.
+    """
+    outcome = _ProbeOutcome(_probe_status)
+    found = _probe_cycle(outcome)
+    _publish_probe_outcome(outcome)
+    return found
+
+
+def _probe_cycle(outcome):
+    global _probe_cooldown_until
     candidates = _read_oauth_candidates()
-    _claude_credential = _oauth_credential_snapshot(candidates)
+    outcome.credential = _oauth_credential_snapshot(candidates)
     if not candidates:
-        _probe_status = "no_claude_oauth_token"
+        outcome.status = "no_claude_oauth_token"
+        # OBS-20: on macOS the keychain says why, so the status and the
+        # credential block carry it — "the user clicked Deny" is a
+        # different fix from "never logged in".
+        if _keychain_reason and not _IS_WINDOWS:
+            outcome.status += f": {_keychain_reason}"
+            outcome.credential = dict(outcome.credential,
+                                      reason=_keychain_reason)
         return None
 
     token = None
@@ -1171,12 +1297,12 @@ def _probe_limits_locked():
         if candidate in _dead_tokens:
             # Värdet är redan avvisat av API:t — vänta på ett nytt i stället
             # för att elda på 429-straffrutan med ett känt dött token.
-            _probe_status = "token_dead_awaiting_refresh"
+            outcome.status = "token_dead_awaiting_refresh"
             continue
         if expires_at and expires_at / 1000 < time.time():
             # Tokenen har gått ut; Claude Code förnyar den i nyckelringen
             # nästa gång den pratar med API:t — vänta och läs om.
-            _probe_status = (f"token_expired_"
+            outcome.status = (f"token_expired_"
                              f"{datetime.fromtimestamp(expires_at / 1000):%H:%M}")
             continue
 
@@ -1188,7 +1314,7 @@ def _probe_limits_locked():
                     _usage_request(candidate), timeout=15) as resp:
                 usage = json.load(resp)
         except urllib.error.HTTPError as error:
-            _probe_status = f"usage_http_{error.code}"
+            outcome.status = f"usage_http_{error.code}"
             if error.code == 429:
                 # Rate-limited: varje ytterligare anrop förlänger straffet.
                 # Avbryt hela cykeln — ingen andra källa, ingen header-probe
@@ -1200,7 +1326,7 @@ def _probe_limits_locked():
                 except (TypeError, ValueError):
                     retry_after = 0
                 _probe_cooldown_until = time.time() + max(retry_after, 600)
-                _probe_status = (
+                outcome.status = (
                     f"usage_http_429 + backoff_until_"
                     f"{datetime.fromtimestamp(_probe_cooldown_until):%H:%M}")
                 _save_probe_state()  # en omstart får inte glömma straffet
@@ -1217,7 +1343,7 @@ def _probe_limits_locked():
             token = candidate
             break
         except Exception as error:
-            _probe_status = f"usage_request_failed: {type(error).__name__}"
+            outcome.status = f"usage_request_failed: {type(error).__name__}"
             token = candidate
             break
         else:
@@ -1227,11 +1353,9 @@ def _probe_limits_locked():
             # reset, och parsern hoppar korrekt över den. Veckosiffrorna är
             # fortfarande giltiga — kasta inte bort dem.
             if found:
-                _probe_status = "usage_http_200 + ok"
-                _probe_headers = []
-                _probe_unknown_buckets = []
+                outcome.status = "usage_http_200 + ok"
                 return found
-            _probe_status = "usage_http_200 + no_mapped_limits"
+            outcome.status = "usage_http_200 + no_mapped_limits"
             token = candidate
             break
 
@@ -1261,13 +1385,13 @@ def _probe_limits_locked():
         with urllib.request.urlopen(req, timeout=15) as resp:
             headers = dict(resp.headers)
     except urllib.error.HTTPError as e:
-        _probe_status += f"; fallback_http_{e.code}"
+        outcome.status += f"; fallback_http_{e.code}"
         headers = dict(e.headers) if e.headers else {}
     except Exception as e:
-        _probe_status += f"; fallback_failed: {type(e).__name__}"
+        outcome.status += f"; fallback_failed: {type(e).__name__}"
         return None
     else:
-        _probe_status += "; fallback_http_200"
+        outcome.status += "; fallback_http_200"
 
     now_ts = time.time()
     # Diagnostik vid första proben: headernamnen är hämtade ur Clawdmeters
@@ -1284,13 +1408,13 @@ def _probe_limits_locked():
     # innehåll, inte exakt namn.
     found = _parse_limit_headers(headers, now_ts)
 
-    _probe_headers = sorted(
+    outcome.headers = sorted(
         n for n in headers if "ratelimit" in n.lower())
-    _probe_unknown_buckets = found.pop("unknownBuckets", [])
+    outcome.unknown_buckets = found.pop("unknownBuckets", [])
     if not found:
-        _probe_status += " + no_mapped_headers"
+        outcome.status += " + no_mapped_headers"
         return None
-    _probe_status += " + ok"
+    outcome.status += " + ok"
     return found
 
 
@@ -1313,7 +1437,7 @@ def _probe_interval_s():
 
 def _refresh_limits():
     global _last_limits, _last_probed, _limits_refreshing, \
-        _probe_failure_streak, _probe_status_logged, _probe_status
+        _probe_failure_streak, _probe_status_logged
     try:
         refreshed = _probe_limits()
     except Exception as e:
@@ -1326,7 +1450,7 @@ def _refresh_limits():
         if _probe_status != crashed:
             log.exception("claude-proben kraschade (status var %s)",
                           _probe_status)
-        _probe_status = crashed
+        _publish_probe_status(crashed)
     # Övergångsloggen: 401 som dyker upp, 429-backoff, återhämtningen.
     # Läses här på probetråden (enda skrivaren), efter att statussträngen
     # är färdigbyggd — samma läge står stilla utan att skriva en rad till.
@@ -3083,6 +3207,7 @@ class Handler(BaseHTTPRequestHandler):
                            if self.github_monitor is not None
                            else disabled_snapshot()),
                 "claudeProbe": _probe_status,
+                **_probe_diagnostics(),
                 "claudeCredential": dict(_claude_credential),
                 "claudeLocalUsage": _claude_plan_usage_status,
                 "ratelimitHeaders": _probe_headers,
