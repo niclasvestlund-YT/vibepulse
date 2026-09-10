@@ -223,9 +223,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   naming the missing values and the `idf.py reconfigure` fix). The ledger
   counters saturate at their ceiling instead of wrapping to zero. `test/test_firmware_diagnostics.py`
   holds the pins and exercises the guard both ways; `docs/observability.md`
-  has the retrieval steps, and its signature table now points a panic and a
-  watchdog at the dump and the ledger instead of calling the banner the
-  only witness.
+  has the retrieval steps, and its signature table now points a panic at
+  the dump and the ledger instead of calling the banner the only witness;
+  a `Task watchdog got triggered` warning is transient serial evidence
+  only (warn-only, so no reboot, dump or ledger count), and a
+  chip-attributed watchdog reset counts in the ledger but has a dump only
+  when the separate `coredump i flash` notice follows the banner.
 - **The panel backs off from a dead service instead of hammering it
   (OBS-13, OBS-12).** In source and CI-built, **not yet flashed**: every
   device poller ran at a fixed cadence no matter what, so a stopped
