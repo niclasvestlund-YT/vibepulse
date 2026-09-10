@@ -418,8 +418,9 @@ the manual detail below is for interpreting what it flags — and steps
    `%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log`. A missing file
    under launchd or Task Scheduler means the service never reached its
    logging entrypoint.
-   `grep -c serving` — more than one per intended restart means
-   crash-looping. `grep -n Traceback` — any hit is a bug; the `500 on`
+   `grep -cE 'serv(ing|erar) http://'` — more than one per intended
+   restart means crash-looping (the older build wrote `serverar`, and the
+   log outlives an upgrade, so count both). `grep -n Traceback` — any hit is a bug; the `500 on`
    line above it names the route. `grep -c 'agent-status'` — a large
    count means a persistent throttled error has been repeating every
    30 s. `grep 'claude-probe:'` — the transition history: when did
