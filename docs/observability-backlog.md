@@ -320,7 +320,9 @@ can be served.
 headers on failure; assemble status into a local and publish once.
 
 ### OBS-19 · Slow-client and backfill blind spots
-`server · S · open`
+`server · S · in progress` — (b) done with OBS-25 (2026-09-10): the
+backfill loop logs one `max-tracker backfill step failed: <class>: <text>`
+line per ten minutes instead of swallowing. (a) still open.
 (a) No handler `timeout`/`protocol_version` on the HTTP handler
 (`tokenserver.py:1465`): a half-open LAN connection parks a worker
 thread in `readline()` forever, uncounted and unlogged.
@@ -409,7 +411,20 @@ from the lessons log is guarded only on the maintainer's Mac. The
 **no such issue exists**.
 
 ### OBS-25 · No linting anywhere
-`hygiene · S · open`
+`hygiene · S · done (2026-09-10)` — `ruff` 0.15.8 pinned in
+`requirements-dev.txt`, configured in `pyproject.toml` with bug-shaped
+rules only (`F`, `E722`, `B`, `S110`, `PLE`, `PLW0602`; each explained in
+the file), run first in `test/run.sh` and therefore in CI's host gate. The
+sweep found 43 things: fourteen `try/except/pass` sites (every one is now
+a named boundary with a `# noqa: S110 - <why>`, and the Max Tracker
+backfill loop, which swallowed every error silently, now logs one line per
+ten minutes), sixteen loop-variable closures in tests, three `zip()` calls
+without `strict=`, three dead imports, one dead variable, one
+`assertRaises(Exception)`, one `raise` without `from`, and three names
+declared `global` that the function never assigns. `BLE001` (74 sites,
+all resilience boundaries) and `PLW0603` (the tokenserver's module-state
+style) are deliberately not enabled; see `pyproject.toml`. Original
+problem, for the record:
 No linter config exists for ~10 k lines of Python (the C side at least
 has `-Wall -Wextra -Werror` in the test gate). Several audit findings
 (bare `except`, swallowed exceptions) are exactly what `ruff` rules

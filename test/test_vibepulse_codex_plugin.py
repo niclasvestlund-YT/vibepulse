@@ -28,7 +28,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "540a51703feb"
+HOST_SOURCE_FINGERPRINT = "d4ddf49d149d"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -3449,7 +3449,7 @@ class RelaySetupTests(unittest.TestCase):
                         ["doctor"], repo_root=ROOT, config_path=path,
                         python=Path(sys.executable), codex=Path("/codex"),
                         run=runner,
-                        urlopen=lambda *_args, **_kwargs: response,
+                        urlopen=lambda *_args, _r=response, **_kwargs: _r,
                         stdout=output), 1)
                     self.assertIn("FIX Tokenserver", output.getvalue())
                     self.assertEqual(response.limits,
@@ -3760,7 +3760,7 @@ class RelaySetupTests(unittest.TestCase):
                         ["doctor"], config_path=path,
                         python=Path(sys.executable), codex=None,
                         run=FakeRunner([python_probe_ok()]),
-                        urlopen=lambda *_args, **_kwargs: response,
+                        urlopen=lambda *_args, _r=response, **_kwargs: _r,
                         stdout=output), 1)
                     self.assertIn("FIX Tokenserver", output.getvalue())
 
@@ -3851,7 +3851,9 @@ class RelaySetupTests(unittest.TestCase):
                     real_save = setup.save_config
                     calls = []
 
-                    def post_commit_failure(save_path, config):
+                    def post_commit_failure(save_path, config, calls=calls,
+                                            real_save=real_save,
+                                            restore_ok=restore_ok):
                         calls.append(config)
                         if len(calls) == 1:
                             real_save(save_path, config)
