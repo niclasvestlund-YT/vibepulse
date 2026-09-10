@@ -235,10 +235,14 @@ static void agent_net_task(void *arg) {
     }
 
     /* Transitions only: the slowdown steps and the recovery, never every
-     * miss (the rejection log above is already throttled). */
+     * miss (the rejection log above is already throttled). The feed counts
+     * as a miss unless the response was APPLIED: a host that answers 200
+     * with a body the parser rejects is as useless to the screen as a dead
+     * one, and hammering it every second changes nothing (host_ok stays
+     * the service-discovery signal only). */
     uint32_t streak_before = backoff.streak;
-    if (tk_poll_backoff_note(&backoff, host_ok)) {
-      if (host_ok) {
+    if (tk_poll_backoff_note(&backoff, accepted)) {
+      if (accepted) {
         ESP_LOGI(TAG, "agentstatus svarar igen efter %" PRIu32 " missar",
                  streak_before);
       } else {

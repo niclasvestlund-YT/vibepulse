@@ -249,13 +249,15 @@ Physical dedicated-power acceptance remains separate evidence.
 ## P2 — stop making it worse
 
 ### OBS-13 · No backoff anywhere in the firmware
-`firmware · M · done in source (2026-09-10) for the three pollers,
+`firmware · M · done in source (2026-09-10) for the four service pollers,
 physically unverified` — `poll_backoff_policy.[ch]` (pure, host-tested):
 first miss free, then doubling to a cap, reset on success, transitions
-only in the log. Wired into agent-status (1 s → 30 s cap), tokens
-(30 s → 300 s) and max-tracker (5 min → 30 min). The recovery task's
-notification still cuts a long tokens wait short. WiFi reconnect is
-OBS-14's, not done here. Original problem:
+only in the log. Wired into agent-status (1 s → 30 s cap; a miss is any
+response that was not applied, so a 200 with a rejected body backs off
+too), tokens (30 s → 300 s), max-tracker (5 min → 30 min) and the
+optional GitHub feed (30 s → 300 s). The recovery task's notification
+still cuts a long tokens wait short. WiFi reconnect is OBS-14's, not
+done here. Original problem:
 Every device poller runs at a fixed cadence no matter what: tokens 30 s,
 max-tracker 300 s (`net.c:62,112`), agent-status **1 000 ms**
 (`agent_net.c:19,136`), WiFi reconnect 2 s (`main.c:165`). A dead

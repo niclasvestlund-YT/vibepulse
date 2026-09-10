@@ -71,9 +71,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   poller alone, all day. A small pure policy (`poll_backoff_policy.c`,
   host-tested) now lets the first miss through at the normal cadence, then
   doubles the wait per consecutive miss up to a cap (agent status 1 s to
-  30 s, tokens 30 s to 300 s, Max Tracker 5 to 30 min) and resets on the
-  first success, logging only the transitions. The tokens poller's
-  recovery notification still cuts a long wait short. Two diagnostic holes
+  30 s, tokens 30 s to 300 s, Max Tracker 5 to 30 min, the optional GitHub
+  feed 30 s to 300 s) and resets on the first success, logging only the
+  transitions. A miss is a response the screen could not apply, not merely
+  a dead host: a service answering 200 with a body the parser rejects
+  backs off the same way. The tokens poller's recovery notification still
+  cuts a long wait short. `docs/observability.md` maps the new log lines. Two diagnostic holes
   closed on the way: the agent poller names the real fetch outcome
   (`IO-fel` vs `överflöde`) instead of a collapsed `ESP_FAIL`, and the HTTP
   helper's one silent failure path (no memory for a client) now logs, with
