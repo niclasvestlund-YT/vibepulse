@@ -233,7 +233,7 @@ def main():
             "\n").encode("utf-8")
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
-    except Exception:
+    except Exception:  # noqa: S110 - a hook must never fail the session start; stdout is the only channel and it just broke
         pass
     return 0
 
