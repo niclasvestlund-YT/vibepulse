@@ -59,8 +59,10 @@ Eleven tags:
 A healthy boot shows: the `boot:` banner (project name and git-describe
 version from the app descriptor, build date/time, IDF version, and the
 decoded reset reason — `strömpåslag` is normal; `PANIK`,
-`TASKVAKTHUND` or `BROWNOUT` mean the previous run died and this line is
-your only witness), `N ihågkomna nät i NVS` and `N nät i jaktlistan`
+`TASKVAKTHUND` or `BROWNOUT` mean the previous run died; since OBS-02/03
+the `omstartsliggare:` line right after it counts such boots, and a
+`coredump i flash` line says a panic dump is there to read, see the
+blind spots below), `N ihågkomna nät i NVS` and `N nät i jaktlistan`
 (the remembered-network list and the candidate hunt — `docs/wifi.md`),
 the WiFi scan table (deliberately permanent — it is
 the ground truth for "which networks can the 2.4 GHz-only S3 actually
@@ -69,17 +71,47 @@ lines every 30 s and a `heap:` line every 10 s.
 
 **Blind spots to know about:**
 
-- Nothing persists. A panic prints a backtrace and reboots; if no monitor
-  was attached at that second, the evidence never existed. The boot
-  banner names the *reason* for the last restart, but there is still no
-  coredump partition and no reboot counter (OBS-02, OBS-03).
-- The log level and console routing are inherited IDF defaults, not
-  pinned in `sdkconfig.defaults` like everything else is (OBS-28).
+- A panic now leaves two witnesses (OBS-02, OBS-03; unverified on the
+  physical unit until the next flash session). The `coredump` partition
+  holds an ELF dump of every task's stack from the last panic; the next
+  boot's banner is followed by `coredump i flash (N byte) …` when one is
+  there. **The partition table must be flashed once over USB first**
+  (`idf.py -p <port> partition-table-flash`, then a normal build/OTA):
+  OTA never writes the table (`docs/ota.md`), so a panel that got this
+  firmware over the air still has no `coredump` partition, the writer has
+  nowhere to put a dump, and the boot log says `coredump-partition saknas
+  i enhetens partitionstabell` until that one USB step is done. The new
+  row is appended after `ota_1` in free flash, so the existing slots keep
+  their offsets and the running image is untouched. Read a dump from the
+  computer with the board on USB:
+  `idf.py -p <port> coredump-info` (summary and backtrace) or
+  `idf.py -p <port> coredump-debug` (a GDB session on the dump). It stays
+  until the next panic overwrites it. And the `omstartsliggare:` line
+  right after the banner is the reboot ledger in NVS: the boot count since
+  the ledger was initialized (the first boot of a firmware that has it, or
+  the last NVS erase; OTA and app flashes preserve NVS, a full erase resets
+  it) and how many of those boots followed a PANIK, a watchdog or a
+  BROWNOUT, so "did it reboot while I was away?" is one serial line. If
+  NVS is full, damaged or holds a key of the wrong type the line says
+  which step failed and gives no counts, rather than a count that was not
+  proven saved.
+- The log level, panic behaviour and task watchdog are pinned in
+  `sdkconfig.defaults` with their reasons (OBS-28), and the root CMake
+  refuses to configure when the effective `sdkconfig` has lost the
+  coredump writer, the panic-then-reboot choice, the LVGL log (module,
+  printf sink or WARN level), the task watchdog (its five-second timeout,
+  its two idle-task subscriptions, or turned its panic option on), the
+  INFO default or the log ceiling
+  (`cmake/torget_diagnostics_guard.cmake`): defaults never migrate an old
+  generated file, so a stale checkout says so instead of building blind. `LV_USE_LOG` is on at
+  WARN, so the launcher's "app skipped for API-version mismatch" report
+  reaches the console.
 - Fetch failures name a *redacted* target (scheme, host, and whether LAN
   or the relay was tried) because the relay URL's path is a credential.
   ESP-IDF's own `HTTP_CLIENT` tag would print the whole request line at
-  `DEBUG`, but `ESP_LOGD` is compiled out at the inherited default level;
-  raising it reopens that (OBS-35).
+  `DEBUG`. `CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT` now compiles `ESP_LOGD` out
+  structurally (OBS-35); a build that raises the maximum level must clamp
+  that tag with `esp_log_level_set("HTTP_CLIENT", ESP_LOG_INFO)`.
 - Serial-monitoring a *running* board is physically unverified: the panel
   draw can bounce the board off a computer USB port
   (`docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md`).
@@ -338,9 +370,9 @@ Verbatim strings worth grepping for, and what they mean:
 | `agentstatus kunde inte skapa HTTP-klient` | fw `agent-net` | agent feed **dead until reboot**; screen shows a frozen header meanwhile (OBS-12). |
 | `heap: internt … DMA största …` | fw `torget` | every 10 s. Watch the DMA largest block: its collapse predicted the 2026-08-06 panel freeze. Nothing alerts on it yet (OBS-27). |
 | `overlaykostnad <namn>: LVGL-pool +N B …, internt ±N B …` | fw `torget` | three lines, once at boot: what each permanent top-layer overlay (wifi-setup, settings, ota) costs. The pool figure is PSRAM (LVGL's TLSF pool lives there since the 2026-08-16 freeze fix); the internal figure is the control — a zero delta means that overlay does not touch internal RAM at all. This is the measured budget the AMOLED rule requires for a persistent layer, so read it after any flash that adds or grows one. |
-| `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the whole backtrace *now* — it will not survive the reboot (OBS-02). |
-| `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. |
-| `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died and this line is the only witness. BROWNOUT → suspect the power supply first. |
+| `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the backtrace if you are watching, but since OBS-02 it also survives the reboot: the `coredump` partition holds the ELF dump, read it with `idf.py -p <port> coredump-info` (blind spots above). |
+| `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. The task watchdog is pinned in IDF's warn-only mode (`sdkconfig.defaults`, no `ESP_TASK_WDT_PANIC`): it prints and the board keeps running, so there is **no reboot, no coredump and no ledger count** for it — this line on a live serial console is the only evidence. The ledger's `vakthund` counts resets the chip attributes to a watchdog (`TASKVAKTHUND` / `AVBROTTSVAKTHUND` in the banner), which the warn-only task watchdog does not cause. |
+| `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died. The `omstartsliggare:` line right after it says how many boots did (OBS-03). A dump is there to read only when the separate `coredump i flash` line follows: expect it after PANIK; a `TASKVAKTHUND` reset (a chip-attributed watchdog, not the warn-only task watchdog above) may leave nothing but the banner and the ledger, and the notice is printed only when `esp_core_dump_image_get()` actually finds an image. BROWNOUT → suspect the power supply first; no dump is written for it. |
 | `hittar inte … — finns Claude Code på den här maskinen?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
 | `500 på /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 på` line above it is doubly interesting. |
 | `usage-omräkningen kraschade` | server log | `/api/tokens` is serving frozen totals that look fresh. `usage-omräkningen frisk igen` closes the episode; until it appears, distrust the day/month numbers. |

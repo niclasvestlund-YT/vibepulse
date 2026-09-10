@@ -37,6 +37,9 @@ idf_component_register(
   INCLUDE_DIRS "." ".." "../platform"
   REQUIRES ${TORGET_MAIN_REQUIRES}
            nvs_flash
+           # bootbanderollens "det ligger en coredump i flash" (OBS-02)
+           espcoredump
+           esp_partition
            esp_wifi
            esp_netif
            esp_event
