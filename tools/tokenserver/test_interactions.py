@@ -893,20 +893,20 @@ class ProviderStoreTests(unittest.TestCase):
 
     def test_valid_international_display_text_still_parks(self):
         event = question_event(
-            question="Vilken väg?",
+            question="Which way?",
             options=[
-                {"label": "Kör tester (Recommended)",
-                 "description": "Säker ändring"},
-                {"label": "Lämna oförändrat"},
+                {"label": "Run tests (Recommended)",
+                 "description": "Safe change"},
+                {"label": "Leave unchanged"},
             ])
 
         entry = self.store.park("question", event, 120)
 
         self.assertIsNotNone(entry)
         public = self.store.pending_public()
-        self.assertEqual(public["prompt"], "Vilken väg?")
-        self.assertEqual(public["title"], "Kör tester")
-        self.assertEqual(public["subtitle"], "Säker ändring")
+        self.assertEqual(public["prompt"], "Which way?")
+        self.assertEqual(public["title"], "Run tests")
+        self.assertEqual(public["subtitle"], "Safe change")
 
     def test_queue_is_bounded(self):
         parked = [self.store.park("approval", approval_event(), 300)
