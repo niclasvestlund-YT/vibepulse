@@ -2172,7 +2172,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     so live percentages/volume only ever reach the on-disk history for
     actual requests, never for a caller that didn't ask for it.
     """
-    global _last_result, _last_computed, _snapshot_refreshing
+    global _snapshot_refreshing
     with _cache_lock:
         if _last_result is None:
             # Första skanningen låg här, UNDER låset, och tog 211 s på en
