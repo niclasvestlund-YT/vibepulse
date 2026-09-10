@@ -198,6 +198,37 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **A panic leaves evidence, and the panel counts its reboots (OBS-02,
+  OBS-03, OBS-28, OBS-35).** In source and CI-built, **not yet flashed or
+  physically verified**: a 128K `coredump` partition (appended after
+  `ota_1`; OTA never writes the table, so one USB
+  `idf.py partition-table-flash` is needed before a dump can land, and
+  the boot log says so until then) with ELF coredumps to flash on panic, a `coredump i flash … idf.py coredump-info` notice at the
+  next boot, and a reboot ledger in NVS (`omstartsliggare: boot #N sedan
+  liggaren initierades; efter PANIK a, vakthund b, BROWNOUT c`, counted
+  since the ledger was initialized or NVS last erased, never claimed as
+  "since first flash"; a read, write or commit failure logs which step and
+  no counts) right after the boot banner, so "did it reboot while I was
+  away?" is one serial line. `sdkconfig.defaults` now
+  pins the log level (INFO, maximum equals default, which compiles
+  `ESP_LOGD` and with it the `HTTP_CLIENT` request-line leak out
+  structurally), panic print-and-reboot, the task watchdog, and LVGL's own
+  log at WARN, each with its reason. Because defaults never migrate an
+  existing generated `sdkconfig` (the 2026-08-19 lesson), the root CMake
+  now refuses to configure when the effective config has lost the coredump
+  writer, the ELF format, the panic-then-reboot choice, the INFO default
+  or the log ceiling, the task watchdog (or has its panic option on: the
+  watchdog is warn-only, pinned off in the defaults) or the LVGL log with
+  its printf sink and WARN level (`cmake/torget_diagnostics_guard.cmake`,
+  naming the missing values and the `idf.py reconfigure` fix). The ledger
+  counters saturate at their ceiling instead of wrapping to zero. `test/test_firmware_diagnostics.py`
+  holds the pins and exercises the guard both ways; `docs/observability.md`
+  has the retrieval steps, and its signature table now points a panic at
+  the dump and the ledger instead of calling the banner the only witness;
+  a `Task watchdog got triggered` warning is transient serial evidence
+  only (warn-only, so no reboot, dump or ledger count), and a
+  chip-attributed watchdog reset counts in the ledger but has a dump only
+  when the separate `coredump i flash` notice follows the banner.
 - **The panel backs off from a dead service instead of hammering it
   (OBS-13, OBS-12).** In source and CI-built, **not yet flashed**: every
   device poller ran at a fixed cadence no matter what, so a stopped

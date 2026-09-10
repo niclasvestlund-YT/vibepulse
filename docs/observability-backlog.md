@@ -51,7 +51,14 @@ the server already solved with `rev`/`startedAt` after it cost an hour
 `esp_reset_reason()` decoded to text. Cheapest line in this backlog.
 
 ### OBS-02 · Enable coredump to flash
-`firmware · M · open`
+`firmware · M · done in source (2026-09-10), physically unverified` —
+128K `coredump` partition, `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` (ELF,
+CRC32), `CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT` pinned, and
+`coredump_note()` in `app_main` logs when a dump is present and how to
+read it. CI builds it; the next flash session has to make it panic once
+(`CONFIG_TORGET_BOOT_HEALTH_FORCE_FAIL` is not a panic — an `assert(0)`
+behind a debug switch is the honest test). `test/test_firmware_diagnostics.py`
+pins the rows. Original problem:
 No `CONFIG_ESP_COREDUMP_*` anywhere, no coredump row in `partitions.csv`
 — a panic prints a backtrace to a console that is almost never attached,
 then reboots. The evidence never existed. `partitions.csv` documents 16 MB
@@ -62,7 +69,10 @@ coredump partition is free.
 document `idf.py coredump-info` retrieval in the runbook.
 
 ### OBS-03 · Reboot ledger in NVS
-`firmware · S · open`
+`firmware · S · done in source (2026-09-10), physically unverified` —
+`reboot_ledger_note()` in `main/main.c`: namespace `torget_boot`, keys
+`boots`, `panic`, `wdt`, `brownout`, one `omstartsliggare:` line after the
+banner, never a stop. Original problem:
 NVS is initialized (`main/main.c:378-383`) but never used for a single
 key. Persist per-reason reset counters + a boot counter, log them in the
 OBS-01 banner. Turns "did it reboot while I was away?" from unanswerable
@@ -522,7 +532,12 @@ Windows box before trusting either — a wire test asserting a security
 boundary must not be loosened blindly.
 
 ### OBS-28 · Pin logging config on purpose
-`firmware · S · open`
+`firmware · S · done (2026-09-10)` — `CONFIG_LOG_DEFAULT_LEVEL_INFO`,
+`CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT`, panic print+reboot, TWDT init and
+timeout, and `LV_USE_LOG` at WARN via printf, each with its reason in
+`sdkconfig.defaults`. Console routing deliberately NOT pinned: the board's
+console path (UART vs USB-Serial/JTAG) has not been confirmed on the unit
+and a wrong pin would silence the monitor. Original problem:
 `sdkconfig.defaults` deliberately pins flash, PSRAM, LVGL, and mbedTLS
 with reasoned comments — but nothing about logging: default level,
 console routing, panic behavior, TWDT are all inherited IDF defaults
@@ -555,7 +570,10 @@ that ignores the block would print `0.00 Mtok idag` for the length of the
 scan.
 
 ### OBS-35 · A raised log level puts the relay secret back on the wire
-`firmware · S · open`
+`firmware · S · done (2026-09-10)` — `CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y`
+with INFO as default compiles `ESP_LOGD` out; the pin's comment and
+`docs/observability.md` say to clamp `HTTP_CLIENT` if anyone raises it.
+Original problem:
 The panel's own fetch logs are redacted: `torget_http.c` hands every
 failure line through `tg_net_log_target()`, which keeps scheme, host and
 route and drops the path — the relay's `/u/<secret>` is its whole access
