@@ -226,6 +226,23 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   has the retrieval steps, and its signature table now points a panic and a
   watchdog at the dump and the ledger instead of calling the banner the
   only witness.
+- **The panel backs off from a dead service instead of hammering it
+  (OBS-13, OBS-12).** In source and CI-built, **not yet flashed**: every
+  device poller ran at a fixed cadence no matter what, so a stopped
+  tokenserver got a connect attempt every second from the agent-status
+  poller alone, all day. A small pure policy (`poll_backoff_policy.c`,
+  host-tested) now lets the first miss through at the normal cadence, then
+  doubles the wait per consecutive miss up to a cap (agent status 1 s to
+  30 s, tokens 30 s to 300 s, Max Tracker 5 to 30 min, the optional GitHub
+  feed 30 s to 300 s) and resets on the first success, logging only the
+  transitions. A miss is a response the screen could not apply, not merely
+  a dead host: a service answering 200 with a body the parser rejects
+  backs off the same way. The tokens poller's recovery notification still
+  cuts a long wait short. `docs/observability.md` maps the new log lines. Two diagnostic holes
+  closed on the way: the agent poller names the real fetch outcome
+  (`IO-fel` vs `överflöde`) instead of a collapsed `ESP_FAIL`, and the HTTP
+  helper's one silent failure path (no memory for a client) now logs, with
+  the target redacted like every other line there.
 - **A linter, at last (OBS-25).** `ruff` is pinned in `requirements-dev.txt`
   (and `pyproject.toml` carries the same pin as `required-version`, so a
   venv with another release is refused instead of linting differently from
