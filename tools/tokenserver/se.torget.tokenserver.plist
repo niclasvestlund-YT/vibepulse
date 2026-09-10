@@ -8,7 +8,7 @@
      keep them out of ProgramArguments so setup changes cannot go stale here.
      The log lives in ~/Library/Logs (survives a reboot, shows in the
      Console app; /tmp is cleaned by macOS). The server rotates it itself at
-     start once it has grown past the cap -- launchd has no rotation of its
+     start once it has grown past the cap; launchd has no rotation of its
      own. ThrottleInterval is the fence against respawn loops: if the
      process dies right at start, launchd waits 30 s instead of filling the
      log. -->

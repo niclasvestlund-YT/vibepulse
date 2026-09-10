@@ -394,8 +394,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                     self.assertNotIn(token, serialized)
 
     def test_windows_reads_the_credentials_file_claude_login_writes(self):
-        """Windows har ingen nyckelring — `claude login` skriver samma
-        claudeAiOauth-post till %USERPROFILE%\\.claude\\.credentials.json."""
+        """Windows has no keychain -- `claude login` writes the same
+        claudeAiOauth record to %USERPROFILE%\\.claude\\.credentials.json."""
         credentials = json.dumps({
             "claudeAiOauth": {
                 "accessToken": "windows-file-token",
@@ -430,7 +430,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 self.assertEqual(tokenserver._read_oauth_candidates(), [])
 
     def test_windows_credentials_file_that_is_garbage_is_not_a_candidate(self):
-        """Halvskriven fil under `claude login` ska ge tystnad, inte krasch."""
+        """A half-written file during `claude login` must give silence, not a crash."""
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / ".claude" / ".credentials.json"
             path.parent.mkdir(parents=True)
@@ -4953,7 +4953,7 @@ class ProbeTransitionLogTests(unittest.TestCase):
             self.assertIn("crashed", out)
             self.assertIn("-> probe_crashed: RuntimeError", out)
 
-            # Samma krasch igen: samma episod, ingen ny rad.
+            # The same crash again: the same episode, no new line.
             with self.assertNoLogs("tokenserver"):
                 tokenserver._refresh_limits()
 
