@@ -34,6 +34,17 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   previous file and memory intact. Not done here: the glass itself still
   shows the placeholder zeros as `0` for the length of the scan, because
   dashing them needs the firmware to read `usageTotals` (OBS-36).
+- **Five SessionStart tests inherited the developer's own Codex settings.**
+  `session_start.py` reads the saved `approval_policy`, `approvals_reviewer`
+  and `sandbox_mode` from `$CODEX_HOME/config.toml`, else
+  `~/.codex/config.toml`, *before* it checks service health, on purpose: a
+  saved `never` is the failure that looks exactly like a broken panel. Run
+  on a machine whose real config says `never`, that same rule turned five
+  service-health tests red on an unchanged checkout (issue #93). The test
+  harness now hands every script an empty `CODEX_HOME` unless a test
+  supplies its own; the explicit permission-mode tests still pass theirs
+  and still prove the production check. A new test poisons the fallback
+  home directory and asserts the isolation wins.
 - **The host gate could not go green anywhere but Europe.** Every Max
   Tracker test stamped its synthetic records at a fixed UTC hour such as
   `T10:00:00Z` and expected the store to file them under that same calendar
