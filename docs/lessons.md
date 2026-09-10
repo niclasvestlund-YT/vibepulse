@@ -50,6 +50,24 @@ and the header gate; `test_publisher.py` proves a placeholder is not sent;
 each classify the state. **Watch for:** a new producer that computes under
 `_cache_lock`, and a new `/api/tokens` reader that forgets the header and
 mistakes the 503 for a dead service.
+## 2026-09-10 · A hand-written label map was a parser with six entries and a hundred inputs
+
+**What happened:** the agent rows on the panel typeset six model ids by
+hand (`MODEL_LABELS`) and let every other id in `prices.json` fall
+through as a raw lowercase string clipped at 24 bytes: `claude-fable-5-1`
+sat next to `OPUS 5`, and `claude-haiku-4-5-20251001` rendered as
+`claude-haiku-4-5-2025100` (OBS-30). **Root cause:** a lookup table is a
+parser whose grammar is "the cases someone remembered"; every new model
+was a silent miss with no test to fail. **The rule now:** derive the label
+from the id's own structure (family, version, variant; every snapshot
+date form dropped, including the compact `-0613` token before a variant)
+and keep the map for genuine exceptions only. **Guards:** a test walks
+every id in `prices.json` and every label fits the firmware column; the
+compact-snapshot forms are pinned after a Codex review found them.
+**Watch for:** an id shape neither grammar nor table knows — it lands
+uppercased, not clipped, but check it against Claude's own client before
+shipping a hand override.
+
 ## 2026-09-10 · A store that starts over on a bad file destroys the evidence on its next save
 
 **What happened:** none of the three state files was ever corrupted in the
