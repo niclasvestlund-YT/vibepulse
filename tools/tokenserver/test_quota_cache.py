@@ -151,6 +151,32 @@ class QuotaCacheTests(unittest.TestCase):
             self.assertEqual(cache.latest("codex", "general_weekly", now=300),
                              decreased)
 
+    def test_corrupt_file_is_quarantined_not_overwritten(self):
+        # OBS-11.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "quota.json"
+            path.write_text('{"v": 1, "records": [', encoding="utf-8")
+            with self.assertLogs("tokenserver.state", level="WARNING") as captured:
+                cache = QuotaCache(path)
+            self.assertIsNone(cache.latest("claude", "general_weekly"))
+            self.assertFalse(path.exists())
+            quarantined = list(path.parent.glob("quota.json.corrupt-*"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual(quarantined[0].read_text(encoding="utf-8"),
+                             '{"v": 1, "records": [')
+            self.assertIn("quarantined as quota.json.corrupt-",
+                          "\n".join(captured.output))
+
+    def test_wrong_shape_is_quarantined_too(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "quota.json"
+            path.write_text('{"v": 1, "records": [], "extra": 1}',
+                            encoding="utf-8")
+            with self.assertLogs("tokenserver.state", level="WARNING"):
+                QuotaCache(path)
+            self.assertEqual(
+                len(list(path.parent.glob("quota.json.corrupt-*"))), 1)
+
     def test_load_ignores_malformed_sibling_record(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "quota.json"

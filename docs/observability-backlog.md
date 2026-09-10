@@ -179,7 +179,11 @@ event happens to re-mark dirty.
 cycle retry.
 
 ### OBS-11 · Corrupt state files are silently wiped — quarantine them instead
-`server · S · open`
+`server · S · done (2026-09-10)` — `state_files.quarantine_corrupt` moves
+the file to `<name>.corrupt-<UTC stamp>` and logs one WARNING (file and
+reason, never contents) before the store starts empty; all three loaders
+use it, for invalid JSON, non-UTF-8 bytes and wrong top-level shape alike.
+Tested per store. Original problem:
 All three state stores respond to a corrupt file by starting empty with
 no message: `max_tracker.py:1095-1102` (up to **400 days** of history
 plus backfill watermarks), `quota_cache.py:112`, `usage_history.py:81`.
@@ -352,7 +356,12 @@ through that prompt; if they deny it, the only trace is
 one logged transition (OBS-04).
 
 ### OBS-21 · Two of three state writers skip the directory fsync
-`server · S · open`
+`server · S · done (2026-09-10)` — `state_files.fsync_parent` (the
+quota_cache pattern, Windows no-op included) now runs after the rename in
+`max_tracker._atomic_write` and `usage_history._persist`; quota_cache
+delegates to the same helper. A failing parent fsync raises, so the Max
+Tracker writer re-marks dirty and retries and `record_many` restores its
+memory. Original problem:
 `quota_cache` does the full atomic dance — file fsync, rename, *parent
 directory fsync*, with rollback (`quota_cache.py:148-154`) — precisely
 because a rename can otherwise evaporate on power loss.

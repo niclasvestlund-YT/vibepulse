@@ -7,6 +7,36 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **A corrupt state file was wiped, silently, by the next save (OBS-11).**
+  All three stores (`max-tracker.json` with up to 400 days of history,
+  `quota-cache.json`, `usage-history.json`) answered unreadable bytes by
+  starting empty with no message, and the next save overwrote the evidence.
+  Each now moves the file aside as `<name>.corrupt-<UTC stamp>` beside the
+  original and logs one WARNING naming the file and the reason (never the
+  contents), then starts empty. The bytes are usually 99 % intact, so the
+  option to look or hand-repair is kept. Wrong-shape JSON counts too, and
+  a non-UTF-8 `max-tracker.json`, which used to raise out of the
+  constructor and stop the service from starting, is quarantined the same
+  way. One helper (`state_files.py`) holds the rule for all three, and the
+  quarantine rename gets the same directory fsync as a save, so the kept
+  copy is durable before the warning says it is. Two more edges from the
+  review: a file that exists but cannot be read (permissions, I/O) makes
+  the store start empty *and refuse to save*, since a rename needs only
+  the directory's permission and would have overwritten it; and a
+  provider section that is a dict but not the `{v, days, weeks,
+  backfill}` shape `save()` writes is quarantined rather than skimmed.
+  The usage history keeps its new state in memory when the replace has
+  landed but the directory fsync failed (disk and memory agree), instead
+  of rolling back and dropping that sample on the next save.
+
+- **Two of three state writers stopped one fsync short of durable
+  (OBS-21).** `quota-cache.json` always did the full atomic dance: file
+  fsync, rename, parent-directory fsync. `max-tracker.json` and
+  `usage-history.json` stopped at the file fsync, so a power cut right
+  after the rename could bring back the previous file or none; the one
+  with 400 days in it was the least protected. Both now fsync the parent
+  through the same shared helper (a no-op on Windows, which has no
+  directory descriptors, exactly as the quota cache already handled it).
 - **`effort` was null for every Claude job.** `agent_status.py` read it
   from inside the API `message`, beside `model`. Claude Code writes it on
   the transcript *record*, beside `type` and `version`: measured on a live
