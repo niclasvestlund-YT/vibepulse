@@ -112,6 +112,25 @@ def classify_startup_health(root, tokens):
         return (f"VibePulse startup health: PROVIDER DATA STALE ({providers}). "
                 f"{action}{risk}")
 
+    # Issue #62: the service answers at once while its first history scan
+    # runs, so a fresh quota can ride beside placeholder volume counters.
+    # A scan that is running is a wait; a recompute that keeps failing
+    # (or froze the totals, OBS-08) is a fault, not "HEALTHY".
+    totals = tokens.get("usageTotals")
+    totals_state = totals.get("state") if isinstance(totals, dict) else None
+    if root.get("usageComputeOk") is False or totals_state == "failing":
+        return ("VibePulse startup health: VOLUME RECOMPUTE FAILING; quota "
+                "data is fresh but the token-volume recompute behind "
+                "/api/tokens is crashing, so the value page shows dashes or "
+                "frozen totals. Read the tokenserver log for "
+                "`usage-omräkningen kraschade` and run the tokenserver smoke "
+                f"test.{risk}")
+    if totals_state == "refreshing":
+        return ("VibePulse startup health: SERVICE WARMING UP; quota data is "
+                "fresh and the first history scan is still running, so the "
+                "volume counters are placeholders for a few minutes. Nothing "
+                f"to fix; recheck shortly.{risk}")
+
     panel = interactions.get("panel")
     if not isinstance(panel, dict):
         return ("VibePulse startup health: PANEL DIAGNOSTICS UNAVAILABLE; "
