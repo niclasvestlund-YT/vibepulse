@@ -174,9 +174,10 @@ Returns live server state, added after real debugging nights:
   completed cycle (`null` before the first). Dashes on the screen look
   the same whether the probe is failing every four minutes or resting;
   these say which. The smoke test prints them beside a non-ok status.
-  All of them, the status string, the credential block and the header
-  evidence are copied under one lock, so a response never pairs one
-  cycle's status with another's numbers.
+  All of them, the status string, the credential block, the 429 rest and
+  the header evidence are copied under one lock, the same one the probe
+  publishes them under, so a response never pairs one cycle's status
+  with another's numbers.
 - `claudeCredential` — the content-free pre-expiry guard for the saved Claude
   Code credential: `ready`, `expiring`, `expired`, `unavailable`, or
   `unknown`, plus whole `expiresInMin` when known, and on macOS a `reason`
@@ -193,8 +194,10 @@ Returns live server state, added after real debugging nights:
 - `ratelimitHeaders` / `unknownRateLimitBuckets` — header names seen by
   the fallback probe in the **most recent** cycle; a cycle that never
   reached the fallback (the usage contract answered, or every token was
-  rejected first) publishes them empty, so they never sit hours-old
-  beside a current failure. A non-empty `unknownRateLimitBuckets` means
+  rejected first) publishes them empty, and so does a cycle that never
+  ran at all (`probe_held_by_other_instance`, `probe_crashed`), so they
+  never sit hours-old beside a current failure. A non-empty
+  `unknownRateLimitBuckets` means
   Anthropic added a bucket we don't map yet: file it.
 - `usageComputeOk` / `usageComputeFailingForS` — whether the recompute
   behind `/api/tokens` is healthy. `false` means the served token totals

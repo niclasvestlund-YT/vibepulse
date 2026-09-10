@@ -642,9 +642,18 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                     mock.patch.object(tokenserver, "_dead_tokens", {}), \
                     mock.patch.object(tokenserver, "_probe_cooldown_until",
                                       0.0), \
+                    mock.patch.object(tokenserver, "_probe_headers",
+                                      ["anthropic-ratelimit-unified-status"]), \
+                    mock.patch.object(tokenserver, "_probe_unknown_buckets",
+                                      ["7d_haiku"]), \
                     mock.patch.object(tokenserver.urllib.request, "urlopen",
                                       side_effect=explode):
                 found = tokenserver._probe_limits()
+                # Codex review of #111: the evidence is the most recent
+                # cycle's, and this cycle saw none — an earlier fallback's
+                # names must not sit beside the new status.
+                self.assertEqual(tokenserver._probe_headers, [])
+                self.assertEqual(tokenserver._probe_unknown_buckets, [])
         finally:
             holder.close()
 
@@ -1241,10 +1250,12 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             "usage_request_failed: URLError; fallback_http_500"
             " + no_mapped_headers")
 
-    def test_a_crashing_cycle_publishes_nothing_but_the_crash(self):
+    def test_a_crashing_cycle_publishes_the_crash_with_empty_evidence(self):
         with mock.patch.object(tokenserver, "_probe_status",
                                "usage_http_200 + ok"), \
                 mock.patch.object(tokenserver, "_probe_headers", ["h"]), \
+                mock.patch.object(tokenserver, "_probe_unknown_buckets",
+                                  ["7d_haiku"]), \
                 mock.patch.object(tokenserver, "_probe_status_logged",
                                   "usage_http_200 + ok"), \
                 mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
@@ -1257,7 +1268,10 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             tokenserver._refresh_limits()
             self.assertEqual(tokenserver._probe_status,
                              "probe_crashed: KeyError")
-            self.assertEqual(tokenserver._probe_headers, ["h"])
+            # A status-only cycle publishes empty evidence, not the
+            # previous cycle's (Codex review of #111).
+            self.assertEqual(tokenserver._probe_headers, [])
+            self.assertEqual(tokenserver._probe_unknown_buckets, [])
 
     def test_a_cycle_publishes_its_backoff_with_its_outcome(self):
         # Codex review of #111: the streak and timestamp used to be written
@@ -1301,6 +1315,51 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             self.assertEqual(tokenserver._probe_failure_streak, 1)
             self.assertFalse(tokenserver._probe_cycle_published)
             self.assertFalse(tokenserver._limits_refreshing)
+
+    def test_a_429_publishes_its_cooldown_with_its_status(self):
+        # Codex review of #111: the cooldown used to be assigned on the
+        # probe thread outside _limits_lock, so GET / could pair the new
+        # rest with the previous cycle's status and streak.
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(
+                req.get_full_url(), 429, "Too Many Requests", None, None)
+
+        published = []
+
+        def spy_publish(outcome, refreshed):
+            # What the world can see the moment the outcome lands.
+            self.assertIsNotNone(outcome.cooldown_until)
+            self.assertTrue(outcome.status.startswith(
+                "usage_http_429 + backoff_until_"), outcome.status)
+            published.append(tokenserver._probe_cooldown_until)
+            real_publish(outcome, refreshed)
+
+        real_publish = tokenserver._publish_probe_outcome
+        with mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_probe_status", "not_run"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_save_probe_state") as saved, \
+                mock.patch.object(tokenserver, "_publish_probe_outcome",
+                                  side_effect=spy_publish), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("fresh-token", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            view = tokenserver._probe_view()
+            # Before publish the global was untouched; after it the view
+            # pairs the 429 status, its streak and its rest.
+            self.assertEqual(published, [0.0])
+            self.assertGreater(tokenserver._probe_cooldown_until,
+                               time.time() + 500)
+            self.assertTrue(view["claudeProbe"].startswith(
+                "usage_http_429 + backoff_until_"))
+            self.assertEqual(view["claudeProbeStreak"], 1)
+            self.assertGreater(view["claudeProbeCooldownLeftS"], 500)
+            # The persisted value is the published one.
+            saved.assert_called_once_with(tokenserver._probe_cooldown_until)
 
     def test_probe_view_copies_every_correlated_field_under_one_lock(self):
         with mock.patch.object(tokenserver, "_probe_status",
