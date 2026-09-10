@@ -232,10 +232,10 @@ healthy empty polling, accepted live rows, and the one-shot stale clear when a
 debugger or future local diagnostic surface reads it. They are reset on app
 start and are not persistent telemetry.
 
-Not exposed yet, so invisible from outside: the probe's failure streak
-and slowed interval, and any Codex-side probe status (OBS-18). This
-endpoint is also absent from the runbook (OBS-23) — this section is
-currently its only documentation.
+Still not exposed, so invisible from outside: any Codex-side probe status
+(the Claude probe's streak and slowed interval are the `claudeProbe*`
+fields above since OBS-18). This endpoint's field-by-field documentation
+lives in this section only (OBS-23).
 
 ### 4. Server state files
 
