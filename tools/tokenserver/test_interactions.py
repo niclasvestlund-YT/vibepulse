@@ -1159,13 +1159,15 @@ class RelayStoreListenerTests(unittest.TestCase):
             barrier = threading.Barrier(3)
             results = []
 
-            def direct():
+            def direct(entry=entry, stamp=stamp, direct_mac=direct_mac,
+                       barrier=barrier, results=results):
                 barrier.wait()
                 results.append(self.store.resolve(
                     entry.request_id, "deny", stamp, direct_mac,
                     provider="claude", view_sha256=entry.view_sha256))
 
-            def relayed():
+            def relayed(relay_result=relay_result, barrier=barrier,
+                        results=results):
                 barrier.wait()
                 results.append(self.store.resolve_relay(
                     relay_result, lambda _job, _result: True))

@@ -103,7 +103,7 @@ class DiscoveryAdvertiser:
             if zc is not None:
                 try:
                     zc.close()
-                except Exception:
+                except Exception:  # noqa: S110 - already on the error path; the warning below carries the cause
                     pass
             self.status = "error"
             self.reason = type(exc).__name__

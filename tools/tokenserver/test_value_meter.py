@@ -482,7 +482,7 @@ class PriceTableTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "prices.json"
             path.write_text("{ not json")
-            with self.assertRaises(Exception):
+            with self.assertRaises(ValueError):  # json.JSONDecodeError
                 value_meter.load_prices(path)
 
 
