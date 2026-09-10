@@ -7,6 +7,17 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **Unmapped models reached the panel as raw ids (OBS-30).** The agent
+  rows typeset six model ids by hand (`OPUS 5`, `GPT-5.6 SOL`, ...) and let
+  the other hundred-odd in `prices.json` fall through as raw lowercase,
+  clipped at 24 bytes mid-string: `claude-haiku-4-5-20251001` rendered as
+  `claude-haiku-4-5-2025100` next to its typeset siblings. The label is now
+  derived from the id (family, version and variant uppercased, the dated
+  suffix dropped: `HAIKU 4.5`, `OPUS 4.8`, `SONNET 3.7`, `GPT-5.4 MINI`,
+  `O4 MINI`, `MYTHOS PREVIEW`), so a model the agent picks tomorrow is
+  typeset on arrival. The hand map stays for exceptions only, and a test
+  proves every priced model derives an uppercase label that fits the
+  panel's column.
 - **A corrupt state file was wiped, silently, by the next save (OBS-11).**
   All three stores (`max-tracker.json` with up to 400 days of history,
   `quota-cache.json`, `usage-history.json`) answered unreadable bytes by
