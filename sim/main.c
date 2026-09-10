@@ -352,9 +352,11 @@ static void feed_tokens_file(const char *file) {
   tk_tokens t;
   if (json && tk_tokens_parse(json, len, &t)) {
     tokens_apply(&t);
-    if (t.volume_placeholder && t.volume_failing) {
+    if (t.volume_failing) {
       printf("tokens: volymomräkningen på datorn kraschar — värdesidan "
-             "visar streck, kvoten är live\n");
+             "visar streck (%s), kvoten är live\n",
+             t.volume_placeholder ? "ingen skanning har lyckats än"
+                                  : "räknarna är frysta");
     } else if (t.volume_placeholder) {
       /* Värddatorn skannar historiken (issue #62): platshållare, inte
          mätning — samma ärlighet som net.c. */

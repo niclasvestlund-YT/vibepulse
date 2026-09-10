@@ -124,11 +124,13 @@ static void net_task(void *arg) {
       /* Utan Claude-källa är volymsiffrorna nollor som inte är mätningar.
        * Loggen säger det i stället för att skriva ut "0.00 Mtok idag",
        * som läses som en dag utan arbete. */
-      if (t.volume_placeholder && t.volume_failing) {
+      if (t.volume_failing) {
         ESP_LOGW(TAG,
                  "hämtning ok (volymomräkningen på datorn kraschar — "
-                 "värdesidan visar streck; kvoten är live, stale "
+                 "värdesidan visar streck, %s; kvoten är live, stale "
                  "claude=%d fable=%d codex=%d)",
+                 t.volume_placeholder ? "ingen skanning har lyckats än"
+                                      : "räknarna är frysta",
                  t.claude_week.stale, t.claude_model_week.stale,
                  t.codex_week.stale);
       } else if (t.volume_placeholder) {

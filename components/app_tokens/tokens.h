@@ -117,7 +117,9 @@ typedef struct {
   /* 1 när samma block säger `state: "failing"`: omräkningen på datorn
    * kraschar och värdet kommer inte av sig självt. Skärmen visar då streck
    * på värdesidan i stället för gamla siffror som ser färska ut (Codex-
-   * granskning av #104). Bara meningsfull ihop med volume_placeholder. */
+   * granskning av #104). Gäller oavsett volume_placeholder: efter en
+   * lyckad skanning serverar tjänsten FRYSTA räknare med placeholder
+   * false och state failing (OBS-08), och de är lika lite en mätning. */
   int volume_failing;
 
   /* taken (null-bara). claude_model_week är veckofönstret för tyngsta

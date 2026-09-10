@@ -163,6 +163,13 @@ int main(void) {
               "\"daySessions\":1,\"monthTokens\":5," BASE_NULLS
               ",\"usageTotals\":{\"state\":\"ready\",\"ageS\":2,"
               "\"placeholder\":false}}", &t) && t.volume_placeholder == 0);
+  memset(&t, 0, sizeof t);
+  check("failing utan platshållare (frysta räknare) sätter bara failing",
+        PARSE("{\"v\":2,\"dayTokens\":5,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":5," BASE_NULLS
+              ",\"usageTotals\":{\"state\":\"failing\",\"ageS\":900,"
+              "\"placeholder\":false}}", &t) &&
+        t.volume_placeholder == 0 && t.volume_failing == 1);
   check("usageTotals som sträng avvisar inte och är ingen platshållare",
         PARSE("{\"v\":2,\"dayTokens\":5,\"dayTokensPerHour\":0,"
               "\"daySessions\":1,\"monthTokens\":5," BASE_NULLS
