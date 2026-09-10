@@ -9,7 +9,8 @@
 # Each argument is the effective CONFIG_* value as CMake sees it after the
 # IDF project() call ("y" when set, "" when unset or =n).
 function(torget_require_diagnostics coredump_to_flash coredump_elf
-         log_default_info log_max_equals_default task_wdt lv_use_log)
+         log_default_info log_max_equals_default task_wdt lv_use_log
+         lv_log_printf lv_log_level_warn)
   set(_missing "")
   if(NOT "${coredump_to_flash}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y")
@@ -32,6 +33,14 @@ function(torget_require_diagnostics coredump_to_flash coredump_elf
   endif()
   if(NOT "${lv_use_log}" STREQUAL "y")
     list(APPEND _missing "CONFIG_LV_USE_LOG=y")
+  endif()
+  # LV_USE_LOG alone has no sink: nothing registers lv_log_register_print_cb,
+  # so the printf sink and the WARN level are part of the promise too.
+  if(NOT "${lv_log_printf}" STREQUAL "y")
+    list(APPEND _missing "CONFIG_LV_LOG_PRINTF=y")
+  endif()
+  if(NOT "${lv_log_level_warn}" STREQUAL "y")
+    list(APPEND _missing "CONFIG_LV_LOG_LEVEL_WARN=y")
   endif()
   if(NOT "${_missing}" STREQUAL "")
     string(REPLACE ";" ", " _missing_text "${_missing}")

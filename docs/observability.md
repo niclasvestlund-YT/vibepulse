@@ -59,8 +59,10 @@ Eleven tags:
 A healthy boot shows: the `boot:` banner (project name and git-describe
 version from the app descriptor, build date/time, IDF version, and the
 decoded reset reason — `strömpåslag` is normal; `PANIK`,
-`TASKVAKTHUND` or `BROWNOUT` mean the previous run died and this line is
-your only witness), `N ihågkomna nät i NVS` and `N nät i jaktlistan`
+`TASKVAKTHUND` or `BROWNOUT` mean the previous run died; since OBS-02/03
+the `omstartsliggare:` line right after it counts such boots, and a
+`coredump i flash` line says a panic dump is there to read, see the
+blind spots below), `N ihågkomna nät i NVS` and `N nät i jaktlistan`
 (the remembered-network list and the candidate hunt — `docs/wifi.md`),
 the WiFi scan table (deliberately permanent — it is
 the ground truth for "which networks can the 2.4 GHz-only S3 actually
@@ -96,7 +98,8 @@ lines every 30 s and a `heap:` line every 10 s.
 - The log level, panic behaviour and task watchdog are pinned in
   `sdkconfig.defaults` with their reasons (OBS-28), and the root CMake
   refuses to configure when the effective `sdkconfig` has lost the
-  coredump writer, the LVGL log, the task watchdog or the log ceiling
+  coredump writer, the LVGL log (module, printf sink or WARN level), the
+  task watchdog, the INFO default or the log ceiling
   (`cmake/torget_diagnostics_guard.cmake`): defaults never migrate an old
   generated file, so a stale checkout says so instead of building blind. `LV_USE_LOG` is on at
   WARN, so the launcher's "app skipped for API-version mismatch" report

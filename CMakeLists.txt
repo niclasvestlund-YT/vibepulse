@@ -82,7 +82,9 @@ torget_require_diagnostics(
   "${CONFIG_LOG_DEFAULT_LEVEL_INFO}"
   "${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"
   "${CONFIG_ESP_TASK_WDT_INIT}"
-  "${CONFIG_LV_USE_LOG}")
+  "${CONFIG_LV_USE_LOG}"
+  "${CONFIG_LV_LOG_PRINTF}"
+  "${CONFIG_LV_LOG_LEVEL_WARN}")
 
 # LVGL:s minnespool till PSRAM (frysfix 2026-08-16, se docs/lessons.md och
 # main/lv_psram_pool.c). LVGL:s inbyggda allokator lägger annars sin

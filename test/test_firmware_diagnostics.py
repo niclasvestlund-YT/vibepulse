@@ -48,6 +48,8 @@ for pin in (
     "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
     "CONFIG_ESP_TASK_WDT_INIT=y",
     "CONFIG_LV_USE_LOG=y",
+    "CONFIG_LV_LOG_PRINTF=y",
+    "CONFIG_LV_LOG_LEVEL_WARN=y",
 ):
     assert re.search(rf"^{re.escape(pin)}$", config, re.M), f"missing pin {pin}"
 assert "CONFIG_LOG_DEFAULT_LEVEL_DEBUG" not in config, (
@@ -68,6 +70,8 @@ for effective in (
     '"${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"',
     '"${CONFIG_ESP_TASK_WDT_INIT}"',
     '"${CONFIG_LV_USE_LOG}"',
+    '"${CONFIG_LV_LOG_PRINTF}"',
+    '"${CONFIG_LV_LOG_LEVEL_WARN}"',
 ):
     assert effective in root_cmake, f"guard must read {effective}"
 assert root_cmake.index("project(torget)") < root_cmake.index(
@@ -86,7 +90,7 @@ def run_guard(values):
                               capture_output=True, check=False, text=True)
 
 
-ok = run_guard(["y"] * 6)
+ok = run_guard(["y"] * 8)
 assert ok.returncode == 0, ok.stdout + ok.stderr
 for index, name in enumerate((
         "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y",
@@ -96,9 +100,13 @@ for index, name in enumerate((
         "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
         "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
         "CONFIG_ESP_TASK_WDT_INIT=y",
-        "CONFIG_LV_USE_LOG=y")):
+        "CONFIG_LV_USE_LOG=y",
+        # LV_USE_LOG without the printf sink or the WARN level is a log
+        # nobody reads: no lv_log_register_print_cb exists in the tree.
+        "CONFIG_LV_LOG_PRINTF=y",
+        "CONFIG_LV_LOG_LEVEL_WARN=y")):
     for stale in ("", "n"):
-        values = ["y"] * 6
+        values = ["y"] * 8
         values[index] = stale
         result = run_guard(values)
         diagnostic = " ".join((result.stdout + result.stderr).split())
