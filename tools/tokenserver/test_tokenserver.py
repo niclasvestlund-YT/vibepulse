@@ -56,7 +56,7 @@ class StubHistory:
 
 
 class _FakeUsageResponse:
-    """Minsta möjliga urlopen-svar: kontexthanterare med en read()."""
+    """The smallest possible urlopen answer: a context manager with a read()."""
 
     def __init__(self, payload):
         self._payload = payload
@@ -175,9 +175,9 @@ class ClaudePlanUsageFallbackTests(unittest.TestCase):
 
 class ClaudeLimitHeaderTests(unittest.TestCase):
     def setUp(self):
-        # Probelåset och straffrutefilen pekas om till en tempkatalog så
-        # testerna aldrig samsas om de riktiga filerna med en levande
-        # tokenserver på samma maskin — och aldrig läser in en äkta backoff.
+        # The probe lock and the penalty-box file are pointed at a temp
+        # directory so the tests never share the real files with a live
+        # tokenserver on the same machine -- and never load a real backoff.
         self._lock_dir = tempfile.TemporaryDirectory(prefix="probe-lock-")
         for attr, value in (
                 ("_PROBE_LOCK_PATH",
@@ -212,9 +212,10 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertIn("modelIdentity", parsed)
 
     def test_usage_endpoint_maps_inactive_fable_pool_with_real_usage(self):
-        """Live-svaret 2026-08-14: Fable veckan på 11 % bar is_active=false
-        (flaggan pekar ut den BINDANDE gränsen, inte poolens existens) och
-        procenten försvann från glaset. Verklig förbrukning ska visas."""
+        """The live answer of 2026-08-14: the Fable week at 11 % carried
+        is_active=false (the flag marks the BINDING limit, not the pool's
+        existence) and the percentage vanished from the glass. Real
+        consumption must be shown."""
         parsed = tokenserver._parse_usage_limits({
             "limits": [{
                 "kind": "weekly_scoped", "percent": 11,
@@ -229,8 +230,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(parsed["modelLabel"], "FABLE · WEEK")
 
     def test_usage_endpoint_leaves_untouched_inactive_pool_unnamed(self):
-        """0 % OCH inaktiv = en aldrig använd modellpool — den tar ingen
-        plats på glaset. Gränsen sitter vid verklig förbrukning."""
+        """0 % AND inactive = a never-used model pool -- it takes no space
+        on the glass. The line is drawn at real consumption."""
         parsed = tokenserver._parse_usage_limits({
             "limits": [{
                 "kind": "weekly_scoped", "percent": 0,
@@ -257,9 +258,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertNotIn("modelLabel", parsed)
 
     def test_ota_available_reads_newest_valid_torget_binary(self):
-        """Annonsen läser versionen ur torget.bin:s appbeskrivning: rätt
-        magi, rätt projekt, nyaste mtime vinner; skräp och främmande
-        projekt annonseras aldrig."""
+        """The announcement reads the version from torget.bin's app
+        descriptor: right magic, right project, newest mtime wins; junk and
+        foreign projects are never announced."""
         def fake_bin(version, project=b"torget"):
             desc = (b"\x32\x54\xcd\xab" + b"\x00" * 12 +
                     version.ljust(32, "\x00").encode() +
@@ -312,8 +313,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                                   side_effect=run):
             candidates = tokenserver._read_oauth_candidates()
 
-        # Processtokenen först, men den utgångna nyckelringsposten står kvar
-        # som reserv — probens utgångsspärr sorterar bort den vid behov.
+        # The process token first, but the expired keychain entry stays as
+        # a fallback -- the probe's expiry guard sorts it out when needed.
         self.assertEqual(candidates, [
             ("fresh-process-token", None),
             ("expired-keychain-token", 1),
@@ -416,8 +417,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                                           "no subprocess on Windows")):
                 candidates = tokenserver._read_oauth_candidates()
 
-        # Filen är enda källan: ingen pgrep, inget `security`, ingen
-        # utgången processtoken att sortera bort.
+        # The file is the only source: no pgrep, no `security`, no expired
+        # process token to sort out.
         self.assertEqual(
             candidates, [("windows-file-token", 1_900_000_000_000)])
 
@@ -442,8 +443,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 self.assertEqual(tokenserver._read_oauth_candidates(), [])
 
     def test_macos_ignores_a_credentials_file(self):
-        """Macen läser nyckelringen. En kvarglömd .credentials.json på samma
-        maskin får inte smyga in en tredje kandidat."""
+        """The Mac reads the keychain. A forgotten .credentials.json on the
+        same machine must not sneak in a third candidate."""
         keychain = json.dumps({
             "claudeAiOauth": {
                 "accessToken": "keychain-token",
@@ -476,8 +477,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             candidates, [("keychain-token", 1_900_000_000_000)])
 
     def test_windows_probe_reaches_the_api_with_the_file_token(self):
-        """Hela Windows-kedjan i ett svep: fil → kandidat → lås → API-svar.
-        Enhetstesten ovan kan alla passera medan kedjan ändå är bruten."""
+        """The whole Windows chain in one sweep: file -> candidate -> lock ->
+        API answer. The unit tests above can all pass while the chain is
+        still broken."""
         calls = []
 
         def fake_urlopen(req, timeout=None):
@@ -538,8 +540,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 Path(r"C:\Users\erik\AppData\Local") / "VibePulse")
 
     def test_state_dir_falls_back_when_localappdata_is_unset(self):
-        """En tjänst som startas utan användarmiljö (Task Scheduler under
-        SYSTEM) saknar LOCALAPPDATA — sökvägen ska ändå bli den rätta."""
+        """A service started without a user environment (Task Scheduler
+        under SYSTEM) lacks LOCALAPPDATA -- the path must still be right."""
         env = dict(tokenserver.os.environ)
         env.pop("LOCALAPPDATA", None)
         with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
@@ -599,9 +601,10 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                           "Bearer fresh-keychain-token"])
 
     def test_probe_never_resends_a_dead_token(self):
-        """429-straffrutan 2026-08-14: nyckelringstokenen dog på natten och
-        Desktops frusna processtoken hamrades mot API:t varje cykel i timmar.
-        Ett värde som fått 401 ska aldrig lämna Macen igen."""
+        """The 429 penalty box of 2026-08-14: the keychain token died
+        overnight and Desktop's frozen process token was hammered against
+        the API every cycle for hours. A value that got a 401 must never
+        leave the Mac again."""
         calls = []
 
         def fake_urlopen(req, timeout=None):
@@ -621,18 +624,20 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
 
         self.assertIsNone(first)
         self.assertIsNone(second)
-        # Exakt ETT nätanrop: avvisningen minns och andra cykeln rör inte
-        # nätet alls med det döda värdet.
+        # Exactly ONE network call: the rejection is remembered and the
+        # second cycle does not touch the network at all with the dead
+        # value.
         self.assertEqual(calls, ["Bearer dead-token"])
         self.assertEqual(status, "token_dead_awaiting_refresh")
 
     @unittest.skipUnless(fcntl is not None, "POSIX flock regression")
     def test_probe_yields_when_another_instance_holds_the_lock(self):
-        """Maskinvida enprobe-garantin: håller någon annan process låset gör
-        cykeln INGEN nätaktivitet alls — extra instanser (worktree, manuell
-        start) blir strukturellt ofarliga för 429-straffrutan."""
+        """The machine-wide single-probe guarantee: if another process holds
+        the lock the cycle does NO network activity at all -- extra
+        instances (a worktree, a manual start) become structurally harmless
+        for the 429 penalty box."""
         def explode(req, timeout=None):
-            raise AssertionError("upstream-anrop trots att låset var upptaget")
+            raise AssertionError("upstream call although the lock was held")
 
         holder = open(tokenserver._PROBE_LOCK_PATH, "w")
         fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -662,9 +667,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                          "probe_held_by_other_instance")
 
     def test_probe_lock_uses_msvcrt_when_there_is_no_fcntl(self):
-        """Windows saknar fcntl. Enprobe-grinden får inte tyst försvinna där
-        — den tas med msvcrt.locking i stället, samma icke-blockerande
-        semantik."""
+        """Windows has no fcntl. The single-probe gate must not silently
+        vanish there -- it is taken with msvcrt.locking instead, the same
+        non-blocking semantics."""
         calls = []
 
         class FakeMsvcrt:
@@ -684,7 +689,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             self.assertIsNotNone(handle)
             handle.close()
             self.assertEqual(calls, [(FakeMsvcrt.LK_NBLCK, 1)])
-            # Låset måste ha en byte att sätta tänderna i.
+            # The lock must have a byte to sink its teeth into.
             self.assertEqual(path.read_text(encoding="utf-8"), "1")
 
     def test_probe_lock_yields_when_msvcrt_reports_a_held_range(self):
@@ -703,8 +708,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                 self.assertIsNone(tokenserver._hold_probe_lock())
 
     def test_probe_retries_a_refreshed_token_value(self):
-        """Dödmarkeringen sitter på VÄRDET: när källan levererar en ny
-        sträng (Claude Code förnyade i nyckelringen) provas den direkt."""
+        """The dead mark sits on the VALUE: when the source delivers a new
+        string (Claude Code renewed it in the keychain) it is tried at
+        once."""
         calls = []
 
         def fake_urlopen(req, timeout=None):
@@ -732,9 +738,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(calls, ["Bearer dead-token", "Bearer refreshed-token"])
 
     def test_probe_ok_when_session_window_lapsed(self):
-        """Speglar ett live-svar 2026-08-13: sessionsfönstret hade löpt ut
-        minuter tidigare, veckosiffrorna var giltiga. Proben ska behålla dem
-        i stället för att falla vidare till header-proben."""
+        """Mirrors a live answer of 2026-08-13: the session window had
+        lapsed minutes earlier, the week figures were valid. The probe must
+        keep them instead of falling through to the header probe."""
         calls = []
 
         def fake_urlopen(req, timeout=None):
@@ -783,8 +789,9 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertIsNone(second)
         self.assertTrue(status.startswith("usage_http_429 + backoff_until_"),
                         status)
-        # 429 avbryter cykeln direkt: ingen andra källa, ingen header-probe,
-        # och nästa cykel rör inte nätet alls under nedkylningen.
+        # A 429 aborts the cycle at once: no second source, no header
+        # probe, and the next cycle does not touch the network at all
+        # during the cooldown.
         self.assertEqual(len(calls), 1)
 
     def test_probe_backoff_interval_grows_with_failures(self):
@@ -845,10 +852,10 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertEqual(calls, ["Bearer renewed"])
 
     def test_probe_respects_persisted_cooldown_across_restart(self):
-        """Straffrutan får inte glömmas av en omstart: en framtida cooldown
-        på disk ska stoppa cykeln före ALL nätaktivitet."""
+        """The penalty box must not be forgotten by a restart: a future
+        cooldown on disk must stop the cycle before ANY network activity."""
         def explode(req, timeout=None):
-            raise AssertionError("upstream-anrop trots persisterad backoff")
+            raise AssertionError("upstream call despite a persisted backoff")
 
         tokenserver._PROBE_STATE_PATH.write_text(
             json.dumps({"cooldown_until": time.time() + 3600}),
@@ -979,8 +986,8 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
 
         self.assertIsNone(found)
         self.assertEqual(tokenserver._probe_status, "usage_http_401")
-        # Båda källorna provades mot usage-kontraktet, och den döda tokenen
-        # skickades aldrig vidare till header-proben.
+        # Both sources were tried against the usage contract, and the dead
+        # token was never passed on to the header probe.
         self.assertEqual(calls, [
             "https://api.anthropic.com/api/oauth/usage",
             "https://api.anthropic.com/api/oauth/usage",
@@ -1499,11 +1506,11 @@ class CodexLimitLogTests(unittest.TestCase):
             self.assertEqual(tokenserver._codex_app_server_command(), expected)
 
     def _fake_app_server(self, temp_dir, body):
-        """Ett körbart som talar app-server-protokollet på stdin/stdout.
+        """An executable that speaks the app-server protocol on stdin/stdout.
 
-        Läsvägen mockades bort i varje befintligt test — bara parsern var
-        täckt — så select-bytet hade kunnat gå sönder tyst. Det här kör den
-        på riktigt: process, pipe, tråd, kö.
+        The read path was mocked away in every existing test -- only the
+        parser was covered -- so the select swap could have broken
+        silently. This runs it for real: process, pipe, thread, queue.
         """
         script = Path(temp_dir) / "codex-test-server.py"
         script.write_text(
@@ -1541,8 +1548,8 @@ class CodexLimitLogTests(unittest.TestCase):
         self.assertEqual(found["codexWeekResetAt"], 1_900_000_000)
 
     def test_app_server_read_gives_up_when_the_process_says_nothing(self):
-        """Deadlinen måste hålla utan select: en app-server som svarar
-        aldrig får inte hänga probecykeln."""
+        """The deadline must hold without select: an app server that never
+        answers must not hang the probe cycle."""
         with tempfile.TemporaryDirectory() as temp_dir:
             script = Path(temp_dir) / "codex"
             script.write_text(
@@ -1562,8 +1569,8 @@ class CodexLimitLogTests(unittest.TestCase):
         self.assertLess(elapsed, 10)
 
     def test_app_server_read_returns_when_the_process_dies_at_once(self):
-        """EOF-vakten: strömmen stängs direkt, och läsaren ska returnera på
-        en gång i stället för att vänta ut hela sin deadline."""
+        """The EOF sentinel: the stream closes at once, and the reader must
+        return immediately instead of waiting out its whole deadline."""
         with tempfile.TemporaryDirectory() as temp_dir:
             script = Path(temp_dir) / "codex"
             script.write_text(
@@ -2855,8 +2862,9 @@ class HandlerPrivacyTests(unittest.TestCase):
                 self.assertLogs("tokenserver", level="ERROR") as captured:
             handler.do_GET()
 
-        # Över LAN:et: bara kontraktets sanerade form. I den lokala loggen:
-        # hela orsaken — ett tyst 500 var så serverfel förblev osynliga.
+        # Over the LAN: only the contract's sanitized form. In the local
+        # log: the whole cause -- a silent 500 is how server errors stayed
+        # invisible.
         handler._send.assert_called_once_with(
             500, {"error": "internal server error"})
         self.assertIn("/private/source/path secret",
@@ -3086,8 +3094,8 @@ class PanelStartupHealthTests(unittest.TestCase):
 
 
 class HandlerErrorLoggingTests(unittest.TestCase):
-    """500-kontraktet plus loggning: felen ska synas lokalt, aldrig på LAN:et,
-    och en försvunnen klient är inte ett serverfel."""
+    """The 500 contract plus logging: errors must show locally, never on
+    the LAN, and a vanished client is not a server error."""
 
     def _handler(self, path):
         handler = tokenserver.Handler.__new__(tokenserver.Handler)
@@ -3099,8 +3107,8 @@ class HandlerErrorLoggingTests(unittest.TestCase):
         return handler
 
     def test_agent_status_route_keeps_the_error_contract(self):
-        # Rutten saknade try/except: ett fel läckte som rå traceback över
-        # HTTP i stället för kontraktets {"error": ...}.
+        # The route lacked try/except: an error leaked as a raw traceback
+        # over HTTP instead of the contract's {"error": ...}.
         handler = self._handler("/api/agent-status")
         handler.agent_status.snapshot.side_effect = RuntimeError("trasig")
         with self.assertLogs("tokenserver", level="ERROR") as captured:
@@ -3117,11 +3125,12 @@ class HandlerErrorLoggingTests(unittest.TestCase):
         with self.assertNoLogs("tokenserver"):
             handler.do_GET()
 
-        handler._send.assert_called_once()  # inget 500-försök till ett lik
+        handler._send.assert_called_once()  # no 500 attempt at a corpse
 
     def test_producer_connection_error_is_a_server_error_not_a_disconnect(self):
-        # ConnectionError FRÅN producenten är ett serverfel och ska logga +
-        # 500 — bara under svarsskrivningen betyder det att klienten dog.
+        # A ConnectionError FROM the producer is a server error and must
+        # log + 500 -- only during the response write does it mean the
+        # client died.
         handler = self._handler("/api/agent-status")
         handler.agent_status.snapshot.side_effect = ConnectionError("inuti")
         with self.assertLogs("tokenserver", level="ERROR") as captured:
@@ -3153,9 +3162,10 @@ class HandlerErrorLoggingTests(unittest.TestCase):
 
 
 class UsageComputeHealthTests(unittest.TestCase):
-    """OBS-08: en kraschad omräkning får frysa siffrorna (senaste goda
-    serveras vidare) men aldrig tyst — logg vid övergången, strypt
-    upprepning, usageComputeOk på GET /, och återhämtningen loggad."""
+    """OBS-08: a crashed recompute may freeze the figures (the last good
+    ones keep being served) but never silently -- a log at the transition,
+    throttled repetition, usageComputeOk on GET /, and the recovery
+    logged."""
 
     def test_compute_crash_logs_throttled_and_flags_the_root_payload(self):
         with mock.patch.object(tokenserver, "_compute_failing_since", None), \
@@ -3169,11 +3179,11 @@ class UsageComputeHealthTests(unittest.TestCase):
             with self.assertLogs("tokenserver", level="ERROR") as captured:
                 tokenserver._refresh_usage_totals(Path("/x"))
             self.assertIn("frozen figures", "\n".join(captured.output))
-            # Ihållande fel stryps — ingen ny rad inom fönstret.
+            # A persistent error is throttled -- no new line within the window.
             with self.assertNoLogs("tokenserver"):
                 tokenserver._refresh_usage_totals(Path("/x"))
             self.assertIsNotNone(tokenserver._compute_failing_since)
-            # Senaste goda snapshotet serveras vidare — det är avsikten.
+            # The last good snapshot keeps being served -- that is the intent.
             self.assertEqual(tokenserver._last_result, {"v": 1})
 
             handler = tokenserver.Handler.__new__(tokenserver.Handler)
@@ -3208,8 +3218,8 @@ class UsageComputeHealthTests(unittest.TestCase):
             self.assertTrue(payload["usageComputeOk"])
             self.assertIsNone(payload["usageComputeFailingForS"])
 
-            # Återhämtningen stänger episoden: ett NYTT fel inom gamla
-            # strypfönstret ska logga direkt, inte tigas ihjäl.
+            # The recovery closes the episode: a NEW error within the old
+            # throttle window must log at once, not be silenced.
             self.assertIsNone(tokenserver._last_compute_error_logged)
             with mock.patch.object(tokenserver, "_compute",
                                    side_effect=RuntimeError("ny episod")), \
@@ -3803,9 +3813,9 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
         )
         tokenserver._max_tracker_dirty = False
         tokenserver._max_tracker_writer_running = False
-        # None = "aldrig loggat" — 0.0 hade svalt första felet på en maskin
-        # med kort uptime, eftersom monotonic räknar från boot (CI fällde
-        # exakt det).
+        # None = "never logged" -- 0.0 would have swallowed the first error
+        # on a machine with short uptime, since monotonic counts from boot
+        # (CI tripped exactly that).
         tokenserver._last_save_error_logged = None
         tokenserver._max_tracker_save_failing_since = None
 
@@ -3854,7 +3864,7 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
             if not tokenserver._max_tracker_writer_running:
                 return
             time.sleep(0.01)
-        self.fail("writer-tråden stannade aldrig")
+        self.fail("the writer thread never stopped")
 
     def test_marking_dirty_eventually_saves_off_the_calling_thread(self):
         store = mock.Mock()
@@ -3900,11 +3910,12 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
         self.assertLessEqual(store.save.call_count, 2)
 
     def test_failed_save_keeps_dirty_so_the_next_mark_retries(self):
-        # Var: dirty nollades FÖRE save() och felet svaldes — en disk- eller
-        # rättighetsmiss slängde observationerna tyst tills någon orelaterad
-        # händelse råkade markera om (OBS-10 i observability-backloggen).
+        # Was: dirty was cleared BEFORE save() and the error swallowed -- a
+        # disk or permission failure threw the observations away silently
+        # until some unrelated event happened to mark again (OBS-10 in the
+        # observability backlog).
         store = mock.Mock()
-        store.save.side_effect = OSError("disken full")
+        store.save.side_effect = OSError("disk full")
 
         with self.assertLogs("tokenserver", level="ERROR") as captured:
             tokenserver._mark_max_tracker_dirty(store)
@@ -3918,8 +3929,8 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
         self.assertTrue(tokenserver._max_tracker_dirty)
         self.assertIn("save failed", "\n".join(captured.output))
 
-        # Nästa markering försöker igen — signalen överlevde felet, och
-        # den lyckade skrivningen stänger episoden i loggen.
+        # The next mark tries again -- the signal survived the error, and
+        # the successful write closes the episode in the log.
         store.save.side_effect = None
         with self.assertLogs("tokenserver", level="INFO") as recovered:
             tokenserver._mark_max_tracker_dirty(store)
@@ -3931,9 +3942,9 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
         self.assertEqual(store.save.call_count, 2)
         self.assertFalse(tokenserver._max_tracker_dirty)
         self.assertIn("succeeded again", "\n".join(recovered.output))
-        # Episoden är stängd: ett nytt fel loggar direkt trots att gamla
-        # strypfönstret inte hunnit löpa ut.
-        store.save.side_effect = OSError("disken full igen")
+        # The episode is closed: a new error logs at once although the old
+        # throttle window has not expired yet.
+        store.save.side_effect = OSError("disk full again")
         with self.assertLogs("tokenserver", level="ERROR"):
             tokenserver._mark_max_tracker_dirty(store)
             for _ in range(50):
@@ -4763,8 +4774,9 @@ class ValueMultipleIntegrationTests(unittest.TestCase):
         self.assertEqual(value["value_usd"], 0.5)
 
 class LogRotationTests(unittest.TestCase):
-    """_maybe_rotate_own_log: trunkera bara launchd-loggen, bara över taket,
-    och bevara svansen — utan att någonsin röra en fil stderr inte äger."""
+    """_maybe_rotate_own_log: truncate only the launchd log, only over the
+    cap, and preserve the tail -- without ever touching a file stderr does
+    not own."""
 
     def _big_file(self, tmp):
         path = Path(tmp) / "torget-tokenserver.log"
@@ -4790,9 +4802,9 @@ class LogRotationTests(unittest.TestCase):
             self.assertTrue(tail.endswith(b"SVANSEN\n"))
 
     def test_rotation_holds_the_logging_handler_locks(self):
-        # En loggrad mellan svansläsningen och trunkeringen skulle raderas
-        # ur BÅDA filerna — rotationen ska hålla handlerlåsen så att
-        # logging-skrivningar inte kan interfoliera.
+        # A log line between the tail read and the truncation would be
+        # erased from BOTH files -- the rotation must hold the handler locks
+        # so logging writes cannot interleave.
         class CountingHandler(logging.Handler):
             def __init__(self):
                 super().__init__()
@@ -4823,8 +4835,8 @@ class LogRotationTests(unittest.TestCase):
             root.removeHandler(counting)
 
     def test_terminal_run_never_touches_the_file(self):
-        # stderr_fd=2 är testkörarens stderr, inte filen — fstat/stat-vakten
-        # ska vägra, oavsett storlek.
+        # stderr_fd=2 is the test runner's stderr, not the file -- the
+        # fstat/stat guard must refuse, whatever the size.
         with tempfile.TemporaryDirectory() as tmp:
             path = self._big_file(tmp)
             size_before = path.stat().st_size
@@ -4874,8 +4886,9 @@ class SourceFingerprintTests(unittest.TestCase):
 
 class LogRotationWatchTests(unittest.TestCase):
     def test_watch_keeps_checking_until_stopped(self):
-        # Startrotationen räcker inte för en långlivad process — vakten ska
-        # titta om och om igen och dö snyggt på stoppsignalen.
+        # The start-up rotation is not enough for a long-lived process --
+        # the watch must look again and again and die cleanly on the stop
+        # signal.
         stop = threading.Event()
         calls = []
         with mock.patch.object(tokenserver, "_maybe_rotate_own_log",
@@ -4895,8 +4908,9 @@ class LogRotationWatchTests(unittest.TestCase):
 
 
 class ProbeTransitionLogTests(unittest.TestCase):
-    """Övergångsloggen: en rad när probestatusen ändras, tystnad medan
-    samma läge står — loggfilen ska vara läsbar över veckor."""
+    """The transition log: one line when the probe status changes, silence
+    while the same state stands -- the log file must stay readable over
+    weeks."""
 
     def test_status_change_logs_once_then_stays_quiet(self):
         with mock.patch.object(tokenserver, "_probe_status",
@@ -4917,10 +4931,10 @@ class ProbeTransitionLogTests(unittest.TestCase):
                 tokenserver._refresh_limits()
 
     def test_probe_crash_replaces_stale_ok_status_and_logs_once(self):
-        # Kraschar proben innan den satt status fick "usage_http_200 + ok"
-        # stå kvar och ljuga medan värdena försvann — kraschen ska bli en
-        # egen status (syns på GET / och i röktestet) med traceback en
-        # gång per episod.
+        # If the probe crashed before setting a status, "usage_http_200 +
+        # ok" used to stand and lie while the values vanished -- the crash
+        # must become a status of its own (visible on GET / and in the
+        # smoke test) with a traceback once per episode.
         with mock.patch.object(tokenserver, "_probe_status",
                                "usage_http_200 + ok"), \
                 mock.patch.object(tokenserver, "_probe_status_logged",
