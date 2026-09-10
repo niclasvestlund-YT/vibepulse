@@ -1094,16 +1094,18 @@ def _load_probe_state():
     except (OSError, ValueError, TypeError):
         return
     if math.isfinite(until) and until > time.time():
-        _probe_cooldown_until = until
-        _probe_status = (f"usage_http_429 + backoff_until_"
-                         f"{datetime.fromtimestamp(until):%H:%M} (persisted)")
+        with _limits_lock:  # one read of GET / sees both or neither
+            _probe_cooldown_until = until
+            _probe_status = (f"usage_http_429 + backoff_until_"
+                             f"{datetime.fromtimestamp(until):%H:%M}"
+                             " (persisted)")
 
 
-def _save_probe_state():
+def _save_probe_state(cooldown_until):
     try:
         _PROBE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
         _PROBE_STATE_PATH.write_text(
-            json.dumps({"cooldown_until": _probe_cooldown_until}),
+            json.dumps({"cooldown_until": cooldown_until}),
             encoding="utf-8")
     except OSError:
         pass  # utan disk är beteendet som förr: bättre än att krascha
@@ -1196,7 +1198,9 @@ class _ProbeOutcome:
     to come). The cycle now writes here and ``_publish_probe_outcome``
     swaps everything in at once, under ``_limits_lock``. Headers start
     empty every cycle (OBS-18 b): a cycle that never reaches the fallback
-    probe leaves no hours-old header names beside a current failure.
+    probe leaves no hours-old header names beside a current failure. A
+    429 sets ``cooldown_until`` here too, so the rest is published in the
+    same section as the status that explains it (Codex review of #111).
     """
 
     def __init__(self, status):
@@ -1204,6 +1208,7 @@ class _ProbeOutcome:
         self.headers = []
         self.unknown_buckets = []
         self.credential = None
+        self.cooldown_until = None
 
 
 # Set by the publish helpers when a cycle has already recorded its streak
@@ -1225,22 +1230,32 @@ def _publish_probe_outcome(outcome, refreshed):
     """Status, evidence, credential AND the backoff for the next cycle, in
     one critical section, so a reader never pairs them across cycles."""
     global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _claude_credential
+        _claude_credential, _probe_cooldown_until
     with _limits_lock:
         _probe_status = outcome.status
         _probe_headers = list(outcome.headers)
         _probe_unknown_buckets = list(outcome.unknown_buckets)
         if outcome.credential is not None:
             _claude_credential = outcome.credential
+        if outcome.cooldown_until is not None:
+            _probe_cooldown_until = outcome.cooldown_until
         _note_probe_schedule_locked(refreshed)
 
 
 def _publish_probe_status(status):
-    """A status-only outcome (nothing was probed, or the probe crashed):
-    evidence stays as is, the miss still counts for the backoff."""
-    global _probe_status
+    """A status-only outcome (nothing was probed, or the probe crashed).
+
+    The header evidence is the most recent cycle's, and this cycle saw
+    none: publish it empty rather than leave an earlier fallback's names
+    and unknown buckets beside the new status (Codex review of #111).
+    The credential block stays: it describes the saved credential, not
+    the cycle. The miss still counts for the backoff.
+    """
+    global _probe_status, _probe_headers, _probe_unknown_buckets
     with _limits_lock:
         _probe_status = status
+        _probe_headers = []
+        _probe_unknown_buckets = []
         _note_probe_schedule_locked(False)
 
 
@@ -1262,7 +1277,7 @@ def _probe_view():
         streak = _probe_failure_streak
         interval_s = _probe_interval_s()
         probed_at = _last_probed
-    cooldown_left = _probe_cooldown_until - time.time()
+        cooldown_left = _probe_cooldown_until - time.time()
     return {
         "claudeProbe": status,
         "claudeProbeStreak": streak,
@@ -1289,7 +1304,9 @@ def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
     _load_probe_state()
-    if time.time() < _probe_cooldown_until:
+    with _limits_lock:
+        resting = time.time() < _probe_cooldown_until
+    if resting:
         # I nedkylning efter 429 — statusen står kvar på backoff-strängen.
         return None
     lock = _hold_probe_lock()
@@ -1307,8 +1324,8 @@ def _probe_limits():
 def _probe_limits_locked():
     """Run one cycle and publish its evidence once (see _ProbeOutcome).
 
-    A cycle that raises publishes nothing: ``_refresh_limits`` records the
-    crash as its own status, and the previous evidence stands meanwhile.
+    A cycle that raises publishes nothing itself: ``_refresh_limits``
+    records the crash as its own status, with empty header evidence.
     """
     outcome = _ProbeOutcome(_probe_status)
     found = _probe_cycle(outcome)
@@ -1317,7 +1334,6 @@ def _probe_limits_locked():
 
 
 def _probe_cycle(outcome):
-    global _probe_cooldown_until
     candidates = _read_oauth_candidates()
     outcome.credential = _oauth_credential_snapshot(candidates)
     if not candidates:
@@ -1364,11 +1380,14 @@ def _probe_cycle(outcome):
                         "Retry-After", 0))
                 except (TypeError, ValueError):
                     retry_after = 0
-                _probe_cooldown_until = time.time() + max(retry_after, 600)
+                # Publiceras tillsammans med statusen i _publish_probe_outcome
+                # så GET / aldrig ser ny nedkylning bredvid gammal status.
+                outcome.cooldown_until = time.time() + max(retry_after, 600)
                 outcome.status = (
                     f"usage_http_429 + backoff_until_"
-                    f"{datetime.fromtimestamp(_probe_cooldown_until):%H:%M}")
-                _save_probe_state()  # en omstart får inte glömma straffet
+                    f"{datetime.fromtimestamp(outcome.cooldown_until):%H:%M}")
+                # En omstart får inte glömma straffet.
+                _save_probe_state(outcome.cooldown_until)
                 return None
             if error.code in (401, 403):
                 # Avvisad token säger inget om nästa källa — prova den innan

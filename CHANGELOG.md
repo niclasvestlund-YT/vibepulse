@@ -242,10 +242,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   next to a non-ok status. The status string is assembled per cycle and
   published once, together with the streak and timestamp, under the lock
   the HTTP threads read with, where it used to grow with `+=` on the probe
-  thread and could be served half-built; `GET /` copies status, backoff,
-  credential and header evidence in one locked read, and header evidence
-  (`ratelimitHeaders`, `unknownRateLimitBuckets`) is now the current
-  cycle's only, never hours-old names beside a fresh failure. On macOS the keychain read no
+  thread and could be served half-built; a 429's rest is published in that
+  same section as the status that explains it; `GET /` copies status,
+  backoff, rest, credential and header evidence in one locked read, and
+  header evidence (`ratelimitHeaders`, `unknownRateLimitBuckets`) is now
+  the current cycle's only — a cycle that never reached the fallback, was
+  held by another instance or crashed publishes it empty — never
+  hours-old names beside a fresh failure. On macOS the keychain read no
   longer folds every failure into one shrug: `no_claude_oauth_token`
   carries `keychain_denied_or_locked (exit N)` (Deny on the prompt, or a
   locked keychain), `keychain_no_entry`, `keychain_timeout`,
