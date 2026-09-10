@@ -3318,7 +3318,11 @@ def _run_max_tracker_backfill(store, stop_event):
     switches itself off; it just keeps discovering newly-appeared rollout/
     session files on its own, without needing a restart.
     """
-    last_error_logged = 0.0
+    # None = never logged. Not 0.0: time.monotonic() counts from boot, so
+    # on a machine up for less than the throttle window "now - 0.0" is
+    # below it and the FIRST failure would be swallowed -- the same trap
+    # _last_compute_error_logged already documents (CI's fresh VM).
+    last_error_logged = None
     while not stop_event.is_set():
         try:
             if store.backfill_step():
@@ -3326,9 +3330,10 @@ def _run_max_tracker_backfill(store, stop_event):
         except Exception as exc:
             # The loop must survive a bad file (OBS-08's lesson: a crashed
             # recompute must not freeze the numbers), but not silently:
-            # one line per ten minutes names the failure class.
+            # the first failure logs at once, then one line per ten
+            # minutes names the failure class.
             now = time.monotonic()
-            if now - last_error_logged >= 600:
+            if last_error_logged is None or now - last_error_logged >= 600:
                 last_error_logged = now
                 log.warning("max-tracker backfill step failed: %s: %s",
                             type(exc).__name__, exc)

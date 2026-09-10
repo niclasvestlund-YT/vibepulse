@@ -17,7 +17,7 @@ DEFAULT_PORT = 8737
 HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
-EXPECTED_HOST_SOURCE_FINGERPRINT = "f2e2a6edb1c3"
+EXPECTED_HOST_SOURCE_FINGERPRINT = "09ea41e4c7b4"
 CODEX_CONFIG_MAX_BYTES = 64 * 1024
 # Only the three top-level string settings that decide whether a permission
 # card can reach a user at all. Anchored and quote-matched so a value inside
