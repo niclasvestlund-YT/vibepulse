@@ -715,7 +715,12 @@ _probe_status_logged = None  # last logged status: transitions are logged, state
 # it gave one, or was never asked). Set on the probe thread, logged on
 # change only, and carried into claudeProbe/claudeCredential on GET /.
 _keychain_reason = None
-_keychain_reason_logged = None
+# The transition log's "previous" word. A successful read is None there
+# too, so a separate sentinel marks "nothing logged yet": otherwise a
+# failure after a recovery would read ``start -> …`` as if the service had
+# just booted, instead of ``ok -> …`` (Codex review of #111).
+_KEYCHAIN_UNLOGGED = object()
+_keychain_reason_logged = _KEYCHAIN_UNLOGGED
 # Content-free credential readiness captured on the probe thread. GET / must
 # never reread Keychain synchronously: startup health has a sub-second budget.
 _claude_credential = {"status": "unknown"}
@@ -782,9 +787,11 @@ def _note_keychain_reason(reason):
     """Publish the keychain outcome; one log line per change (OBS-04)."""
     global _keychain_reason, _keychain_reason_logged
     _keychain_reason = reason
-    if reason != _keychain_reason_logged:
+    unlogged = _keychain_reason_logged is _KEYCHAIN_UNLOGGED
+    if unlogged or reason != _keychain_reason_logged:
         log.info("claude-keychain: %s -> %s",
-                 _keychain_reason_logged or "start", reason or "ok")
+                 "start" if unlogged else (_keychain_reason_logged or "ok"),
+                 reason or "ok")
         _keychain_reason_logged = reason
 
 
