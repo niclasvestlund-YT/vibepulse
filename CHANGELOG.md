@@ -32,7 +32,8 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   firmware sends the header, parses `usageTotals.placeholder`, applies the
   live quota rings but leaves the value page and the keep-awake burn rate
   untouched during a warm-up: never invented zeros, counters never go
-  backwards. The same block is on `GET /`, the numbers publisher does not
+  backwards. The firmware fetch log and the simulator say "volym ej
+  uppmätt än" for such a sample instead of printing `0.00 Mtok idag`. The same block is on `GET /`, the numbers publisher does not
   send a placeholder to the relay, the SessionStart hook reports `SERVICE
   WARMING UP` (and `VOLUME RECOMPUTE FAILING`) as their own classes, the
   setup doctor prints `WAIT` for a warm-up and `FIX` for a failing

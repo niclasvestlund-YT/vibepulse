@@ -124,7 +124,16 @@ static void net_task(void *arg) {
       /* Utan Claude-källa är volymsiffrorna nollor som inte är mätningar.
        * Loggen säger det i stället för att skriva ut "0.00 Mtok idag",
        * som läses som en dag utan arbete. */
-      if (t.claude_source_present) {
+      if (t.volume_placeholder) {
+        /* Första historikskanningen pågår på datorn (issue #62): volymen
+         * är en platshållare, inte en mätning — skriv inte ut nollor. */
+        ESP_LOGI(TAG,
+                 "hämtning ok (volym ej uppmätt än — datorn skannar "
+                 "historiken, tidigare värden står kvar; "
+                 "stale claude=%d fable=%d codex=%d)",
+                 t.claude_week.stale, t.claude_model_week.stale,
+                 t.codex_week.stale);
+      } else if (t.claude_source_present) {
         ESP_LOGI(TAG,
                  "hämtning ok (%.2f Mtok idag, %d sessioner; "
                  "stale claude=%d fable=%d codex=%d)",

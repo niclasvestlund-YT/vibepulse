@@ -352,7 +352,12 @@ static void feed_tokens_file(const char *file) {
   tk_tokens t;
   if (json && tk_tokens_parse(json, len, &t)) {
     tokens_apply(&t);
-    if (t.claude_source_present) {
+    if (t.volume_placeholder) {
+      /* Värddatorn skannar historiken (issue #62): platshållare, inte
+         mätning — samma ärlighet som net.c. */
+      printf("tokens: volym ej uppmätt än — datorn skannar historiken, "
+             "tidigare värden står kvar\n");
+    } else if (t.claude_source_present) {
       printf("tokens: %.2f Mtok idag, %d sessioner, takt %.2f Mtok/h\n",
              t.day_tokens / 1e6, t.day_sessions,
              t.day_tokens_per_hour / 1e6);
