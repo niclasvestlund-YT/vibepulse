@@ -1083,7 +1083,12 @@ _PROBE_STATE_PATH = _state_dir() / "claude-probe-state.json"
 _probe_state_loaded = False
 
 
-def _load_probe_state():
+def _load_probe_state_locked():
+    """Load a persisted 429 rest once. The caller holds ``_limits_lock``:
+    the status and cooldown it publishes must land in the same critical
+    section as the streak and timestamp the resting cycle records right
+    after (Codex review of #111), so ``GET /`` never pairs the persisted
+    status with the initial streak and a ``null`` age."""
     global _probe_state_loaded, _probe_cooldown_until, _probe_status
     if _probe_state_loaded:
         return
@@ -1094,11 +1099,10 @@ def _load_probe_state():
     except (OSError, ValueError, TypeError):
         return
     if math.isfinite(until) and until > time.time():
-        with _limits_lock:  # one read of GET / sees both or neither
-            _probe_cooldown_until = until
-            _probe_status = (f"usage_http_429 + backoff_until_"
-                             f"{datetime.fromtimestamp(until):%H:%M}"
-                             " (persisted)")
+        _probe_cooldown_until = until
+        _probe_status = (f"usage_http_429 + backoff_until_"
+                         f"{datetime.fromtimestamp(until):%H:%M}"
+                         " (persisted)")
 
 
 def _save_probe_state(cooldown_until):
@@ -1303,11 +1307,15 @@ def _probe_diagnostics():
 def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
-    _load_probe_state()
     with _limits_lock:
+        _load_probe_state_locked()
         resting = time.time() < _probe_cooldown_until
+        if resting:
+            # I nedkylning efter 429 — statusen står kvar på backoff-
+            # strängen, och den överhoppade cykeln räknas som en miss HÄR,
+            # i samma sektion, inte senare i _refresh_limits.
+            _note_probe_schedule_locked(False)
     if resting:
-        # I nedkylning efter 429 — statusen står kvar på backoff-strängen.
         return None
     lock = _hold_probe_lock()
     if lock is None:
@@ -1519,9 +1527,10 @@ def _refresh_limits():
                  _probe_status_logged or "start", _probe_status)
         _probe_status_logged = _probe_status
     with _limits_lock:
-        # A cycle that published an outcome (or a crash status) recorded
-        # its streak and timestamp in that same critical section; only a
-        # cycle that published nothing (429 cooldown) is scheduled here.
+        # Every path through _probe_limits records its streak and
+        # timestamp in the critical section it publishes in (outcome,
+        # status-only, or the resting 429 cycle); this fallback covers a
+        # replaced _probe_limits, such as the tests', and nothing else.
         if not _probe_cycle_published:
             _note_probe_schedule_locked(refreshed)
         _probe_cycle_published = False

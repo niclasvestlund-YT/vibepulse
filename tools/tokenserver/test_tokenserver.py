@@ -865,6 +865,44 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
         self.assertIsNone(found)
         self.assertIn("persisted", status)
 
+    def test_a_persisted_cooldown_is_published_with_its_schedule(self):
+        # Codex review of #111: the persisted path published status and
+        # cooldown, then _refresh_limits recorded the streak and timestamp
+        # in a later critical section, so GET / could pair the persisted
+        # status with streak 0 and a null age.
+        tokenserver._PROBE_STATE_PATH.write_text(
+            json.dumps({"cooldown_until": time.time() + 3600}),
+            encoding="utf-8")
+        seen = []
+        real_note = tokenserver._note_probe_schedule_locked
+
+        def spy_note(refreshed):
+            # Called while the lock is held: the status must already be
+            # the persisted one in this very section.
+            seen.append(tokenserver._probe_status)
+            real_note(refreshed)
+
+        with mock.patch.object(tokenserver, "_probe_state_loaded", False), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_probe_status", "not_run"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_probe_cycle_published",
+                                  False), \
+                mock.patch.object(tokenserver, "_note_probe_schedule_locked",
+                                  side_effect=spy_note), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=AssertionError("no upstream")):
+            self.assertIsNone(tokenserver._probe_limits())
+            view = tokenserver._probe_view()
+            self.assertEqual(len(seen), 1)
+            self.assertIn("(persisted)", seen[0])
+            self.assertIn("(persisted)", view["claudeProbe"])
+            self.assertEqual(view["claudeProbeStreak"], 1)
+            self.assertIsNotNone(view["claudeProbeAgeS"])
+            self.assertGreater(view["claudeProbeCooldownLeftS"], 3000)
+            self.assertTrue(tokenserver._probe_cycle_published)
+
     def test_probe_ignores_expired_persisted_cooldown(self):
         tokenserver._PROBE_STATE_PATH.write_text(
             json.dumps({"cooldown_until": time.time() - 60}),
