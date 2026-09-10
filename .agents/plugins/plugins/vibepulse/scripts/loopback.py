@@ -205,8 +205,15 @@ def get_json(url: str, *,
         return None
     deadline = _ResponseDeadline(float(read_timeout))
     try:
+        # X-VibePulse-Accepts: this reader understands usageTotals and
+        # will not treat placeholder counters as measurements, so the
+        # service may answer 200 with them during its first history scan
+        # instead of the 503 it gives a client that would apply zeros.
         request = urllib.request.Request(
-            url, method="GET", headers={"Accept": "application/json"})
+            url, method="GET", headers={
+                "Accept": "application/json",
+                "X-VibePulse-Accepts": "usage-totals",
+            })
         opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
             _SplitTimeoutHTTPHandler(float(read_timeout), deadline),
