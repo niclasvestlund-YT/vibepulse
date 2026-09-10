@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import atexit
 import importlib.util
 import io
 import hashlib
@@ -187,6 +188,19 @@ def closed_port():
 SCRIPT_HANG_TIMEOUT_SECONDS = 30
 
 
+# Every script run gets an EMPTY Codex home unless a test hands it one.
+# session_start.py reads the saved approval/reviewer/sandbox modes from
+# $CODEX_HOME/config.toml (else ~/.codex/config.toml) BEFORE it checks
+# service health, on purpose: a saved `approval_policy = "never"` is the
+# failure that looks exactly like a broken panel. Inherited from the
+# developer's real machine, that same setting turned five service-health
+# tests red on an unchanged checkout (issue #93). The permission-mode tests
+# pass their own CODEX_HOME explicitly and are unaffected by this default.
+_ISOLATED_CODEX_HOME = tempfile.TemporaryDirectory(
+    prefix="vibepulse-test-codex-home-")
+atexit.register(_ISOLATED_CODEX_HOME.cleanup)
+
+
 def run_script(name, stdin=b"", *, port=None, env=None,
                timeout=SCRIPT_HANG_TIMEOUT_SECONDS):
     process_env = os.environ.copy()
@@ -196,6 +210,7 @@ def run_script(name, stdin=b"", *, port=None, env=None,
     for key in ("VIBEPULSE_PORT", "VIBEPULSE_CWD", "VIBEPULSE_SESSION_ID",
                 "VIBEPULSE_TURN_ID", "_VIBEPULSE_TEST_READ_TIMEOUT"):
         process_env.pop(key, None)
+    process_env["CODEX_HOME"] = _ISOLATED_CODEX_HOME.name
     if port is not None:
         process_env["VIBEPULSE_PORT"] = str(port)
     if env:
@@ -807,6 +822,33 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("Permission decisions remain subject to Codex policy", context)
         self.assertIn("VibePulse startup health: SERVER UNAVAILABLE", context)
         self.assertNotIn(str(ROOT), context)
+
+    def test_service_health_ignores_the_developers_own_codex_config(self):
+        """Issue #93: the suite must not inherit the machine it runs on.
+
+        A developer whose real ~/.codex/config.toml says
+        approval_policy = "never" saw five service-health tests fail on an
+        unchanged checkout, because session_start.py reports that saved
+        mode BEFORE it looks at the service, exactly as it should for a
+        real user. The harness therefore hands every script an empty
+        CODEX_HOME. This test poisons the home directory the fallback
+        would otherwise read (HOME on POSIX, USERPROFILE on Windows) and
+        checks that the isolated default still wins; the explicit
+        permission-mode tests below keep proving the production check.
+        """
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        with tempfile.TemporaryDirectory() as home:
+            codex = Path(home, ".codex")
+            codex.mkdir()
+            (codex / "config.toml").write_text(
+                'approval_policy = "never"\n', encoding="utf-8")
+            completed = run_script(
+                "session_start.py", compact(payload).encode(),
+                port=closed_port(), env={"HOME": home, "USERPROFILE": home})
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: SERVER UNAVAILABLE", context)
+        self.assertNotIn("approval_policy is never", context)
 
     def test_startup_health_names_saved_codex_modes_that_hide_cards(self):
         """The failure that looks exactly like a broken panel.
