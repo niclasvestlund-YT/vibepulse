@@ -31,6 +31,7 @@
 #include "nvs.h"
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 #include "esp_core_dump.h"
+#include "esp_partition.h"
 #endif
 
 #include "esp_heap_caps.h"
@@ -1029,6 +1030,19 @@ static void reboot_ledger_note(esp_reset_reason_t rr) {
  * avläsningen sker från datorn (`idf.py coredump-info`), aldrig här. */
 static void coredump_note(void) {
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+  /* OTA skriver aldrig partitionstabellen (docs/ota.md): en panel som fått
+   * den här firmwaren över luften har fortfarande sin gamla tabell utan
+   * coredump-partition, och då kan skrivaren inte spara någon dump alls.
+   * Säg det på boot i stället för att tyst aldrig hitta något. */
+  if (esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                               ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
+                               NULL) == NULL) {
+    ESP_LOGW(TAG, "coredump-partition saknas i enhetens partitionstabell — "
+                  "en panik lämnar ingen dump förrän tabellen flashats en "
+                  "gång via USB (`idf.py -p <port> partition-table-flash`, "
+                  "docs/observability.md)");
+    return;
+  }
   size_t addr = 0, size = 0;
   if (esp_core_dump_image_get(&addr, &size) == ESP_OK && size > 0) {
     ESP_LOGW(TAG, "coredump i flash (%u byte) från en tidigare krasch — "

@@ -9,7 +9,7 @@
 # Each argument is the effective CONFIG_* value as CMake sees it after the
 # IDF project() call ("y" when set, "" when unset or =n).
 function(torget_require_diagnostics coredump_to_flash coredump_elf
-         log_max_equals_default task_wdt lv_use_log)
+         log_default_info log_max_equals_default task_wdt lv_use_log)
   set(_missing "")
   if(NOT "${coredump_to_flash}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y")
@@ -17,8 +17,14 @@ function(torget_require_diagnostics coredump_to_flash coredump_elf
   if(NOT "${coredump_elf}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y")
   endif()
+  # ESP_LOGD compiled in would print the relay's secret URL (OBS-35). The
+  # ceiling is "equals the default", so the default itself must be INFO:
+  # a stale config with DEFAULT_LEVEL_DEBUG + MAXIMUM_EQUALS_DEFAULT would
+  # otherwise pass with a DEBUG ceiling.
+  if(NOT "${log_default_info}" STREQUAL "y")
+    list(APPEND _missing "CONFIG_LOG_DEFAULT_LEVEL_INFO=y")
+  endif()
   if(NOT "${log_max_equals_default}" STREQUAL "y")
-    # ESP_LOGD compiled in would print the relay's secret URL (OBS-35).
     list(APPEND _missing "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y")
   endif()
   if(NOT "${task_wdt}" STREQUAL "y")

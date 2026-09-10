@@ -73,7 +73,15 @@ lines every 30 s and a `heap:` line every 10 s.
   physical unit until the next flash session). The `coredump` partition
   holds an ELF dump of every task's stack from the last panic; the next
   boot's banner is followed by `coredump i flash (N byte) …` when one is
-  there. Read it from the computer with the board on USB:
+  there. **The partition table must be flashed once over USB first**
+  (`idf.py -p <port> partition-table-flash`, then a normal build/OTA):
+  OTA never writes the table (`docs/ota.md`), so a panel that got this
+  firmware over the air still has no `coredump` partition, the writer has
+  nowhere to put a dump, and the boot log says `coredump-partition saknas
+  i enhetens partitionstabell` until that one USB step is done. The new
+  row is appended after `ota_1` in free flash, so the existing slots keep
+  their offsets and the running image is untouched. Read a dump from the
+  computer with the board on USB:
   `idf.py -p <port> coredump-info` (summary and backtrace) or
   `idf.py -p <port> coredump-debug` (a GDB session on the dump). It stays
   until the next panic overwrites it. And the `omstartsliggare:` line
@@ -307,7 +315,7 @@ Verbatim strings worth grepping for, and what they mean:
 | `heap: internt … DMA största …` | fw `torget` | every 10 s. Watch the DMA largest block: its collapse predicted the 2026-08-06 panel freeze. Nothing alerts on it yet (OBS-27). |
 | `overlaykostnad <namn>: LVGL-pool +N B …, internt ±N B …` | fw `torget` | three lines, once at boot: what each permanent top-layer overlay (wifi-setup, settings, ota) costs. The pool figure is PSRAM (LVGL's TLSF pool lives there since the 2026-08-16 freeze fix); the internal figure is the control — a zero delta means that overlay does not touch internal RAM at all. This is the measured budget the AMOLED rule requires for a persistent layer, so read it after any flash that adds or grows one. |
 | `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the backtrace if you are watching, but since OBS-02 it also survives the reboot: the `coredump` partition holds the ELF dump, read it with `idf.py -p <port> coredump-info` (blind spots above). |
-| `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. The task watchdog panics, so the same coredump path applies, and the ledger counts it under `vakthund`. |
+| `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. The task watchdog is pinned in IDF's warn-only mode (`sdkconfig.defaults`, no `ESP_TASK_WDT_PANIC`): it prints and the board keeps running, so there is **no reboot, no coredump and no ledger count** for it — this line on a live serial console is the only evidence. The ledger's `vakthund` counts resets the chip attributes to a watchdog (`TASKVAKTHUND` / `AVBROTTSVAKTHUND` in the banner), which the warn-only task watchdog does not cause. |
 | `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died. The `omstartsliggare:` line right after it says how many boots did (OBS-03), and for PANIK/TASKVAKTHUND the `coredump i flash` line says the dump is there to read. BROWNOUT → suspect the power supply first; no dump is written for it. |
 | `hittar inte … — finns Claude Code på den här maskinen?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
 | `500 på /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 på` line above it is doubly interesting. |

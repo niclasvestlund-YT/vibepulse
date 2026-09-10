@@ -79,6 +79,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/torget_diagnostics_guard.cmake")
 torget_require_diagnostics(
   "${CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH}"
   "${CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF}"
+  "${CONFIG_LOG_DEFAULT_LEVEL_INFO}"
   "${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"
   "${CONFIG_ESP_TASK_WDT_INIT}"
   "${CONFIG_LV_USE_LOG}")

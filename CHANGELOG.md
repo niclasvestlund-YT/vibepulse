@@ -115,8 +115,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 - **A panic leaves evidence, and the panel counts its reboots (OBS-02,
   OBS-03, OBS-28, OBS-35).** In source and CI-built, **not yet flashed or
-  physically verified**: a 128K `coredump` partition with ELF coredumps to
-  flash on panic, a `coredump i flash … idf.py coredump-info` notice at the
+  physically verified**: a 128K `coredump` partition (appended after
+  `ota_1`; OTA never writes the table, so one USB
+  `idf.py partition-table-flash` is needed before a dump can land, and
+  the boot log says so until then) with ELF coredumps to flash on panic, a `coredump i flash … idf.py coredump-info` notice at the
   next boot, and a reboot ledger in NVS (`omstartsliggare: boot #N sedan
   liggaren initierades; efter PANIK a, vakthund b, BROWNOUT c`, counted
   since the ledger was initialized or NVS last erased, never claimed as

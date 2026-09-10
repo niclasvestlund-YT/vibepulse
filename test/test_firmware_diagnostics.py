@@ -64,6 +64,7 @@ assert 'include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/torget_diagnostics_guard.cmak
 for effective in (
     '"${CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH}"',
     '"${CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF}"',
+    '"${CONFIG_LOG_DEFAULT_LEVEL_INFO}"',
     '"${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"',
     '"${CONFIG_ESP_TASK_WDT_INIT}"',
     '"${CONFIG_LV_USE_LOG}"',
@@ -85,16 +86,19 @@ def run_guard(values):
                               capture_output=True, check=False, text=True)
 
 
-ok = run_guard(["y"] * 5)
+ok = run_guard(["y"] * 6)
 assert ok.returncode == 0, ok.stdout + ok.stderr
 for index, name in enumerate((
         "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y",
         "CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y",
+        # A stale DEFAULT_LEVEL_DEBUG with MAXIMUM_EQUALS_DEFAULT=y is a
+        # DEBUG ceiling: the relay secret on the serial line (OBS-35).
+        "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
         "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
         "CONFIG_ESP_TASK_WDT_INIT=y",
         "CONFIG_LV_USE_LOG=y")):
     for stale in ("", "n"):
-        values = ["y"] * 5
+        values = ["y"] * 6
         values[index] = stale
         result = run_guard(values)
         diagnostic = " ".join((result.stdout + result.stderr).split())
@@ -111,6 +115,12 @@ assert 'nvs_open("torget_boot", NVS_READWRITE, &ledger)' in main_c, (
 for key in ('"boots"', '"panic"', '"wdt"', '"brownout"'):
     assert key in main_c, f"ledger must count {key}"
 assert "esp_core_dump_image_get(&addr, &size)" in main_c
+# Codex review of #109: OTA never writes the partition table, so a panel
+# updated over the air has no coredump partition until a USB flash. The
+# boot notice must say so rather than silently never find a dump.
+assert "ESP_PARTITION_SUBTYPE_DATA_COREDUMP" in main_c
+assert "partition-table-flash" in main_c
+assert "esp_partition" in read("main/CMakeLists.txt")
 assert "idf.py coredump-info" in main_c, "the notice must say how to read it"
 # Called right after NVS is up, before anything that could crash.
 nvs_ready = main_c.index("ESP_ERROR_CHECK(nvs);")
