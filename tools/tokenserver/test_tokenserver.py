@@ -3042,7 +3042,7 @@ class PanelStartupHealthTests(unittest.TestCase):
             "status": "ready", "ageS": 1,
             "route": "/api/agent-status",
             "httpStallRecoveryBoot": False})
-        self.assertIn("panelkontakt READY", "\n".join(captured.output))
+        self.assertIn("panel contact READY", "\n".join(captured.output))
         self.assertNotIn("192.0.2.40", json.dumps(snapshot))
 
     def test_loopback_or_one_lan_request_cannot_claim_panel_ready(self):
@@ -3140,7 +3140,7 @@ class HandlerErrorLoggingTests(unittest.TestCase):
 
         self.assertEqual(handler._send.call_count, 2)
         self.assertEqual(handler._send.call_args.args[0], 500)
-        self.assertIn("svarsskrivningen", "\n".join(captured.output))
+        self.assertIn("response write", "\n".join(captured.output))
 
     def test_log_error_reaches_the_log_while_access_log_stays_muted(self):
         handler = self._handler("/api/tokens")
@@ -3168,7 +3168,7 @@ class UsageComputeHealthTests(unittest.TestCase):
                                   side_effect=RuntimeError("boom")):
             with self.assertLogs("tokenserver", level="ERROR") as captured:
                 tokenserver._refresh_usage_totals(Path("/x"))
-            self.assertIn("frysta siffror", "\n".join(captured.output))
+            self.assertIn("frozen figures", "\n".join(captured.output))
             # Ihållande fel stryps — ingen ny rad inom fönstret.
             with self.assertNoLogs("tokenserver"):
                 tokenserver._refresh_usage_totals(Path("/x"))
@@ -3196,7 +3196,7 @@ class UsageComputeHealthTests(unittest.TestCase):
                                   return_value={"v": 2}):
             with self.assertLogs("tokenserver", level="INFO") as captured:
                 tokenserver._refresh_usage_totals(Path("/x"))
-            self.assertIn("frisk igen", "\n".join(captured.output))
+            self.assertIn("healthy again", "\n".join(captured.output))
             self.assertIsNone(tokenserver._compute_failing_since)
             self.assertEqual(tokenserver._last_result, {"v": 2})
 
@@ -3916,7 +3916,7 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
 
         store.save.assert_called_once()
         self.assertTrue(tokenserver._max_tracker_dirty)
-        self.assertIn("save misslyckades", "\n".join(captured.output))
+        self.assertIn("save failed", "\n".join(captured.output))
 
         # Nästa markering försöker igen — signalen överlevde felet, och
         # den lyckade skrivningen stänger episoden i loggen.
@@ -3930,7 +3930,7 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
             self._wait_for_writer_stop()
         self.assertEqual(store.save.call_count, 2)
         self.assertFalse(tokenserver._max_tracker_dirty)
-        self.assertIn("lyckades igen", "\n".join(recovered.output))
+        self.assertIn("succeeded again", "\n".join(recovered.output))
         # Episoden är stängd: ett nytt fel loggar direkt trots att gamla
         # strypfönstret inte hunnit löpa ut.
         store.save.side_effect = OSError("disken full igen")
@@ -4936,7 +4936,7 @@ class ProbeTransitionLogTests(unittest.TestCase):
             out = "\n".join(captured.output)
             self.assertEqual(tokenserver._probe_status,
                              "probe_crashed: RuntimeError")
-            self.assertIn("kraschade", out)
+            self.assertIn("crashed", out)
             self.assertIn("-> probe_crashed: RuntimeError", out)
 
             # Samma krasch igen: samma episod, ingen ny rad.

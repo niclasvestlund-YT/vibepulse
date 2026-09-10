@@ -94,9 +94,9 @@ changes again — so a healthy week is a handful of lines and anything
 repeating deserves attention. What a healthy boot looks like:
 
 ```
-2026-08-13 21:21:47 INFO startar: rev 7385cb3
-2026-08-13 21:21:47 INFO förstaskanning 2.3 s: … tokens idag, …
-2026-08-13 21:21:47 INFO serverar http://0.0.0.0:8737/api/tokens, …
+2026-08-13 21:21:47 INFO starting: rev 7385cb3
+2026-08-13 21:21:47 INFO first scan 2.3 s: … tokens today, …
+2026-08-13 21:21:47 INFO serving http://0.0.0.0:8737/api/tokens, …
 2026-08-13 21:23:47 INFO claude-probe: start -> usage_http_200 + ok
 ```
 
@@ -105,7 +105,7 @@ repeating deserves attention. What a healthy boot looks like:
 - **`agent-status <context>: <ErrorName>`** — throttled to one per error
   type per 30 s, deliberately content-free (privacy: never a path or
   message from your sessions).
-- **`500 på /api/…` + traceback** — any route serving a 500 now logs its
+- **`500 on /api/…` + traceback** — any route serving a 500 now logs its
   cause; the LAN response stays the sanitized `{"error": ...}` contract.
   A traceback in this log is a server bug worth filing.
 - Access logging stays muted (a 30 s poll must not fill the file), but
@@ -203,7 +203,7 @@ Returns live server state, added after real debugging nights:
   behind `/api/tokens` is healthy. `false` means the served token totals
   are frozen at their last good value while *looking* fresh; the smoke
   test turns this into a FAIL, and the log has the cause
-  (`usage-omräkningen kraschade`).
+  (`usage recompute crashed`).
 - `usageTotals` — `{state, placeholder, sinceS|ageS}`: what the four
   volume counters on `/api/tokens` are right now. `refreshing` = the first
   history scan is still running and the counters are placeholder zeros
@@ -341,9 +341,9 @@ Verbatim strings worth grepping for, and what they mean:
 | `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the whole backtrace *now* — it will not survive the reboot (OBS-02). |
 | `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. |
 | `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died and this line is the only witness. BROWNOUT → suspect the power supply first. |
-| `hittar inte … — finns Claude Code på den här maskinen?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
-| `500 på /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 på` line above it is doubly interesting. |
-| `usage-omräkningen kraschade` | server log | `/api/tokens` is serving frozen totals that look fresh. `usage-omräkningen frisk igen` closes the episode; until it appears, distrust the day/month numbers. |
+| `found neither … — is Claude Code or Codex on this machine?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
+| `500 on /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 on` line above it is doubly interesting. |
+| `usage recompute crashed` | server log | `/api/tokens` is serving frozen totals that look fresh. `usage recompute healthy again` closes the episode; until it appears, distrust the day/month numbers. |
 | `ratelimit-header: …` | server stdout | the *fallback* probe engaged — the primary usage endpoint returned nothing mappable. Not part of a healthy boot despite what the README implies (OBS-23). |
 | `claudeProbe: usage_http_429 + backoff_until_…` | `GET /` | rate-limited; probe is resting ≥10 min. Do not restart the server to "fix" it — that resets the backoff and feeds the penalty (see lessons: the 429 night). |
 
@@ -374,8 +374,8 @@ the manual detail below is for interpreting what it flags — and steps
    `%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log`. A missing file
    under launchd or Task Scheduler means the service never reached its
    logging entrypoint.
-   `grep -c serverar` — more than one per intended restart means
-   crash-looping. `grep -n Traceback` — any hit is a bug; the `500 på`
+   `grep -c serving` — more than one per intended restart means
+   crash-looping. `grep -n Traceback` — any hit is a bug; the `500 on`
    line above it names the route. `grep -c 'agent-status'` — a large
    count means a persistent throttled error has been repeating every
    30 s. `grep 'claude-probe:'` — the transition history: when did

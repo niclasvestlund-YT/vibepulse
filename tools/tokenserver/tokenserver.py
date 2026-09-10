@@ -308,12 +308,12 @@ def _maybe_rotate_own_log(path=None, stderr_fd=2):
             tail = fh.read()  # reads to the ACTUAL EOF -- newer lines too
             path.with_name(path.name + ".old").write_bytes(tail)
             fh.truncate(0)
-        log.info("loggfilen roterad (%d byte > taket %d; svansen ligger i "
+        log.info("log file rotated (%d bytes > the cap %d; the tail is in "
                  "%s.old)", st.st_size, _LOG_CAP_BYTES, path.name)
         return True
     except Exception:
         # Rotation must never take the service down; that it failed must show.
-        log.warning("logrotering av %s misslyckades", path, exc_info=True)
+        log.warning("log rotation of %s failed", path, exc_info=True)
         return False
     finally:
         for handler in reversed(handlers):
@@ -1537,7 +1537,7 @@ def _refresh_limits():
         # status of its own and log the traceback once per episode.
         crashed = f"probe_crashed: {type(e).__name__}"
         if _probe_status != crashed:
-            log.exception("claude-proben kraschade (status var %s)",
+            log.exception("the claude probe crashed (status was %s)",
                           _probe_status)
         _publish_probe_status(crashed)
     # The transition log: a 401 appearing, the 429 backoff, the recovery.
@@ -2140,7 +2140,7 @@ def _max_tracker_writer(store):
                 # A successful write closes the error episode: log the end
                 # and reset the throttle, so the next error (a NEW episode)
                 # logs at once instead of inheriting the old window.
-                log.info("max-tracker: save lyckades igen efter %.0f s",
+                log.info("max-tracker: save succeeded again after %.0f s",
                          time.monotonic()
                          - (_max_tracker_save_failing_since
                             or time.monotonic()))
@@ -2161,8 +2161,8 @@ def _max_tracker_writer(store):
                     now - _last_save_error_logged >= _ERROR_LOG_THROTTLE_S):
                 _last_save_error_logged = now
                 log.exception(
-                    "max-tracker: save misslyckades — observationerna står "
-                    "kvar i minnet och nästa försök kommer")
+                    "max-tracker: save failed — the observations stay in "
+                    "memory and the next attempt is coming")
             with _max_tracker_writer_lock:
                 _max_tracker_dirty = True
                 _max_tracker_writer_running = False
@@ -2265,11 +2265,11 @@ def _refresh_usage_totals(projects_dir, max_tracker_store=None):
         if (_last_compute_error_logged is None or
                 now - _last_compute_error_logged >= _ERROR_LOG_THROTTLE_S):
             _last_compute_error_logged = now
-            log.exception("usage-omräkningen kraschade — /api/tokens "
-                          "serverar frysta siffror tills den lyckas igen")
+            log.exception("usage recompute crashed — /api/tokens serves "
+                          "frozen figures until it succeeds again")
     else:
         if _compute_failing_since is not None:
-            log.info("usage-omräkningen frisk igen efter %.0f s",
+            log.info("usage recompute healthy again after %.0f s",
                      time.monotonic() - _compute_failing_since)
             _compute_failing_since = None
             # The recovery closes the episode: the next error is a NEW
@@ -2822,7 +2822,7 @@ class Handler(BaseHTTPRequestHandler):
                 cls.panel_last_http_stall_recovery_boot = recovery_boot
                 became_ready = not was_fresh
         if became_ready:
-            log.info("startup-health: panelkontakt READY via %s", self.path)
+            log.info("startup-health: panel contact READY via %s", self.path)
 
     @classmethod
     def _panel_health_snapshot(cls):
@@ -3004,7 +3004,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         except Exception:
-            log.exception("500 på %s", self.path)
+            log.exception("500 on %s", self.path)
             try:
                 self._send(500, {"error": "internal server error"})
             except OSError:
@@ -3016,7 +3016,7 @@ class Handler(BaseHTTPRequestHandler):
             pass  # the client went away mid-response -- not a server error
         except Exception:
             # E.g. an unserializable payload -- a server error, not the client's.
-            log.exception("500 på %s (svarsskrivningen)", self.path)
+            log.exception("500 on %s (response write)", self.path)
             try:
                 self._send(500, {"error": "internal server error"})
             except OSError:
@@ -3044,9 +3044,9 @@ class Handler(BaseHTTPRequestHandler):
         candidate = dict(payload)
         candidate["pending"] = pending
         if not interactions.response_fits(candidate):
-            log.warning("pending-posten fick inte plats i /api/agent-status "
-                        "(%d jobb) — agentlistan går före och posten "
-                        "utelämnas", len(pending))
+            log.warning("the pending entry did not fit in /api/agent-status "
+                        "(%d jobs) — the agent list takes precedence and "
+                        "the entry is left out", len(pending))
             return payload
         return candidate
 
@@ -3087,8 +3087,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.interaction_store.await_verdict(
                 entry, is_alive=lambda: not self._hook_client_gone())
         except Exception:
-            log.exception("interaktionen kraschade — lämnar beslutet till "
-                          "terminalen")
+            log.exception("the interaction crashed — leaving the decision "
+                          "to the terminal")
             body = None
         try:
             if body is None:
@@ -3147,8 +3147,8 @@ class Handler(BaseHTTPRequestHandler):
             result = self.interaction_store.await_result(
                 entry, is_alive=lambda: not self._hook_client_gone())
         except Exception:
-            log.exception("Codex-frågan kraschade — lämnar beslutet till "
-                          "datorn")
+            log.exception("the Codex question crashed — leaving the "
+                          "decision to the computer")
             result = None
         try:
             if result is None:
@@ -3178,8 +3178,8 @@ class Handler(BaseHTTPRequestHandler):
             result = self.interaction_store.await_result(
                 entry, is_alive=lambda: not self._hook_client_gone())
         except Exception:
-            log.exception("Codex-behörigheten kraschade — lämnar beslutet "
-                          "till datorn")
+            log.exception("the Codex permission crashed — leaving the "
+                          "decision to the computer")
             result = None
         try:
             body = (codex_permission_response(result.verdict)
@@ -3218,7 +3218,7 @@ class Handler(BaseHTTPRequestHandler):
         if not accepted:
             self._send(409, {"ok": False, "reason": "signature rejected"})
             return
-        log.warning("panikstopp från enheten: %d väntande beslut nekade",
+        log.warning("panic stop from the device: %d pending decisions denied",
                     denied)
         self._send(200, {"ok": True, "denied": denied})
 
@@ -3239,8 +3239,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if claude_route or codex_route:
             if not self._is_loopback():
-                log.warning("hook-POST från %s avvisad — hookar får bara "
-                            "komma från den här maskinen",
+                log.warning("hook POST from %s rejected — hooks may only "
+                            "come from this machine",
                             self.address_string())
                 self._send(403, {"error": "hooks must be local"})
                 return
@@ -3371,8 +3371,8 @@ def _build_arg_parser():
     ap.add_argument("--dir", default=os.path.expanduser("~/.claude/projects"))
     ap.add_argument(
         "--claude-plan", choices=["pro", "max5x", "max20x"], default=None,
-        help="Claude-planen för Max Trackers badge (frivillig, allowlistad "
-             "i max_tracker.PLAN_LABELS)")
+        help="the Claude plan for Max Tracker's badge (optional, "
+             "allowlisted in max_tracker.PLAN_LABELS)")
     ap.add_argument(
         "--plan", action="append", metavar="PROVIDER=USD", default=[],
         help="what a subscription actually costs per month, in USD: "
@@ -3392,13 +3392,13 @@ def _build_arg_parser():
              "carry yet. No code change needed")
     ap.add_argument(
         "--codex-plan", choices=["plus", "pro"], default=None,
-        help="Codex-planen för Max Trackers badge (frivillig, allowlistad "
-             "i max_tracker.PLAN_LABELS)")
+        help="the Codex plan for Max Tracker's badge (optional, "
+             "allowlisted in max_tracker.PLAN_LABELS)")
     ap.add_argument(
         "--github-repo", type=normalize_repo,
         default=os.environ.get("VIBEPULSE_GITHUB_REPO") or None,
-        help="Frivilligt publikt GitHub-repo som owner/repository. "
-             "Kan också sättas med VIBEPULSE_GITHUB_REPO.")
+        help="optional public GitHub repo as owner/repository. "
+             "Can also be set with VIBEPULSE_GITHUB_REPO.")
     ap.add_argument(
         "--publish", metavar="RELAY_URL", default=None,
         help="also POST the numbers endpoints (/api/tokens, /api/max-tracker,"
@@ -3488,8 +3488,9 @@ def _resolve_interaction_config(args, path=None):
         try:
             saved = load_config(config_path)
         except ConfigError:
-            log.error("ogiltig VibePulse-konfiguration i %s — sparade "
-                      "interaktioner stängs av", config_path, exc_info=True)
+            log.error("invalid VibePulse configuration in %s — saved "
+                      "interactions are turned off", config_path,
+                      exc_info=True)
             saved = VibePulseConfig()
             invalid_saved = True
         claude_override = (True if args.interactions else
@@ -3799,7 +3800,7 @@ def main():
         name="log-rotation-watch",
         daemon=True,
     ).start()
-    log.info("startar: rev %s", _SERVER_REV)
+    log.info("starting: rev %s", _SERVER_REV)
     global _claude_plan, _codex_plan, _plan_costs, _price_table
     _claude_plan = args.claude_plan
     _codex_plan = args.codex_plan
@@ -3816,9 +3817,10 @@ def main():
         github_token = _read_github_token()
         github_monitor = GitHubMonitor(args.github_repo, token=github_token)
         github_monitor.start()
-        log.info("GitHub-monitor startad för publika repot %s (stargazare: %s)",
-                 args.github_repo,
-                 "auth" if github_token else "anonym — namn blir 'någon'")
+        log.info("GitHub monitor started for the public repo %s "
+                 "(stargazers: %s)", args.github_repo,
+                 "auth" if github_token else "anonymous — the name becomes "
+                 "'someone'")
     Handler.github_monitor = github_monitor
 
     Handler.projects_dir = Path(args.dir)
@@ -3835,22 +3837,23 @@ def main():
         # advertised over DNS-SD, and the panel would find a computer it
         # cannot ask. The README's prerequisite is "Claude Code and/or
         # Codex"; either is enough.
-        log.warning("hittar varken %s eller %s — finns Claude Code eller "
-                    "Codex på den här maskinen? Väntar på att någon av dem "
-                    "dyker upp (Ctrl-C avbryter).",
+        log.warning("found neither %s nor %s — is Claude Code or Codex on "
+                    "this machine? Waiting for one of them to appear "
+                    "(Ctrl-C aborts).",
                     Handler.projects_dir, CODEX_SESSIONS)
         try:
             while not _any_provider_dir(Handler.projects_dir):
                 time.sleep(30)
         except KeyboardInterrupt:
             raise SystemExit(1) from None
-        log.info("hittade en leverantörskatalog — fortsätter starten.")
+        log.info("found a provider directory — continuing startup.")
     if not Handler.projects_dir.is_dir():
         # Starts anyway: Path.glob on a directory that does not exist gives
         # an empty result without raising, so the Claude figures become
         # zero instead of an error. Codex-only is a fully valid state, not
         # a half-broken one.
-        log.info("%s saknas — kör vidare utan Claude-siffror (Codex hittad).",
+        log.info("%s missing — continuing without Claude figures (Codex "
+                 "found).",
                  Handler.projects_dir)
 
     # The first scan is a warm-up plus a log line -- /api/tokens redoes
@@ -3891,21 +3894,21 @@ def main():
             # _refresh_usage_totals has already logged the crash (throttled)
             # and usageTotals on GET / stays on refreshing until the next
             # attempt.
-            log.warning("förstaskanningen gav inget resultat på %.0f s — "
-                        "/api/tokens serverar platshållare tills en "
-                        "omräkning lyckas", time.monotonic() - t0)
+            log.warning("the first scan produced no result in %.0f s — "
+                        "/api/tokens serves placeholders until a recompute "
+                        "succeeds", time.monotonic() - t0)
             return
         # The same honesty as net.c and the simulator: without a Claude
         # source the zeros are not measurements, and "0 tokens today" in
         # the startup event reads as a day without work to whoever combs
         # the logs.
         if not snap.get("claudeSourcePresent", True):
-            log.info("förstaskanning %.1f s: ingen Claude-källa på den här "
-                     "maskinen — volym okänd, inte noll",
+            log.info("first scan %.1f s: no Claude source on this machine "
+                     "— volume unknown, not zero",
                      time.monotonic() - t0)
             return
-        log.info("förstaskanning %.1f s: %s tokens idag, %d sessioner, "
-                 "%s denna månad",
+        log.info("first scan %.1f s: %s tokens today, %d sessions, "
+                 "%s this month",
                  time.monotonic() - t0,
                  f"{snap['dayTokens']:,}".replace(",", " "),
                  snap["daySessions"],
@@ -3931,52 +3934,52 @@ def main():
     secret = _configure_interactions(
         interaction_config, args.interaction_timeout,
         audit=lambda action, row: log.info(
-            "interaktion %s: %s", action,
+            "interaction %s: %s", action,
             json.dumps(row, sort_keys=True)))
     if secret is None and interaction_config.agent_status_relay:
         secret = interactions.read_device_key()
     if interaction_config.legacy_claude_panel_v1:
-        log.warning("OSÄKER KOMPATIBILITET PÅ: gamla Claude-panelens "
-                    "v1-svar saknar provider/digest-bindning. Stäng av "
-                    "med --no-legacy-claude-panel-v1 när gammal firmware "
-                    "inte längre används. Codex förblir v2.")
+        log.warning("UNSAFE COMPATIBILITY ON: the old Claude panel's v1 "
+                    "answers lack the provider/digest binding. Turn it off "
+                    "with --no-legacy-claude-panel-v1 once old firmware is "
+                    "no longer in use. Codex stays v2.")
     if Handler.interaction_store is not None:
-        log.info("Needs You på: Claude=%s, Codex=%s på 127.0.0.1:%d, "
-                 "håller %.0f s. "
-                 "Enhetsnyckel: %s. Innehåll till skärmen: %s",
-                 "ja" if interaction_config.claude_interactions else "nej",
-                 "ja" if interaction_config.codex_interactions else "nej",
+        log.info("Needs You on: Claude=%s, Codex=%s on 127.0.0.1:%d, "
+                 "holding %.0f s. "
+                 "Device key: %s. Content to the screen: %s",
+                 "yes" if interaction_config.claude_interactions else "no",
+                 "yes" if interaction_config.codex_interactions else "no",
                  args.port, Handler.interaction_timeout_s,
-                 "finns" if secret else "SAKNAS — enheten kan inte svara",
-                 "ja (--interaction-detail)"
+                 "present" if secret else "MISSING — the device cannot answer",
+                 "yes (--interaction-detail)"
                  if interaction_config.interaction_detail
-                 else "nej, bara att något väntar")
+                 else "no, only that something is waiting")
         if not secret:
-            log.warning("ingen enhetsnyckel hittad — hookar parkeras och "
-                        "faller tillbaka till terminalen. Sätt "
-                        "TK_VIBEPULSE_DEVICE_KEY i secrets.h (samma värde "
-                        "som skärmen bygger med) för att kunna svara.")
+            log.warning("no device key found — hooks are parked and fall "
+                        "back to the terminal. Set TK_VIBEPULSE_DEVICE_KEY "
+                        "in secrets.h (the same value the screen is built "
+                        "with) to be able to answer.")
 
     interaction_relay_adapter = _configure_interaction_relay(
         interaction_config,
         secret,
         audit=lambda action, row: log.info(
-            "krypterat interaktionsrelä %s: %s", action,
+            "encrypted interaction relay %s: %s", action,
             json.dumps(row, sort_keys=True)),
     )
     if Handler.interaction_relay_status == "ready":
-        log.info("krypterat Needs You-relä redo (E2E; inga "
-                 "frågor eller kommandon loggas)")
+        log.info("encrypted Needs You relay ready (E2E; no questions or "
+                 "commands are logged)")
     elif Handler.interaction_relay_status == "disabled":
-        log.warning("krypterat Needs You-relä avstängt: %s; LAN och "
-                    "terminalfallback fortsätter",
+        log.warning("encrypted Needs You relay off: %s; LAN and the "
+                    "terminal fallback continue",
                     Handler.interaction_relay_reason)
     if Handler.agent_status_relay_status == "ready":
-        log.info("krypterat agentstatus-relä redo (E2E; fast storlek, "
-                 "kort livslängd, ingen klartext hos molnet)")
+        log.info("encrypted agent-status relay ready (E2E; fixed size, "
+                 "short lifetime, no plaintext at the cloud)")
     elif Handler.agent_status_relay_status == "disabled":
-        log.warning("krypterat agentstatus-relä avstängt: %s; direkt LAN "
-                    "fortsätter", Handler.agent_status_relay_reason)
+        log.warning("encrypted agent-status relay off: %s; direct LAN "
+                    "continues", Handler.agent_status_relay_reason)
 
     relay_publisher = None
     if args.publish:
@@ -4011,9 +4014,9 @@ def main():
             "/api/github": _github_payload,
         })
         relay_publisher.start()
-        log.info("publicerar siffror till reläet som \"%s\" (högst var "
-                 "5:e minut för kvoter och var 30:e minut för GitHub/Max "
-                 "Tracker; agentstatus och Needs You publiceras ALDRIG)",
+        log.info("publishing figures to the relay as \"%s\" (at most every "
+                 "5 min for quotas and every 30 min for GitHub/Max Tracker; "
+                 "agent status and Needs You are NEVER published)",
                  machine)
 
     backfill_stop = threading.Event()
@@ -4032,9 +4035,9 @@ def main():
         discovery.start(args.port)
         Handler.discovery_status = discovery.status
         Handler.discovery_reason = discovery.reason
-        log.info("serverar http://0.0.0.0:%d/api/tokens, "
-                 "/api/agent-status, /api/max-tracker och /api/github "
-                 "(LAN — exponera inte utåt)", args.port)
+        log.info("serving http://0.0.0.0:%d/api/tokens, "
+                 "/api/agent-status, /api/max-tracker and /api/github "
+                 "(LAN — do not expose it outward)", args.port)
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
@@ -4051,8 +4054,8 @@ def main():
         try:
             max_tracker_store.save()  # final flush, the same as the stop() flow
         except Exception:
-            log.exception("max-tracker: slutlig flush misslyckades — "
-                          "dagens toppar kan saknas efter omstart")
+            log.exception("max-tracker: final flush failed — today's peaks "
+                          "may be missing after a restart")
         status_service.stop()
         if srv is not None:
             srv.server_close()

@@ -378,8 +378,8 @@ def check_log_file(path):
     if tracebacks:
         results.append((WARN, f"{tracebacks} traceback(s) in the log{suffix} "
                               f"— grep -n Traceback {path}*"))
-    starts = (text.count("serverar http://")
-              + old_text.count("serverar http://"))
+    starts = (text.count("serving http://")
+              + old_text.count("serving http://"))
     if starts >= RESPAWN_SUSPICION_COUNT:
         service = "the autostart" if os.name == "nt" else "launchd"
         results.append((WARN, f"{starts} start lines in the log{suffix} — "

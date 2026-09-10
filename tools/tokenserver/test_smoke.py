@@ -334,7 +334,7 @@ class LogFileCheckTests(unittest.TestCase):
     def test_small_clean_file_is_ok(self):
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.log"
-            f.write_text("2026-08-13 INFO serverar http://0.0.0.0:8737\n")
+            f.write_text("2026-08-13 INFO serving http://0.0.0.0:8737\n")
             results = smoke.check_log_file(f)
         self.assertEqual(levels(results), [smoke.OK])
 
@@ -343,7 +343,7 @@ class LogFileCheckTests(unittest.TestCase):
             f = Path(tmp) / "t.log"
             f.write_text(
                 "Traceback (most recent call last)\n boom\n" +
-                "serverar http://0.0.0.0:8737\n" * 12)
+                "serving http://0.0.0.0:8737\n" * 12)
             results = smoke.check_log_file(f)
         self.assertEqual(levels(results),
                          [smoke.OK, smoke.WARN, smoke.WARN])
@@ -355,10 +355,10 @@ class LogFileCheckTests(unittest.TestCase):
         # clean, newly truncated file must not hide it.
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.log"
-            f.write_text("serverar http://0.0.0.0:8737\n")
+            f.write_text("serving http://0.0.0.0:8737\n")
             (Path(tmp) / "t.log.old").write_text(
                 "Traceback (most recent call last)\n boom\n" +
-                "serverar http://0.0.0.0:8737\n" * 11)
+                "serving http://0.0.0.0:8737\n" * 11)
             results = smoke.check_log_file(f)
         self.assertEqual(levels(results),
                          [smoke.OK, smoke.WARN, smoke.WARN])
@@ -429,7 +429,7 @@ class RunExitCodeTests(unittest.TestCase):
     def _run(self, payloads, status=200):
         with tempfile.TemporaryDirectory() as tmp:
             log_file = Path(tmp) / "t.log"
-            log_file.write_text("serverar http://0.0.0.0:8737\n")
+            log_file.write_text("serving http://0.0.0.0:8737\n")
             state = Path(tmp) / "state"
             state.mkdir()
             for name in smoke.STATE_FILES:
