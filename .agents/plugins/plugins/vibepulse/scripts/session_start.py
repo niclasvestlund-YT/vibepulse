@@ -17,7 +17,7 @@ DEFAULT_PORT = 8737
 HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
-EXPECTED_HOST_SOURCE_FINGERPRINT = "635036880d22"
+EXPECTED_HOST_SOURCE_FINGERPRINT = "b1cb05f46caf"
 CODEX_CONFIG_MAX_BYTES = 64 * 1024
 # Only the three top-level string settings that decide whether a permission
 # card can reach a user at all. Anchored and quote-matched so a value inside
@@ -111,6 +111,25 @@ def classify_startup_health(root, tokens):
             action = "Run the setup doctor and tokenserver smoke test."
         return (f"VibePulse startup health: PROVIDER DATA STALE ({providers}). "
                 f"{action}{risk}")
+
+    # Issue #62: the service answers at once while its first history scan
+    # runs, so a fresh quota can ride beside placeholder volume counters.
+    # A scan that is running is a wait; a recompute that keeps failing
+    # (or froze the totals, OBS-08) is a fault, not "HEALTHY".
+    totals = tokens.get("usageTotals")
+    totals_state = totals.get("state") if isinstance(totals, dict) else None
+    if root.get("usageComputeOk") is False or totals_state == "failing":
+        return ("VibePulse startup health: VOLUME RECOMPUTE FAILING; quota "
+                "data is fresh but the token-volume recompute behind "
+                "/api/tokens is crashing, so the value page shows dashes or "
+                "frozen totals. Read the tokenserver log for "
+                "`usage-omräkningen kraschade` and run the tokenserver smoke "
+                f"test.{risk}")
+    if totals_state == "refreshing":
+        return ("VibePulse startup health: SERVICE WARMING UP; quota data is "
+                "fresh and the first history scan is still running, so the "
+                "volume counters are placeholders for a few minutes. Nothing "
+                f"to fix; recheck shortly.{risk}")
 
     panel = interactions.get("panel")
     if not isinstance(panel, dict):

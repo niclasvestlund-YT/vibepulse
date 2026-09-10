@@ -7,6 +7,50 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **A healthy service restart showed STALE on the glass for minutes.** The
+  tokenserver's first history scan ran *under the cache lock* inside
+  `get_snapshot`, so every `/api/tokens` request queued behind it. On a Mac
+  with a large Claude/Codex history the scan took 211 s, the panel's polls
+  timed out one after another, and the glass went STALE two minutes into
+  every restart of a service whose credentials, discovery and relay were
+  all fine (issue #62). The first request now answers at once: the scan
+  runs in the background, and the response carries live quota percentages
+  plus a new additive block `usageTotals` that says what the four volume
+  counters are: `refreshing` (placeholder zeros, `placeholder: true`,
+  `sinceS` since start), `ready` (`ageS` old) or `failing` (the recompute
+  is crashing, OBS-08: frozen with `ageS`, or still placeholders if no
+  scan ever completed). The block is captured under the same lock and from
+  the same read as the counters, so it can never describe a different
+  snapshot than the one it rides on. The completed scan is swapped in
+  atomically; a scan that crashes is retried on the normal thirty-second
+  cadence, never per request. **Placeholders never reach a client that
+  would apply them:** the service serves them only to a request carrying
+  `X-VibePulse-Accepts: usage-totals`, and answers everyone else with the
+  contract's error form (HTTP 503, `usageTotals` beside it), which the
+  already-flashed firmware rejects by design and keeps its last good
+  values, going honestly STALE two minutes later exactly as before. New
+  firmware sends the header, parses `usageTotals.placeholder`, applies the
+  live quota rings but leaves the value page and the keep-awake burn rate
+  untouched during a warm-up: never invented zeros, counters never go
+  backwards. The firmware fetch log and the simulator say "volym ej
+  uppmätt än" for such a sample instead of printing `0.00 Mtok idag`.
+  When the block says `failing` the recompute is crashing and the
+  measurement is not coming, whether the counters are placeholders or
+  frozen at the last good scan: the firmware then shows dashes on the
+  value page instead of carrying an old figure that would look fresh poll
+  after poll, keeps the panel asleep rather than waking on a frozen burn
+  rate, and logs a warning (fixture `tokens-volume-failing.json`). The same block is on `GET /`, the numbers publisher does not
+  send a placeholder to the relay, the SessionStart hook reports `SERVICE
+  WARMING UP` (and `VOLUME RECOMPUTE FAILING`) as their own classes, the
+  setup doctor prints `WAIT` for a warm-up and `FIX` for a failing
+  recompute, and the smoke test warns instead of failing. A full disk is
+  visible too: `GET /` carries `maxTrackerSaveOk` /
+  `maxTrackerSaveFailingForS` while the state file cannot be written (the
+  observations stay in memory and retry, as OBS-10 already arranged), the
+  doctor and smoke test name it, and a test proves one `ENOSPC` on the
+  atomic write leaves both the previous file and memory intact. Firmware
+  side built in CI, not flashed: an OTA to this build is what turns the
+  post-restart STALE into a live panel; until then the old behaviour holds.
 - **Unmapped models reached the panel as raw ids (OBS-30).** The agent
   rows typeset six model ids by hand (`OPUS 5`, `GPT-5.6 SOL`, ...) and let
   the other hundred-odd in `prices.json` fall through as raw lowercase,

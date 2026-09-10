@@ -21,6 +21,35 @@ point at the backlog item.
 
 ---
 
+## 2026-09-10 · A background scan still blocked every request through the lock
+
+**What happened:** after a restart on a Mac with a large Claude/Codex
+history, the light health endpoints answered but every `/api/tokens` request
+timed out for 211 s, and the panel went STALE two minutes into a restart of
+a perfectly healthy service (issue #62). **Root cause:** the first usage
+scan had been moved *off* the startup thread in August (lesson 2026-08-26),
+but `get_snapshot` still ran it inline, under `_cache_lock`, whenever no
+result existed yet. Every HTTP worker took the same lock to read the result
+and queued behind the one doing the scan. The warm-up thread did not help:
+it was just the first caller to take that lock. **The rule now:** a request
+handler never does the expensive thing under the lock that serves the
+cheap thing. If there is no result yet, say so in the response and let one
+background thread produce it; readers take the lock only to copy. And the
+"no result yet" state is *named* (`usageTotals.state`), so a placeholder
+never looks like a measurement to the doctor, the hook, the smoke test or
+the relay publisher. And a placeholder is only handed to a client that
+said it understands one (`X-VibePulse-Accepts: usage-totals`); the
+already-flashed firmware would have applied the zeros as fresh data, which
+a Codex review caught on the first draft, so everyone else gets the error
+form the old firmware already rejects. **Guards:** `StartupSnapshotTests`
+in `test_tokenserver.py` time the first request with the scan blocked,
+prove one scan for many requests, the cadence-bounded retry after a crash,
+that the block is captured under the lock with the counters it describes,
+and the header gate; `test_publisher.py` proves a placeholder is not sent;
+`test_tokens.c` proves the firmware flag; the doctor, hook and smoke suites
+each classify the state. **Watch for:** a new producer that computes under
+`_cache_lock`, and a new `/api/tokens` reader that forgets the header and
+mistakes the 503 for a dead service.
 ## 2026-09-10 · A hand-written label map was a parser with six entries and a hundred inputs
 
 **What happened:** the agent rows on the panel typeset six model ids by

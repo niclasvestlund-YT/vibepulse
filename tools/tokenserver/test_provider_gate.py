@@ -196,6 +196,11 @@ class CodexOnlyEndToEndTest(unittest.TestCase):
                                   "_persist_quota_records_async"):
             tokenserver._last_result = None
             tokenserver._last_computed = 0.0
+            # Since issue #62 the first request answers with a placeholder
+            # (or, without the Accepts header, the error form) while the
+            # scan runs in the background. This test is about what the
+            # completed Codex-only scan serves, so run that scan first.
+            tokenserver._refresh_usage_totals(self.claude_absent)
             handler.do_GET()
 
         handler._send.assert_called_once()

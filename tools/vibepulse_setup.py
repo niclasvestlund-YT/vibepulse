@@ -1653,10 +1653,47 @@ def _doctor(
                 print("PASS Tokenserver source: live fingerprint matches "
                       "this checkout", file=stdout)
             _doctor_panel_lan_contact(interactions, stdout)
+            if not _doctor_usage_totals(payload, stdout):
+                fixes = True
             if config.claude_interactions and not _doctor_claude_quota(
                     payload, stdout):
                 fixes = True
     return not fixes
+
+
+def _doctor_usage_totals(payload: dict, stdout) -> bool:
+    """Classify the served volume counters and the state writer.
+
+    Startup refresh, frozen recompute and a failing save are three
+    different things (issue #62): only the last two are FIX. Prints
+    durations only, never paths or figures.
+    """
+    healthy = True
+    totals = payload.get("usageTotals")
+    if isinstance(totals, dict):
+        state = totals.get("state")
+        if state == "refreshing":
+            since = totals.get("sinceS")
+            since_text = f" for {since} s" if isinstance(since, int) else ""
+            print("WAIT Tokenserver usage totals: the first history scan is "
+                  f"still running{since_text}; quota data is live and the "
+                  "panel is served placeholder zeros until it finishes",
+                  file=stdout)
+        elif state == "failing":
+            age = totals.get("ageS")
+            age_text = f" ({age} s old)" if isinstance(age, int) else ""
+            print("FIX Tokenserver usage totals: the recompute is failing, "
+                  f"so the served volume counters are frozen{age_text}; "
+                  "read the tokenserver log", file=stdout)
+            healthy = False
+    if payload.get("maxTrackerSaveOk") is False:
+        secs = payload.get("maxTrackerSaveFailingForS")
+        secs_text = f" for {secs} s" if isinstance(secs, int) else ""
+        print("FIX Max Tracker save: the state file cannot be written"
+              f"{secs_text}; observations stay in memory and retry, but "
+              "check free disk space and permissions", file=stdout)
+        healthy = False
+    return healthy
 
 
 def _doctor_panel_lan_contact(interactions: dict, stdout) -> None:

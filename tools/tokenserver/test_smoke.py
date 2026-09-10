@@ -189,6 +189,30 @@ class ServerCheckTests(unittest.TestCase):
         self.assertIn("frysta siffror", fails[0])
         self.assertIn("612", fails[0])
 
+    def test_first_scan_in_progress_is_a_warning_not_a_failure(self):
+        # Issue #62: placeholder counters during the first scan are named,
+        # bounded and expected -- the smoke test says so, and says the
+        # quota is live, without escalating to FAIL.
+        root = dict(HEALTHY_ROOT,
+                    usageTotals={"state": "refreshing", "sinceS": 41})
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        warnings = [text for level, text in results if level == smoke.VARN]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("första skanningen pågår", warnings[0])
+        self.assertIn("41", warnings[0])
+        self.assertNotIn(smoke.FAIL, levels(results))
+
+    def test_a_failing_state_save_is_a_warning_with_its_duration(self):
+        root = dict(HEALTHY_ROOT, maxTrackerSaveOk=False,
+                    maxTrackerSaveFailingForS=77)
+        with canned_server({"/": root}) as base:
+            results = smoke.check_server(base, checkout_rev="abc1234")
+        warnings = [text for level, text in results if level == smoke.VARN]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("kan inte spara", warnings[0])
+        self.assertIn("77", warnings[0])
+
     def test_older_server_without_compute_field_is_not_judged(self):
         root = {k: v for k, v in HEALTHY_ROOT.items()
                 if not k.startswith("usageCompute")}

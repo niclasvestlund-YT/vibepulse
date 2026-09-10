@@ -441,6 +441,27 @@ De nya delta- och prognosfälten är frivilliga för äldre skärmkod och `null`
 när underlaget saknas. Prognosen blir först aktiv efter minst tre punkter,
 90 minuters spann och en procents faktisk rörelse i samma resetcykel.
 
+## Uppstart: platshållare tills första skanningen är klar
+
+Första historikskanningen kan ta minuter på en stor `~/.claude`/`~/.codex`.
+Den körs i bakgrunden; under tiden svarar `/api/tokens` direkt, med
+kvotprocenten live och blocket `usageTotals` som säger vad volymräknarna
+är: `{"state": "refreshing", "sinceS": N, "placeholder": true}` tills
+skanningen gått i mål, sedan `{"state": "ready", "ageS": N,
+"placeholder": false}`, och `"failing"` om omräkningen kraschar (frysta
+räknare med `ageS`, eller platshållare om ingen skanning hunnit lyckas;
+`usageComputeOk` på `GET /` har detaljen). Samma block finns på `GET /`.
+
+**Platshållare serveras bara till den som sagt att den förstår dem.**
+En klient som skickar `X-VibePulse-Accepts: usage-totals` får svaret ovan
+med nollor och blocket; alla andra får `503 {"error": ..., "usageTotals":
+{...}}`, kontraktets felform, som firmwaren avvisar och behåller sina
+senaste värden på — så en redan flashad panel lär sig aldrig nollor.
+Firmware från 2026-09-10 skickar headern, läser `placeholder` och
+applicerar kvoten men rör inte värdesidan förrän räknarna är mätta.
+Relä-publiceraren skickar inga platshållare, så en panel bakom reläet
+behåller sina senaste riktiga värden.
+
 ## Kvotcache och stale-kontrakt
 
 Senaste auktoritativa Claude- och Codex-värden för generell vecka och

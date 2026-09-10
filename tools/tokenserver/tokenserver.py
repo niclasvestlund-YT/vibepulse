@@ -120,6 +120,9 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     import value_meter
 
 RECOMPUTE_EVERY_S = 30
+# Hur länge uppvärmningstråden väntar på en skanning som en tidig
+# HTTP-förfrågan hann starta före den, innan den ger upp loggraden.
+FIRST_SCAN_WAIT_S = 600
 LIMITS_EVERY_S = 240  # rate-limit-proben: 15 anrop/h — kontots bucket delas
 AUTH_RECOVERY_EVERY_S = 15.0  # lokal tokenkontroll; ingen upstream vid väntan
                       # med Claude Code självt, och kvoten rör sig långsamt;
@@ -402,6 +405,11 @@ _price_table = None
 _last_result = None
 _last_computed = 0.0
 _snapshot_refreshing = False
+# När den senaste LYCKADE omräkningen blev klar (monotonic). None tills
+# första skanningen gått i mål: det är den som skiljer "platshållare" från
+# "frysta siffror" i usageTotals-blocket nedan.
+_last_result_at = None
+_SERVER_STARTED_MONO = time.monotonic()
 # Omräkningens hälsa: kraschar _compute serveras förra snapshotet vidare —
 # rätt beteende, men det får inte ske TYST (då fryser siffrorna för alltid
 # och ser färska ut). failing_since driver usageComputeOk på GET / och
@@ -1890,6 +1898,7 @@ _max_tracker_writer_lock = threading.Lock()
 _max_tracker_dirty = False
 _max_tracker_writer_running = False
 _ERROR_LOG_THROTTLE_S = 300.0  # ihållande fel: en loggrad per 5 min räcker
+_max_tracker_save_failing_since = None  # monotonic; None = sparar fint
 _last_save_error_logged = None  # None = aldrig loggat (0.0 sväljer första
                                 # felet på en nystartad maskin — monotonic
                                 # räknar från boot)
@@ -1897,7 +1906,7 @@ _last_save_error_logged = None  # None = aldrig loggat (0.0 sväljer första
 
 def _max_tracker_writer(store):
     global _max_tracker_dirty, _max_tracker_writer_running, \
-        _last_save_error_logged
+        _last_save_error_logged, _max_tracker_save_failing_since
     while True:
         with _max_tracker_writer_lock:
             if not _max_tracker_dirty:
@@ -1910,14 +1919,23 @@ def _max_tracker_writer(store):
                 # Lyckad skrivning stänger felepisoden: logga slutet och
                 # nollställ strypningen, så nästa fel (en NY episod) loggar
                 # direkt i stället för att ärva gamla fönstret.
-                log.info("max-tracker: save lyckades igen")
+                log.info("max-tracker: save lyckades igen efter %.0f s",
+                         time.monotonic()
+                         - (_max_tracker_save_failing_since
+                            or time.monotonic()))
                 _last_save_error_logged = None
+            _max_tracker_save_failing_since = None
         except Exception:
             # En misslyckad skrivning får inte tappa dirty-signalen: markera
             # om och avsluta, så NÄSTA observation (eller slutflushen)
             # försöker igen — ingen het loop, ingen tyst dataförlust.
             # Loggen är strypt: ett trasigt skrivmål ska inte fylla filen.
+            # Episoden syns på GET / (maxTrackerSaveOk) så en full disk
+            # (ENOSPC, issue #62) är degraderad hälsa, inte en loggrad
+            # ingen läser.
             now = time.monotonic()
+            if _max_tracker_save_failing_since is None:
+                _max_tracker_save_failing_since = now
             if (_last_save_error_logged is None or
                     now - _last_save_error_logged >= _ERROR_LOG_THROTTLE_S):
                 _last_save_error_logged = now
@@ -2015,7 +2033,7 @@ def _add_forecast(result, prefix, forecast):
 
 def _refresh_usage_totals(projects_dir, max_tracker_store=None):
     global _last_result, _last_computed, _snapshot_refreshing, \
-        _compute_failing_since, _last_compute_error_logged
+        _last_result_at, _compute_failing_since, _last_compute_error_logged
     try:
         refreshed = _compute(projects_dir, max_tracker_store)
     except Exception:
@@ -2039,8 +2057,108 @@ def _refresh_usage_totals(projects_dir, max_tracker_store=None):
     with _cache_lock:
         if refreshed is not None:
             _last_result = refreshed
+            _last_result_at = time.monotonic()
         _last_computed = time.monotonic()
         _snapshot_refreshing = False
+
+
+def _usage_totals_state_locked(have_result):
+    """The additive ``usageTotals`` block, on ``/api/tokens`` and ``GET /``.
+
+    ``have_result`` is whether the counters in the payload being built
+    are a completed scan (True) or placeholder zeros (False). The caller
+    decides that UNDER ``_cache_lock`` from the same read that picked the
+    counters, so the block can never describe a different snapshot than
+    the one it rides on (a first scan that landed between the two reads
+    used to label zeros ``ready``, and the publisher would have sent
+    them). Three states plus one honest flag (issue #62):
+
+    ``refreshing``
+        The first history scan has not finished. ``placeholder`` is true:
+        the counters are zeros, not measurements. ``sinceS`` is how long
+        the service has been up. Quota percentages in the same payload are
+        live: they come from the probe and the quota cache, not the scan.
+    ``ready``
+        The counters are the last completed scan, ``ageS`` seconds old.
+    ``failing``
+        The recompute is crashing (OBS-08). With a completed scan behind
+        it the counters are frozen at ``ageS`` old; without one they are
+        still placeholders (``placeholder`` true, ``sinceS``), and the
+        state says *failing*, not refreshing, so a hook or doctor does not
+        call a broken scan a warm-up. ``usageComputeOk`` /
+        ``usageComputeFailingForS`` on ``GET /`` carry the detail.
+    """
+    now = time.monotonic()
+    failing = _compute_failing_since is not None
+    if not have_result:
+        return {"state": "failing" if failing else "refreshing",
+                "sinceS": int(now - _SERVER_STARTED_MONO),
+                "placeholder": True}
+    age = (int(now - _last_result_at)
+           if _last_result_at is not None else None)
+    return {"state": "failing" if failing else "ready",
+            "ageS": age,
+            "placeholder": False}
+
+
+def _usage_totals_state():
+    """``GET /``'s view of the block: one consistent read under the lock."""
+    with _cache_lock:
+        return _usage_totals_state_locked(_last_result is not None)
+
+
+def usage_totals_are_placeholders(payload):
+    """True when a ``/api/tokens`` payload's counters are not measurements.
+
+    The one question every consumer has to ask before treating the volume
+    counters as numbers: the publisher (never relay a placeholder), the
+    handler (never hand one to a client that would apply it), and any
+    tool reading the endpoint.
+    """
+    if not isinstance(payload, dict):
+        return False
+    totals = payload.get("usageTotals")
+    return isinstance(totals, dict) and totals.get("placeholder") is True
+
+
+def _startup_totals_placeholder(projects_dir):
+    """What ``/api/tokens`` serves for the volume counters until the first
+    scan completes.
+
+    The firmware contract requires the four counters to be numbers
+    (tokens_parse.c: ``if (!num(root, "dayTokens", &day)) goto done;``),
+    so an honest ``null`` is not an option there. Zeros it is, with
+    ``usageTotals.state == "refreshing"`` saying so in the same payload;
+    ``claudeSourcePresent`` keeps its own meaning (is there a Claude
+    directory at all). The value block is the real builder fed zero
+    volume, so its ``state``/``cost_source`` are exactly what a genuinely
+    empty month would produce.
+    """
+    return {
+        "v": 1,
+        "dayTokens": 0,
+        "dayTokensPerHour": 0,
+        "daySessions": 0,
+        "monthTokens": 0,
+        "claudeSourcePresent": projects_dir.is_dir(),
+        "value": value_meter.build_payload(
+            0.0, 0, 0,
+            claude_plan=_claude_plan, codex_plan=_codex_plan,
+            plan_costs=_plan_costs, table=_price_table,
+            claude_usd=0.0, codex_usd=0.0),
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+
+def _start_usage_refresh(projects_dir, max_tracker_store, name):
+    """Start one background recompute. Caller holds ``_cache_lock`` and has
+    already set ``_snapshot_refreshing``; this only spawns the thread."""
+    threading.Thread(
+        target=_refresh_usage_totals,
+        args=(projects_dir, max_tracker_store),
+        name=name,
+        daemon=True,
+    ).start()
 
 
 def get_snapshot(projects_dir: Path, history=None, now_ts=None,
@@ -2054,21 +2172,33 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     so live percentages/volume only ever reach the on-disk history for
     actual requests, never for a caller that didn't ask for it.
     """
-    global _last_result, _last_computed, _snapshot_refreshing
+    global _snapshot_refreshing
     with _cache_lock:
         if _last_result is None:
-            _last_result = _compute(projects_dir, max_tracker_store)
-            _last_computed = time.monotonic()
-        elif (time.monotonic() - _last_computed > RECOMPUTE_EVERY_S and
-              not _snapshot_refreshing):
-            _snapshot_refreshing = True
-            threading.Thread(
-                target=_refresh_usage_totals,
-                args=(projects_dir, max_tracker_store),
-                name="usage-total-refresh",
-                daemon=True,
-            ).start()
-        result = dict(_last_result)
+            # Första skanningen låg här, UNDER låset, och tog 211 s på en
+            # Mac med stor historik: varje /api/tokens-anrop köade bakom
+            # den och gick i timeout, så panelen blev STALE efter varje
+            # omstart av en frisk tjänst (issue #62). Nu startas den i
+            # bakgrunden och svaret är en platshållare som säger vad den
+            # är (usageTotals nedan). Kraschar den startas den om först
+            # efter RECOMPUTE_EVERY_S — inte per anrop.
+            now = time.monotonic()
+            if (not _snapshot_refreshing and
+                    (_last_computed == 0.0 or
+                     now - _last_computed > RECOMPUTE_EVERY_S)):
+                _snapshot_refreshing = True
+                _start_usage_refresh(projects_dir, max_tracker_store,
+                                     "usage-total-first-scan")
+            result = _startup_totals_placeholder(projects_dir)
+            totals = _usage_totals_state_locked(have_result=False)
+        else:
+            if (time.monotonic() - _last_computed > RECOMPUTE_EVERY_S and
+                    not _snapshot_refreshing):
+                _snapshot_refreshing = True
+                _start_usage_refresh(projects_dir, max_tracker_store,
+                                     "usage-total-refresh")
+            result = dict(_last_result)
+            totals = _usage_totals_state_locked(have_result=True)
 
     # null = ärlig frånvaro (nyckelring/probe/loggar otillgängliga) — skärmen
     # visar streck, aldrig hittade procent. Samma regel som sharePct.
@@ -2218,6 +2348,10 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     # OTA-annonsen rider på kvotpollen: noll ny infrastruktur, och enheten
     # avgör själv (mot sin körande version) om notisen ska visas.
     result["otaAvailableVersion"] = _ota_available_version()
+    # Additiv nyckel (tokens_parse.c hoppar över okända toppnivånycklar):
+    # säger om volymräknarna ovan är mätningar, platshållare eller frysta.
+    # Fångad under låset ovan, från SAMMA läsning som valde räknarna.
+    result["usageTotals"] = totals
     result["v"] = 2
     return result
 
@@ -2591,6 +2725,35 @@ class Handler(BaseHTTPRequestHandler):
             quota_snapshot.get("codexWeekStale"))
         return payload
 
+    # The header a client sends to say it understands ``usageTotals`` and
+    # will not apply placeholder counters as measurements. Firmware from
+    # 2026-09-10 on sends it on every fetch; the hook and the smoke test
+    # send it too. A client without it gets the contract's error form
+    # instead of a placeholder, so an already-flashed panel keeps its last
+    # good values (and goes honestly STALE) rather than learning zeros.
+    ACCEPTS_HEADER = "X-VibePulse-Accepts"
+    ACCEPTS_USAGE_TOTALS = "usage-totals"
+
+    def _accepts_usage_totals(self):
+        headers = getattr(self, "headers", None)
+        accepts = (headers.get(self.ACCEPTS_HEADER) if headers else None) or ""
+        return self.ACCEPTS_USAGE_TOTALS in accepts.lower()
+
+    class _NotMeasuredYet(Exception):
+        """Raised by _tokens_payload for a client that must not see zeros."""
+
+        def __init__(self, totals):
+            super().__init__("usage totals not measured yet")
+            self.totals = totals
+
+    def _tokens_payload(self):
+        payload = get_snapshot(self.projects_dir,
+                               max_tracker_store=self.max_tracker_store)
+        if (usage_totals_are_placeholders(payload) and
+                not self._accepts_usage_totals()):
+            raise self._NotMeasuredYet(payload["usageTotals"])
+        return payload
+
     def _reply(self, produce):
         """Svara 200 med produce(), annars 500 {"error": ...} — skärmen
         avvisar error-formen per kontrakt och behåller senaste goda värden.
@@ -2600,9 +2763,20 @@ class Handler(BaseHTTPRequestHandler):
         Producenten och svarsskrivningen bedöms VAR FÖR SIG: ett
         ConnectionError/TimeoutError från producenten är ett serverfel som
         ska loggas och bli 500 — bara under själva skrivningen betyder det
-        att klienten försvann."""
+        att klienten försvann.
+
+        Ett undantag: platshållare (issue #62) till en klient som inte sagt
+        att den förstår dem är inget serverfel utan ett 503 i felformen,
+        med usageTotals-blocket bredvid så den som läser vet varför."""
         try:
             payload = produce()
+        except self._NotMeasuredYet as pending:
+            try:
+                self._send(503, {"error": "usage totals not measured yet",
+                                 "usageTotals": pending.totals})
+            except OSError:
+                pass
+            return
         except Exception:
             log.exception("500 på %s", self.path)
             try:
@@ -2876,9 +3050,7 @@ class Handler(BaseHTTPRequestHandler):
                          "/api/max-tracker", "/api/github"):
             self._record_panel_poll()
         if self.path == "/api/tokens":
-            self._reply(lambda: get_snapshot(
-                self.projects_dir,
-                max_tracker_store=self.max_tracker_store))
+            self._reply(self._tokens_payload)
         elif self.path == "/api/agent-status":
             self._reply(self._agent_status_payload)
         elif self.path == "/api/max-tracker":
@@ -2898,6 +3070,7 @@ class Handler(BaseHTTPRequestHandler):
         # emellan ge None i subtraktionen (500 på själva diagnostikrutten)
         # och en nystartad episod ge ok=true med varaktighet bredvid.
         failing_since = _compute_failing_since
+        save_failing_since = _max_tracker_save_failing_since
         endpoints = ["/api/tokens", "/api/agent-status",
                      "/api/max-tracker", "/api/github"]
         return {"service": "torget-tokenserver",
@@ -2920,6 +3093,11 @@ class Handler(BaseHTTPRequestHandler):
                 "usageComputeFailingForS":
                     (int(time.monotonic() - failing_since)
                      if failing_since is not None else None),
+                "usageTotals": _usage_totals_state(),
+                "maxTrackerSaveOk": save_failing_since is None,
+                "maxTrackerSaveFailingForS":
+                    (int(time.monotonic() - save_failing_since)
+                     if save_failing_since is not None else None),
                 "discovery": {
                     "status": self.discovery_status,
                     **({"reason": self.discovery_reason}
@@ -3459,12 +3637,32 @@ def main():
     # svarar meningsfullt på en gång, /api/tokens svarar när skanningen är
     # klar (skärmen visar streck/stale tills dess, precis som vid nätfel).
     def _first_scan_warmup():
+        global _snapshot_refreshing
         t0 = time.monotonic()
-        try:
-            snap = get_snapshot(Handler.projects_dir)
-        except Exception:
-            log.exception("förstaskanningen kraschade — /api/tokens värmer "
-                          "vid första anropet i stället")
+        # Gör själva skanningen här, i den här tråden, i stället för att
+        # gå via get_snapshot: den svarar numera direkt med en platshållare
+        # (issue #62) och startar skanningen i bakgrunden, och en logg-
+        # rad byggd på platshållaren hade sagt "0 tokens idag". Anspråket
+        # görs under låset så en tidig /api/tokens och uppvärmningen
+        # aldrig kör _compute samtidigt; förlorar vi kapplöpningen väntar
+        # vi in den trådens resultat i stället.
+        with _cache_lock:
+            claimed = _last_result is None and not _snapshot_refreshing
+            if claimed:
+                _snapshot_refreshing = True
+        if claimed:
+            _refresh_usage_totals(Handler.projects_dir)
+        else:
+            while (_last_result is None and
+                   time.monotonic() - t0 < FIRST_SCAN_WAIT_S):
+                time.sleep(0.2)
+        snap = _last_result
+        if snap is None:
+            # _refresh_usage_totals har redan loggat kraschen (strypt) och
+            # usageTotals på GET / står på refreshing tills nästa försök.
+            log.warning("förstaskanningen gav inget resultat på %.0f s — "
+                        "/api/tokens serverar platshållare tills en "
+                        "omräkning lyckas", time.monotonic() - t0)
             return
         # Samma ärlighet som net.c och simulatorn: utan Claude-källa är
         # nollorna inte mätningar, och "0 tokens idag" i starthändelsen

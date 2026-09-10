@@ -105,6 +105,16 @@ static bool http_get_timeout(const char *url, char *buf, size_t cap,
     goto done;
   }
 
+  /* This firmware understands usageTotals and never applies placeholder
+   * counters as measurements (tokens_parse.c / usage_screen.c), so the
+   * service may answer with them during its first history scan instead of
+   * the error form it gives older panels (issue #62). Content-free, so it
+   * is sent on every fetch, relay included; delivery never depends on it. */
+  if (esp_http_client_set_header(
+          client, "X-VibePulse-Accepts", "usage-totals") != ESP_OK) {
+    ESP_LOGW(TAG, "kunde inte sätta Accepts-headern");
+  }
+
   /* Content-free post-restart evidence for the local health endpoint. Never
    * send it to a public relay, and never make data delivery depend on this
    * optional diagnostic header. */

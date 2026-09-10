@@ -440,6 +440,24 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
                       &t.claude_model_week)) goto done;
   if (!optional_stale(root, "codexWeekStale", &t.codex_week)) goto done;
 
+  /* Additiv, valfri: usageTotals.placeholder (issue #62). Bara en riktig
+   * boolean true gör räknarna till platshållare; ett saknat, felformat
+   * eller icke-booleskt block betyder "mätningar" — samma öppna hand som
+   * för alla frivilliga nycklar, och aldrig ett skäl att avvisa svaret. */
+  {
+    const cJSON *totals = cJSON_GetObjectItemCaseSensitive(
+        root, "usageTotals");
+    if (cJSON_IsObject(totals)) {
+      const cJSON *placeholder = cJSON_GetObjectItemCaseSensitive(
+          totals, "placeholder");
+      t.volume_placeholder = cJSON_IsTrue(placeholder) ? 1 : 0;
+      const cJSON *state = cJSON_GetObjectItemCaseSensitive(totals, "state");
+      t.volume_failing = (cJSON_IsString(state) && state->valuestring &&
+                          strcmp(state->valuestring, "failing") == 0)
+                             ? 1 : 0;
+    }
+  }
+
   optional_label(root, trust_optional_strings, "claudeModelWeekLabel",
                  t.claude_model_week_label,
                  sizeof t.claude_model_week_label,
