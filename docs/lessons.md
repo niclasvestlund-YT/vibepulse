@@ -50,6 +50,38 @@ and the header gate; `test_publisher.py` proves a placeholder is not sent;
 each classify the state. **Watch for:** a new producer that computes under
 `_cache_lock`, and a new `/api/tokens` reader that forgets the header and
 mistakes the 503 for a dead service.
+## 2026-09-10 · A store that starts over on a bad file destroys the evidence on its next save
+
+**What happened:** none of the three state files was ever corrupted in the
+field; this is an audit finding (OBS-11) made into a rule before it costs
+anyone 400 days of Max Tracker history. **Root cause:** each store handled
+"cannot read" the only way an unspecified case gets handled: return an
+empty state and carry on. The next `save()` then wrote the empty state over
+the corrupt bytes, which are usually 99 % intact. Recovery was impossible
+by design, and a non-UTF-8 `max-tracker.json` did not even reach that
+path: `read_text` raised out of the constructor and the service did not
+start. The parent-directory fsync (OBS-21) has the same shape: the quota
+cache had it, its two siblings did not, because each writer was written on
+its own day. **The rule now:** a state file that cannot be loaded is moved
+aside (`<name>.corrupt-<UTC stamp>`) with one WARNING naming file and
+reason, never contents, and only then does the store start empty; a
+parseable file that lacks the shape `save()` always writes counts as
+corrupt too, since a valid file cannot look like that. Durability and
+quarantine live in one helper (`state_files.py`) so a fourth store
+inherits both instead of re-deciding them. **Guards:** per-store tests for
+invalid JSON, non-UTF-8 bytes and wrong shape (`{}` included, after a
+Codex review caught that gap; a provider section that is a dict but not
+the `{v, days, weeks, backfill}` shape `save()` writes, after the next
+pass caught that one), and for the parent fsync after the rename. Two
+more rules from the same review: a file that exists but cannot be *read*
+(permissions, I/O) is not "empty" — the store starts empty but refuses to
+save, because a rename needs only the directory's permission and would
+have replaced the file on the first save; and when the replace has landed
+but the directory fsync fails, memory keeps the new state (disk and
+memory agree, only durability is unproven) instead of rolling back and
+letting the next save drop a sample that is on disk.
+**Watch for:** a new store that catches `OSError` broadly and returns
+empty, and a loader that accepts a partial shape "to be lenient".
 ## 2026-09-10 · The parser read a field where the docs put it, not where the writer puts it
 
 **What happened:** `/api/agent-status` served `effort: null` for every
