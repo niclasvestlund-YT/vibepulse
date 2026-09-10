@@ -67,7 +67,13 @@ MODEL_LABELS = {
     "gpt-5.6-sol": "GPT-5.6 SOL",
     "gpt-5.6-terra": "GPT-5.6 TERRA",
 }
-_DATED_SUFFIX = re.compile(r"-(?:20\d{6}|20\d\d-\d\d-\d\d)$")
+# Snapshot dates in an id, in every form the two catalogs use: a trailing
+# `-20250219` or `-2025-04-14`, and the compact `-0613` / `-0125` MMDD
+# token that may sit before a variant (`gpt-4-0125-preview`). A version
+# is never four bare digits, so the compact form is safe to drop wherever
+# it appears (Codex review of #106).
+_DATED_SUFFIX = re.compile(
+    r"-(?:20\d{6}|20\d\d-\d\d-\d\d|\d{4})(?=-|$)")
 _VERSION_TOKEN = re.compile(r"^\d+(?:\.\d+)*$")
 
 
