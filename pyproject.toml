@@ -23,6 +23,11 @@
 # Run: ruff check .   (test/run.sh and CI's host gate run it for you)
 
 [tool.ruff]
+# Same pin as requirements-dev.txt. A venv carrying another ruff release
+# would run a different rule implementation than CI and pass or fail
+# differently; ruff itself refuses to run when the versions disagree, so
+# the gate cannot silently lint with the wrong binary.
+required-version = "==0.15.8"
 target-version = "py311"
 extend-exclude = [
     ".venv",

@@ -47,7 +47,9 @@ fi
 
 # Lint first: bug-shaped rules only (pyproject.toml explains each). ruff is
 # pinned in requirements-dev.txt, so a missing binary is a stale venv, and
-# the gate says so instead of silently skipping the lint (OBS-25).
+# the gate says so instead of silently skipping the lint (OBS-25). A venv
+# with another ruff release is refused by ruff itself: pyproject.toml's
+# `required-version` carries the same pin.
 if ! "$PYTHON_BIN" -m ruff --version >/dev/null 2>&1; then
   printf '%s\n' \
     'ERROR: ruff saknas i Python-miljön (pinnad i requirements-dev.txt).' \

@@ -102,8 +102,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
-- **A linter, at last (OBS-25).** `ruff` is pinned in `requirements-dev.txt`,
-  configured in `pyproject.toml` with bug-shaped rules only (pyflakes, bare
+- **A linter, at last (OBS-25).** `ruff` is pinned in `requirements-dev.txt`
+  (and `pyproject.toml` carries the same pin as `required-version`, so a
+  venv with another release is refused instead of linting differently from
+  CI), configured in `pyproject.toml` with bug-shaped rules only (pyflakes, bare
   `except`, bugbear, `try/except/pass`, pylint errors, `global` declared for
   a name never assigned) and runs first in `test/run.sh`, so CI's host gate
   runs it too. The first sweep found 43 things across ~10 k lines. Every
