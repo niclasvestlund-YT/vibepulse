@@ -998,7 +998,7 @@ class AgentStatusService:
         self._last_diagnostic[key] = now
         try:
             self._diagnostic(f"agent-status {context}: {error_name}")
-        except Exception:
+        except Exception:  # noqa: S110 - a failing diagnostic sink must not stop the tailer
             pass
 
     @staticmethod

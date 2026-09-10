@@ -56,9 +56,12 @@ def _local_stamp(day: str, hour: int = 12) -> str:
     return local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _rollout_event(rate_limits, timestamp=_local_stamp("2026-08-07", 10)):
+def _rollout_event(rate_limits, timestamp=None):
     """Mirror test_tokenserver.py's CodexLimitLogTests._event fixture shape:
-    a real Codex rollout ``event_msg``/``token_count`` line."""
+    a real Codex rollout ``event_msg``/``token_count`` line. ``timestamp``
+    defaults to local 10:00 on 2026-08-07 (see ``_local_stamp``)."""
+    if timestamp is None:
+        timestamp = _local_stamp("2026-08-07", 10)
     return {
         "timestamp": timestamp,
         "type": "event_msg",
