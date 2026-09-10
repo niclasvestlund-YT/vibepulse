@@ -482,7 +482,12 @@ load. Platform-dependent test assumptions are an established theme
 or forced verify schedule) instead of relying on wall-clock behavior.
 
 ### OBS-30 · Unmapped models reach the panel as raw ids
-`server · S · open`
+`server · S · done (2026-09-10)` — `agent_status.derive_model_label`
+typesets any id (family, version, variant; dated suffix dropped) and
+`normalize_model` bounds the raw id wide enough to keep a dated id whole
+before deriving, then bounds the label to the 24-byte column.
+`MODEL_LABELS` is exceptions only. A test walks every id in `prices.json`.
+Original problem:
 `MODEL_LABELS` (`agent_status.py:56`) names six models; `prices.json`
 prices roughly a hundred and ten. `normalize_model` falls through to the
 raw lowercase id for the rest, so the panel mixes typeset labels
