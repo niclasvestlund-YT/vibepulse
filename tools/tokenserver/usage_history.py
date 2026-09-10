@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import tempfile
@@ -16,6 +17,12 @@ try:
     from .state_files import fsync_parent, quarantine_corrupt
 except ImportError:  # run as a script / from the directory itself
     from state_files import fsync_parent, quarantine_corrupt
+
+log = logging.getLogger("tokenserver.state")
+
+
+class _PostReplaceError(Exception):
+    """The new file is in place; only its directory entry's sync failed."""
 
 
 SAMPLE_INTERVAL_S = 15 * 60
@@ -69,6 +76,9 @@ class UsageHistory:
         # one instance; every state read/mutation plus its persist happens
         # under this lock so a batch stays atomic in memory and on disk.
         self._lock = threading.RLock()
+        # See MaxTrackerStore._load_error: an existing file that cannot be
+        # read is never overwritten by a store that started empty.
+        self._load_error: str | None = None
         self._records = self._load()
 
     @property
@@ -98,7 +108,12 @@ class UsageHistory:
         except UnicodeError:
             quarantine_corrupt(self.path, "not UTF-8")
             return []
-        except OSError:
+        except OSError as error:
+            self._load_error = type(error).__name__
+            log.warning("%s exists but could not be read (%s): starting "
+                        "empty and refusing to save over it until the "
+                        "service restarts with a readable file",
+                        self.path.name, self._load_error)
             return []
         try:
             payload = json.loads(raw)
@@ -116,6 +131,10 @@ class UsageHistory:
         return [record for record in records if record["at"] >= cutoff]
 
     def _persist(self) -> None:
+        if self._load_error is not None:
+            raise OSError(
+                f"{self.path.name} was unreadable at startup "
+                f"({self._load_error}); refusing to overwrite it")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
@@ -131,7 +150,10 @@ class UsageHistory:
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
             temporary = None
-            fsync_parent(self.path)  # OBS-21: the rename itself is not durable
+            try:
+                fsync_parent(self.path)  # OBS-21: the rename is not durable
+            except OSError as error:
+                raise _PostReplaceError() from error
         finally:
             if temporary is not None:
                 try:
@@ -184,6 +206,17 @@ class UsageHistory:
             self._records.sort(key=lambda record: record["at"])
             try:
                 self._persist()
+            except _PostReplaceError as error:
+                # The replace landed: disk and memory agree, only the
+                # directory entry's durability is unproven. Rolling memory
+                # back here would make the next successful save drop a
+                # sample that is on disk (Codex review of #105); keep it
+                # and say so.
+                log.warning("%s was saved but its directory fsync failed "
+                            "(%s): the file may not survive power loss "
+                            "until the next save",
+                            self.path.name, type(error.__cause__).__name__)
+                return added
             except OSError:
                 self._records = old_records
                 return 0

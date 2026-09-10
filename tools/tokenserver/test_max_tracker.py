@@ -1376,8 +1376,61 @@ class MaxTrackerStorePersistenceTests(unittest.TestCase):
                     path.parent.glob("max-tracker.json.corrupt-*"))
                 self.assertEqual(len(quarantined), 1)
                 self.assertEqual(quarantined[0].read_bytes(), corrupt)
-                self.assertIn("missing a provider section",
+                self.assertIn("provider section (claude/codex) is missing",
                               "\n".join(captured.output))
+
+    def test_a_provider_section_with_the_wrong_shape_is_quarantined(self):
+        # Codex review of #105, second pass: both keys being dicts is not
+        # the shape save() writes; a section missing v/days/weeks/backfill
+        # loaded nothing and was overwritten on the next save.
+        valid = {"v": 1, "days": {}, "weeks": {}, "backfill": {}}
+        for corrupt in (
+                {"claude": {}, "codex": valid},
+                {"claude": valid, "codex": {"v": 1, "days": [],
+                                            "weeks": {}, "backfill": {}}},
+                {"claude": dict(valid, v=2), "codex": valid},
+                {"claude": {"v": 1, "days": {}, "weeks": {}}, "codex": valid},
+        ):
+            with self.subTest(corrupt=corrupt), \
+                    tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "nested" / "max-tracker.json"
+                path.parent.mkdir()
+                path.write_text(json.dumps(corrupt), encoding="utf-8")
+                with self.assertLogs("tokenserver.state",
+                                     level="WARNING") as captured:
+                    store, _, _ = _new_store(directory, path=path)
+                self.assertEqual(store._state["claude"]["days"], {})
+                self.assertFalse(path.exists())
+                self.assertEqual(
+                    len(list(path.parent.glob("max-tracker.json.corrupt-*"))),
+                    1)
+                self.assertIn("{v, days, weeks, backfill}",
+                              "\n".join(captured.output))
+
+    def test_an_unreadable_file_is_never_overwritten(self):
+        # Codex review of #105: PermissionError is not an empty file. The
+        # rename only needs the directory's permission, so a store that
+        # started empty would replace 400 days of history on its first save.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "max-tracker.json"
+            path.parent.mkdir()
+            store, _, _ = _new_store(directory, path=path)
+            store.observe_volume("claude", "2026-08-07", 400)
+            store.save()
+            original = path.read_bytes()
+
+            with mock.patch.object(Path, "read_text",
+                                   side_effect=PermissionError("denied")), \
+                    self.assertLogs("tokenserver.state",
+                                    level="WARNING") as captured:
+                store, _, _ = _new_store(directory, path=path)
+            self.assertEqual(store._state["claude"]["days"], {})
+            self.assertIn("refusing to save", "\n".join(captured.output))
+            store.observe_volume("claude", "2026-08-08", 250)
+            with self.assertRaises(OSError) as raised:
+                store.save()
+            self.assertIn("refusing to overwrite", str(raised.exception))
+            self.assertEqual(path.read_bytes(), original)
 
     def test_a_non_utf8_file_is_quarantined_instead_of_crashing_startup(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -43,6 +43,7 @@ avslutade backfill-filer aldrig läses om.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import tempfile
@@ -54,6 +55,8 @@ try:
     from .state_files import fsync_parent, quarantine_corrupt
 except ImportError:  # run as a script / from the directory itself
     from state_files import fsync_parent, quarantine_corrupt
+
+log = logging.getLogger("tokenserver.state")
 
 if __package__:
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
@@ -501,6 +504,11 @@ class MaxTrackerStore:
         # resolved (parsed or discarded), so losing this cache just means
         # re-reading that one line's bytes from disk again.
         self._pending = {provider: {} for provider in PROVIDERS}
+        # Set when the file exists but could not be read (permissions, I/O):
+        # the store then starts empty AND refuses to save, because a rename
+        # needs only the directory's permission and would replace up to 400
+        # days of history with the empty state (Codex review of #105).
+        self._load_error: str | None = None
         self._load()
 
     # -- live rollup ---------------------------------------------------
@@ -1105,7 +1113,12 @@ class MaxTrackerStore:
         except UnicodeError:
             quarantine_corrupt(self.path, "not UTF-8")
             return
-        except OSError:
+        except OSError as error:
+            self._load_error = type(error).__name__
+            log.warning("%s exists but could not be read (%s): starting "
+                        "empty and refusing to save over it until the "
+                        "service restarts with a readable file",
+                        self.path.name, self._load_error)
             return
         try:
             payload = json.loads(raw)
@@ -1120,14 +1133,29 @@ class MaxTrackerStore:
         # damaged one: quarantine it rather than load nothing and let the
         # next save overwrite it (the same shape smoke._tracker_state_shape
         # already refuses).
-        if any(not isinstance(payload.get(provider), dict)
+        if any(not self._valid_provider_section(payload.get(provider))
                for provider in PROVIDERS):
             quarantine_corrupt(
-                self.path, "missing a provider section (claude/codex)")
+                self.path, "a provider section (claude/codex) is missing or "
+                "not the {v, days, weeks, backfill} shape save() writes")
             return
         with self._lock:
             for provider in PROVIDERS:
                 self._load_provider(provider, payload[provider])
+
+    @classmethod
+    def _valid_provider_section(cls, section) -> bool:
+        """The exact shape ``_provider_payload`` writes, nothing looser.
+
+        ``{}`` or ``{"days": []}`` parse fine and used to load nothing,
+        after which the next save overwrote the file. The format has had
+        all four keys since its first commit, so a section without them
+        is damage, not an older version.
+        """
+        return (isinstance(section, dict) and
+                section.get("v") == cls._SCHEMA_VERSION and
+                all(isinstance(section.get(key), dict)
+                    for key in ("days", "weeks", "backfill")))
 
     def _load_provider(self, provider: str, section: dict) -> None:
         """Populate ``self._state`` from one provider's persisted section.
@@ -1210,6 +1238,10 @@ class MaxTrackerStore:
         actual (potentially slow) disk write runs unlocked and never
         blocks a concurrent probe or HTTP snapshot.
         """
+        if self._load_error is not None:
+            raise OSError(
+                f"{self.path.name} was unreadable at startup "
+                f"({self._load_error}); refusing to overwrite it")
         with self._lock:
             self._prune_retention(today)
             payload = {provider: self._provider_payload(provider)

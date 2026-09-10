@@ -41,7 +41,16 @@ corrupt too, since a valid file cannot look like that. Durability and
 quarantine live in one helper (`state_files.py`) so a fourth store
 inherits both instead of re-deciding them. **Guards:** per-store tests for
 invalid JSON, non-UTF-8 bytes and wrong shape (`{}` included, after a
-Codex review caught that gap), and for the parent fsync after the rename.
+Codex review caught that gap; a provider section that is a dict but not
+the `{v, days, weeks, backfill}` shape `save()` writes, after the next
+pass caught that one), and for the parent fsync after the rename. Two
+more rules from the same review: a file that exists but cannot be *read*
+(permissions, I/O) is not "empty" — the store starts empty but refuses to
+save, because a rename needs only the directory's permission and would
+have replaced the file on the first save; and when the replace has landed
+but the directory fsync fails, memory keeps the new state (disk and
+memory agree, only durability is unproven) instead of rolling back and
+letting the next save drop a sample that is on disk.
 **Watch for:** a new store that catches `OSError` broadly and returns
 empty, and a loader that accepts a partial shape "to be lenient".
 ## 2026-09-10 · The parser read a field where the docs put it, not where the writer puts it

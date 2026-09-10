@@ -118,6 +118,50 @@ class UsageHistoryPersistenceTests(unittest.TestCase):
                 len(list(path.parent.glob("usage-history.json.corrupt-*"))), 1)
             self.assertIn("not yet durable", "\n".join(captured.output))
 
+    def test_post_replace_fsync_failure_keeps_memory_and_disk_together(self):
+        # Codex review of #105: the replace has landed when the directory
+        # fsync fails; rolling memory back made the next save drop the
+        # sample that was already on disk.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            history = UsageHistory(path)
+            with mock.patch("tools.tokenserver.usage_history.fsync_parent",
+                            side_effect=OSError("EIO")), \
+                    self.assertLogs("tokenserver.state",
+                                    level="WARNING") as captured:
+                self.assertTrue(history.record(
+                    "claude", "week", 10, reset_at=DAY, at=0))
+            self.assertEqual(len(history.records), 1)
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(on_disk["samples"]), 1)
+            self.assertIn("directory fsync failed", "\n".join(captured.output))
+            # The next save carries both samples: nothing was dropped.
+            self.assertTrue(history.record(
+                "claude", "week", 12, reset_at=DAY, at=usage_history_module.SAMPLE_INTERVAL_S))
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual([s["pct"] for s in on_disk["samples"]],
+                             [10.0, 12.0])
+
+    def test_an_unreadable_file_is_never_overwritten(self):
+        # Codex review of #105: a permission or I/O error is not "empty".
+        # The rename only needs the directory's permission, so a store
+        # that started empty would replace the file on its first save.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            UsageHistory(path).record("claude", "week", 10, reset_at=DAY, at=0)
+            original = path.read_bytes()
+            with mock.patch.object(Path, "read_text",
+                                   side_effect=PermissionError("denied")), \
+                    self.assertLogs("tokenserver.state",
+                                    level="WARNING") as captured:
+                history = UsageHistory(path)
+            self.assertEqual(history.records, ())
+            self.assertIn("refusing to save", "\n".join(captured.output))
+            self.assertFalse(history.record(
+                "claude", "week", 50, reset_at=DAY, at=usage_history_module.SAMPLE_INTERVAL_S))
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(history.records, ())
+
     def test_wrong_shape_is_quarantined_too(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "usage-history.json"

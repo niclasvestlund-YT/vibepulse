@@ -19,7 +19,15 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   constructor and stop the service from starting, is quarantined the same
   way. One helper (`state_files.py`) holds the rule for all three, and the
   quarantine rename gets the same directory fsync as a save, so the kept
-  copy is durable before the warning says it is.
+  copy is durable before the warning says it is. Two more edges from the
+  review: a file that exists but cannot be read (permissions, I/O) makes
+  the store start empty *and refuse to save*, since a rename needs only
+  the directory's permission and would have overwritten it; and a
+  provider section that is a dict but not the `{v, days, weeks,
+  backfill}` shape `save()` writes is quarantined rather than skimmed.
+  The usage history keeps its new state in memory when the replace has
+  landed but the directory fsync failed (disk and memory agree), instead
+  of rolling back and dropping that sample on the next save.
 
 - **Two of three state writers stopped one fsync short of durable
   (OBS-21).** `quota-cache.json` always did the full atomic dance: file
