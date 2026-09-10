@@ -64,6 +64,19 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **A panic leaves evidence, and the panel counts its reboots (OBS-02,
+  OBS-03, OBS-28, OBS-35).** In source and CI-built, **not yet flashed or
+  physically verified**: a 128K `coredump` partition with ELF coredumps to
+  flash on panic, a `coredump i flash … idf.py coredump-info` notice at the
+  next boot, and a reboot ledger in NVS (`omstartsliggare: boot #N; efter
+  PANIK a, vakthund b, BROWNOUT c`) right after the boot banner, so "did it
+  reboot while I was away?" is one serial line. `sdkconfig.defaults` now
+  pins the log level (INFO, maximum equals default, which compiles
+  `ESP_LOGD` and with it the `HTTP_CLIENT` request-line leak out
+  structurally), panic print-and-reboot, the task watchdog, and LVGL's own
+  log at WARN, each with its reason. `test/test_firmware_diagnostics.py`
+  holds the pins; `docs/observability.md` has the retrieval steps.
+
 - **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
   pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`
   and the rest, per worktree, including the extra parents a multi-line one

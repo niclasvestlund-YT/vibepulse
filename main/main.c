@@ -9,6 +9,7 @@
  * apptask sker under torget_ui_lock() — det är LVGL:s egen mutex, så det
  * behövs inte en till.
  */
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <string.h>
 
@@ -27,6 +28,10 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "nvs.h"
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include "esp_core_dump.h"
+#endif
 
 #include "esp_heap_caps.h"
 
@@ -949,6 +954,67 @@ static const char *reset_reason_name(esp_reset_reason_t r) {
   }
 }
 
+/* OBS-03: omstartsliggaren. NVS initierades i månader utan att en enda
+ * nyckel skrevs, och "startade den om medan jag var borta?" gick inte att
+ * svara på — banderollen ovan säger bara varför DEN HÄR starten skedde.
+ * Fyra räknare i ett eget namnutrymme: totalt antal boot och hur många av
+ * dem som föregicks av panik, vakthund respektive brownout. En rad per
+ * boot, aldrig ett stopp: kan liggaren inte öppnas loggas det och
+ * starten fortsätter. */
+static void reboot_ledger_note(esp_reset_reason_t rr) {
+  nvs_handle_t ledger;
+  esp_err_t err = nvs_open("torget_boot", NVS_READWRITE, &ledger);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "omstartsliggaren gick inte att öppna (%s) — den här "
+                  "booten räknas inte", esp_err_to_name(err));
+    return;
+  }
+  const char *reason_key = NULL;
+  switch (rr) {
+  case ESP_RST_PANIC: reason_key = "panic"; break;
+  case ESP_RST_INT_WDT:
+  case ESP_RST_TASK_WDT:
+  case ESP_RST_WDT: reason_key = "wdt"; break;
+  case ESP_RST_BROWNOUT: reason_key = "brownout"; break;
+  default: break;
+  }
+  uint32_t boots = 0;
+  nvs_get_u32(ledger, "boots", &boots);  /* NOT_FOUND lämnar 0 */
+  boots++;
+  nvs_set_u32(ledger, "boots", boots);
+  if (reason_key != NULL) {
+    uint32_t count = 0;
+    nvs_get_u32(ledger, reason_key, &count);
+    count++;
+    nvs_set_u32(ledger, reason_key, count);
+  }
+  err = nvs_commit(ledger);
+  uint32_t panics = 0, wdts = 0, brownouts = 0;
+  nvs_get_u32(ledger, "panic", &panics);
+  nvs_get_u32(ledger, "wdt", &wdts);
+  nvs_get_u32(ledger, "brownout", &brownouts);
+  nvs_close(ledger);
+  ESP_LOGI(TAG, "omstartsliggare: boot #%" PRIu32 "; efter PANIK %" PRIu32
+                ", vakthund %" PRIu32 ", BROWNOUT %" PRIu32 "%s",
+           boots, panics, wdts, brownouts,
+           err == ESP_OK ? "" : " (commit misslyckades)");
+}
+
+/* OBS-02: säg till när flashen bär en coredump från en tidigare krasch.
+ * Dumpen ligger kvar tills nästa panik skriver över den; själva
+ * avläsningen sker från datorn (`idf.py coredump-info`), aldrig här. */
+static void coredump_note(void) {
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+  size_t addr = 0, size = 0;
+  if (esp_core_dump_image_get(&addr, &size) == ESP_OK && size > 0) {
+    ESP_LOGW(TAG, "coredump i flash (%u byte) från en tidigare krasch — "
+                  "läs den med `idf.py coredump-info` innan nästa panik "
+                  "skriver över den",
+             (unsigned)size);
+  }
+#endif
+}
+
 void app_main(void) {
   /* Bootbanderollen svarar på två frågor loggen annars inte kan:
    * "kör kortet det jag just flashade?" (versionen är git describe via
@@ -977,6 +1043,8 @@ void app_main(void) {
     nvs = nvs_flash_init();
   }
   ESP_ERROR_CHECK(nvs);
+  reboot_ledger_note(rr);
+  coredump_note();
 
   /* OTA-hälsogrinden direkt efter NVS: är detta första boot på en ny
    * avbild börjar 8/15-sekundersklockan ticka HÄR, och bevisen markeras

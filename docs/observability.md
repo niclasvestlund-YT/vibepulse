@@ -69,17 +69,27 @@ lines every 30 s and a `heap:` line every 10 s.
 
 **Blind spots to know about:**
 
-- Nothing persists. A panic prints a backtrace and reboots; if no monitor
-  was attached at that second, the evidence never existed. The boot
-  banner names the *reason* for the last restart, but there is still no
-  coredump partition and no reboot counter (OBS-02, OBS-03).
-- The log level and console routing are inherited IDF defaults, not
-  pinned in `sdkconfig.defaults` like everything else is (OBS-28).
+- A panic now leaves two witnesses (OBS-02, OBS-03; unverified on the
+  physical unit until the next flash session). The `coredump` partition
+  holds an ELF dump of every task's stack from the last panic; the next
+  boot's banner is followed by `coredump i flash (N byte) …` when one is
+  there. Read it from the computer with the board on USB:
+  `idf.py -p <port> coredump-info` (summary and backtrace) or
+  `idf.py -p <port> coredump-debug` (a GDB session on the dump). It stays
+  until the next panic overwrites it. And the `omstartsliggare:` line
+  right after the banner is the reboot ledger in NVS: the boot count since
+  first flash and how many boots followed a PANIK, a watchdog or a
+  BROWNOUT, so "did it reboot while I was away?" is one serial line.
+- The log level, panic behaviour and task watchdog are pinned in
+  `sdkconfig.defaults` with their reasons (OBS-28). `LV_USE_LOG` is on at
+  WARN, so the launcher's "app skipped for API-version mismatch" report
+  reaches the console.
 - Fetch failures name a *redacted* target (scheme, host, and whether LAN
   or the relay was tried) because the relay URL's path is a credential.
   ESP-IDF's own `HTTP_CLIENT` tag would print the whole request line at
-  `DEBUG`, but `ESP_LOGD` is compiled out at the inherited default level;
-  raising it reopens that (OBS-35).
+  `DEBUG`. `CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT` now compiles `ESP_LOGD` out
+  structurally (OBS-35); a build that raises the maximum level must clamp
+  that tag with `esp_log_level_set("HTTP_CLIENT", ESP_LOG_INFO)`.
 - Serial-monitoring a *running* board is physically unverified: the panel
   draw can bounce the board off a computer USB port
   (`docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md`).

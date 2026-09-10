@@ -28,6 +28,36 @@ CONFIG_SPIRAM_RODATA=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_FREERTOS_HZ=1000
 
+# --- Diagnostik: pinnat med flit, inte ärvt (OBS-02, OBS-28, OBS-35) ---
+# En panik sparar en ELF-coredump i flashpartitionen "coredump" innan
+# omstarten, så en nattlig krasch går att läsa nästa morgon med
+# `idf.py coredump-info` i stället för att kräva en inkopplad monitor i
+# just den sekunden. Bootbanderollen säger till när en dump ligger där.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+# Panik = skriv ut, dumpa, starta om. Det är IDF:s default; det står här så
+# en IDF-bump inte tyst byter till "stanna och vänta på debuggern" på en
+# skärm som ska hänga på en hylla utan dator.
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+# Loggnivå INFO, och maxnivån LIKA MED defaultnivån: då kompileras ESP_LOGD
+# bort helt. Det är inte bara brus: ESP-IDF:s HTTP_CLIENT-tagg skriver hela
+# förfrågningsraden vid DEBUG, och reläets URL-sökväg är en hemlighet
+# (docs/relay.md, OBS-35). Vill någon ha DEBUG på ett relä-bygge måste
+# den taggen klämmas med esp_log_level_set("HTTP_CLIENT", ESP_LOG_INFO).
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y
+# Taskvakthunden: IDF:s default (på, 5 s, varnar utan panik), pinnat så
+# valet är synligt. Vilka tasker som faktiskt prenumererar är OBS-17.
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+# LVGL:s egen logg på WARN via printf: starterns enda rapport när en app
+# hoppas över för API-versionsmiss (platform/torget_ui.c) gick förut till
+# en avstängd logg och försvann.
+CONFIG_LV_USE_LOG=y
+CONFIG_LV_LOG_LEVEL_WARN=y
+CONFIG_LV_LOG_PRINTF=y
+
 # LVGL: bara de widgets UI:t faktiskt använder. Montserrat 14 finns kvar som
 # LV_FONT_DEFAULT — våra Plex-fonter sätts explicit på varje etikett, men
 # LVGL vill ha en defaultfont som existerar.
