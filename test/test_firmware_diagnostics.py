@@ -47,6 +47,7 @@ for pin in (
     # URL at DEBUG (OBS-35). Raising the maximum level reopens that.
     "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
     "CONFIG_ESP_TASK_WDT_INIT=y",
+    "CONFIG_ESP_TASK_WDT_TIMEOUT_S=5",
     "CONFIG_LV_USE_LOG=y",
     "CONFIG_LV_LOG_PRINTF=y",
     "CONFIG_LV_LOG_LEVEL_WARN=y",
@@ -72,6 +73,7 @@ for effective in (
     '"${CONFIG_LOG_DEFAULT_LEVEL_INFO}"',
     '"${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"',
     '"${CONFIG_ESP_TASK_WDT_INIT}"',
+    '"${CONFIG_ESP_TASK_WDT_TIMEOUT_S}"',
     '"${CONFIG_ESP_TASK_WDT_PANIC}"',
     '"${CONFIG_LV_USE_LOG}"',
     '"${CONFIG_LV_LOG_PRINTF}"',
@@ -96,8 +98,9 @@ def run_guard(values):
 
 # Argument order of torget_require_diagnostics; the task-watchdog panic
 # option is the one value that must be UNSET (warn-only watchdog).
-GOOD = ["y", "y", "y", "y", "y", "y", "", "y", "y", "y"]
-WDT_PANIC_INDEX = 6
+GOOD = ["y", "y", "y", "y", "y", "y", "5", "", "y", "y", "y"]
+WDT_TIMEOUT_INDEX = 6
+WDT_PANIC_INDEX = 7
 ok = run_guard(GOOD)
 assert ok.returncode == 0, ok.stdout + ok.stderr
 for index, name in enumerate((
@@ -111,6 +114,7 @@ for index, name in enumerate((
         "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
         "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
         "CONFIG_ESP_TASK_WDT_INIT=y",
+        None,  # the watchdog timeout: tested below with other values
         None,  # the watchdog panic option: tested below the other way round
         "CONFIG_LV_USE_LOG=y",
         # LV_USE_LOG without the printf sink or the WARN level is a log
@@ -136,6 +140,14 @@ result = run_guard(values)
 assert result.returncode != 0, "CONFIG_ESP_TASK_WDT_PANIC=y must be refused"
 assert "CONFIG_ESP_TASK_WDT_PANIC" in " ".join(
     (result.stdout + result.stderr).split())
+# A stale timeout other than the documented five seconds is refused too.
+for stale in ("", "30", "1"):
+    values = list(GOOD)
+    values[WDT_TIMEOUT_INDEX] = stale
+    result = run_guard(values)
+    assert result.returncode != 0, f"TIMEOUT_S={stale!r} must be refused"
+    assert "CONFIG_ESP_TASK_WDT_TIMEOUT_S=5" in " ".join(
+        (result.stdout + result.stderr).split())
 
 # --- main.c: the reboot ledger and the coredump notice at boot ---
 main_c = read("main/main.c")

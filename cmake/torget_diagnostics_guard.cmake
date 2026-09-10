@@ -10,7 +10,8 @@
 # IDF project() call ("y" when set, "" when unset or =n).
 function(torget_require_diagnostics coredump_to_flash coredump_elf
          panic_reboot log_default_info log_max_equals_default task_wdt
-         task_wdt_panic lv_use_log lv_log_printf lv_log_level_warn)
+         task_wdt_timeout_s task_wdt_panic lv_use_log lv_log_printf
+         lv_log_level_warn)
   set(_missing "")
   if(NOT "${coredump_to_flash}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y")
@@ -39,6 +40,11 @@ function(torget_require_diagnostics coredump_to_flash coredump_elf
   # The task watchdog is documented as warn-only (docs/observability.md);
   # a stale config with the panic option on would reboot the panel on a
   # starved IDLE instead of the transient serial line the runbook promises.
+  # The five-second timeout is the documented behaviour; a stale value
+  # warns much earlier or later than the runbook says.
+  if(NOT "${task_wdt_timeout_s}" STREQUAL "5")
+    list(APPEND _missing "CONFIG_ESP_TASK_WDT_TIMEOUT_S=5")
+  endif()
   if("${task_wdt_panic}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_TASK_WDT_PANIC unset (warn-only)")
   endif()
