@@ -995,14 +995,17 @@ static void reboot_ledger_note(esp_reset_reason_t rr) {
   uint32_t boots = 0, panics = 0, wdts = 0, brownouts = 0;
   if (ledger_read(ledger, "boots", &boots) != ESP_OK) failed = "läsa boots";
   if (!failed) {
-    boots++;
+    /* Räknare backar aldrig: vid taket står de stilla i stället för att
+     * slå runt till noll (Codex-granskning av #109). */
+    if (boots < UINT32_MAX) boots++;
     if (nvs_set_u32(ledger, "boots", boots) != ESP_OK) failed = "skriva boots";
   }
   if (!failed && reason_key != NULL) {
     uint32_t count = 0;
     if (ledger_read(ledger, reason_key, &count) != ESP_OK) {
       failed = "läsa orsaksräknaren";
-    } else if (nvs_set_u32(ledger, reason_key, count + 1) != ESP_OK) {
+    } else if (nvs_set_u32(ledger, reason_key,
+                           count < UINT32_MAX ? count + 1 : count) != ESP_OK) {
       failed = "skriva orsaksräknaren";
     }
   }

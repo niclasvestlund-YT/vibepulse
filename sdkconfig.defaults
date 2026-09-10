@@ -51,6 +51,10 @@ CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y
 # valet är synligt. Vilka tasker som faktiskt prenumererar är OBS-17.
 CONFIG_ESP_TASK_WDT_INIT=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+# Uttryckligen AV: vakthunden varnar, den startar inte om panelen
+# (docs/observability.md lovar det; CMake-vakten vägrar ett gammalt
+# sdkconfig som har den på).
+# CONFIG_ESP_TASK_WDT_PANIC is not set
 # LVGL:s egen logg på WARN via printf: starterns enda rapport när en app
 # hoppas över för API-versionsmiss (platform/torget_ui.c) gick förut till
 # en avstängd logg och försvann.

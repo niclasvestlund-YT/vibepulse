@@ -54,6 +54,8 @@ for pin in (
     assert re.search(rf"^{re.escape(pin)}$", config, re.M), f"missing pin {pin}"
 assert "CONFIG_LOG_DEFAULT_LEVEL_DEBUG" not in config, (
     "DEBUG as the default level puts the relay secret on the serial line")
+assert re.search(r"^# CONFIG_ESP_TASK_WDT_PANIC is not set$", config, re.M), (
+    "the task watchdog is documented warn-only; pin the panic option off")
 
 # --- CMake: the pins are enforced against the EFFECTIVE sdkconfig ---
 # Codex review of #109: defaults seed a new sdkconfig and never migrate an
@@ -66,9 +68,11 @@ assert 'include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/torget_diagnostics_guard.cmak
 for effective in (
     '"${CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH}"',
     '"${CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF}"',
+    '"${CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT}"',
     '"${CONFIG_LOG_DEFAULT_LEVEL_INFO}"',
     '"${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"',
     '"${CONFIG_ESP_TASK_WDT_INIT}"',
+    '"${CONFIG_ESP_TASK_WDT_PANIC}"',
     '"${CONFIG_LV_USE_LOG}"',
     '"${CONFIG_LV_LOG_PRINTF}"',
     '"${CONFIG_LV_LOG_LEVEL_WARN}"',
@@ -90,23 +94,33 @@ def run_guard(values):
                               capture_output=True, check=False, text=True)
 
 
-ok = run_guard(["y"] * 8)
+# Argument order of torget_require_diagnostics; the task-watchdog panic
+# option is the one value that must be UNSET (warn-only watchdog).
+GOOD = ["y", "y", "y", "y", "y", "y", "", "y", "y", "y"]
+WDT_PANIC_INDEX = 6
+ok = run_guard(GOOD)
 assert ok.returncode == 0, ok.stdout + ok.stderr
 for index, name in enumerate((
         "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y",
         "CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y",
+        # A halted or GDB-stubbed panic leaves the shelf display dark with
+        # no ledger line and no dump notice.
+        "CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y",
         # A stale DEFAULT_LEVEL_DEBUG with MAXIMUM_EQUALS_DEFAULT=y is a
         # DEBUG ceiling: the relay secret on the serial line (OBS-35).
         "CONFIG_LOG_DEFAULT_LEVEL_INFO=y",
         "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
         "CONFIG_ESP_TASK_WDT_INIT=y",
+        None,  # the watchdog panic option: tested below the other way round
         "CONFIG_LV_USE_LOG=y",
         # LV_USE_LOG without the printf sink or the WARN level is a log
         # nobody reads: no lv_log_register_print_cb exists in the tree.
         "CONFIG_LV_LOG_PRINTF=y",
         "CONFIG_LV_LOG_LEVEL_WARN=y")):
+    if name is None:
+        continue
     for stale in ("", "n"):
-        values = ["y"] * 8
+        values = list(GOOD)
         values[index] = stale
         result = run_guard(values)
         diagnostic = " ".join((result.stdout + result.stderr).split())
@@ -114,6 +128,14 @@ for index, name in enumerate((
         assert name in diagnostic, diagnostic
         assert "sdkconfig is stale" in diagnostic, diagnostic
         assert "idf.py reconfigure && idf.py build" in diagnostic, diagnostic
+# A stale sdkconfig with the watchdog panic ON is refused: the runbook
+# promises a warn-only watchdog, and defaults never migrate that value.
+values = list(GOOD)
+values[WDT_PANIC_INDEX] = "y"
+result = run_guard(values)
+assert result.returncode != 0, "CONFIG_ESP_TASK_WDT_PANIC=y must be refused"
+assert "CONFIG_ESP_TASK_WDT_PANIC" in " ".join(
+    (result.stdout + result.stderr).split())
 
 # --- main.c: the reboot ledger and the coredump notice at boot ---
 main_c = read("main/main.c")
@@ -123,6 +145,11 @@ assert 'nvs_open("torget_boot", NVS_READWRITE, &ledger)' in main_c, (
 for key in ('"boots"', '"panic"', '"wdt"', '"brownout"'):
     assert key in main_c, f"ledger must count {key}"
 assert "esp_core_dump_image_get(&addr, &size)" in main_c
+# Codex review of #109: counters never go backwards, so at UINT32_MAX they
+# saturate instead of wrapping to zero.
+ledger_src = main_c[main_c.index("static void reboot_ledger_note"):
+                    main_c.index("static void coredump_note")]
+assert ledger_src.count("UINT32_MAX") >= 2, "both ledger counters saturate"
 # Codex review of #109: OTA never writes the partition table, so a panel
 # updated over the air has no coredump partition until a USB flash. The
 # boot notice must say so rather than silently never find a dump.

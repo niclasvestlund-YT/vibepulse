@@ -161,9 +161,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   log at WARN, each with its reason. Because defaults never migrate an
   existing generated `sdkconfig` (the 2026-08-19 lesson), the root CMake
   now refuses to configure when the effective config has lost the coredump
-  writer, the ELF format, the log ceiling, the task watchdog or the LVGL
-  log (`cmake/torget_diagnostics_guard.cmake`, naming the missing values
-  and the `idf.py reconfigure` fix). `test/test_firmware_diagnostics.py`
+  writer, the ELF format, the panic-then-reboot choice, the INFO default
+  or the log ceiling, the task watchdog (or has its panic option on: the
+  watchdog is warn-only, pinned off in the defaults) or the LVGL log with
+  its printf sink and WARN level (`cmake/torget_diagnostics_guard.cmake`,
+  naming the missing values and the `idf.py reconfigure` fix). The ledger
+  counters saturate at their ceiling instead of wrapping to zero. `test/test_firmware_diagnostics.py`
   holds the pins and exercises the guard both ways; `docs/observability.md`
   has the retrieval steps, and its signature table now points a panic and a
   watchdog at the dump and the ledger instead of calling the banner the

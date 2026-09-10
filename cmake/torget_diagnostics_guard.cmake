@@ -9,14 +9,19 @@
 # Each argument is the effective CONFIG_* value as CMake sees it after the
 # IDF project() call ("y" when set, "" when unset or =n).
 function(torget_require_diagnostics coredump_to_flash coredump_elf
-         log_default_info log_max_equals_default task_wdt lv_use_log
-         lv_log_printf lv_log_level_warn)
+         panic_reboot log_default_info log_max_equals_default task_wdt
+         task_wdt_panic lv_use_log lv_log_printf lv_log_level_warn)
   set(_missing "")
   if(NOT "${coredump_to_flash}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y")
   endif()
   if(NOT "${coredump_elf}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y")
+  endif()
+  # A halted or GDB-stubbed panic leaves an unattended shelf display dark
+  # with no ledger line and no dump notice; the panel must reboot.
+  if(NOT "${panic_reboot}" STREQUAL "y")
+    list(APPEND _missing "CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y")
   endif()
   # ESP_LOGD compiled in would print the relay's secret URL (OBS-35). The
   # ceiling is "equals the default", so the default itself must be INFO:
@@ -30,6 +35,12 @@ function(torget_require_diagnostics coredump_to_flash coredump_elf
   endif()
   if(NOT "${task_wdt}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_TASK_WDT_INIT=y")
+  endif()
+  # The task watchdog is documented as warn-only (docs/observability.md);
+  # a stale config with the panic option on would reboot the panel on a
+  # starved IDLE instead of the transient serial line the runbook promises.
+  if("${task_wdt_panic}" STREQUAL "y")
+    list(APPEND _missing "CONFIG_ESP_TASK_WDT_PANIC unset (warn-only)")
   endif()
   if(NOT "${lv_use_log}" STREQUAL "y")
     list(APPEND _missing "CONFIG_LV_USE_LOG=y")
