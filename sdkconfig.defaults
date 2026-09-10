@@ -55,6 +55,10 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
 # (docs/observability.md lovar det; CMake-vakten vägrar ett gammalt
 # sdkconfig som har den på).
 # CONFIG_ESP_TASK_WDT_PANIC is not set
+# Vakthunden vaktar bara IDLE-taskerna (ingen egen task prenumererar,
+# OBS-17) — utan de här två vaktar den ingenting alls.
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
 # LVGL:s egen logg på WARN via printf: starterns enda rapport när en app
 # hoppas över för API-versionsmiss (platform/torget_ui.c) gick förut till
 # en avstängd logg och försvann.

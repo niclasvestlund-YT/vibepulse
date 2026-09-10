@@ -100,7 +100,8 @@ lines every 30 s and a `heap:` line every 10 s.
   refuses to configure when the effective `sdkconfig` has lost the
   coredump writer, the panic-then-reboot choice, the LVGL log (module,
   printf sink or WARN level), the task watchdog (its five-second timeout,
-  or turned its panic option on), the INFO default or the log ceiling
+  its two idle-task subscriptions, or turned its panic option on), the
+  INFO default or the log ceiling
   (`cmake/torget_diagnostics_guard.cmake`): defaults never migrate an old
   generated file, so a stale checkout says so instead of building blind. `LV_USE_LOG` is on at
   WARN, so the launcher's "app skipped for API-version mismatch" report

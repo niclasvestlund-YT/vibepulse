@@ -48,6 +48,8 @@ for pin in (
     "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
     "CONFIG_ESP_TASK_WDT_INIT=y",
     "CONFIG_ESP_TASK_WDT_TIMEOUT_S=5",
+    "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y",
+    "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y",
     "CONFIG_LV_USE_LOG=y",
     "CONFIG_LV_LOG_PRINTF=y",
     "CONFIG_LV_LOG_LEVEL_WARN=y",
@@ -75,6 +77,8 @@ for effective in (
     '"${CONFIG_ESP_TASK_WDT_INIT}"',
     '"${CONFIG_ESP_TASK_WDT_TIMEOUT_S}"',
     '"${CONFIG_ESP_TASK_WDT_PANIC}"',
+    '"${CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0}"',
+    '"${CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1}"',
     '"${CONFIG_LV_USE_LOG}"',
     '"${CONFIG_LV_LOG_PRINTF}"',
     '"${CONFIG_LV_LOG_LEVEL_WARN}"',
@@ -98,7 +102,7 @@ def run_guard(values):
 
 # Argument order of torget_require_diagnostics; the task-watchdog panic
 # option is the one value that must be UNSET (warn-only watchdog).
-GOOD = ["y", "y", "y", "y", "y", "y", "5", "", "y", "y", "y"]
+GOOD = ["y", "y", "y", "y", "y", "y", "5", "", "y", "y", "y", "y", "y"]
 WDT_TIMEOUT_INDEX = 6
 WDT_PANIC_INDEX = 7
 ok = run_guard(GOOD)
@@ -116,6 +120,10 @@ for index, name in enumerate((
         "CONFIG_ESP_TASK_WDT_INIT=y",
         None,  # the watchdog timeout: tested below with other values
         None,  # the watchdog panic option: tested below the other way round
+        # The watchdog watches only the idle tasks (OBS-17): without these
+        # two subscriptions it watches nothing.
+        "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y",
+        "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y",
         "CONFIG_LV_USE_LOG=y",
         # LV_USE_LOG without the printf sink or the WARN level is a log
         # nobody reads: no lv_log_register_print_cb exists in the tree.

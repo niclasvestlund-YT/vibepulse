@@ -10,8 +10,8 @@
 # IDF project() call ("y" when set, "" when unset or =n).
 function(torget_require_diagnostics coredump_to_flash coredump_elf
          panic_reboot log_default_info log_max_equals_default task_wdt
-         task_wdt_timeout_s task_wdt_panic lv_use_log lv_log_printf
-         lv_log_level_warn)
+         task_wdt_timeout_s task_wdt_panic task_wdt_idle_cpu0
+         task_wdt_idle_cpu1 lv_use_log lv_log_printf lv_log_level_warn)
   set(_missing "")
   if(NOT "${coredump_to_flash}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y")
@@ -47,6 +47,16 @@ function(torget_require_diagnostics coredump_to_flash coredump_elf
   endif()
   if("${task_wdt_panic}" STREQUAL "y")
     list(APPEND _missing "CONFIG_ESP_TASK_WDT_PANIC unset (warn-only)")
+  endif()
+  # No task of ours subscribes to the watchdog (OBS-17); the IDLE-starvation
+  # detection the runbook describes exists only because IDF subscribes the
+  # two idle tasks. A stale config without them has a watchdog watching
+  # nothing.
+  if(NOT "${task_wdt_idle_cpu0}" STREQUAL "y")
+    list(APPEND _missing "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y")
+  endif()
+  if(NOT "${task_wdt_idle_cpu1}" STREQUAL "y")
+    list(APPEND _missing "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y")
   endif()
   if(NOT "${lv_use_log}" STREQUAL "y")
     list(APPEND _missing "CONFIG_LV_USE_LOG=y")
