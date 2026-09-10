@@ -304,7 +304,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             if command[0] == "ps":
                 return mock.Mock(stdout=process_command)
             if command[0] == "security":
-                return mock.Mock(stdout=expired_keychain)
+                return mock.Mock(stdout=expired_keychain, returncode=0)
             raise AssertionError(command)
 
         with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
@@ -337,7 +337,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             if command[0] == "ps":
                 return mock.Mock(stdout=unrelated_command)
             if command[0] == "security":
-                return mock.Mock(stdout=keychain)
+                return mock.Mock(stdout=keychain, returncode=0)
             raise AssertionError(command)
 
         with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
@@ -360,7 +360,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             if command[0] == "pgrep":
                 return mock.Mock(stdout="")
             if command[0] == "security":
-                return mock.Mock(stdout=keychain)
+                return mock.Mock(stdout=keychain, returncode=0)
             raise AssertionError(command)
 
         with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
@@ -455,7 +455,7 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             if command[0] == "pgrep":
                 return mock.Mock(stdout="")
             if command[0] == "security":
-                return mock.Mock(stdout=keychain)
+                return mock.Mock(stdout=keychain, returncode=0)
             raise AssertionError(command)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -642,9 +642,18 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                     mock.patch.object(tokenserver, "_dead_tokens", {}), \
                     mock.patch.object(tokenserver, "_probe_cooldown_until",
                                       0.0), \
+                    mock.patch.object(tokenserver, "_probe_headers",
+                                      ["anthropic-ratelimit-unified-status"]), \
+                    mock.patch.object(tokenserver, "_probe_unknown_buckets",
+                                      ["7d_haiku"]), \
                     mock.patch.object(tokenserver.urllib.request, "urlopen",
                                       side_effect=explode):
                 found = tokenserver._probe_limits()
+                # Codex review of #111: the evidence is the most recent
+                # cycle's, and this cycle saw none — an earlier fallback's
+                # names must not sit beside the new status.
+                self.assertEqual(tokenserver._probe_headers, [])
+                self.assertEqual(tokenserver._probe_unknown_buckets, [])
         finally:
             holder.close()
 
@@ -855,6 +864,44 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
 
         self.assertIsNone(found)
         self.assertIn("persisted", status)
+
+    def test_a_persisted_cooldown_is_published_with_its_schedule(self):
+        # Codex review of #111: the persisted path published status and
+        # cooldown, then _refresh_limits recorded the streak and timestamp
+        # in a later critical section, so GET / could pair the persisted
+        # status with streak 0 and a null age.
+        tokenserver._PROBE_STATE_PATH.write_text(
+            json.dumps({"cooldown_until": time.time() + 3600}),
+            encoding="utf-8")
+        seen = []
+        real_note = tokenserver._note_probe_schedule_locked
+
+        def spy_note(refreshed):
+            # Called while the lock is held: the status must already be
+            # the persisted one in this very section.
+            seen.append(tokenserver._probe_status)
+            real_note(refreshed)
+
+        with mock.patch.object(tokenserver, "_probe_state_loaded", False), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_probe_status", "not_run"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_probe_cycle_published",
+                                  False), \
+                mock.patch.object(tokenserver, "_note_probe_schedule_locked",
+                                  side_effect=spy_note), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=AssertionError("no upstream")):
+            self.assertIsNone(tokenserver._probe_limits())
+            view = tokenserver._probe_view()
+            self.assertEqual(len(seen), 1)
+            self.assertIn("(persisted)", seen[0])
+            self.assertIn("(persisted)", view["claudeProbe"])
+            self.assertEqual(view["claudeProbeStreak"], 1)
+            self.assertIsNotNone(view["claudeProbeAgeS"])
+            self.assertGreater(view["claudeProbeCooldownLeftS"], 3000)
+            self.assertTrue(tokenserver._probe_cycle_published)
 
     def test_probe_ignores_expired_persisted_cooldown(self):
         tokenserver._PROBE_STATE_PATH.write_text(
@@ -1091,6 +1138,337 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             (tokenserver._last_limits,
              tokenserver._last_probed,
              tokenserver._limits_refreshing) = previous
+
+    # --- OBS-20: the keychain says why, not just (None, None) ---
+
+    def test_keychain_reason_names_each_failure_cause(self):
+        cases = [
+            ("security_missing", FileNotFoundError("security"),
+             "keychain_security_missing"),
+            ("timeout", tokenserver.subprocess.TimeoutExpired("security", 10),
+             "keychain_timeout"),
+            ("no_entry", mock.Mock(stdout="", returncode=44),
+             "keychain_no_entry"),
+            ("denied", mock.Mock(stdout="", returncode=51),
+             "keychain_denied_or_locked (exit 51)"),
+            ("malformed", mock.Mock(stdout="not json\n", returncode=0),
+             "keychain_malformed"),
+            ("list_body", mock.Mock(stdout="[1, 2]\n", returncode=0),
+             "keychain_malformed"),
+            ("no_token", mock.Mock(stdout='{"claudeAiOauth": {}}\n',
+                                   returncode=0),
+             "keychain_entry_without_token"),
+        ]
+        for name, outcome, expected in cases:
+            with self.subTest(name=name), \
+                    mock.patch.object(tokenserver, "_keychain_reason", None), \
+                    mock.patch.object(tokenserver, "_keychain_reason_logged",
+                                      None), \
+                    mock.patch.object(
+                        tokenserver.subprocess, "run",
+                        side_effect=(outcome if isinstance(outcome, Exception)
+                                     else None),
+                        return_value=(None if isinstance(outcome, Exception)
+                                      else outcome)):
+                self.assertEqual(tokenserver._read_keychain_oauth(),
+                                 (None, None))
+                self.assertEqual(tokenserver._keychain_reason, expected)
+
+    def test_keychain_success_clears_the_reason_and_returns_the_record(self):
+        record = json.dumps({"claudeAiOauth": {
+            "accessToken": "kc-token", "expiresAt": 1900000000000}})
+        with mock.patch.object(tokenserver, "_keychain_reason",
+                               "keychain_no_entry"), \
+                mock.patch.object(tokenserver, "_keychain_reason_logged",
+                                  "keychain_no_entry"), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  return_value=mock.Mock(stdout=record,
+                                                         returncode=0)):
+            self.assertEqual(tokenserver._read_keychain_oauth(),
+                             ("kc-token", 1900000000000))
+            self.assertIsNone(tokenserver._keychain_reason)
+
+    def test_keychain_reason_logs_transitions_only(self):
+        denied = mock.Mock(stdout="", returncode=51)
+        record = json.dumps({"claudeAiOauth": {
+            "accessToken": "kc-token", "expiresAt": 1900000000000}})
+        with mock.patch.object(tokenserver, "_keychain_reason", None), \
+                mock.patch.object(tokenserver, "_keychain_reason_logged",
+                                  tokenserver._KEYCHAIN_UNLOGGED), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  side_effect=[denied, denied, mock.Mock(
+                                      stdout=record, returncode=0),
+                                      mock.Mock(stdout=record, returncode=0),
+                                      denied]), \
+                self.assertLogs("tokenserver", level="INFO") as captured:
+            for _ in range(5):
+                tokenserver._read_keychain_oauth()
+        lines = [line for line in captured.output if "claude-keychain" in line]
+        self.assertEqual(len(lines), 3)
+        self.assertIn("start -> keychain_denied_or_locked (exit 51)", lines[0])
+        self.assertIn("keychain_denied_or_locked (exit 51) -> ok", lines[1])
+        # Codex review of #111: a failure after a recovery is a regression
+        # from ok, not a second start -- None means "read fine", and only
+        # the sentinel means "nothing logged yet".
+        self.assertIn("ok -> keychain_denied_or_locked (exit 51)", lines[2])
+        self.assertNotIn("kc-token", "\n".join(captured.output))
+
+    def test_first_keychain_success_logs_start_to_ok_once(self):
+        record = json.dumps({"claudeAiOauth": {
+            "accessToken": "kc-token", "expiresAt": 1900000000000}})
+        with mock.patch.object(tokenserver, "_keychain_reason", None), \
+                mock.patch.object(tokenserver, "_keychain_reason_logged",
+                                  tokenserver._KEYCHAIN_UNLOGGED), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  return_value=mock.Mock(stdout=record,
+                                                         returncode=0)), \
+                self.assertLogs("tokenserver", level="INFO") as captured:
+            tokenserver._read_keychain_oauth()
+            tokenserver._read_keychain_oauth()
+        lines = [line for line in captured.output if "claude-keychain" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("start -> ok", lines[0])
+
+    def test_probe_status_carries_the_keychain_reason_on_macos(self):
+        with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[]), \
+                mock.patch.object(tokenserver, "_keychain_reason",
+                                  "keychain_denied_or_locked (exit 51)"):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            self.assertEqual(
+                tokenserver._probe_status,
+                "no_claude_oauth_token: keychain_denied_or_locked (exit 51)")
+            self.assertEqual(tokenserver._claude_credential, {
+                "status": "unavailable",
+                "reason": "keychain_denied_or_locked (exit 51)"})
+        # The auth-recovery cadence keys on the prefix, so it still applies.
+        with mock.patch.object(
+                tokenserver, "_probe_status",
+                "no_claude_oauth_token: keychain_denied_or_locked (exit 51)"):
+            self.assertEqual(tokenserver._probe_interval_s(),
+                             tokenserver.AUTH_RECOVERY_EVERY_S)
+
+    def test_windows_has_no_keychain_reason_to_report(self):
+        with mock.patch.object(tokenserver, "_IS_WINDOWS", True), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[]), \
+                mock.patch.object(tokenserver, "_keychain_reason",
+                                  "keychain_no_entry"):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            self.assertEqual(tokenserver._probe_status,
+                             "no_claude_oauth_token")
+            self.assertEqual(tokenserver._claude_credential,
+                             {"status": "unavailable"})
+
+    # --- OBS-18: one published outcome per cycle, no stale evidence ---
+
+    def test_a_cycle_that_skips_the_fallback_clears_old_header_names(self):
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(
+                req.get_full_url(), 401, "Unauthorized", None, None)
+
+        with mock.patch.object(tokenserver, "_probe_headers", [
+                    "anthropic-ratelimit-unified-7d-utilization"]), \
+                mock.patch.object(tokenserver, "_probe_unknown_buckets",
+                                  ["7d_haiku"]), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("stale", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            self.assertEqual(tokenserver._probe_status, "usage_http_401")
+            self.assertEqual(tokenserver._probe_headers, [])
+            self.assertEqual(tokenserver._probe_unknown_buckets, [])
+
+    def test_status_is_published_once_at_the_end_of_the_cycle(self):
+        seen = []
+
+        def fake_urlopen(req, timeout=None):
+            seen.append(tokenserver._probe_status)
+            if "usage" in req.get_full_url():
+                raise urllib.error.URLError("dns")
+            raise urllib.error.HTTPError(
+                req.get_full_url(), 500, "Server Error", None, None)
+
+        with mock.patch.object(tokenserver, "_probe_status",
+                               "usage_http_200 + ok"), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("fresh-token", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            final = tokenserver._probe_status
+
+        # Two upstream calls, and neither saw a half-built string.
+        self.assertEqual(seen, ["usage_http_200 + ok"] * 2)
+        self.assertEqual(
+            final,
+            "usage_request_failed: URLError; fallback_http_500"
+            " + no_mapped_headers")
+
+    def test_a_crashing_cycle_publishes_the_crash_with_empty_evidence(self):
+        with mock.patch.object(tokenserver, "_probe_status",
+                               "usage_http_200 + ok"), \
+                mock.patch.object(tokenserver, "_probe_headers", ["h"]), \
+                mock.patch.object(tokenserver, "_probe_unknown_buckets",
+                                  ["7d_haiku"]), \
+                mock.patch.object(tokenserver, "_probe_status_logged",
+                                  "usage_http_200 + ok"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_limits", {"weekPct": 1}), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_limits_refreshing", True), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  side_effect=KeyError("boom")), \
+                self.assertLogs("tokenserver", level="INFO"):
+            tokenserver._refresh_limits()
+            self.assertEqual(tokenserver._probe_status,
+                             "probe_crashed: KeyError")
+            # A status-only cycle publishes empty evidence, not the
+            # previous cycle's (Codex review of #111).
+            self.assertEqual(tokenserver._probe_headers, [])
+            self.assertEqual(tokenserver._probe_unknown_buckets, [])
+
+    def test_a_cycle_publishes_its_backoff_with_its_outcome(self):
+        # Codex review of #111: the streak and timestamp used to be written
+        # later, in _refresh_limits, so GET / could pair a new status with
+        # the previous cycle's backoff.
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(
+                req.get_full_url(), 401, "Unauthorized", None, None)
+
+        with mock.patch.object(tokenserver, "_probe_failure_streak", 2), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_probe_cycle_published",
+                                  False), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("stale", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            # Streak and timestamp landed with the status, in one section.
+            self.assertEqual(tokenserver._probe_failure_streak, 3)
+            self.assertGreater(tokenserver._last_probed, 0.0)
+            self.assertTrue(tokenserver._probe_cycle_published)
+
+        # And _refresh_limits does not count the same cycle twice.
+        with mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_limits", None), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_limits_refreshing", True), \
+                mock.patch.object(tokenserver, "_probe_cycle_published",
+                                  False), \
+                mock.patch.object(tokenserver, "_probe_status_logged",
+                                  "usage_http_401"), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("stale", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            tokenserver._refresh_limits()
+            self.assertEqual(tokenserver._probe_failure_streak, 1)
+            self.assertFalse(tokenserver._probe_cycle_published)
+            self.assertFalse(tokenserver._limits_refreshing)
+
+    def test_a_429_publishes_its_cooldown_with_its_status(self):
+        # Codex review of #111: the cooldown used to be assigned on the
+        # probe thread outside _limits_lock, so GET / could pair the new
+        # rest with the previous cycle's status and streak.
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(
+                req.get_full_url(), 429, "Too Many Requests", None, None)
+
+        published = []
+
+        def spy_publish(outcome, refreshed):
+            # What the world can see the moment the outcome lands.
+            self.assertIsNotNone(outcome.cooldown_until)
+            self.assertTrue(outcome.status.startswith(
+                "usage_http_429 + backoff_until_"), outcome.status)
+            published.append(tokenserver._probe_cooldown_until)
+            real_publish(outcome, refreshed)
+
+        real_publish = tokenserver._publish_probe_outcome
+        with mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_probe_status", "not_run"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_save_probe_state") as saved, \
+                mock.patch.object(tokenserver, "_publish_probe_outcome",
+                                  side_effect=spy_publish), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("fresh-token", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            view = tokenserver._probe_view()
+            # Before publish the global was untouched; after it the view
+            # pairs the 429 status, its streak and its rest.
+            self.assertEqual(published, [0.0])
+            self.assertGreater(tokenserver._probe_cooldown_until,
+                               time.time() + 500)
+            self.assertTrue(view["claudeProbe"].startswith(
+                "usage_http_429 + backoff_until_"))
+            self.assertEqual(view["claudeProbeStreak"], 1)
+            self.assertGreater(view["claudeProbeCooldownLeftS"], 500)
+            # The persisted value is the published one.
+            saved.assert_called_once_with(tokenserver._probe_cooldown_until)
+
+    def test_probe_view_copies_every_correlated_field_under_one_lock(self):
+        with mock.patch.object(tokenserver, "_probe_status",
+                               "usage_http_401"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 1), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_claude_credential",
+                                  {"status": "ready", "expiresInMin": 9}), \
+                mock.patch.object(tokenserver, "_probe_headers", ["h"]), \
+                mock.patch.object(tokenserver, "_probe_unknown_buckets",
+                                  ["7d_haiku"]):
+            view = tokenserver._probe_view()
+            self.assertEqual(view["claudeProbe"], "usage_http_401")
+            self.assertEqual(view["claudeCredential"],
+                             {"status": "ready", "expiresInMin": 9})
+            self.assertEqual(view["ratelimitHeaders"], ["h"])
+            self.assertEqual(view["unknownRateLimitBuckets"], ["7d_haiku"])
+            self.assertEqual(view["claudeProbeStreak"], 1)
+            # Copies, not the live lists: a later cycle cannot mutate a
+            # served payload under a slow writer.
+            view["ratelimitHeaders"].append("x")
+            self.assertEqual(tokenserver._probe_headers, ["h"])
+
+    def test_probe_diagnostics_expose_the_backoff_state(self):
+        with mock.patch.object(tokenserver, "_probe_status",
+                               "usage_http_401"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 2), \
+                mock.patch.object(tokenserver, "_last_probed",
+                                  time.monotonic() - 30), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until",
+                                  time.time() + 300):
+            diagnostics = tokenserver._probe_diagnostics()
+        self.assertEqual(diagnostics["claudeProbeStreak"], 2)
+        self.assertEqual(diagnostics["claudeProbeIntervalS"],
+                         tokenserver.LIMITS_EVERY_S * 4)
+        self.assertTrue(295 <= diagnostics["claudeProbeCooldownLeftS"] <= 300)
+        self.assertTrue(29 <= diagnostics["claudeProbeAgeS"] <= 31)
+
+        with mock.patch.object(tokenserver, "_probe_status", "not_run"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0):
+            diagnostics = tokenserver._probe_diagnostics()
+        self.assertEqual(diagnostics, {
+            "claudeProbeStreak": 0,
+            "claudeProbeIntervalS": tokenserver.LIMITS_EVERY_S,
+            "claudeProbeCooldownLeftS": None,
+            "claudeProbeAgeS": None,
+        })
 
 
 class CodexLimitLogTests(unittest.TestCase):
@@ -2527,6 +2905,10 @@ class HandlerPrivacyTests(unittest.TestCase):
         self.assertEqual(payload["claudeLocalUsage"], "fresh_applied")
         self.assertEqual(payload["claudeCredential"], {
             "status": "expiring", "expiresInMin": 17})
+        # OBS-18: the backoff state rides beside the status string.
+        for key in ("claudeProbeStreak", "claudeProbeIntervalS",
+                    "claudeProbeCooldownLeftS", "claudeProbeAgeS"):
+            self.assertIn(key, payload)
 
     def test_root_diagnostics_report_only_safe_interaction_switches(self):
         handler = self._handler("/")

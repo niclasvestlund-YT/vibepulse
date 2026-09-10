@@ -134,6 +134,18 @@ repeating deserves attention. What a healthy boot looks like:
 
 - **`claude-probe: X -> Y`** — every probe status transition: a 401
   appearing, a 429 backoff starting, and the recovery back to ok.
+- **`claude-keychain: X -> Y`** — macOS only (OBS-20): every change in why
+  the keychain read gave no token, logged once per transition like the
+  probe line. `X` is the previous word, `ok` after a recovery, or `start`
+  for the first read since the service started; `Y` is `ok` (a token
+  came back) or one of `keychain_security_missing` (no `security` binary),
+  `keychain_timeout` (the prompt sat unanswered), `keychain_no_entry`
+  (exit 44, never logged in on this account), `keychain_denied_or_locked
+  (exit N)` (Deny on the prompt, or a locked keychain),
+  `keychain_malformed` (the record is not JSON) or
+  `keychain_entry_without_token`. The same word rides on `claudeProbe`
+  after `no_claude_oauth_token:` and in `claudeCredential.reason` on
+  `GET /`; the fix per word is in [agent-setup.md](agent-setup.md).
 - **`agent-status <context>: <ErrorName>`** — throttled to one per error
   type per 30 s, deliberately content-free (privacy: never a path or
   message from your sessions).
@@ -190,11 +202,31 @@ Returns live server state, added after real debugging nights:
   `usage_http_200 + ok` (healthy), `no_claude_oauth_token`,
   `usage_http_401`, `usage_http_429 + backoff_until_HH:MM`,
   `usage_request_failed: <Type>`, `probe_crashed: <Type>` (the probe
-  itself hit a bug — the log has the traceback).
+  itself hit a bug — the log has the traceback). On macOS a
+  `no_claude_oauth_token` carries the keychain's own word after a colon
+  (OBS-20): `keychain_denied_or_locked (exit N)` is the prompt clicked
+  Deny or a locked keychain, `keychain_no_entry` never logged in on this
+  account, `keychain_timeout` a prompt left unanswered,
+  `keychain_security_missing` / `keychain_malformed` the tool or the
+  record itself. The string is assembled per probe cycle and published
+  once, so it never reads half-built.
+- `claudeProbeStreak` / `claudeProbeIntervalS` / `claudeProbeCooldownLeftS`
+  / `claudeProbeAgeS` — the backoff behind `claudeProbe` (OBS-18):
+  consecutive failed cycles, the current gap between cycles (240 s,
+  doubling per miss to 960 s; 15 s while waiting on a local token), seconds left
+  of a 429 rest (`null` when not resting) and seconds since the last
+  completed cycle (`null` before the first). Dashes on the screen look
+  the same whether the probe is failing every four minutes or resting;
+  these say which. The smoke test prints them beside a non-ok status.
+  All of them, the status string, the credential block, the 429 rest and
+  the header evidence are copied under one lock, the same one the probe
+  publishes them under, so a response never pairs one cycle's status
+  with another's numbers.
 - `claudeCredential` — the content-free pre-expiry guard for the saved Claude
   Code credential: `ready`, `expiring`, `expired`, `unavailable`, or
-  `unknown`, plus whole `expiresInMin` when known. It never contains OAuth
-  token values or account data. Startup, doctor, and the smoke test warn 30
+  `unknown`, plus whole `expiresInMin` when known, and on macOS a `reason`
+  beside `unavailable` (the same keychain word as in `claudeProbe`). It
+  never contains OAuth token values or account data. Startup, doctor, and the smoke test warn 30
   minutes before expiry instead of waiting for Fable to become stale.
 - `claudeLocalUsage` — the passive Claude Desktop fallback for the general
   week: `fresh_applied` means the official local plan history is newer than
@@ -204,7 +236,12 @@ Returns live server state, added after real debugging nights:
   `invalid*`, and `unsupported` explain why the local file was not trusted.
   This fallback never marks the named Fable/Opus model pool fresh.
 - `ratelimitHeaders` / `unknownRateLimitBuckets` — header names seen by
-  the fallback probe. A non-empty `unknownRateLimitBuckets` means
+  the fallback probe in the **most recent** cycle; a cycle that never
+  reached the fallback (the usage contract answered, or every token was
+  rejected first) publishes them empty, and so does a cycle that never
+  ran at all (`probe_held_by_other_instance`, `probe_crashed`), so they
+  never sit hours-old beside a current failure. A non-empty
+  `unknownRateLimitBuckets` means
   Anthropic added a bucket we don't map yet: file it.
 - `usageComputeOk` / `usageComputeFailingForS` — whether the recompute
   behind `/api/tokens` is healthy. `false` means the served token totals
@@ -239,10 +276,10 @@ healthy empty polling, accepted live rows, and the one-shot stale clear when a
 debugger or future local diagnostic surface reads it. They are reset on app
 start and are not persistent telemetry.
 
-Not exposed yet, so invisible from outside: the probe's failure streak
-and slowed interval, and any Codex-side probe status (OBS-18). This
-endpoint is also absent from the runbook (OBS-23) — this section is
-currently its only documentation.
+Still not exposed, so invisible from outside: any Codex-side probe status
+(the Claude probe's streak and slowed interval are the `claudeProbe*`
+fields above since OBS-18). This endpoint's field-by-field documentation
+lives in this section only (OBS-23).
 
 ### 4. Server state files
 
