@@ -114,6 +114,11 @@ typedef struct {
    * usage-totals (torget_http.c gör det); äldre firmware får felformen och
    * behåller sina värden. */
   int volume_placeholder;
+  /* 1 när samma block säger `state: "failing"`: omräkningen på datorn
+   * kraschar och värdet kommer inte av sig självt. Skärmen visar då streck
+   * på värdesidan i stället för gamla siffror som ser färska ut (Codex-
+   * granskning av #104). Bara meningsfull ihop med volume_placeholder. */
+  int volume_failing;
 
   /* taken (null-bara). claude_model_week är veckofönstret för tyngsta
    * modellen (Fable/Opus) — tredje raden i Claudes egen usage-panel. */

@@ -18,6 +18,7 @@ Regler som fixturerna låser:
 |---|---|---|
 | `tokens.json` | SYNTETISK, godkänd statisk AMOLED-layout | Fullt v2-svar: 73/47/21-ringarna, volym, värde, prognoser. |
 | `tokens-missing.json` | SYNTETISK | Alla kvoter `null`: streck, aldrig påhittade procent. |
+| `tokens-volume-failing.json` | SYNTETISK (issue #62) | Som ovan men `usageTotals.state: "failing"`: omräkningen på datorn kraschar. Firmwaren applicerar kvoten, visar streck på värdesidan (inte gamla siffror som ser färska ut) och loggar en varning. |
 | `tokens-warming-up.json` | SYNTETISK (issue #62) | Tjänstens första historikskanning pågår: räknarna är noll med `usageTotals.placeholder: true`, kvoten live. Firmwaren applicerar kvoten men rör inte värdesidan; äldre firmware får aldrig det här svaret (tjänsten kräver `X-VibePulse-Accepts: usage-totals`). |
 
 ## Max Tracker-fixturer

@@ -992,6 +992,57 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("active Claude probe is live", context)
         self.assertNotIn("DEVICE PATH STALE", context)
 
+    def test_startup_health_names_a_warming_up_and_a_failing_recompute(self):
+        # Issue #62: /api/tokens answers during the first history scan with
+        # placeholder counters; the hook must not call that HEALTHY.
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {"status": "ready", "expiresInMin": 480},
+            "usageComputeOk": True,
+            "interactions": {
+                "claude": True, "codex": True,
+                "panel": {"status": "ready", "ageS": 3},
+            },
+        }
+        fresh = {
+            "claudeWeekStale": False,
+            "claudeModelWeekStale": False,
+            "codexWeekStale": False,
+        }
+        cases = [
+            (dict(root), dict(fresh, usageTotals={
+                "state": "refreshing", "sinceS": 12, "placeholder": True}),
+             "SERVICE WARMING UP"),
+            (dict(root), dict(fresh, usageTotals={
+                "state": "failing", "sinceS": 900, "placeholder": True}),
+             "VOLUME RECOMPUTE FAILING"),
+            (dict(root, usageComputeOk=False), dict(fresh, usageTotals={
+                "state": "failing", "ageS": 300, "placeholder": False}),
+             "VOLUME RECOMPUTE FAILING"),
+            (dict(root), dict(fresh, usageTotals={
+                "state": "ready", "ageS": 5, "placeholder": False}),
+             "HEALTHY"),
+        ]
+        for root_body, tokens_body, expected in cases:
+            with self.subTest(expected=expected):
+                routes = {
+                    "/": {"body": compact(root_body).encode()},
+                    "/api/tokens": {"body": compact(tokens_body).encode()},
+                }
+                with LocalServer(routes=routes) as server:
+                    completed = run_script(
+                        "session_start.py", compact(payload).encode(),
+                        port=server.port)
+                context = json.loads(completed.stdout)["hookSpecificOutput"][
+                    "additionalContext"]
+                self.assertIn(expected, context)
+                if expected != "HEALTHY":
+                    self.assertNotIn("HEALTHY", context)
+                self.assertNotIn("sinceS", context)
+
     def test_startup_health_reports_ready_and_credential_risk_separately(self):
         payload = {"hook_event_name": "SessionStart", "session_id": "s"}
         root = {

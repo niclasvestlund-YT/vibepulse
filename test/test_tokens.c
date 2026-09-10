@@ -137,6 +137,17 @@ int main(void) {
     check("kvoten är live trots platshållare",
           t.claude_week.has_pct && t.claude_week.pct == 47.0);
     check("platshållarens räknare är noll", t.day_tokens == 0);
+    check("pågående skanning är inte 'failing'", t.volume_failing == 0);
+    free(json);
+  }
+  json = read_file(FIXTURES_DIR "/tokens-volume-failing.json", &len);
+  if (json) {
+    memset(&t, 0, sizeof t);
+    check("failing-fixturen parsar", tk_tokens_parse(json, len, &t));
+    check("failing sätter både platshållare och failing",
+          t.volume_placeholder == 1 && t.volume_failing == 1);
+    check("kvoten är live trots kraschande omräkning",
+          t.claude_week.has_pct && t.claude_week.pct == 47.0);
     free(json);
   }
   json = read_file(FIXTURES_DIR "/tokens.json", &len);

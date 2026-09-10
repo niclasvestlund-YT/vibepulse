@@ -1053,6 +1053,15 @@ void usage_screen_apply_tokens(const tk_tokens *tokens) {
     merged.day_sessions = ui.last_tokens.day_sessions;
     merged.month_tokens = ui.last_tokens.month_tokens;
     merged.value = ui.last_tokens.value;
+    if (tokens->volume_failing) {
+      /* Omräkningen på datorn kraschar (`usageTotals.state: failing`):
+       * mätningen kommer inte av sig självt, och ett gammalt värde som
+       * står kvar poll efter poll ser färskt ut fast ingen mätt det på
+       * länge. Streck är det ärliga svaret — samma "vet inte" som när
+       * blocket saknas helt. Räknarna ovan står kvar (de ritas inte). */
+      memset(&merged.value, 0, sizeof merged.value);
+      merged.value.state = TK_VALUE_UNAVAILABLE;
+    }
   }
   ui.last_tokens = merged;
   for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], &merged);
@@ -1060,7 +1069,8 @@ void usage_screen_apply_tokens(const tk_tokens *tokens) {
   usage_presenter_build_forecasts(&merged, &forecasts);
   for (int i = 0; i < 2; i++)
     apply_forecast_row(&ui.forecast_rows[i], &forecasts.rows[i]);
-  if (!tokens->volume_placeholder) apply_value(&merged);
+  if (!tokens->volume_placeholder || tokens->volume_failing)
+    apply_value(&merged);
 }
 
 void usage_screen_apply_max_tracker(const tk_max_tracker *t) {

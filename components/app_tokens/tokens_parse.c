@@ -451,6 +451,10 @@ bool tk_tokens_parse(const char *json, size_t len, tk_tokens *out) {
       const cJSON *placeholder = cJSON_GetObjectItemCaseSensitive(
           totals, "placeholder");
       t.volume_placeholder = cJSON_IsTrue(placeholder) ? 1 : 0;
+      const cJSON *state = cJSON_GetObjectItemCaseSensitive(totals, "state");
+      t.volume_failing = (cJSON_IsString(state) && state->valuestring &&
+                          strcmp(state->valuestring, "failing") == 0)
+                             ? 1 : 0;
     }
   }
 
