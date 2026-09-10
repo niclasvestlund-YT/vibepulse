@@ -64,7 +64,8 @@ class UsageHistoryPersistenceTests(unittest.TestCase):
             })
             self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
-    def test_corrupt_file_starts_empty_without_touching_sibling(self):
+    def test_corrupt_file_is_quarantined_without_touching_sibling(self):
+        # OBS-11: start empty, but keep the bytes beside the file and say so.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             path = root / "usage-history.json"
@@ -72,11 +73,43 @@ class UsageHistoryPersistenceTests(unittest.TestCase):
             path.write_text("{broken", encoding="utf-8")
             sibling.write_text("unchanged", encoding="utf-8")
 
-            history = UsageHistory(path)
+            with self.assertLogs("tokenserver.state", level="WARNING") as captured:
+                history = UsageHistory(path)
 
             self.assertEqual(history.records, ())
             self.assertEqual(sibling.read_text(encoding="utf-8"),
                              "unchanged")
+            self.assertFalse(path.exists())
+            quarantined = list(root.glob("usage-history.json.corrupt-*"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual(quarantined[0].read_text(encoding="utf-8"),
+                             "{broken")
+            self.assertIn("quarantined", "\n".join(captured.output))
+
+            self.assertTrue(history.record(
+                "claude", "week", 10, reset_at=DAY, at=0))
+            self.assertTrue(path.exists())
+
+    def test_wrong_shape_is_quarantined_too(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            path.write_text('{"v": 7, "samples": "no"}', encoding="utf-8")
+            with self.assertLogs("tokenserver.state", level="WARNING"):
+                history = UsageHistory(path)
+            self.assertEqual(history.records, ())
+            self.assertEqual(
+                len(list(path.parent.glob("usage-history.json.corrupt-*"))), 1)
+
+    def test_persist_fsyncs_the_parent_directory_after_the_rename(self):
+        # OBS-21.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            history = UsageHistory(path)
+            with mock.patch(
+                    "tools.tokenserver.usage_history.fsync_parent") as fsync:
+                self.assertTrue(history.record(
+                    "claude", "week", 10, reset_at=DAY, at=0))
+            fsync.assert_called_once_with(path)
 
     def test_rejects_unbounded_provider_or_window_names(self):
         with tempfile.TemporaryDirectory() as temp_dir:

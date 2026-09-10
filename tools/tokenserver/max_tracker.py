@@ -50,6 +50,11 @@ import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+try:
+    from .state_files import fsync_parent, quarantine_corrupt
+except ImportError:  # run as a script / from the directory itself
+    from state_files import fsync_parent, quarantine_corrupt
+
 if __package__:
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
 else:  # direktkörning: python3 tools/tokenserver/max_tracker.py
@@ -1090,15 +1095,25 @@ class MaxTrackerStore:
                     del weeks[week]
 
     def _load(self) -> None:
+        """Populate from disk. A missing file is the normal first run; an
+        unreadable one is quarantined (OBS-11) rather than overwritten by
+        the next save -- this file holds up to 400 days of history."""
         try:
             raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        except UnicodeError:
+            quarantine_corrupt(self.path, "not UTF-8")
+            return
         except OSError:
             return
         try:
             payload = json.loads(raw)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as error:
+            quarantine_corrupt(self.path, f"invalid JSON at byte {error.pos}")
             return
         if not isinstance(payload, dict):
+            quarantine_corrupt(self.path, "top level is not an object")
             return
         with self._lock:
             for provider in PROVIDERS:
@@ -1253,6 +1268,10 @@ class MaxTrackerStore:
                 os.fsync(stream.fileno())
             os.replace(temp_path, self.path)
             temp_path = None
+            # The rename is not durable until the directory entry is
+            # (OBS-21): a power cut between here and the next directory
+            # flush could bring back the previous file, or none.
+            fsync_parent(self.path)
         finally:
             if temp_path is not None:
                 try:

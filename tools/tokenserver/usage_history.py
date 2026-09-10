@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+try:
+    from .state_files import fsync_parent, quarantine_corrupt
+except ImportError:  # run as a script / from the directory itself
+    from state_files import fsync_parent, quarantine_corrupt
+
 
 SAMPLE_INTERVAL_S = 15 * 60
 RETENTION_S = 8 * 24 * 60 * 60
@@ -87,11 +92,22 @@ class UsageHistory:
 
     def _load(self) -> list:
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return []
+        except UnicodeError:
+            quarantine_corrupt(self.path, "not UTF-8")
+            return []
+        except OSError:
+            return []
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as error:
+            quarantine_corrupt(self.path, f"invalid JSON at byte {error.pos}")
             return []
         if (not isinstance(payload, dict) or payload.get("v") != 1 or
                 not isinstance(payload.get("samples"), list)):
+            quarantine_corrupt(self.path, "not a {v: 1, samples: [...]} file")
             return []
         records = [dict(record) for record in payload["samples"]
                    if self._valid_record(record)]
@@ -115,6 +131,7 @@ class UsageHistory:
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
             temporary = None
+            fsync_parent(self.path)  # OBS-21: the rename itself is not durable
         finally:
             if temporary is not None:
                 try:

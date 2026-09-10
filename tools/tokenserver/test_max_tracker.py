@@ -1301,6 +1301,65 @@ class MaxTrackerStorePersistenceTests(unittest.TestCase):
                 reloaded.snapshot("2026-08-07", {}),
                 store.snapshot("2026-08-07", {}))
 
+    def test_a_corrupt_file_is_quarantined_not_overwritten(self):
+        # OBS-11: this file holds up to 400 days of history. A corrupt
+        # byte used to mean a silent empty start and, on the next save,
+        # the corrupt bytes -- 99 % intact, usually -- gone for good.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "max-tracker.json"
+            path.parent.mkdir()
+            corrupt = b'{"claude": {"days": {"2026-08-07": {"vol": 4'
+            path.write_bytes(corrupt)
+
+            with self.assertLogs("tokenserver.state", level="WARNING") as captured:
+                store, _, _ = _new_store(directory, path=path)
+
+            self.assertEqual(store._state["claude"]["days"], {})
+            self.assertFalse(path.exists())
+            quarantined = list(path.parent.glob("max-tracker.json.corrupt-*"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual(quarantined[0].read_bytes(), corrupt)
+            text = "\n".join(captured.output)
+            self.assertIn("quarantined as max-tracker.json.corrupt-", text)
+            self.assertIn("invalid JSON", text)
+            self.assertNotIn("2026-08-07", text)  # never the contents
+
+            store.observe_volume("claude", "2026-08-08", 250)
+            store.save()
+            self.assertTrue(path.exists())
+            self.assertEqual(quarantined[0].read_bytes(), corrupt)
+
+    def test_a_non_utf8_file_is_quarantined_instead_of_crashing_startup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "max-tracker.json"
+            path.parent.mkdir()
+            path.write_bytes(b"\xff\xfe{}")
+            with self.assertLogs("tokenserver.state", level="WARNING") as captured:
+                store, _, _ = _new_store(directory, path=path)
+            self.assertEqual(store._state["claude"]["days"], {})
+            self.assertIn("not UTF-8", "\n".join(captured.output))
+            self.assertEqual(
+                len(list(path.parent.glob("max-tracker.json.corrupt-*"))), 1)
+
+    def test_save_fsyncs_the_parent_directory_after_the_rename(self):
+        # OBS-21: quota_cache did this from day one; the file with 400 days
+        # in it did not.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "max-tracker.json"
+            store, _, _ = _new_store(directory, path=path)
+            store.observe_volume("claude", "2026-08-07", 400)
+            with mock.patch("tools.tokenserver.max_tracker.fsync_parent") as fsync:
+                store.save()
+            fsync.assert_called_once_with(path)
+
+            store.observe_volume("claude", "2026-08-08", 1)
+            with mock.patch("tools.tokenserver.max_tracker.fsync_parent",
+                            side_effect=OSError(5, "Input/output error")):
+                with self.assertRaises(OSError):
+                    store.save()
+            self.assertEqual(
+                [p.name for p in path.parent.iterdir()], ["max-tracker.json"])
+
     def test_reload_of_a_missing_file_starts_empty_without_error(self):
         with tempfile.TemporaryDirectory() as directory:
             store, _, _ = _new_store(directory)

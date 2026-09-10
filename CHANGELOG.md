@@ -7,6 +7,27 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **A corrupt state file was wiped, silently, by the next save (OBS-11).**
+  All three stores (`max-tracker.json` with up to 400 days of history,
+  `quota-cache.json`, `usage-history.json`) answered unreadable bytes by
+  starting empty with no message, and the next save overwrote the evidence.
+  Each now moves the file aside as `<name>.corrupt-<UTC stamp>` beside the
+  original and logs one WARNING naming the file and the reason (never the
+  contents), then starts empty. The bytes are usually 99 % intact, so the
+  option to look or hand-repair is kept. Wrong-shape JSON counts too, and
+  a non-UTF-8 `max-tracker.json`, which used to raise out of the
+  constructor and stop the service from starting, is quarantined the same
+  way. One helper (`state_files.py`) holds the rule for all three.
+
+- **Two of three state writers stopped one fsync short of durable
+  (OBS-21).** `quota-cache.json` always did the full atomic dance: file
+  fsync, rename, parent-directory fsync. `max-tracker.json` and
+  `usage-history.json` stopped at the file fsync, so a power cut right
+  after the rename could bring back the previous file or none; the one
+  with 400 days in it was the least protected. Both now fsync the parent
+  through the same shared helper (a no-op on Windows, which has no
+  directory descriptors, exactly as the quota cache already handled it).
+
 - **The panel printed the relay's secret URL every time a cloud fetch
   failed.** All three failure paths in `components/torget_net/torget_http.c`
   logged the address they had just failed on. When the fetch had failed over

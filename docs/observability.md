@@ -204,11 +204,14 @@ currently its only documentation.
 | `quota-cache.json` | last-known quota truths + reset times | until reset passes |
 | `max-tracker.json` | daily peaks, streaks, backfill watermarks | 400 days |
 
-All three are written atomically (temp + fsync + rename). All three
-**silently start over from empty if corrupt** — a bad `max-tracker.json`
-discards up to 400 days of history with no message and no backup
-(OBS-11). During a comb, validating these files is cheap insurance;
-`python3 -m json.tool < file > /dev/null` is enough to know they parse.
+All three are written atomically (temp + fsync + rename + parent-directory
+fsync, OBS-21). An unreadable one — invalid JSON, non-UTF-8 bytes, or the
+wrong top-level shape — is **quarantined, not overwritten** (OBS-11): the
+store moves it to `<name>.corrupt-<UTC stamp>` beside the original, logs
+one `tokenserver.state` WARNING with the file and reason, and starts
+empty. During a comb, a `*.corrupt-*` file in this directory is a finding:
+the bytes are usually mostly intact and worth a look before deleting.
+`python3 -m json.tool < file > /dev/null` is still the quick parse check.
 
 ### 5. The screen itself
 
