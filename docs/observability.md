@@ -216,7 +216,7 @@ Returns live server state, added after real debugging nights:
   the block beside it, so an older panel keeps its last values instead of
   applying zeros. Firmware from 2026-09-10 sends the header and leaves the
   value page alone while `placeholder` is true. Smoke: `refreshing` is a
-  VARN, never a FAIL. Doctor: `WAIT` for `refreshing`, `FIX` for `failing`.
+  WARN, never a FAIL. Doctor: `WAIT` for `refreshing`, `FIX` for `failing`.
 - `maxTrackerSaveOk` / `maxTrackerSaveFailingForS` — whether the Max
   Tracker state file can be written. `false` (typically `ENOSPC` or a
   permissions change) means observations are held in memory and retried

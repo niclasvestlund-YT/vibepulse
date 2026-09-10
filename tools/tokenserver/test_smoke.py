@@ -1,7 +1,9 @@
-"""Röktestets eget facit: varje kamsteg mot riggade servrar och filer.
+"""The smoke test's own verdict: every comb step against rigged servers
+and files.
 
-Ingen testklass rör nätet utom via en lokal kannad HTTP-server på port 0,
-och ingen rör hemkatalogen — allt tillstånd bor i tempkataloger.
+No test class touches the network except through a local canned HTTP
+server on port 0, and none touches the home directory -- all state lives
+in temporary directories.
 """
 
 import contextlib
@@ -31,10 +33,10 @@ HEALTHY_ROOT = {
     "usageComputeOk": True,
     "usageComputeFailingForS": None,
 }
-# De friska svaren ÄR sim-fixturerna — samma payloads som firmwarens
-# parsrar bevisligen accepterar (de matas genom exakt de parsrarna i
-# simulatorn och C-testerna). Driftar kontraktet faller de här testen
-# i stället för att röktestet ljuger grönt.
+# The healthy answers ARE the sim fixtures -- the same payloads the
+# firmware's parsers demonstrably accept (they are fed through exactly
+# those parsers in the simulator and the C tests). If the contract drifts
+# these tests fail instead of the smoke test lying green.
 _FIXTURES = Path(__file__).resolve().parents[2] / "sim-fixtures"
 HEALTHY_TOKENS = json.loads((_FIXTURES / "tokens.json").read_text())
 HEALTHY_AGENTS = json.loads(
@@ -45,7 +47,7 @@ HEALTHY_TRACKER = json.loads(
 
 @contextlib.contextmanager
 def canned_server(payloads, status=200):
-    """Lokal HTTP-server på port 0 som svarar med riggade JSON-kroppar."""
+    """Local HTTP server on port 0 answering with rigged JSON bodies."""
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -87,14 +89,14 @@ class ServerCheckTests(unittest.TestCase):
     def test_rev_mismatch_warns_about_stale_worktree(self):
         with canned_server({"/": HEALTHY_ROOT}) as base:
             results = smoke.check_server(base, checkout_rev="fff9999")
-        self.assertIn(smoke.VARN, levels(results))
+        self.assertIn(smoke.WARN, levels(results))
         self.assertIn("WorkingDirectory", results[0][1])
 
     def test_probe_status_other_than_ok_warns_with_runbook_pointer(self):
         root = dict(HEALTHY_ROOT, claudeProbe="usage_http_401")
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        warn = [text for level, text in results if level == smoke.VARN]
+        warn = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warn), 1)
         self.assertIn("usage_http_401", warn[0])
         self.assertIn("agent-setup", warn[0])
@@ -105,9 +107,9 @@ class ServerCheckTests(unittest.TestCase):
                     claudeProbeCooldownLeftS=None)
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        warn = [text for level, text in results if level == smoke.VARN]
+        warn = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warn), 1)
-        self.assertIn("3 missar i rad", warn[0])
+        self.assertIn("3 misses in a row", warn[0])
         self.assertIn("480 s", warn[0])
         self.assertNotIn("429-vila", warn[0])
 
@@ -116,21 +118,21 @@ class ServerCheckTests(unittest.TestCase):
             "status": "expiring", "expiresInMin": 19})
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        warnings = [text for level, text in results if level == smoke.VARN]
+        warnings = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warnings), 1)
         self.assertIn("19 min", warnings[0])
-        self.assertIn("ny Claude Code CLI-turn", warnings[0])
+        self.assertIn("new Claude Code CLI turn", warnings[0])
 
     def test_expired_saved_credential_does_not_hide_live_process_source(self):
         root = dict(HEALTHY_ROOT, claudeCredential={
             "status": "expired", "expiresInMin": 0})
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        warnings = [text for level, text in results if level == smoke.VARN]
+        warnings = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warnings), 1)
-        self.assertIn("nuvarande kvotkälla är live", warnings[0])
-        self.assertIn("nästa klientglapp", warnings[0])
-        self.assertIn("ingen serveromstart behövs", warnings[0])
+        self.assertIn("current quota source is live", warnings[0])
+        self.assertIn("next client gap", warnings[0])
+        self.assertIn("no server restart needed", warnings[0])
 
     def test_expired_saved_credential_with_dead_probe_is_not_called_live(self):
         root = dict(HEALTHY_ROOT, claudeProbe="token_expired_15:34",
@@ -138,18 +140,18 @@ class ServerCheckTests(unittest.TestCase):
                                       "expiresInMin": 0})
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        warnings = [text for level, text in results if level == smoke.VARN]
+        warnings = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warnings), 2)
-        self.assertFalse(any("kvotkälla är live" in text
+        self.assertFalse(any("quota source is live" in text
                              for text in warnings))
-        self.assertTrue(any("läser om den automatiskt" in text
+        self.assertTrue(any("rereads it automatically" in text
                             for text in warnings))
 
     def test_unknown_buckets_warn(self):
         root = dict(HEALTHY_ROOT, unknownRateLimitBuckets=["7d_haiku"])
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        self.assertIn(smoke.VARN, levels(results))
+        self.assertIn(smoke.WARN, levels(results))
 
     def test_wrong_service_on_port_is_fail(self):
         with canned_server({"/": {"service": "annan"}}) as base:
@@ -157,26 +159,26 @@ class ServerCheckTests(unittest.TestCase):
         self.assertEqual(levels(results), [smoke.FAIL])
 
     def test_non_object_json_on_port_is_fail_not_a_traceback(self):
-        # En främmande tjänst kan svara med en lista, ett tal eller null —
-        # exakt fel-tjänst-scenariot får inte krascha diagnosen.
+        # A foreign service can answer with a list, a number or null --
+        # exactly the wrong-service scenario must not crash the diagnosis.
         for foreign in ([1, 2, 3], 42, None, "text"):
             with self.subTest(foreign=foreign):
                 with canned_server({"/": foreign}) as base:
                     results = smoke.check_server(base,
                                                  checkout_rev="abc1234")
                 self.assertEqual(levels(results), [smoke.FAIL])
-                self.assertIn("fel tjänst", results[0][1])
+                self.assertIn("wrong service", results[0][1])
 
     def test_source_fingerprint_mismatch_warns_about_edited_code(self):
-        # Rev kan inte se en smutsig worktree eller en redigering efter
-        # start — fingerprintet kan. Jämförs bara när bägge sidor finns.
+        # The rev cannot see a dirty worktree or an edit after start --
+        # the fingerprint can. Compared only when both sides exist.
         root = dict(HEALTHY_ROOT, srcFingerprint="aaaa11112222")
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234",
                                          checkout_src="bbbb33334444")
-        warn = [text for level, text in results if level == smoke.VARN]
+        warn = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warn), 1)
-        self.assertIn("annan källkod", warn[0])
+        self.assertIn("different source", warn[0])
 
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234",
@@ -190,15 +192,15 @@ class ServerCheckTests(unittest.TestCase):
         self.assertEqual(levels(results), [smoke.OK, smoke.OK, smoke.OK])
 
     def test_frozen_usage_compute_is_fail(self):
-        # OBS-08: siffror som fryst men ser färska ut är värsta sortens fel
-        # — röktestet ska skrika, inte viska.
+        # OBS-08: figures that froze but look fresh are the worst kind of
+        # error -- the smoke test must shout, not whisper.
         root = dict(HEALTHY_ROOT, usageComputeOk=False,
                     usageComputeFailingForS=612)
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
         fails = [text for level, text in results if level == smoke.FAIL]
         self.assertEqual(len(fails), 1)
-        self.assertIn("frysta siffror", fails[0])
+        self.assertIn("frozen figures", fails[0])
         self.assertIn("612", fails[0])
 
     def test_first_scan_in_progress_is_a_warning_not_a_failure(self):
@@ -209,9 +211,9 @@ class ServerCheckTests(unittest.TestCase):
                     usageTotals={"state": "refreshing", "sinceS": 41})
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        warnings = [text for level, text in results if level == smoke.VARN]
+        warnings = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warnings), 1)
-        self.assertIn("första skanningen pågår", warnings[0])
+        self.assertIn("first scan in progress", warnings[0])
         self.assertIn("41", warnings[0])
         self.assertNotIn(smoke.FAIL, levels(results))
 
@@ -220,9 +222,9 @@ class ServerCheckTests(unittest.TestCase):
                     maxTrackerSaveFailingForS=77)
         with canned_server({"/": root}) as base:
             results = smoke.check_server(base, checkout_rev="abc1234")
-        warnings = [text for level, text in results if level == smoke.VARN]
+        warnings = [text for level, text in results if level == smoke.WARN]
         self.assertEqual(len(warnings), 1)
-        self.assertIn("kan inte spara", warnings[0])
+        self.assertIn("cannot save", warnings[0])
         self.assertIn("77", warnings[0])
 
     def test_older_server_without_compute_field_is_not_judged(self):
@@ -259,12 +261,13 @@ class EndpointCheckTests(unittest.TestCase):
         with canned_server(payloads) as base:
             results = smoke.check_endpoints(base)
         self.assertEqual(levels(results),
-                         [smoke.VARN, smoke.OK, smoke.VARN])
+                         [smoke.WARN, smoke.OK, smoke.WARN])
 
     def test_contract_version_skew_is_fail_not_a_false_green(self):
-        # En gammal serverprocess som serverar v1 ser HTTP-frisk ut medan
-        # skärmens parser avvisar allt (tokens_parse.c kräver v == 2) —
-        # exakt fallet "smoke grönt, display frusen" som ska bli FAIL.
+        # An old server process serving v1 looks HTTP-healthy while the
+        # screen's parser rejects everything (tokens_parse.c requires
+        # v == 2) -- exactly the "smoke green, display frozen" case that
+        # must become a FAIL.
         payloads = {"/api/tokens": dict(HEALTHY_TOKENS, v=1),
                     "/api/agent-status": HEALTHY_AGENTS,
                     "/api/max-tracker": HEALTHY_TRACKER}
@@ -272,7 +275,7 @@ class EndpointCheckTests(unittest.TestCase):
             results = smoke.check_endpoints(base)
         self.assertEqual(levels(results),
                          [smoke.FAIL, smoke.OK, smoke.OK])
-        self.assertIn("kontraktsversion", results[0][1])
+        self.assertIn("contract version", results[0][1])
 
     def test_missing_mandatory_field_is_fail(self):
         broken = {k: v for k, v in HEALTHY_TOKENS.items()
@@ -287,8 +290,9 @@ class EndpointCheckTests(unittest.TestCase):
         self.assertIn("monthTokens", results[0][1])
 
     def test_non_200_with_healthy_body_is_fail(self):
-        # torget_http.c avvisar allt utom HTTP 200 — en proxy eller cache
-        # som svarar 502 med frisk-seende kropp får inte smoke-grönt.
+        # torget_http.c rejects everything but HTTP 200 -- a proxy or
+        # cache answering 502 with a healthy-looking body must not get a
+        # green smoke test.
         payloads = {"/api/tokens": HEALTHY_TOKENS,
                     "/api/agent-status": HEALTHY_AGENTS,
                     "/api/max-tracker": HEALTHY_TRACKER}
@@ -299,8 +303,8 @@ class EndpointCheckTests(unittest.TestCase):
             self.assertIn("502", text)
 
     def test_agents_as_list_is_fail(self):
-        # agent_status_parse.c kräver att agents är ett objekt med claude
-        # och codex — en lista ser HTTP-frisk ut men skärmen avvisar den.
+        # agent_status_parse.c requires agents to be an object with claude
+        # and codex -- a list looks HTTP-healthy but the screen rejects it.
         payloads = {"/api/tokens": HEALTHY_TOKENS,
                     "/api/agent-status": dict(HEALTHY_AGENTS, agents=[]),
                     "/api/max-tracker": HEALTHY_TRACKER}
@@ -318,14 +322,14 @@ class EndpointCheckTests(unittest.TestCase):
             results = smoke.check_endpoints(base)
         self.assertEqual(levels(results),
                          [smoke.OK, smoke.OK, smoke.FAIL])
-        self.assertIn("providerobjekt", results[2][1])
+        self.assertIn("provider objects", results[2][1])
 
 
 class LogFileCheckTests(unittest.TestCase):
     def test_missing_file_is_a_warning_not_a_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             results = smoke.check_log_file(Path(tmp) / "finns-inte.log")
-        self.assertEqual(levels(results), [smoke.VARN])
+        self.assertEqual(levels(results), [smoke.WARN])
 
     def test_small_clean_file_is_ok(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -342,13 +346,13 @@ class LogFileCheckTests(unittest.TestCase):
                 "serverar http://0.0.0.0:8737\n" * 12)
             results = smoke.check_log_file(f)
         self.assertEqual(levels(results),
-                         [smoke.OK, smoke.VARN, smoke.VARN])
+                         [smoke.OK, smoke.WARN, smoke.WARN])
         self.assertIn("traceback", results[1][1])
         self.assertIn("respawn", results[2][1])
 
     def test_rotated_tail_evidence_is_still_seen(self):
-        # Direkt efter en rotation bor de färska bevisen i .old — en ren
-        # nytrunkerad fil får inte dölja dem.
+        # Right after a rotation the fresh evidence lives in .old -- a
+        # clean, newly truncated file must not hide it.
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.log"
             f.write_text("serverar http://0.0.0.0:8737\n")
@@ -357,7 +361,7 @@ class LogFileCheckTests(unittest.TestCase):
                 "serverar http://0.0.0.0:8737\n" * 11)
             results = smoke.check_log_file(f)
         self.assertEqual(levels(results),
-                         [smoke.OK, smoke.VARN, smoke.VARN])
+                         [smoke.OK, smoke.WARN, smoke.WARN])
         self.assertIn(".old", results[1][1])
         self.assertIn("respawn", results[2][1])
 
@@ -382,8 +386,9 @@ class StateFileCheckTests(unittest.TestCase):
         self.assertEqual(levels(results), [smoke.OK] * 3)
 
     def test_valid_json_with_wrong_shape_is_fail(self):
-        # Giltig JSON med fel form nollställs LIKA tyst som korrupta bytes
-        # av laddarna — röktestet får inte kalla den frisk.
+        # Valid JSON with the wrong shape is reset JUST AS silently as
+        # corrupt bytes by the loaders -- the smoke test must not call it
+        # healthy.
         with tempfile.TemporaryDirectory() as tmp:
             self._write_state(tmp, **{
                 "usage-history.json": '{"v": 2, "samples": []}',
@@ -393,7 +398,7 @@ class StateFileCheckTests(unittest.TestCase):
         fails = [text for level, text in results if level == smoke.FAIL]
         self.assertEqual(len(fails), 2)
         for text in fails:
-            self.assertIn("FEL FORM", text)
+            self.assertIn("WRONG SHAPE", text)
 
     def test_corrupt_state_file_is_fail_with_forensics_pointer(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -401,15 +406,15 @@ class StateFileCheckTests(unittest.TestCase):
             results = smoke.check_state_files(tmp, now_ts=time.time())
         fails = [text for level, text in results if level == smoke.FAIL]
         self.assertEqual(len(fails), 1)
-        self.assertIn("KORRUPT", fails[0])
-        self.assertIn("forensik", fails[0])
+        self.assertIn("CORRUPT", fails[0])
+        self.assertIn("forensics", fails[0])
 
     def test_missing_files_and_missing_dir_warn(self):
         with tempfile.TemporaryDirectory() as tmp:
             results = smoke.check_state_files(Path(tmp) / "finns-inte")
-            self.assertEqual(levels(results), [smoke.VARN])
+            self.assertEqual(levels(results), [smoke.WARN])
             results = smoke.check_state_files(tmp)
-            self.assertEqual(levels(results), [smoke.VARN] * 3)
+            self.assertEqual(levels(results), [smoke.WARN] * 3)
 
     def test_stale_usage_history_warns(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -417,7 +422,7 @@ class StateFileCheckTests(unittest.TestCase):
             results = smoke.check_state_files(
                 tmp, now_ts=time.time() + 25 * 3600)
         self.assertEqual(
-            levels(results), [smoke.OK, smoke.VARN, smoke.OK, smoke.OK])
+            levels(results), [smoke.OK, smoke.WARN, smoke.OK, smoke.OK])
 
 
 class RunExitCodeTests(unittest.TestCase):
@@ -442,7 +447,7 @@ class RunExitCodeTests(unittest.TestCase):
                     "/api/max-tracker": HEALTHY_TRACKER}
         code, text = self._run(payloads)
         self.assertEqual(code, 0, text)
-        self.assertIn("röktest:", text)
+        self.assertIn("smoke test:", text)
         self.assertNotIn("[FAIL]", text)
 
     def test_warnings_exit_1(self):
@@ -462,8 +467,9 @@ class RunExitCodeTests(unittest.TestCase):
         self.assertEqual(code, 2, text)
 
     def test_compute_failure_still_checks_every_endpoint(self):
-        # Nådd men sjuk server: kompute-FAIL:et får inte gömma oberoende
-        # fel i de andra feedarna — alla tre kontrakten ska granskas.
+        # A reached but sick server: the compute FAIL must not hide
+        # independent failures in the other feeds -- all three contracts
+        # must be examined.
         payloads = {"/": dict(HEALTHY_ROOT, usageComputeOk=False,
                               usageComputeFailingForS=90),
                     "/api/tokens": HEALTHY_TOKENS,
@@ -471,8 +477,8 @@ class RunExitCodeTests(unittest.TestCase):
                     "/api/max-tracker": HEALTHY_TRACKER}
         code, text = self._run(payloads)
         self.assertEqual(code, 2, text)
-        self.assertIn("/api/agent-status: svarar", text)
-        self.assertIn("/api/max-tracker: svarar", text)
+        self.assertIn("/api/agent-status: answers", text)
+        self.assertIn("/api/max-tracker: answers", text)
 
     def test_unreachable_server_skips_endpoint_checks_and_exits_2(self):
         with tempfile.TemporaryDirectory() as tmp:
