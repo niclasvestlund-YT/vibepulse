@@ -1194,19 +1194,40 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
             "accessToken": "kc-token", "expiresAt": 1900000000000}})
         with mock.patch.object(tokenserver, "_keychain_reason", None), \
                 mock.patch.object(tokenserver, "_keychain_reason_logged",
-                                  None), \
+                                  tokenserver._KEYCHAIN_UNLOGGED), \
                 mock.patch.object(tokenserver.subprocess, "run",
                                   side_effect=[denied, denied, mock.Mock(
-                                      stdout=record, returncode=0)]), \
+                                      stdout=record, returncode=0),
+                                      mock.Mock(stdout=record, returncode=0),
+                                      denied]), \
+                self.assertLogs("tokenserver", level="INFO") as captured:
+            for _ in range(5):
+                tokenserver._read_keychain_oauth()
+        lines = [line for line in captured.output if "claude-keychain" in line]
+        self.assertEqual(len(lines), 3)
+        self.assertIn("start -> keychain_denied_or_locked (exit 51)", lines[0])
+        self.assertIn("keychain_denied_or_locked (exit 51) -> ok", lines[1])
+        # Codex review of #111: a failure after a recovery is a regression
+        # from ok, not a second start -- None means "read fine", and only
+        # the sentinel means "nothing logged yet".
+        self.assertIn("ok -> keychain_denied_or_locked (exit 51)", lines[2])
+        self.assertNotIn("kc-token", "\n".join(captured.output))
+
+    def test_first_keychain_success_logs_start_to_ok_once(self):
+        record = json.dumps({"claudeAiOauth": {
+            "accessToken": "kc-token", "expiresAt": 1900000000000}})
+        with mock.patch.object(tokenserver, "_keychain_reason", None), \
+                mock.patch.object(tokenserver, "_keychain_reason_logged",
+                                  tokenserver._KEYCHAIN_UNLOGGED), \
+                mock.patch.object(tokenserver.subprocess, "run",
+                                  return_value=mock.Mock(stdout=record,
+                                                         returncode=0)), \
                 self.assertLogs("tokenserver", level="INFO") as captured:
             tokenserver._read_keychain_oauth()
             tokenserver._read_keychain_oauth()
-            tokenserver._read_keychain_oauth()
         lines = [line for line in captured.output if "claude-keychain" in line]
-        self.assertEqual(len(lines), 2)
-        self.assertIn("start -> keychain_denied_or_locked (exit 51)", lines[0])
-        self.assertIn("keychain_denied_or_locked (exit 51) -> ok", lines[1])
-        self.assertNotIn("kc-token", "\n".join(captured.output))
+        self.assertEqual(len(lines), 1)
+        self.assertIn("start -> ok", lines[0])
 
     def test_probe_status_carries_the_keychain_reason_on_macos(self):
         with mock.patch.object(tokenserver, "_IS_WINDOWS", False), \

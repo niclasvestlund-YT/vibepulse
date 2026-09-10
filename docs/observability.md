@@ -136,7 +136,8 @@ repeating deserves attention. What a healthy boot looks like:
   appearing, a 429 backoff starting, and the recovery back to ok.
 - **`claude-keychain: X -> Y`** — macOS only (OBS-20): every change in why
   the keychain read gave no token, logged once per transition like the
-  probe line. `X` is the previous word or `start`; `Y` is `ok` (a token
+  probe line. `X` is the previous word, `ok` after a recovery, or `start`
+  for the first read since the service started; `Y` is `ok` (a token
   came back) or one of `keychain_security_missing` (no `security` binary),
   `keychain_timeout` (the prompt sat unanswered), `keychain_no_entry`
   (exit 44, never logged in on this account), `keychain_denied_or_locked
