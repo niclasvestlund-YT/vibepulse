@@ -1206,7 +1206,24 @@ class _ProbeOutcome:
         self.credential = None
 
 
-def _publish_probe_outcome(outcome):
+# Set by the publish helpers when a cycle has already recorded its streak
+# and timestamp together with its outcome; _refresh_limits then leaves the
+# scheduling state alone instead of writing it a second time, later, where
+# GET / could see a new status beside the old streak (Codex review of #111).
+_probe_cycle_published = False
+
+
+def _note_probe_schedule_locked(refreshed):
+    """Streak and timestamp for one finished cycle. Caller holds the lock."""
+    global _probe_failure_streak, _last_probed, _probe_cycle_published
+    _probe_failure_streak = 0 if refreshed else _probe_failure_streak + 1
+    _last_probed = time.monotonic()
+    _probe_cycle_published = True
+
+
+def _publish_probe_outcome(outcome, refreshed):
+    """Status, evidence, credential AND the backoff for the next cycle, in
+    one critical section, so a reader never pairs them across cycles."""
     global _probe_status, _probe_headers, _probe_unknown_buckets, \
         _claude_credential
     with _limits_lock:
@@ -1215,35 +1232,57 @@ def _publish_probe_outcome(outcome):
         _probe_unknown_buckets = list(outcome.unknown_buckets)
         if outcome.credential is not None:
             _claude_credential = outcome.credential
+        _note_probe_schedule_locked(refreshed)
 
 
 def _publish_probe_status(status):
-    """A status-only outcome (nothing was probed): evidence stays as is."""
+    """A status-only outcome (nothing was probed, or the probe crashed):
+    evidence stays as is, the miss still counts for the backoff."""
     global _probe_status
     with _limits_lock:
         _probe_status = status
+        _note_probe_schedule_locked(False)
 
 
-def _probe_diagnostics():
-    """OBS-18 (a): the backoff behind ``claudeProbe``, content-free.
+def _probe_view():
+    """Every correlated probe field for ``GET /``, copied under ONE lock.
 
-    Dashes on the screen used to look the same whether the probe was
-    failing every 120 s or resting at 480 s after a streak; ``GET /`` now
-    says which. Read under the lock the probe thread publishes with.
+    OBS-18 (a): the backoff behind ``claudeProbe``, content-free. Dashes
+    on the screen used to look the same whether the probe was failing
+    every four minutes or resting at 960 s after a streak; ``GET /`` now
+    says which. Status, evidence, credential and backoff are read in the
+    same critical section the probe thread publishes them in, so the
+    payload never pairs an old status with a new cycle's numbers.
     """
     with _limits_lock:
+        status = _probe_status
+        credential = dict(_claude_credential)
+        headers = list(_probe_headers)
+        unknown = list(_probe_unknown_buckets)
         streak = _probe_failure_streak
         interval_s = _probe_interval_s()
         probed_at = _last_probed
     cooldown_left = _probe_cooldown_until - time.time()
     return {
+        "claudeProbe": status,
         "claudeProbeStreak": streak,
         "claudeProbeIntervalS": int(interval_s),
         "claudeProbeCooldownLeftS": (int(math.ceil(cooldown_left))
                                      if cooldown_left > 0 else None),
         "claudeProbeAgeS": (int(time.monotonic() - probed_at)
                             if probed_at else None),
+        "claudeCredential": credential,
+        "ratelimitHeaders": headers,
+        "unknownRateLimitBuckets": unknown,
     }
+
+
+def _probe_diagnostics():
+    """The backoff fields of :func:`_probe_view` alone (tests, smoke)."""
+    view = _probe_view()
+    return {key: view[key] for key in (
+        "claudeProbeStreak", "claudeProbeIntervalS",
+        "claudeProbeCooldownLeftS", "claudeProbeAgeS")}
 
 
 def _probe_limits():
@@ -1273,7 +1312,7 @@ def _probe_limits_locked():
     """
     outcome = _ProbeOutcome(_probe_status)
     found = _probe_cycle(outcome)
-    _publish_probe_outcome(outcome)
+    _publish_probe_outcome(outcome, bool(found))
     return found
 
 
@@ -1419,7 +1458,7 @@ def _probe_cycle(outcome):
 
 
 def _probe_interval_s():
-    """Backa av vid upprepade misslyckanden: 120 → 240 → 480 s (tak).
+    """Backa av vid upprepade misslyckanden: 240 → 480 → 960 s (tak).
 
     En död token fick tidigare hamra API:t varannan minut i timmar — det
     mönstret utlöste en 429-straffruta. Lyckad probe återställer takten.
@@ -1436,8 +1475,10 @@ def _probe_interval_s():
 
 
 def _refresh_limits():
-    global _last_limits, _last_probed, _limits_refreshing, \
-        _probe_failure_streak, _probe_status_logged
+    global _last_limits, _limits_refreshing, _probe_status_logged, \
+        _probe_cycle_published
+    with _limits_lock:
+        _probe_cycle_published = False  # this cycle's flag, nobody else's
     try:
         refreshed = _probe_limits()
     except Exception as e:
@@ -1459,9 +1500,13 @@ def _refresh_limits():
                  _probe_status_logged or "start", _probe_status)
         _probe_status_logged = _probe_status
     with _limits_lock:
-        _probe_failure_streak = 0 if refreshed else _probe_failure_streak + 1
+        # A cycle that published an outcome (or a crash status) recorded
+        # its streak and timestamp in that same critical section; only a
+        # cycle that published nothing (429 cooldown) is scheduled here.
+        if not _probe_cycle_published:
+            _note_probe_schedule_locked(refreshed)
+        _probe_cycle_published = False
         _last_limits = refreshed
-        _last_probed = time.monotonic()
         _limits_refreshing = False
 
 
@@ -3206,12 +3251,10 @@ class Handler(BaseHTTPRequestHandler):
                 "github": (self.github_monitor.snapshot()
                            if self.github_monitor is not None
                            else disabled_snapshot()),
-                "claudeProbe": _probe_status,
-                **_probe_diagnostics(),
-                "claudeCredential": dict(_claude_credential),
+                # Status, backoff, credential and header evidence come from
+                # one locked read so they always describe the same cycle.
+                **_probe_view(),
                 "claudeLocalUsage": _claude_plan_usage_status,
-                "ratelimitHeaders": _probe_headers,
-                "unknownRateLimitBuckets": _probe_unknown_buckets,
                 # GET / parsas aldrig av skärmen — fält kan läggas till
                 # utan kontraktsrisk.
                 "usageComputeOk": failing_since is None,

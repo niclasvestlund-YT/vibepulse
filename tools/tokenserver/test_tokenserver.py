@@ -1259,6 +1259,72 @@ class ClaudeLimitHeaderTests(unittest.TestCase):
                              "probe_crashed: KeyError")
             self.assertEqual(tokenserver._probe_headers, ["h"])
 
+    def test_a_cycle_publishes_its_backoff_with_its_outcome(self):
+        # Codex review of #111: the streak and timestamp used to be written
+        # later, in _refresh_limits, so GET / could pair a new status with
+        # the previous cycle's backoff.
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(
+                req.get_full_url(), 401, "Unauthorized", None, None)
+
+        with mock.patch.object(tokenserver, "_probe_failure_streak", 2), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_probe_cycle_published",
+                                  False), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("stale", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            self.assertIsNone(tokenserver._probe_limits_locked())
+            # Streak and timestamp landed with the status, in one section.
+            self.assertEqual(tokenserver._probe_failure_streak, 3)
+            self.assertGreater(tokenserver._last_probed, 0.0)
+            self.assertTrue(tokenserver._probe_cycle_published)
+
+        # And _refresh_limits does not count the same cycle twice.
+        with mock.patch.object(tokenserver, "_probe_failure_streak", 0), \
+                mock.patch.object(tokenserver, "_last_limits", None), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_limits_refreshing", True), \
+                mock.patch.object(tokenserver, "_probe_cycle_published",
+                                  False), \
+                mock.patch.object(tokenserver, "_probe_status_logged",
+                                  "usage_http_401"), \
+                mock.patch.object(tokenserver, "_dead_tokens", {}), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_read_oauth_candidates",
+                                  return_value=[("stale", None)]), \
+                mock.patch.object(tokenserver.urllib.request, "urlopen",
+                                  side_effect=fake_urlopen):
+            tokenserver._refresh_limits()
+            self.assertEqual(tokenserver._probe_failure_streak, 1)
+            self.assertFalse(tokenserver._probe_cycle_published)
+            self.assertFalse(tokenserver._limits_refreshing)
+
+    def test_probe_view_copies_every_correlated_field_under_one_lock(self):
+        with mock.patch.object(tokenserver, "_probe_status",
+                               "usage_http_401"), \
+                mock.patch.object(tokenserver, "_probe_failure_streak", 1), \
+                mock.patch.object(tokenserver, "_last_probed", 0.0), \
+                mock.patch.object(tokenserver, "_probe_cooldown_until", 0.0), \
+                mock.patch.object(tokenserver, "_claude_credential",
+                                  {"status": "ready", "expiresInMin": 9}), \
+                mock.patch.object(tokenserver, "_probe_headers", ["h"]), \
+                mock.patch.object(tokenserver, "_probe_unknown_buckets",
+                                  ["7d_haiku"]):
+            view = tokenserver._probe_view()
+            self.assertEqual(view["claudeProbe"], "usage_http_401")
+            self.assertEqual(view["claudeCredential"],
+                             {"status": "ready", "expiresInMin": 9})
+            self.assertEqual(view["ratelimitHeaders"], ["h"])
+            self.assertEqual(view["unknownRateLimitBuckets"], ["7d_haiku"])
+            self.assertEqual(view["claudeProbeStreak"], 1)
+            # Copies, not the live lists: a later cycle cannot mutate a
+            # served payload under a slow writer.
+            view["ratelimitHeaders"].append("x")
+            self.assertEqual(tokenserver._probe_headers, ["h"])
+
     def test_probe_diagnostics_expose_the_backoff_state(self):
         with mock.patch.object(tokenserver, "_probe_status",
                                "usage_http_401"), \

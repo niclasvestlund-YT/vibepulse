@@ -168,12 +168,15 @@ Returns live server state, added after real debugging nights:
   once, so it never reads half-built.
 - `claudeProbeStreak` / `claudeProbeIntervalS` / `claudeProbeCooldownLeftS`
   / `claudeProbeAgeS` — the backoff behind `claudeProbe` (OBS-18):
-  consecutive failed cycles, the current gap between cycles (120 s
-  doubling to 480 s; 15 s while waiting on a local token), seconds left
+  consecutive failed cycles, the current gap between cycles (240 s,
+  doubling per miss to 960 s; 15 s while waiting on a local token), seconds left
   of a 429 rest (`null` when not resting) and seconds since the last
   completed cycle (`null` before the first). Dashes on the screen look
-  the same whether the probe is failing every two minutes or resting;
+  the same whether the probe is failing every four minutes or resting;
   these say which. The smoke test prints them beside a non-ok status.
+  All of them, the status string, the credential block and the header
+  evidence are copied under one lock, so a response never pairs one
+  cycle's status with another's numbers.
 - `claudeCredential` — the content-free pre-expiry guard for the saved Claude
   Code credential: `ready`, `expiring`, `expired`, `unavailable`, or
   `unknown`, plus whole `expiresInMin` when known, and on macOS a `reason`
