@@ -68,6 +68,16 @@ assert main_c.index("reboot_ledger_note(rr);") < main_c.index(
     "torget_boot_health_start();")
 # Never a stop: an unopenable ledger logs and continues.
 assert "ESP_ERROR_CHECK(nvs_open" not in main_c
+# Never a count that was not proven saved: every NVS call is checked
+# (NOT_FOUND is a fresh counter, anything else is reported as a failure).
+ledger = main_c[main_c.index("static void reboot_ledger_note"):
+                main_c.index("static void coredump_note")]
+assert ledger.count("nvs_get_u32(") == 0, "reads go through ledger_read"
+assert "ledger_read(ledger," in ledger
+assert ledger.count("if (nvs_set_u32(") + ledger.count("(nvs_set_u32(") >= 2
+assert "nvs_commit(ledger) != ESP_OK" in ledger
+assert "sedan liggaren" in ledger, "the log line names the epoch honestly"
+assert "första flash" not in ledger or "inte sedan första flash" in ledger
 
 # --- CMake: the coredump component is an explicit requirement ---
 assert "espcoredump" in read("main/CMakeLists.txt")

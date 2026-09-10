@@ -78,8 +78,13 @@ lines every 30 s and a `heap:` line every 10 s.
   `idf.py -p <port> coredump-debug` (a GDB session on the dump). It stays
   until the next panic overwrites it. And the `omstartsliggare:` line
   right after the banner is the reboot ledger in NVS: the boot count since
-  first flash and how many boots followed a PANIK, a watchdog or a
-  BROWNOUT, so "did it reboot while I was away?" is one serial line.
+  the ledger was initialized (the first boot of a firmware that has it, or
+  the last NVS erase; OTA and app flashes preserve NVS, a full erase resets
+  it) and how many of those boots followed a PANIK, a watchdog or a
+  BROWNOUT, so "did it reboot while I was away?" is one serial line. If
+  NVS is full, damaged or holds a key of the wrong type the line says
+  which step failed and gives no counts, rather than a count that was not
+  proven saved.
 - The log level, panic behaviour and task watchdog are pinned in
   `sdkconfig.defaults` with their reasons (OBS-28). `LV_USE_LOG` is on at
   WARN, so the launcher's "app skipped for API-version mismatch" report

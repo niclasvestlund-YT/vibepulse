@@ -68,9 +68,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   OBS-03, OBS-28, OBS-35).** In source and CI-built, **not yet flashed or
   physically verified**: a 128K `coredump` partition with ELF coredumps to
   flash on panic, a `coredump i flash … idf.py coredump-info` notice at the
-  next boot, and a reboot ledger in NVS (`omstartsliggare: boot #N; efter
-  PANIK a, vakthund b, BROWNOUT c`) right after the boot banner, so "did it
-  reboot while I was away?" is one serial line. `sdkconfig.defaults` now
+  next boot, and a reboot ledger in NVS (`omstartsliggare: boot #N sedan
+  liggaren initierades; efter PANIK a, vakthund b, BROWNOUT c`, counted
+  since the ledger was initialized or NVS last erased, never claimed as
+  "since first flash"; a read, write or commit failure logs which step and
+  no counts) right after the boot banner, so "did it reboot while I was
+  away?" is one serial line. `sdkconfig.defaults` now
   pins the log level (INFO, maximum equals default, which compiles
   `ESP_LOGD` and with it the `HTTP_CLIENT` request-line leak out
   structurally), panic print-and-reboot, the task watchdog, and LVGL's own
