@@ -2063,39 +2063,63 @@ def _refresh_usage_totals(projects_dir, max_tracker_store=None):
         _snapshot_refreshing = False
 
 
-def _usage_totals_state():
+def _usage_totals_state_locked(have_result):
     """The additive ``usageTotals`` block, on ``/api/tokens`` and ``GET /``.
 
-    Three states, so a reader never has to guess what the four volume
-    counters mean (issue #62):
+    ``have_result`` is whether the counters in the payload being built
+    are a completed scan (True) or placeholder zeros (False). The caller
+    decides that UNDER ``_cache_lock`` from the same read that picked the
+    counters, so the block can never describe a different snapshot than
+    the one it rides on (a first scan that landed between the two reads
+    used to label zeros ``ready``, and the publisher would have sent
+    them). Three states plus one honest flag (issue #62):
 
     ``refreshing``
-        The first history scan has not finished. The counters are
-        PLACEHOLDER ZEROS, not measurements; ``sinceS`` is how long the
-        service has been up. Quota percentages in the same payload are
+        The first history scan has not finished. ``placeholder`` is true:
+        the counters are zeros, not measurements. ``sinceS`` is how long
+        the service has been up. Quota percentages in the same payload are
         live: they come from the probe and the quota cache, not the scan.
     ``ready``
         The counters are the last completed scan, ``ageS`` seconds old.
     ``failing``
-        A scan has completed once, but the recompute has been crashing
-        since (OBS-08): the counters are frozen at ``ageS`` seconds old.
-        ``usageComputeOk``/``usageComputeFailingForS`` on ``GET /`` carry
-        the detail; this block only names the class.
-
-    Reads the module state without the cache lock, like
-    ``_compute_failing_since`` already is: every field is a single
-    reference read, and a reader that races a swap sees either the old
-    or the new state, never a torn one.
+        The recompute is crashing (OBS-08). With a completed scan behind
+        it the counters are frozen at ``ageS`` old; without one they are
+        still placeholders (``placeholder`` true, ``sinceS``), and the
+        state says *failing*, not refreshing, so a hook or doctor does not
+        call a broken scan a warm-up. ``usageComputeOk`` /
+        ``usageComputeFailingForS`` on ``GET /`` carry the detail.
     """
     now = time.monotonic()
-    if _last_result is None:
-        return {"state": "refreshing",
-                "sinceS": int(now - _SERVER_STARTED_MONO)}
+    failing = _compute_failing_since is not None
+    if not have_result:
+        return {"state": "failing" if failing else "refreshing",
+                "sinceS": int(now - _SERVER_STARTED_MONO),
+                "placeholder": True}
     age = (int(now - _last_result_at)
            if _last_result_at is not None else None)
-    return {"state": ("failing" if _compute_failing_since is not None
-                      else "ready"),
-            "ageS": age}
+    return {"state": "failing" if failing else "ready",
+            "ageS": age,
+            "placeholder": False}
+
+
+def _usage_totals_state():
+    """``GET /``'s view of the block: one consistent read under the lock."""
+    with _cache_lock:
+        return _usage_totals_state_locked(_last_result is not None)
+
+
+def usage_totals_are_placeholders(payload):
+    """True when a ``/api/tokens`` payload's counters are not measurements.
+
+    The one question every consumer has to ask before treating the volume
+    counters as numbers: the publisher (never relay a placeholder), the
+    handler (never hand one to a client that would apply it), and any
+    tool reading the endpoint.
+    """
+    if not isinstance(payload, dict):
+        return False
+    totals = payload.get("usageTotals")
+    return isinstance(totals, dict) and totals.get("placeholder") is True
 
 
 def _startup_totals_placeholder(projects_dir):
@@ -2167,6 +2191,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
                 _start_usage_refresh(projects_dir, max_tracker_store,
                                      "usage-total-first-scan")
             result = _startup_totals_placeholder(projects_dir)
+            totals = _usage_totals_state_locked(have_result=False)
         else:
             if (time.monotonic() - _last_computed > RECOMPUTE_EVERY_S and
                     not _snapshot_refreshing):
@@ -2174,6 +2199,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
                 _start_usage_refresh(projects_dir, max_tracker_store,
                                      "usage-total-refresh")
             result = dict(_last_result)
+            totals = _usage_totals_state_locked(have_result=True)
 
     # null = ärlig frånvaro (nyckelring/probe/loggar otillgängliga) — skärmen
     # visar streck, aldrig hittade procent. Samma regel som sharePct.
@@ -2325,7 +2351,8 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     result["otaAvailableVersion"] = _ota_available_version()
     # Additiv nyckel (tokens_parse.c hoppar över okända toppnivånycklar):
     # säger om volymräknarna ovan är mätningar, platshållare eller frysta.
-    result["usageTotals"] = _usage_totals_state()
+    # Fångad under låset ovan, från SAMMA läsning som valde räknarna.
+    result["usageTotals"] = totals
     result["v"] = 2
     return result
 
@@ -2699,6 +2726,35 @@ class Handler(BaseHTTPRequestHandler):
             quota_snapshot.get("codexWeekStale"))
         return payload
 
+    # The header a client sends to say it understands ``usageTotals`` and
+    # will not apply placeholder counters as measurements. Firmware from
+    # 2026-09-10 on sends it on every fetch; the hook and the smoke test
+    # send it too. A client without it gets the contract's error form
+    # instead of a placeholder, so an already-flashed panel keeps its last
+    # good values (and goes honestly STALE) rather than learning zeros.
+    ACCEPTS_HEADER = "X-VibePulse-Accepts"
+    ACCEPTS_USAGE_TOTALS = "usage-totals"
+
+    def _accepts_usage_totals(self):
+        headers = getattr(self, "headers", None)
+        accepts = (headers.get(self.ACCEPTS_HEADER) if headers else None) or ""
+        return self.ACCEPTS_USAGE_TOTALS in accepts.lower()
+
+    class _NotMeasuredYet(Exception):
+        """Raised by _tokens_payload for a client that must not see zeros."""
+
+        def __init__(self, totals):
+            super().__init__("usage totals not measured yet")
+            self.totals = totals
+
+    def _tokens_payload(self):
+        payload = get_snapshot(self.projects_dir,
+                               max_tracker_store=self.max_tracker_store)
+        if (usage_totals_are_placeholders(payload) and
+                not self._accepts_usage_totals()):
+            raise self._NotMeasuredYet(payload["usageTotals"])
+        return payload
+
     def _reply(self, produce):
         """Svara 200 med produce(), annars 500 {"error": ...} — skärmen
         avvisar error-formen per kontrakt och behåller senaste goda värden.
@@ -2708,9 +2764,20 @@ class Handler(BaseHTTPRequestHandler):
         Producenten och svarsskrivningen bedöms VAR FÖR SIG: ett
         ConnectionError/TimeoutError från producenten är ett serverfel som
         ska loggas och bli 500 — bara under själva skrivningen betyder det
-        att klienten försvann."""
+        att klienten försvann.
+
+        Ett undantag: platshållare (issue #62) till en klient som inte sagt
+        att den förstår dem är inget serverfel utan ett 503 i felformen,
+        med usageTotals-blocket bredvid så den som läser vet varför."""
         try:
             payload = produce()
+        except self._NotMeasuredYet as pending:
+            try:
+                self._send(503, {"error": "usage totals not measured yet",
+                                 "usageTotals": pending.totals})
+            except OSError:
+                pass
+            return
         except Exception:
             log.exception("500 på %s", self.path)
             try:
@@ -2984,9 +3051,7 @@ class Handler(BaseHTTPRequestHandler):
                          "/api/max-tracker", "/api/github"):
             self._record_panel_poll()
         if self.path == "/api/tokens":
-            self._reply(lambda: get_snapshot(
-                self.projects_dir,
-                max_tracker_store=self.max_tracker_store))
+            self._reply(self._tokens_payload)
         elif self.path == "/api/agent-status":
             self._reply(self._agent_status_payload)
         elif self.path == "/api/max-tracker":

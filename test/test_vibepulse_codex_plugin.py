@@ -28,7 +28,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "78eb818013c0"
+HOST_SOURCE_FINGERPRINT = "007f92198744"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -1008,7 +1008,8 @@ class SessionStartTests(unittest.TestCase):
             "claudeWeekStale": False,
             "claudeModelWeekStale": False,
             "codexWeekStale": False,
-            "usageTotals": {"state": "refreshing", "sinceS": 48},
+            "usageTotals": {"state": "refreshing", "sinceS": 48,
+                            "placeholder": True},
         }
         routes = {
             "/": {"body": compact(root).encode()},
@@ -1025,6 +1026,18 @@ class SessionStartTests(unittest.TestCase):
         self.assertNotIn("PROVIDER DATA STALE", context)
         self.assertNotIn("HEALTHY", context)
         self.assertNotIn("sinceS", context)
+
+        # A crashing scan is never a warm-up, with or without a result.
+        failing = dict(tokens, usageTotals={"state": "failing", "sinceS": 90,
+                                            "placeholder": True})
+        routes["/api/tokens"] = {"body": compact(failing).encode()}
+        with LocalServer(routes=routes) as server:
+            completed = run_script(
+                "session_start.py", compact(payload).encode(), port=server.port)
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("VOLUME RECOMPUTE FAILING", context)
+        self.assertNotIn("WARMING UP", context)
 
         # Stale provider data still outranks the warm-up: it names a repair.
         stale = dict(tokens, claudeWeekStale=True)

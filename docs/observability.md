@@ -179,14 +179,19 @@ Returns live server state, added after real debugging nights:
   are frozen at their last good value while *looking* fresh; the smoke
   test turns this into a FAIL, and the log has the cause
   (`usage-omräkningen kraschade`).
-- `usageTotals` — `{state, sinceS|ageS}`: what the four volume counters on
-  `/api/tokens` are right now. `refreshing` = the first history scan is
-  still running and the counters are placeholder zeros (`sinceS` since
-  start; quota percentages in the same payload are live); `ready` = the
-  last completed scan, `ageS` old; `failing` = frozen, see the two fields
-  above. The same block rides on `/api/tokens` itself (additive; the
-  firmware ignores it, OBS-36). Smoke: `refreshing` is a VARN, never a
-  FAIL. Doctor: `WAIT` for `refreshing`, `FIX` for `failing`.
+- `usageTotals` — `{state, placeholder, sinceS|ageS}`: what the four
+  volume counters on `/api/tokens` are right now. `refreshing` = the first
+  history scan is still running and the counters are placeholder zeros
+  (`placeholder: true`, `sinceS` since start; quota percentages in the
+  same payload are live); `ready` = the last completed scan, `ageS` old;
+  `failing` = the recompute is crashing: frozen (`ageS`) or, if no scan
+  ever completed, still placeholders. The same block rides on
+  `/api/tokens`, but **only to a client that sends `X-VibePulse-Accepts:
+  usage-totals`**; any other client gets HTTP 503 in the error form with
+  the block beside it, so an older panel keeps its last values instead of
+  applying zeros. Firmware from 2026-09-10 sends the header and leaves the
+  value page alone while `placeholder` is true. Smoke: `refreshing` is a
+  VARN, never a FAIL. Doctor: `WAIT` for `refreshing`, `FIX` for `failing`.
 - `maxTrackerSaveOk` / `maxTrackerSaveFailingForS` — whether the Max
   Tracker state file can be written. `false` (typically `ENOSPC` or a
   permissions change) means observations are held in memory and retried

@@ -14,26 +14,36 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   timed out one after another, and the glass went STALE two minutes into
   every restart of a service whose credentials, discovery and relay were
   all fine (issue #62). The first request now answers at once: the scan
-  runs in the background, the response carries placeholder zeros for the
-  four volume counters (the firmware contract requires numbers there) and
-  live quota percentages, and a new additive block `usageTotals` says
-  which of three things the counters are: `refreshing` (placeholder,
-  `sinceS` since start), `ready` (`ageS` old) or `failing` (frozen since
-  the recompute began crashing, OBS-08). The completed scan is swapped in
+  runs in the background, and the response carries live quota percentages
+  plus a new additive block `usageTotals` that says what the four volume
+  counters are: `refreshing` (placeholder zeros, `placeholder: true`,
+  `sinceS` since start), `ready` (`ageS` old) or `failing` (the recompute
+  is crashing, OBS-08: frozen with `ageS`, or still placeholders if no
+  scan ever completed). The block is captured under the same lock and from
+  the same read as the counters, so it can never describe a different
+  snapshot than the one it rides on. The completed scan is swapped in
   atomically; a scan that crashes is retried on the normal thirty-second
-  cadence, never per request. The same block is on `GET /`, the numbers
-  publisher does not send a placeholder to the relay (the far panel keeps
-  its last good values instead of learning zeros), the SessionStart hook
-  reports `SERVICE WARMING UP` as its own class between stale and healthy,
-  the setup doctor prints `WAIT` for a warm-up and `FIX` for frozen totals,
-  and the smoke test warns instead of failing. A full disk is now visible
-  too: `GET /` carries `maxTrackerSaveOk` / `maxTrackerSaveFailingForS`
-  while the state file cannot be written (the observations stay in memory
-  and retry, as OBS-10 already arranged), the doctor and smoke test name
-  it, and a test proves one `ENOSPC` on the atomic write leaves both the
-  previous file and memory intact. Not done here: the glass itself still
-  shows the placeholder zeros as `0` for the length of the scan, because
-  dashing them needs the firmware to read `usageTotals` (OBS-36).
+  cadence, never per request. **Placeholders never reach a client that
+  would apply them:** the service serves them only to a request carrying
+  `X-VibePulse-Accepts: usage-totals`, and answers everyone else with the
+  contract's error form (HTTP 503, `usageTotals` beside it), which the
+  already-flashed firmware rejects by design and keeps its last good
+  values, going honestly STALE two minutes later exactly as before. New
+  firmware sends the header, parses `usageTotals.placeholder`, applies the
+  live quota rings but leaves the value page and the keep-awake burn rate
+  untouched during a warm-up: never invented zeros, counters never go
+  backwards. The same block is on `GET /`, the numbers publisher does not
+  send a placeholder to the relay, the SessionStart hook reports `SERVICE
+  WARMING UP` (and `VOLUME RECOMPUTE FAILING`) as their own classes, the
+  setup doctor prints `WAIT` for a warm-up and `FIX` for a failing
+  recompute, and the smoke test warns instead of failing. A full disk is
+  visible too: `GET /` carries `maxTrackerSaveOk` /
+  `maxTrackerSaveFailingForS` while the state file cannot be written (the
+  observations stay in memory and retry, as OBS-10 already arranged), the
+  doctor and smoke test name it, and a test proves one `ENOSPC` on the
+  atomic write leaves both the previous file and memory intact. Firmware
+  side built in CI, not flashed: an OTA to this build is what turns the
+  post-restart STALE into a live panel; until then the old behaviour holds.
 - **Five SessionStart tests inherited the developer's own Codex settings.**
   `session_start.py` reads the saved `approval_policy`, `approvals_reviewer`
   and `sandbox_mode` from `$CODEX_HOME/config.toml`, else

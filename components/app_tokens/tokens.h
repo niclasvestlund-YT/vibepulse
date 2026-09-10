@@ -104,6 +104,17 @@ typedef struct {
    * null och renderas som streck. */
   int claude_source_present;
 
+  /* 1 när tjänsten säger att volymräknarna och värdeblocket är
+   * PLATSHÅLLARE (första historikskanningen pågår eller kraschar:
+   * `usageTotals.placeholder == true`, issue #62). Kvotprocenten i samma
+   * svar är live. Skärmen rör då inte värdesidan och brinntakten väcker
+   * inte panelen — det som mätts senast står kvar. Saknas nyckeln (äldre
+   * tjänst) är räknarna mätningar, som förr. Tjänsten skickar bara
+   * platshållare till klienter som säger X-VibePulse-Accepts:
+   * usage-totals (torget_http.c gör det); äldre firmware får felformen och
+   * behåller sina värden. */
+  int volume_placeholder;
+
   /* taken (null-bara). claude_model_week är veckofönstret för tyngsta
    * modellen (Fable/Opus) — tredje raden i Claudes egen usage-panel. */
   tk_limit claude_session, claude_week, claude_model_week;

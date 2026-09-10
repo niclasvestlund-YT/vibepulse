@@ -162,12 +162,15 @@ class PublisherTests(unittest.TestCase):
         # zeros marked usageTotals=refreshing. A relay mailbox must not
         # learn those as the day's numbers; the far panel keeps its last
         # good values, and the first real payload goes out at once.
-        payloads = [{"dayTokens": 0, "usageTotals": {"state": "refreshing",
-                                                     "sinceS": 3}},
-                    {"dayTokens": 0, "usageTotals": {"state": "refreshing",
-                                                     "sinceS": 33}},
-                    {"dayTokens": 4321, "usageTotals": {"state": "ready",
-                                                        "ageS": 1}}]
+        payloads = [{"dayTokens": 0, "usageTotals": {
+                        "state": "refreshing", "sinceS": 3,
+                        "placeholder": True}},
+                    {"dayTokens": 0, "usageTotals": {
+                        "state": "failing", "sinceS": 33,
+                        "placeholder": True}},
+                    {"dayTokens": 4321, "usageTotals": {
+                        "state": "ready", "ageS": 1,
+                        "placeholder": False}}]
         p, sent, clock = self._publisher({
             "/api/tokens": lambda: payloads.pop(0),
             "/api/github": lambda: {"stars": 5},

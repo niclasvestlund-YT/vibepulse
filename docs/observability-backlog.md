@@ -494,20 +494,24 @@ valve currently fails silently.
 `LV_USE_LOG` routed to `ESP_LOG`.
 
 ### OBS-36 · The glass shows placeholder zeros as measurements during the first scan
-`firmware · S · open`
+`firmware · S · done in source (2026-09-10), physically unverified` —
+closed in the same PR as issue #62 after a Codex review made the point
+that a payload old firmware would apply is a payload old firmware WILL
+apply. Two halves: the service serves placeholder counters only to a
+request carrying `X-VibePulse-Accepts: usage-totals` and answers every
+other client with the contract's error form (503), so an already-flashed
+panel keeps its last values; firmware from this date sends the header,
+parses `usageTotals.placeholder`, applies the live quota rings and leaves
+the value page and the keep-awake burn rate untouched while the counters
+are placeholders. No new visual state was designed: the value page simply
+keeps what it last showed (the pre-data dashes on a cold boot). Original
+problem, for the record:
 Since issue #62 the tokenserver answers `/api/tokens` at once while its
 first history scan runs, with the four volume counters at zero and an
-additive `usageTotals.state == "refreshing"` block saying so. The firmware
-contract requires numbers for the counters (`tokens_parse.c`:
-`if (!num(root, "dayTokens", &day)) goto done;`), so the server cannot
-send `null`, and the parser ignores the new block, so the panel prints
-`0.00 Mtok idag` for the length of the scan — minutes on a large history.
-Same honesty gap as `claudeSourcePresent` had before the flag existed.
-**Fix:** parse `usageTotals.state` (optional, default `ready` for older
-servers); when `refreshing`, draw the volume counters as dashes and keep
-the quota rings live. Visual change → AMOLED skill gate applies. Until
-then the server side is honest (`GET /`, the hook, the doctor, the smoke
-test and the relay publisher all read the block).
+additive `usageTotals` block saying so. The firmware contract requires
+numbers for the counters, so the server cannot send `null`, and a parser
+that ignores the block would print `0.00 Mtok idag` for the length of the
+scan.
 
 ### OBS-35 · A raised log level puts the relay secret back on the wire
 `firmware · S · open`

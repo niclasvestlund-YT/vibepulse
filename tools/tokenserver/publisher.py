@@ -78,7 +78,7 @@ def is_startup_placeholder(payload) -> bool:
     """True while ``/api/tokens`` serves placeholder volume counters.
 
     The tokenserver answers at once during its first history scan with
-    zeros and ``usageTotals.state == "refreshing"`` (issue #62). A relay
+    zeros and ``usageTotals.placeholder == true`` (issue #62). A relay
     mailbox must not learn those zeros as the day's numbers: the panel on
     the far side keeps its last good values instead, exactly as it does
     across a LAN outage, and the first real scan is published the moment
@@ -87,7 +87,7 @@ def is_startup_placeholder(payload) -> bool:
     if not isinstance(payload, dict):
         return False
     totals = payload.get("usageTotals")
-    return isinstance(totals, dict) and totals.get("state") == "refreshing"
+    return isinstance(totals, dict) and totals.get("placeholder") is True
 
 
 def stale_fields(payload) -> frozenset[str]:

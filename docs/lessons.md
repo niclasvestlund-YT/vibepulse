@@ -37,14 +37,19 @@ cheap thing. If there is no result yet, say so in the response and let one
 background thread produce it; readers take the lock only to copy. And the
 "no result yet" state is *named* (`usageTotals.state`), so a placeholder
 never looks like a measurement to the doctor, the hook, the smoke test or
-the relay publisher. **Guards:** `StartupSnapshotTests` in
-`test_tokenserver.py` time the first request with the scan blocked, prove
-one scan for many requests and the cadence-bounded retry after a crash;
-`test_publisher.py` proves a placeholder is not sent; the doctor, hook and
-smoke suites each classify the state. **Watch for:** a new producer that
-computes under `_cache_lock`, and any consumer that reads the four volume
-counters without checking `usageTotals.state`. The glass is that consumer
-today (OBS-36).
+the relay publisher. And a placeholder is only handed to a client that
+said it understands one (`X-VibePulse-Accepts: usage-totals`); the
+already-flashed firmware would have applied the zeros as fresh data, which
+a Codex review caught on the first draft, so everyone else gets the error
+form the old firmware already rejects. **Guards:** `StartupSnapshotTests`
+in `test_tokenserver.py` time the first request with the scan blocked,
+prove one scan for many requests, the cadence-bounded retry after a crash,
+that the block is captured under the lock with the counters it describes,
+and the header gate; `test_publisher.py` proves a placeholder is not sent;
+`test_tokens.c` proves the firmware flag; the doctor, hook and smoke suites
+each classify the state. **Watch for:** a new producer that computes under
+`_cache_lock`, and a new `/api/tokens` reader that forgets the header and
+mistakes the 503 for a dead service.
 
 ---
 

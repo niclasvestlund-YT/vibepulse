@@ -3218,6 +3218,7 @@ class StartupSnapshotTests(unittest.TestCase):
                 self.assertEqual(first[key], 0)
             self.assertFalse(first["claudeSourcePresent"])
             self.assertEqual(first["usageTotals"]["state"], "refreshing")
+            self.assertTrue(first["usageTotals"]["placeholder"])
             self.assertIsInstance(first["usageTotals"]["sinceS"], int)
             self.assertIn("claudeWeekStale", first)
             self.assertEqual(first["value"]["state"], "no_plan_cost")
@@ -3233,8 +3234,80 @@ class StartupSnapshotTests(unittest.TestCase):
             third = self._snapshot(temp_dir)
             self.assertEqual(third["dayTokens"], 4321)
             self.assertEqual(third["usageTotals"]["state"], "ready")
+            self.assertFalse(third["usageTotals"]["placeholder"])
             self.assertIsInstance(third["usageTotals"]["ageS"], int)
             self.assertEqual(tokenserver._compute.call_count, 1)
+
+    def test_the_totals_block_describes_the_counters_it_rides_on(self):
+        """Codex review of #104: the block used to be computed AFTER the
+        lock was released, so a first scan landing in between labelled
+        placeholder zeros `ready` and the publisher would have relayed
+        them. Simulate exactly that: the scan completes while the quota
+        part of the payload is being built."""
+        computed = {"v": 1, "dayTokens": 4321, "dayTokensPerHour": 7,
+                    "daySessions": 2, "monthTokens": 99999,
+                    "claudeSourcePresent": True, "value": {"state": "ok"}}
+
+        def scan_lands_now():
+            with tokenserver._cache_lock:
+                tokenserver._last_result = computed
+                tokenserver._last_result_at = time.monotonic()
+                tokenserver._snapshot_refreshing = False
+            return {}
+
+        with mock.patch.object(tokenserver, "_start_usage_refresh"), \
+                mock.patch.object(tokenserver, "get_limits",
+                                  side_effect=scan_lands_now), \
+                mock.patch.object(tokenserver, "_read_codex_limits",
+                                  return_value={}), \
+                mock.patch.object(
+                    tokenserver, "_persist_quota_records_async"), \
+                tempfile.TemporaryDirectory() as temp_dir:
+            snapshot = self._snapshot(temp_dir)
+        self.assertEqual(snapshot["dayTokens"], 0)
+        self.assertTrue(snapshot["usageTotals"]["placeholder"])
+        self.assertEqual(snapshot["usageTotals"]["state"], "refreshing")
+        self.assertTrue(tokenserver.usage_totals_are_placeholders(snapshot))
+
+    def test_placeholders_go_only_to_clients_that_declared_they_understand(self):
+        """An already-flashed panel applies whatever parses; it never sent
+        the header, so it gets the contract's error form and keeps its last
+        good values (honestly STALE later) instead of learning zeros."""
+        placeholder = {"v": 2, "dayTokens": 0,
+                       "usageTotals": {"state": "refreshing", "sinceS": 3,
+                                       "placeholder": True}}
+        measured = {"v": 2, "dayTokens": 4321,
+                    "usageTotals": {"state": "ready", "ageS": 2,
+                                    "placeholder": False}}
+        for accepts, payload, expected_code in (
+                (None, placeholder, 503),
+                ("usage-totals", placeholder, 200),
+                ("agent-rows, USAGE-TOTALS", placeholder, 200),
+                ("something-else", placeholder, 503),
+                (None, measured, 200)):
+            with self.subTest(accepts=accepts, code=expected_code):
+                handler = tokenserver.Handler.__new__(tokenserver.Handler)
+                handler.path = "/api/tokens"
+                handler.headers = {}
+                if accepts is not None:
+                    handler.headers = {"X-VibePulse-Accepts": accepts}
+                handler.projects_dir = Path("/unused")
+                handler.max_tracker_store = None
+                handler._send = mock.Mock()
+                handler._record_panel_poll = mock.Mock()
+                with mock.patch.object(tokenserver, "get_snapshot",
+                                       return_value=dict(payload)):
+                    handler.do_GET()
+                code, body = handler._send.call_args.args
+                self.assertEqual(code, expected_code)
+                if expected_code == 503:
+                    self.assertIn("error", body)
+                    self.assertEqual(body["usageTotals"],
+                                     payload["usageTotals"])
+                    self.assertNotIn("dayTokens", body)
+                else:
+                    self.assertNotIn("error", body)
+                    self.assertEqual(body["dayTokens"], payload["dayTokens"])
 
     def test_a_crashing_first_scan_is_retried_on_the_cadence_not_per_request(self):
         with mock.patch.object(tokenserver, "_compute",
@@ -3249,13 +3322,22 @@ class StartupSnapshotTests(unittest.TestCase):
             with self.assertLogs("tokenserver", level="ERROR"):
                 first = self._snapshot(temp_dir)
                 self._wait_until_not_refreshing()
-            self.assertEqual(first["usageTotals"]["state"], "refreshing")
+            # The scan thread may already have crashed while the first
+            # payload was being built; either name is honest, and both
+            # say placeholder.
+            self.assertIn(first["usageTotals"]["state"],
+                          ("refreshing", "failing"))
+            self.assertTrue(first["usageTotals"]["placeholder"])
             self.assertEqual(tokenserver._compute.call_count, 1)
             self.assertIsNone(tokenserver._last_result)
 
-            # Straight after the crash: still a placeholder, no new thread.
+            # Straight after the crash: still a placeholder, no new thread,
+            # and the state says FAILING, not "still running" (a crashed
+            # scan is not a warm-up).
             second = self._snapshot(temp_dir)
-            self.assertEqual(second["usageTotals"]["state"], "refreshing")
+            self.assertEqual(second["usageTotals"]["state"], "failing")
+            self.assertTrue(second["usageTotals"]["placeholder"])
+            self.assertIsInstance(second["usageTotals"]["sinceS"], int)
             self.assertEqual(tokenserver._compute.call_count, 1)
 
             # Once the normal recompute cadence has passed, one retry (its
@@ -3273,20 +3355,32 @@ class StartupSnapshotTests(unittest.TestCase):
         handler.do_GET()
         payload = handler._send.call_args.args[1]
         self.assertEqual(payload["usageTotals"]["state"], "refreshing")
+        self.assertTrue(payload["usageTotals"]["placeholder"])
         self.assertIsInstance(payload["usageTotals"]["sinceS"], int)
         self.assertTrue(payload["usageComputeOk"])
+
+        # Crashing before any scan completed: failing, still a placeholder.
+        tokenserver._compute_failing_since = time.monotonic() - 5
+        handler.do_GET()
+        payload = handler._send.call_args.args[1]
+        self.assertEqual(payload["usageTotals"]["state"], "failing")
+        self.assertTrue(payload["usageTotals"]["placeholder"])
+        self.assertFalse(payload["usageComputeOk"])
+        tokenserver._compute_failing_since = None
 
         tokenserver._last_result = {"v": 1}
         tokenserver._last_result_at = time.monotonic() - 12
         handler.do_GET()
         payload = handler._send.call_args.args[1]
         self.assertEqual(payload["usageTotals"]["state"], "ready")
+        self.assertFalse(payload["usageTotals"]["placeholder"])
         self.assertGreaterEqual(payload["usageTotals"]["ageS"], 12)
 
         tokenserver._compute_failing_since = time.monotonic() - 5
         handler.do_GET()
         payload = handler._send.call_args.args[1]
         self.assertEqual(payload["usageTotals"]["state"], "failing")
+        self.assertFalse(payload["usageTotals"]["placeholder"])
         self.assertFalse(payload["usageComputeOk"])
 
     def test_placeholder_satisfies_the_smoke_shape_and_the_device_budget(self):

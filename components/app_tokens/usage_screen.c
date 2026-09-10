@@ -1041,13 +1041,26 @@ void usage_screen_create(lv_obj_t *root) {
 
 void usage_screen_apply_tokens(const tk_tokens *tokens) {
   if (!tokens) return;
-  ui.last_tokens = *tokens;
-  for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], tokens);
+  /* Platshållare (issue #62): kvoten är live och appliceras; värdesidan
+   * bygger på volymräknarna, som då är nollor som inte är mätningar, så
+   * den lämnas som den var — senast uppmätta värdet, eller startläget om
+   * inget mätts än. Ärlighetsinvarianten: aldrig påhittade nollor, och
+   * räknare backar aldrig. */
+  tk_tokens merged = *tokens;
+  if (tokens->volume_placeholder) {
+    merged.day_tokens = ui.last_tokens.day_tokens;
+    merged.day_tokens_per_hour = ui.last_tokens.day_tokens_per_hour;
+    merged.day_sessions = ui.last_tokens.day_sessions;
+    merged.month_tokens = ui.last_tokens.month_tokens;
+    merged.value = ui.last_tokens.value;
+  }
+  ui.last_tokens = merged;
+  for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], &merged);
   usage_forecast_page_view forecasts = {0};
-  usage_presenter_build_forecasts(tokens, &forecasts);
+  usage_presenter_build_forecasts(&merged, &forecasts);
   for (int i = 0; i < 2; i++)
     apply_forecast_row(&ui.forecast_rows[i], &forecasts.rows[i]);
-  apply_value(tokens);
+  if (!tokens->volume_placeholder) apply_value(&merged);
 }
 
 void usage_screen_apply_max_tracker(const tk_max_tracker *t) {

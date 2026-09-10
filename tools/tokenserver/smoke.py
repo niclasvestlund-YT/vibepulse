@@ -127,8 +127,13 @@ def _get_json(url, timeout=5):
     allt utom 200 (torget_http.c), så en proxy eller cache som svarar 502
     med frisk-seende kropp får inte bli grönt här. Serverns egna 500 bär
     kontraktets {"error": ...}-kropp och parsas också."""
+    # X-VibePulse-Accepts: röktestet förstår usageTotals och räknar aldrig
+    # platshållare som mätningar, så tjänsten får svara 200 med dem under
+    # första skanningen (en klient utan headern får 503 i felformen).
+    request = urllib.request.Request(
+        url, headers={"X-VibePulse-Accepts": "usage-totals"})
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
             return resp.status, json.loads(
                 resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as e:
