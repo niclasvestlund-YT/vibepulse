@@ -799,7 +799,8 @@ class RepositoryRegistryTests(unittest.TestCase):
                 self.assertEqual(len(row), 5)
                 for heading, cell in zip(
                         ("user value", "conflicts", "privacy",
-                         "no-authorization rationale"), row[1:]):
+                         "no-authorization rationale"), row[1:],
+                        strict=True):
                     self.assertGreaterEqual(
                         len(cell.split()), 4,
                         f"{row[0]} has no substantive {heading}",

@@ -50,7 +50,7 @@ import threading
 import time
 import urllib.request
 import weakref
-from datetime import datetime, timedelta
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -1140,8 +1140,7 @@ def _hold_probe_lock():
 def _probe_limits():
     """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
     weekPct, weekResetMin} eller None om något saknas på vägen."""
-    global _probe_status, _probe_headers, _probe_unknown_buckets, \
-        _probe_cooldown_until
+    global _probe_status
     _load_probe_state()
     if time.time() < _probe_cooldown_until:
         # I nedkylning efter 429 — statusen står kvar på backoff-strängen.
@@ -3473,7 +3472,7 @@ def _configure_interaction_relay(config, secret, *, environ=None,
         if adapter is not None:
             try:
                 adapter.stop()
-            except Exception:
+            except Exception:  # noqa: S110 - best-effort teardown on the failure path
                 pass
         return disable_shared("configuration-invalid")
     if publish_interactions:
@@ -3497,12 +3496,25 @@ def _run_max_tracker_backfill(store, stop_event):
     switches itself off; it just keeps discovering newly-appeared rollout/
     session files on its own, without needing a restart.
     """
+    # None = never logged. Not 0.0: time.monotonic() counts from boot, so
+    # on a machine up for less than the throttle window "now - 0.0" is
+    # below it and the FIRST failure would be swallowed -- the same trap
+    # _last_compute_error_logged already documents (CI's fresh VM).
+    last_error_logged = None
     while not stop_event.is_set():
         try:
             if store.backfill_step():
                 _mark_max_tracker_dirty(store)
-        except Exception:
-            pass
+        except Exception as exc:
+            # The loop must survive a bad file (OBS-08's lesson: a crashed
+            # recompute must not freeze the numbers), but not silently:
+            # the first failure logs at once, then one line per ten
+            # minutes names the failure class.
+            now = time.monotonic()
+            if last_error_logged is None or now - last_error_logged >= 600:
+                last_error_logged = now
+                log.warning("max-tracker backfill step failed: %s: %s",
+                            type(exc).__name__, exc)
         if stop_event.wait(MAX_TRACKER_BACKFILL_TICK_S):
             break
 
@@ -3604,7 +3616,7 @@ def main():
             while not _any_provider_dir(Handler.projects_dir):
                 time.sleep(30)
         except KeyboardInterrupt:
-            raise SystemExit(1)
+            raise SystemExit(1) from None
         log.info("hittade en leverantörskatalog — fortsätter starten.")
     if not Handler.projects_dir.is_dir():
         # Startar ändå: Path.glob på en katalog som inte finns ger tomt

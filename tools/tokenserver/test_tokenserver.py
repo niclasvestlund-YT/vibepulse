@@ -3402,6 +3402,34 @@ class StartupSnapshotTests(unittest.TestCase):
         self.assertTrue(set(required) <= set(snapshot))
         self.assertIsNone(shape(snapshot))
         self.assertNotIn("error", snapshot)
+class MaxTrackerBackfillLoopTests(unittest.TestCase):
+    def test_the_first_backfill_failure_logs_even_on_a_freshly_booted_host(self):
+        # Codex review of #103: a 0.0 sentinel minus a young monotonic clock
+        # sat inside the throttle window and swallowed the first failure.
+        stop = threading.Event()
+        store = mock.Mock()
+        calls = []
+
+        def failing_step():
+            calls.append(1)
+            if len(calls) >= 3:
+                stop.set()
+            raise RuntimeError("trasig sessionsfil")
+
+        store.backfill_step.side_effect = failing_step
+        with mock.patch.object(tokenserver.time, "monotonic",
+                               return_value=42.0), \
+                mock.patch.object(tokenserver, "MAX_TRACKER_BACKFILL_TICK_S",
+                                  0.0), \
+                self.assertLogs("tokenserver", level="WARNING") as captured:
+            tokenserver._run_max_tracker_backfill(store, stop)
+        lines = [line for line in captured.output
+                 if "backfill step failed" in line]
+        # Logged once, immediately; the two retries inside the window are
+        # throttled.
+        self.assertEqual(len(lines), 1)
+        self.assertIn("RuntimeError: trasig sessionsfil", lines[0])
+        self.assertEqual(len(calls), 3)
 
 
 class MaxTrackerDirtyWriterTests(unittest.TestCase):
@@ -3555,7 +3583,7 @@ class MaxTrackerDirtyWriterTests(unittest.TestCase):
         self.assertTrue(tokenserver._max_tracker_dirty)
 
 
-class MaxTrackerBackfillLoopTests(unittest.TestCase):
+class MaxTrackerBackfillFailureLogTests(unittest.TestCase):
     def test_loop_ticks_forever_and_marks_dirty_only_on_progress(self):
         store = mock.Mock()
         store.backfill_step.return_value = True

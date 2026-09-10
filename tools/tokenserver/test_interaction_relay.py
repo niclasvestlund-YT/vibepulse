@@ -1,6 +1,5 @@
 import json
 import threading
-import time
 import unittest
 from collections import OrderedDict, deque
 from urllib.parse import urlsplit
@@ -206,8 +205,6 @@ class InteractionRelayTests(unittest.TestCase):
         entry = store.park("approval", approval_event(), 30)
 
         relay.run_once()
-        first_put = [call for call in transport.calls
-                     if call["method"] == "PUT"][0]
         relay.run_once()
         self.assertEqual(len([call for call in transport.calls
                               if call["method"] == "PUT"]), 1)

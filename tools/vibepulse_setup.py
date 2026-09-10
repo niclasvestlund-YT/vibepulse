@@ -976,7 +976,7 @@ def _relay_install(
         except BaseException:
             try:
                 _atomic_private_write(secrets_path, secrets_raw)
-            except BaseException:
+            except BaseException:  # noqa: S110 - best-effort rollback; the original error is re-raised below
                 pass
             try:
                 if Path(token_path).exists() or Path(token_path).is_symlink():
@@ -1139,7 +1139,7 @@ def _relay_uninstall(
                     _atomic_private_write(secrets_path, secrets_raw)
                 if token_raw is not None:
                     _atomic_private_write(token_path, token_raw)
-            except BaseException:
+            except BaseException:  # noqa: S110 - best-effort rollback; the FIX line below reports it
                 pass
             print("FIX Relay uninstall could not safely update local files",
                   file=stdout)
@@ -1882,7 +1882,7 @@ def _reconcile_external(
                 codex=codex):
             try:
                 _invoke(argv, run)
-            except BaseException:
+            except BaseException:  # noqa: S110 - each rollback step is independent; _inspect_external judges the result
                 pass
         try:
             observed = _inspect_external(
@@ -1937,7 +1937,7 @@ def _publish_config(
                 elif current == target:
                     try:
                         save_config(path, snapshot)
-                    except BaseException:
+                    except BaseException:  # noqa: S110 - the reload on the next line decides whether restore worked
                         pass
                     restored = load_config(path) == snapshot
             except BaseException:

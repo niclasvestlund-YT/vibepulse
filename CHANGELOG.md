@@ -155,6 +155,25 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **A linter, at last (OBS-25).** `ruff` is pinned in `requirements-dev.txt`
+  (and `pyproject.toml` carries the same pin as `required-version`, so a
+  venv with another release is refused instead of linting differently from
+  CI), configured in `pyproject.toml` with bug-shaped rules only (pyflakes, bare
+  `except`, bugbear, `try/except/pass`, pylint errors, `global` declared for
+  a name never assigned) and runs first in `test/run.sh`, so CI's host gate
+  runs it too. The first sweep found 43 things across ~10 k lines. Every
+  remaining `try/except/pass` is now a named boundary (`# noqa: S110 -
+  <why>`) rather than an unexplained swallow, and the one that mattered is
+  fixed: the Max Tracker backfill loop caught every exception and dropped
+  it, so a bad session file could stop the heatmap's history from ever
+  filling in with nothing in the log; it now logs one line per ten minutes.
+  Sixteen closures over loop variables in tests are bound explicitly, three
+  `zip()` calls state `strict=True`, three dead imports and one dead
+  variable are gone, and `_probe_limits` no longer declares `global` for
+  three names it only reads. Catching `Exception` (74 sites, all
+  deliberate) and the `global` statement itself are not enabled; the config
+  says why.
+
 - **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
   pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`
   and the rest, per worktree, including the extra parents a multi-line one
