@@ -298,15 +298,15 @@ class UsageHistoryForecastTests(unittest.TestCase):
 
 class UsageHistoryDeltaTests(unittest.TestCase):
     def test_delta_is_full_percent_when_cycle_started_inside_period(self):
-        """Verkligheten 2026-08-14: veckopoolen nollställdes 08:00 men
-        historiken började först 10:45 (429-mörkläggning) respektive vid
-        parserfixen (Fable). Börjar cykeln EFTER "since" är baslinjen 0
-        per definition — hela procenten föll inom perioden, och ett enda
-        prov räcker för att säga det ärligt."""
+        """Reality on 2026-08-14: the week pool reset at 08:00 but the
+        history only began at 10:45 (429 blackout) and at the parser fix
+        (Fable) respectively. If the cycle starts AFTER "since" the baseline
+        is 0 by definition -- the whole percentage fell inside the period,
+        and a single sample is enough to say so honestly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             history = UsageHistory(Path(temp_dir) / "history.json")
-            since = 24 * HOUR                       # midnatt
-            reset_at = (7 * 24 + 25) * HOUR         # cykelstart 25*HOUR
+            since = 24 * HOUR                       # midnight
+            reset_at = (7 * 24 + 25) * HOUR         # cycle start 25*HOUR
             history.record("claude", "model_week", 11,
                            reset_at=reset_at, at=26 * HOUR)
 

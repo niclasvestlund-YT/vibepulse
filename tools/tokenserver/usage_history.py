@@ -34,11 +34,12 @@ RESET_QUANTUM_S = 5 * 60
 
 _PROVIDERS = {"claude", "codex"}
 _WINDOWS = {"session", "week", "model_week"}
-# Fönstrens cykellängder: ligger cykelstarten (reset_at - längd) EFTER
-# deltafrågans "since" började poolen bevisligen på noll inom perioden —
-# baslinjen är då 0 per definition och ingen provhistorik behövs. Utan den
-# härledningen underrapporterade "idag" varje gång historiken hade luckor
-# (429-mörkläggningen och den obenämnda Fable-poolen, båda 2026-08-14).
+# Cycle lengths per window: if the cycle start (reset_at - length) lies
+# AFTER the delta query's "since", the pool provably started at zero inside
+# the period -- the baseline is then 0 by definition and no sample history
+# is needed. Without that derivation "today" was under-reported every time
+# the history had gaps (the 429 blackout and the unnamed Fable pool, both
+# 2026-08-14).
 _WINDOW_LENGTH_S = {
     "session": 5 * 3600.0,
     "week": 7 * 86400.0,
@@ -309,9 +310,9 @@ class UsageHistory:
             return None
         latest = samples[-1]
 
-        # Började cykeln efter "since" är baslinjen 0 per definition — hela
-        # den aktuella procenten föll inom perioden, oavsett hur gles den
-        # inspelade historiken råkar vara.
+        # If the cycle started after "since" the baseline is 0 by
+        # definition -- the whole current percentage fell inside the period,
+        # however sparse the recorded history happens to be.
         cycle_start = reset_at - _WINDOW_LENGTH_S[window]
         if cycle_start >= since:
             return round(max(0.0, float(latest["pct"])), 1)
