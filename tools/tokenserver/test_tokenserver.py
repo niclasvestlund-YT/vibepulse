@@ -16,7 +16,7 @@ import threading
 import time
 import unittest
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from unittest import mock
@@ -3104,7 +3104,12 @@ class MaxTrackerSingleWriterTests(unittest.TestCase):
                 Path(temp_dir) / "max-tracker.json", codex_root, claude_root)
 
             path = claude_root / "session.jsonl"
-            old_timestamp = "2020-01-15T10:00:00Z"
+            # Local noon, expressed in UTC: the store owns the record by
+            # its LOCAL day, and a fixed "T10:00:00Z" is the previous
+            # evening west of UTC-10 (issue #66).
+            old_timestamp = (
+                datetime.fromisoformat("2020-01-15T12:00:00").astimezone()
+                .astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
             path.write_text(json.dumps({
                 "timestamp": old_timestamp, "sessionId": "session-a",
                 "requestId": "request-old",
