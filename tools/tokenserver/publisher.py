@@ -169,10 +169,10 @@ class Publisher:
             try:
                 payload = produce()
             except Exception:
-                log.exception("publicering: %s-producenten föll", path)
+                log.exception("publish: the %s producer raised", path)
                 continue
             if path == "/api/tokens" and is_startup_placeholder(payload):
-                continue  # första skanningen pågår: inget att publicera än
+                continue  # first scan still running: nothing to publish yet
             fingerprint = payload_fingerprint(payload)
             current_stale = stale_fields(payload)
             last_fingerprint, sent_at, last_stale = self._state.get(
@@ -195,7 +195,7 @@ class Publisher:
                 # State untouched: next tick retries.  Log once per failure
                 # tick is acceptable at this cadence; the panel keeps its
                 # last good values either way.
-                log.warning("publicering: %s nådde inte reläet", path)
+                log.warning("publish: %s did not reach the relay", path)
         return sends
 
     def start(self):

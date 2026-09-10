@@ -195,7 +195,7 @@ readable OAuth copy is expired:
 | `claudeProbe` | Meaning | What to do |
 |---|---|---|
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
-| `not_run` | Probe has not fired yet | Normally clears itself within seconds: the startup warmup calls `get_snapshot()`, which calls `get_limits()`, which starts the probe. If it persists, look for `förstaskanningen kraschade` in the server log — the warmup failed and the first `/api/tokens` request warms it instead, so make one. 240 s (`LIMITS_EVERY_S`) is the gap between *completed* probes, not a wait for the first |
+| `not_run` | Probe has not fired yet | Normally clears itself within seconds: the startup warmup calls `get_snapshot()`, which calls `get_limits()`, which starts the probe. If it persists, look for `the first scan produced no result` or `usage recompute crashed` in the server log — the warmup failed and the first `/api/tokens` request warms it instead, so make one. 240 s (`LIMITS_EVERY_S`) is the gap between *completed* probes, not a wait for the first |
 | `no_claude_oauth_token` | No Claude Desktop / Claude Code token found (on Windows: no `.credentials.json`) | Have them sign in to Claude Code on this computer |
 | `no_claude_oauth_token: keychain_no_entry` | macOS: the keychain has no `Claude Code-credentials` item for this account | Have them sign in to Claude Code on this computer |
 | `no_claude_oauth_token: keychain_denied_or_locked (exit N)` | macOS: `security` was refused — the keychain prompt got **Deny**, or the keychain is locked | Restart the service and click **Always Allow** on the prompt (README, keychain step); unlock the login keychain if it is locked |

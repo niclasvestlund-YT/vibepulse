@@ -305,9 +305,9 @@ class ClassificationTests(unittest.TestCase):
         self.assertNotIn("nested-private-model", repr(event))
 
     def test_every_gpt_5_6_variant_gets_a_screen_label(self):
-        """En fork på en T-Display-S3 visade `gpt-5.6-terra` rått bredvid
-        systrarnas typsatta etiketter: prislistan kände modellen, skärmen
-        inte. Alla tre 5.6-varianterna ska se likadana ut."""
+        """A fork on a T-Display-S3 showed `gpt-5.6-terra` raw beside its
+        siblings' typeset labels: the price list knew the model, the screen
+        did not. All three 5.6 variants must look alike."""
         self.assertEqual(agent_status.normalize_model("gpt-5.6-sol"),
                          "GPT-5.6 SOL")
         self.assertEqual(agent_status.normalize_model("gpt-5.6-terra"),
@@ -381,8 +381,8 @@ class ClassificationTests(unittest.TestCase):
                 self.assertFalse(label.startswith("-"))
 
     def test_screen_labels_fit_the_firmware_model_buffer(self):
-        """TK_AGENT_MODEL_CAP är 25 (24 tecken + NUL). En etikett som
-        spränger den klipps mitt i ordet på panelen."""
+        """TK_AGENT_MODEL_CAP is 25 (24 characters + NUL). A label that
+        overflows it is clipped mid-word on the panel."""
         header = Path(__file__).resolve().parents[2] / (
             "components/app_tokens/agent_status.h")
         cap = int(re.search(r"#define TK_AGENT_MODEL_CAP (\d+)",

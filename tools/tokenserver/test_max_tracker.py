@@ -43,8 +43,8 @@ def _local_stamp(day: str, hour: int = 12) -> str:
     ``day`` on every host.
 
     The store owns a backfilled record by the local calendar day of its
-    timestamp (``_handle_claude_event``: "dygnsgränsen är Macens, inte
-    UTC:s"), so a fixed ``"<day>T10:00:00Z"`` only lands on ``<day>`` for
+    timestamp (``_handle_claude_event``: "the day boundary is the Mac's,
+    not UTC's"), so a fixed ``"<day>T10:00:00Z"`` only lands on ``<day>`` for
     hosts within ten hours east of UTC: west of UTC-10 it is the evening
     before, and at UTC+12 a ``T12:00:00Z`` stamp is already the next
     morning. Issue #66's report came from America/Los_Angeles; the same
@@ -896,7 +896,7 @@ class MaxTrackerStoreEventDateOwnershipTests(unittest.TestCase):
             def owning_day(stamp: str) -> str:
                 # The store files every backfilled record under the
                 # LOCAL day of its timestamp (_handle_claude_event:
-                # "dygnsgränsen är Macens, inte UTC:s"). Ground truth
+                # "the day boundary is the Mac's, not UTC's"). Ground truth
                 # has to follow the same rule, or any host west of UTC
                 # sees every pre-08:00Z record land one day earlier
                 # than a UTC-dated expectation claims (issue #66).

@@ -126,9 +126,9 @@ changes again — so a healthy week is a handful of lines and anything
 repeating deserves attention. What a healthy boot looks like:
 
 ```
-2026-08-13 21:21:47 INFO startar: rev 7385cb3
-2026-08-13 21:21:47 INFO förstaskanning 2.3 s: … tokens idag, …
-2026-08-13 21:21:47 INFO serverar http://0.0.0.0:8737/api/tokens, …
+2026-08-13 21:21:47 INFO starting: rev 7385cb3
+2026-08-13 21:21:47 INFO first scan 2.3 s: … tokens today, …
+2026-08-13 21:21:47 INFO serving http://0.0.0.0:8737/api/tokens, …
 2026-08-13 21:23:47 INFO claude-probe: start -> usage_http_200 + ok
 ```
 
@@ -149,7 +149,7 @@ repeating deserves attention. What a healthy boot looks like:
 - **`agent-status <context>: <ErrorName>`** — throttled to one per error
   type per 30 s, deliberately content-free (privacy: never a path or
   message from your sessions).
-- **`500 på /api/…` + traceback** — any route serving a 500 now logs its
+- **`500 on /api/…` + traceback** — any route serving a 500 now logs its
   cause; the LAN response stays the sanitized `{"error": ...}` contract.
   A traceback in this log is a server bug worth filing.
 - Access logging stays muted (a 30 s poll must not fill the file), but
@@ -247,7 +247,7 @@ Returns live server state, added after real debugging nights:
   behind `/api/tokens` is healthy. `false` means the served token totals
   are frozen at their last good value while *looking* fresh; the smoke
   test turns this into a FAIL, and the log has the cause
-  (`usage-omräkningen kraschade`).
+  (`usage recompute crashed`).
 - `usageTotals` — `{state, placeholder, sinceS|ageS}`: what the four
   volume counters on `/api/tokens` are right now. `refreshing` = the first
   history scan is still running and the counters are placeholder zeros
@@ -260,7 +260,7 @@ Returns live server state, added after real debugging nights:
   the block beside it, so an older panel keeps its last values instead of
   applying zeros. Firmware from 2026-09-10 sends the header and leaves the
   value page alone while `placeholder` is true. Smoke: `refreshing` is a
-  VARN, never a FAIL. Doctor: `WAIT` for `refreshing`, `FIX` for `failing`.
+  WARN, never a FAIL. Doctor: `WAIT` for `refreshing`, `FIX` for `failing`.
 - `maxTrackerSaveOk` / `maxTrackerSaveFailingForS` — whether the Max
   Tracker state file can be written. `false` (typically `ENOSPC` or a
   permissions change) means observations are held in memory and retried
@@ -382,12 +382,12 @@ Verbatim strings worth grepping for, and what they mean:
 | `agentstatus kunde inte skapa HTTP-klient` | fw `agent-net` | agent feed **dead until reboot**; screen shows a frozen header meanwhile (OBS-12). |
 | `heap: internt … DMA största …` | fw `torget` | every 10 s. Watch the DMA largest block: its collapse predicted the 2026-08-06 panel freeze. Nothing alerts on it yet (OBS-27). |
 | `overlaykostnad <namn>: LVGL-pool +N B …, internt ±N B …` | fw `torget` | three lines, once at boot: what each permanent top-layer overlay (wifi-setup, settings, ota) costs. The pool figure is PSRAM (LVGL's TLSF pool lives there since the 2026-08-16 freeze fix); the internal figure is the control — a zero delta means that overlay does not touch internal RAM at all. This is the measured budget the AMOLED rule requires for a persistent layer, so read it after any flash that adds or grows one. |
+| `found neither … — is Claude Code or Codex on this machine?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
+| `500 on /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 on` line above it is doubly interesting. |
+| `usage recompute crashed` | server log | `/api/tokens` is serving frozen totals that look fresh. `usage recompute healthy again` closes the episode; until it appears, distrust the day/month numbers. |
 | `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the backtrace if you are watching, but since OBS-02 it also survives the reboot: the `coredump` partition holds the ELF dump, read it with `idf.py -p <port> coredump-info` (blind spots above). |
 | `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. The task watchdog is pinned in IDF's warn-only mode (`sdkconfig.defaults`, no `ESP_TASK_WDT_PANIC`): it prints and the board keeps running, so there is **no reboot, no coredump and no ledger count** for it — this line on a live serial console is the only evidence. The ledger's `vakthund` counts resets the chip attributes to a watchdog (`TASKVAKTHUND` / `AVBROTTSVAKTHUND` in the banner), which the warn-only task watchdog does not cause. |
 | `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died. The `omstartsliggare:` line right after it says how many boots did (OBS-03). A dump is there to read only when the separate `coredump i flash` line follows: expect it after PANIK; a `TASKVAKTHUND` reset (a chip-attributed watchdog, not the warn-only task watchdog above) may leave nothing but the banner and the ledger, and the notice is printed only when `esp_core_dump_image_get()` actually finds an image. BROWNOUT → suspect the power supply first; no dump is written for it. |
-| `hittar inte … — finns Claude Code på den här maskinen?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
-| `500 på /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 på` line above it is doubly interesting. |
-| `usage-omräkningen kraschade` | server log | `/api/tokens` is serving frozen totals that look fresh. `usage-omräkningen frisk igen` closes the episode; until it appears, distrust the day/month numbers. |
 | `ratelimit-header: …` | server stdout | the *fallback* probe engaged — the primary usage endpoint returned nothing mappable. Not part of a healthy boot despite what the README implies (OBS-23). |
 | `claudeProbe: usage_http_429 + backoff_until_…` | `GET /` | rate-limited; probe is resting ≥10 min. Do not restart the server to "fix" it — that resets the backoff and feeds the penalty (see lessons: the 429 night). |
 
@@ -418,8 +418,9 @@ the manual detail below is for interpreting what it flags — and steps
    `%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log`. A missing file
    under launchd or Task Scheduler means the service never reached its
    logging entrypoint.
-   `grep -c serverar` — more than one per intended restart means
-   crash-looping. `grep -n Traceback` — any hit is a bug; the `500 på`
+   `grep -cE 'serv(ing|erar) http://'` — more than one per intended
+   restart means crash-looping (the older build wrote `serverar`, and the
+   log outlives an upgrade, so count both). `grep -n Traceback` — any hit is a bug; the `500 on`
    line above it names the route. `grep -c 'agent-status'` — a large
    count means a persistent throttled error has been repeating every
    30 s. `grep 'claude-probe:'` — the transition history: when did

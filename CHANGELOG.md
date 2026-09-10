@@ -5,6 +5,21 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Changed
+
+- **The tokenserver directory speaks English (issue #12).** Every module,
+  test, the smoke test, the README, the launchd plist and the Windows
+  installer under `tools/tokenserver/` are translated: comments,
+  docstrings, CLI help, console output and log lines. The log signatures
+  the runbook names move with it (`starting: rev`, `first scan …`,
+  `serving http://…`, `500 on /api/…`, `usage recompute crashed` /
+  `healthy again`, `found neither … — is Claude Code or Codex on this
+  machine?`), as do the smoke test's tags (`[WARN]`, summary line
+  `smoke test: N ok, N warnings, N failures`) and the SessionStart hook's
+  advice. Runtime keys, persisted file formats, API fields and exit codes
+  are byte-identical; a handful of test fixtures keep non-ASCII text on
+  purpose because they exist to prove UTF-8 handling.
+
 ### Fixed
 
 - **A healthy service restart showed STALE on the glass for minutes.** The

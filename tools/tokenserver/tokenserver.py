@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
-"""Tokenmätarens tjänst: Claude Code-användningen som platt JSON över LAN.
+"""The token meter's service: Claude Code usage as flat JSON over the LAN.
 
-Skannar sessionsloggarna i ~/.claude/projects/**/*.jsonl (samma källa som
-usage-verktyg i ccusage-familjen läser), summerar tokens per dag och serverar
-glance-mönstrets kontrakt på /api/tokens:
+Scans the session logs in ~/.claude/projects/**/*.jsonl (the same source
+the ccusage family of usage tools reads), sums tokens per day and serves
+the glance pattern's contract on /api/tokens:
 
     {"v": 2, "dayTokens": ..., "dayTokensPerHour": ..., "daySessions": ...,
      "monthTokens": ...}
 
-Designregler, ärvda från Solelkollens /api/glance:
-  * Platt JSON, tal inte strängar, och en takt (dayTokensPerHour, senaste
-    timmens brinntakt) så skärmen kan ticka lokalt mellan hämtningarna.
-  * Inga hemligheter i svaret och ingen autentisering: siffrorna beskriver
-    tokenvolym, inget innehåll. Tjänsten binder mot LAN:et — exponera den
-    inte utanför hemmet.
-  * Fel svarar {"error": "..."} — skärmens parser avvisar den formen per
-    kontrakt och behåller sina senaste goda värden.
+Design rules, inherited from Solelkollen's /api/glance:
+  * Flat JSON, numbers not strings, and a rate (dayTokensPerHour, the last
+    hour's burn rate) so the screen can tick locally between fetches.
+  * No secrets in the response and no authentication: the figures describe
+    token volume, never content. The service binds to the LAN -- do not
+    expose it outside the home.
+  * Errors answer {"error": "..."} -- the screen's parser rejects that form
+    by contract and keeps its last good values.
 
-"Tokens" är alla som passerat modellen: in + ut + cacheskrivning +
-cacheläsning — den enda siffran som ärligt beskriver hur mycket som malts.
-Dubblettrader (samma message.id + requestId, som uppstår när sessioner
-återupptas) räknas en gång, samma dedup som usage-verktygen gör.
+"Tokens" are all that passed through the model: in + out + cache write +
+cache read -- the only figure that honestly describes how much was ground.
+Duplicate rows (same message.id + requestId, which appear when sessions
+are resumed) count once, the same dedup the usage tools do.
 
-Inkrementellt: filer med oförändrad (mtime, storlek) återanvänds ur cachen,
-och filer äldre än månadsskiftet hoppas över helt. En full förstaskanning
-tar några sekunder; därefter är varje svar i praktiken omedelbart.
-Aggregatet räknas om högst var 30:e sekund oavsett hämttakt.
+Incremental: files with unchanged (mtime, size) are reused from the cache,
+and files older than the turn of the month are skipped entirely. A full
+first scan takes a few seconds; after that every answer is effectively
+immediate. The aggregate is recomputed at most every 30 s regardless of
+the fetch rate.
 
-Körning:  python3 tokenserver.py [--port 8737] [--dir ~/.claude/projects]
-Autostart: se README.md härintill (launchd-plist medföljer).
+Run:       python3 tokenserver.py [--port 8737] [--dir ~/.claude/projects]
+Autostart: see README.md next to this file (a launchd plist is included).
 """
 
 import argparse
@@ -54,9 +55,10 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# Probelåset tas med olika systemanrop på olika plattformar; ingen av
-# modulerna finns på båda. Importen får inte fälla hela tjänsten — utan lås
-# är beteendet som före låset fanns, inte "startar inte alls".
+# The probe lock is taken with different system calls on different
+# platforms; neither module exists on both. The import must not take the
+# whole service down -- without a lock the behaviour is what it was before
+# the lock existed, not "does not start at all".
 try:
     import fcntl
 except ImportError:  # Windows
@@ -91,7 +93,7 @@ if __package__:
         save_config,
     )
     from . import codex_usage, interactions, value_meter
-else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
+else:  # run directly: python3 tools/tokenserver/tokenserver.py
     from discovery import DiscoveryAdvertiser
     from agent_status import AgentStatusService
     from codex_command import resolve_codex_executable
@@ -120,39 +122,40 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     import value_meter
 
 RECOMPUTE_EVERY_S = 30
-# Hur länge uppvärmningstråden väntar på en skanning som en tidig
-# HTTP-förfrågan hann starta före den, innan den ger upp loggraden.
+# How long the warm-up thread waits for a scan that an early HTTP request
+# managed to start before it, before it gives up on the log line.
 FIRST_SCAN_WAIT_S = 600
-LIMITS_EVERY_S = 240  # rate-limit-proben: 15 anrop/h — kontots bucket delas
-AUTH_RECOVERY_EVERY_S = 15.0  # lokal tokenkontroll; ingen upstream vid väntan
-                      # med Claude Code självt, och kvoten rör sig långsamt;
-                      # panelens 30 s-pollar får ändå cachat svar direkt
+LIMITS_EVERY_S = 240  # the rate-limit probe: 15 calls/h -- the account's
+                      # bucket is shared with Claude Code itself, and the
+                      # quota moves slowly; the panel's 30 s polls get the
+                      # cached answer at once anyway
+AUTH_RECOVERY_EVERY_S = 15.0  # local token check; no upstream while waiting
 CLAUDE_CREDENTIAL_WARNING_S = 30 * 60
 CLAUDE_PLAN_USAGE_FRESH_S = 20 * 60
 CLAUDE_PLAN_USAGE_MAX_BYTES = 2 * 1024 * 1024
 HTTP_MAX_WORKERS = 32
 JSON_BODY_TIMEOUT_S = 2.0
-# Tömning av en oläst, annonserad kropp före ett tidigt avslag. Delar
-# deadline med _reject_busy (0.05 s), men inte bytetaket: den tömmer som
-# mest 8 KiB *huvuden* och stannar vid \r\n\r\n, medan den här tömningen
-# gäller den annonserade kroppen och har ett eget, större tak.
+# Draining an unread, announced body before an early rejection. Shares
+# the deadline with _reject_busy (0.05 s) but not the byte cap: that one
+# drains at most 8 KiB of *headers* and stops at \r\n\r\n, while this
+# drain covers the announced body and has its own, larger cap.
 REQUEST_DRAIN_LIMIT = 64 * 1024
 REQUEST_DRAIN_TIMEOUT_S = 0.05
 
-# Vilka token-källor och systemanrop som finns beror på plattformen, inte på
-# konfiguration. Testerna patchar konstanten för att köra Windows-grenarna
-# på en Mac.
+# Which token sources and system calls exist depends on the platform, not
+# on configuration. The tests patch the constant to run the Windows
+# branches on a Mac.
 _IS_WINDOWS = sys.platform == "win32"
 _claude_plan_usage_status = "not_checked"
 
 
 def _state_dir():
-    """Tjänstens tillståndskatalog — låset, cachen, historiken, spåraren.
+    """The service's state directory -- the lock, cache, history, tracker.
 
-    ``~/Library/Application Support`` är macOS-konventionen; Windows
-    motsvarighet är ``%LOCALAPPDATA%``. Sökvägarna FUNGERAR bokstavligt på
-    Windows (``Path.home()`` löser ut), men skulle lägga ett ``Library``-träd
-    i användarprofilen som ingenting annat på maskinen känner igen.
+    ``~/Library/Application Support`` is the macOS convention; the Windows
+    counterpart is ``%LOCALAPPDATA%``. The paths DO work literally on
+    Windows (``Path.home()`` resolves), but would put a ``Library`` tree in
+    the user profile that nothing else on the machine recognizes.
     """
     if _IS_WINDOWS:
         local_app_data = os.environ.get("LOCALAPPDATA")
@@ -163,11 +166,11 @@ def _state_dir():
 
 
 def _claude_plan_usage_path():
-    """Claude Desktops lokala, innehållsfria planhistorik.
+    """Claude Desktop's local, content-free plan history.
 
-    Filen ägs och uppdateras av den officiella klienten. Den innehåller bara
-    tid, organisation och procentsatser för femtimmars-/veckofönstret — inga
-    promptar, svar, kommandon eller OAuth-hemligheter.
+    The file is owned and updated by the official client. It contains only
+    time, organization and percentages for the five-hour/week window -- no
+    prompts, answers, commands or OAuth secrets.
     """
     if _IS_WINDOWS:
         app_data = os.environ.get("APPDATA")
@@ -179,12 +182,12 @@ def _claude_plan_usage_path():
 
 
 def _read_claude_plan_usage(path=None, now_ts=None):
-    """Returnera senaste strikta, färska lokala usageprovet eller ``None``.
+    """Return the latest strict, fresh local usage sample, or ``None``.
 
-    Det här är en passiv reserv när åtkomsttokenen som tokenservern kan läsa
-    har gått ut men Claude Desktop fortfarande har en aktuell usagebild. Hela
-    filen är storleksbegränsad och den senaste posten valideras fail-closed;
-    rått organisations-id lämnar aldrig funktionen.
+    This is a passive fallback for when the access token the tokenserver can
+    read has expired while Claude Desktop still has a current usage picture.
+    The whole file is size-capped and the latest entry is validated
+    fail-closed; the raw organization id never leaves the function.
     """
     global _claude_plan_usage_status
     usage_path = (_claude_plan_usage_path() if path is None else Path(path))
@@ -247,47 +250,50 @@ def _read_claude_plan_usage(path=None, now_ts=None):
 
 
 def _log_dir():
-    """Loggkatalogen. macOS har ~/Library/Logs; Windows har ingen egen
-    logg-konvention för användartjänster, så loggen bor i tillståndsträdet."""
+    """The log directory. macOS has ~/Library/Logs; Windows has no log
+    convention of its own for user services, so the log lives in the state
+    tree."""
     return Path.home() / "Library" / "Logs" if not _IS_WINDOWS else (
         _state_dir() / "Logs")
 
-# Diagnostiken går via logging till stderr med tidsstämplar (basicConfig i
-# main; launchd samlar bägge strömmarna i loggfilen, se plisten). Regeln är
-# ÖVERGÅNGAR, inte tillstånd: en statusändring loggas en gång och sedan är
-# det tyst tills läget ändras igen — filen ska vara läsbar över veckor.
+# Diagnostics go through logging to stderr with timestamps (basicConfig in
+# main; launchd collects both streams in the log file, see the plist). The
+# rule is TRANSITIONS, not states: a status change is logged once and then
+# it is quiet until the state changes again -- the file must stay readable
+# over weeks.
 log = logging.getLogger("tokenserver")
 
-# Loggfilen under launchd (plistens StandardOut/ErrorPath). ~/Library/Logs
-# överlever omstart och syns i Konsol-appen — /tmp gjorde ingetdera. launchd
-# har ingen egen rotation, så servern tar den vid start: se
-# _maybe_rotate_own_log.
+# The log file under launchd (the plist's StandardOut/ErrorPath).
+# ~/Library/Logs survives a reboot and shows in the Console app -- /tmp did
+# neither. launchd has no rotation of its own, so the server does it at
+# start: see _maybe_rotate_own_log.
 DEFAULT_LOG_PATH = _log_dir() / "torget-tokenserver.log"
 _LOG_CAP_BYTES = 5 * 1024 * 1024
 _LOG_TAIL_KEEP_BYTES = 256 * 1024
 
 
 def _maybe_rotate_own_log(path=None, stderr_fd=2):
-    """Trunkera loggfilen vid start när den vuxit förbi taket, med svansen
-    bevarad i <namn>.old.
+    """Truncate the log file at start once it has grown past the cap, with
+    the tail preserved in <name>.old.
 
-    Bara när stderr faktiskt ÄR filen (launchd-fallet): fstat/stat-jämförelsen
-    skyddar terminalkörningar från att röra en fil de inte skriver till.
-    Trunkering i stället för rename: launchd håller fd:n öppen med O_APPEND,
-    så en rename hade bara fått processen att skriva vidare i den flyttade
-    filen medan den nya förblev tom.
+    Only when stderr actually IS the file (the launchd case): the fstat/stat
+    comparison protects terminal runs from touching a file they do not
+    write to. Truncation rather than rename: launchd keeps the fd open with
+    O_APPEND, so a rename would only have made the process keep writing
+    into the moved file while the new one stayed empty.
 
-    Hela läs-kopiera-trunkera-sekvensen hålls under root-loggerns
-    handlerlås (RLock — vår egen "roterad"-rad kan fortfarande skrivas), så
-    en loggrad från en annan tråd inte kan landa mellan svansläsningen och
-    trunkeringen och raderas ur bägge filerna. Råa stderr-skrivningar
-    (agent_status-diagnostiken) går utanför låset; det kvarvarande fönstret
-    är millisekunder mot en strypt rad per 30 s, en gång per 5 MB."""
+    The whole read-copy-truncate sequence is held under the root logger's
+    handler lock (an RLock -- our own "rotated" line can still be written),
+    so a log line from another thread cannot land between the tail read
+    and the truncation and be erased from both files. Raw stderr writes
+    (the agent_status diagnostics) go outside the lock; the remaining
+    window is milliseconds against a throttled line per 30 s, once per
+    5 MB."""
     path = Path(path) if path else DEFAULT_LOG_PATH
     try:
         st = path.stat()
     except OSError:
-        return False  # ingen fil (terminalkörning, färsk installation)
+        return False  # no file (terminal run, fresh install)
     handlers = list(logging.getLogger().handlers)
     for handler in handlers:
         handler.acquire()
@@ -299,15 +305,15 @@ def _maybe_rotate_own_log(path=None, stderr_fd=2):
             return False
         with open(path, "rb+") as fh:
             fh.seek(max(0, st.st_size - _LOG_TAIL_KEEP_BYTES))
-            tail = fh.read()  # läser till FAKTISKT EOF — även nyare rader
+            tail = fh.read()  # reads to the ACTUAL EOF -- newer lines too
             path.with_name(path.name + ".old").write_bytes(tail)
             fh.truncate(0)
-        log.info("loggfilen roterad (%d byte > taket %d; svansen ligger i "
+        log.info("log file rotated (%d bytes > the cap %d; the tail is in "
                  "%s.old)", st.st_size, _LOG_CAP_BYTES, path.name)
         return True
     except Exception:
-        # Rotering får aldrig fälla tjänsten; att den misslyckades ska synas.
-        log.warning("logrotering av %s misslyckades", path, exc_info=True)
+        # Rotation must never take the service down; that it failed must show.
+        log.warning("log rotation of %s failed", path, exc_info=True)
         return False
     finally:
         for handler in reversed(handlers):
@@ -318,19 +324,19 @@ _LOG_ROTATE_CHECK_S = 3600.0
 
 
 def _run_log_rotation_watch(stop_event, interval_s=None):
-    """Timvis rotationsvakt: startrotationen räcker inte för en process som
-    lever länge — en ihållande felande deltjänst kan annars skriva förbi
-    taket tills en orelaterad omstart råkar städa. Samma fstat-vakt som vid
-    start, så terminalkörningar förblir orörda; tråden sover resten av
-    tiden."""
+    """Hourly rotation watch: the start-up rotation is not enough for a
+    long-lived process -- a persistently failing sub-service could otherwise
+    write past the cap until an unrelated restart happens to clean up. The
+    same fstat guard as at start, so terminal runs stay untouched; the
+    thread sleeps the rest of the time."""
     interval = _LOG_ROTATE_CHECK_S if interval_s is None else interval_s
     while not stop_event.wait(interval):
         _maybe_rotate_own_log()
 
 
 def _read_server_rev():
-    """Git-revisionen som faktiskt serverar — gör 'fel kod kör' synligt i en
-    curl i stället för en timmes processarkeologi."""
+    """The git revision actually serving -- makes 'the wrong code is running'
+    visible in one curl instead of an hour of process archaeology."""
     try:
         return subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -347,13 +353,13 @@ def _normalized_source_bytes(path):
 
 
 def _read_source_fingerprint():
-    """Innehållshash av tjänstens källfiler, tagen vid start. Rev räcker
-    inte för "kör servern det som ligger här?": en smutsig worktree, eller
-    en redigering EFTER att processen startade, delar HEAD med checkouten
-    och låter rev-jämförelsen ljuga "aktuell". Röktestet räknar om samma
-    hash från disken och jämför. test_* och smoke.py ingår inte — tjänsten
-    laddar dem aldrig, och en redigerad smoke ska inte se ut som en
-    föråldrad server."""
+    """Content hash of the service's source files, taken at start. The rev
+    is not enough for "is the server running what lies here?": a dirty
+    worktree, or an edit AFTER the process started, shares HEAD with the
+    checkout and lets the rev comparison lie "current". The smoke test
+    recomputes the same hash from disk and compares. test_* and smoke.py
+    are not included -- the service never loads them, and an edited smoke
+    must not look like an outdated server."""
     try:
         digest = hashlib.sha256()
         base = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -372,14 +378,14 @@ def _read_source_fingerprint():
 _SERVER_REV = _read_server_rev()
 _SERVER_SRC = _read_source_fingerprint()
 _SERVER_STARTED = datetime.now().astimezone().isoformat(timespec="seconds")
-MAX_TRACKER_BACKFILL_TICK_S = 0.5  # samma kadens som agent_status.POLL_S
-# Claude bär aldrig fönstrets minuttal i klartext (bara namnen "5h"/"7d") --
-# till skillnad från Codex, vars rate-limits-snapshot har window_minutes
-# rakt i JSON:en (se _codex_window nedan). Dessa två är plan-kontraktets
-# fasta motsvarigheter, klassade enligt samma >600-minutersregel som
-# MaxTrackerStore.observe_quota redan använder.
-MAX_TRACKER_CLAUDE_SESSION_MINUTES = 300   # 5 timmar
-MAX_TRACKER_CLAUDE_WEEK_MINUTES = 10080    # 7 dygn
+MAX_TRACKER_BACKFILL_TICK_S = 0.5  # same cadence as agent_status.POLL_S
+# Claude never carries the window's minute count in the clear (only the
+# names "5h"/"7d") -- unlike Codex, whose rate-limits snapshot has
+# window_minutes right in the JSON (see _codex_window below). These two
+# are the plan contract's fixed counterparts, classified by the same
+# >600-minute rule MaxTrackerStore.observe_quota already uses.
+MAX_TRACKER_CLAUDE_SESSION_MINUTES = 300   # 5 hours
+MAX_TRACKER_CLAUDE_WEEK_MINUTES = 10080    # 7 days
 
 # (day, ts, tokens, session, key, usd, unpriced) per usage-bearing log row.
 # The first five are the minimum the day/month/rate/session aggregates need.
@@ -405,18 +411,19 @@ _price_table = None
 _last_result = None
 _last_computed = 0.0
 _snapshot_refreshing = False
-# När den senaste LYCKADE omräkningen blev klar (monotonic). None tills
-# första skanningen gått i mål: det är den som skiljer "platshållare" från
-# "frysta siffror" i usageTotals-blocket nedan.
+# When the latest SUCCESSFUL recompute finished (monotonic). None until the
+# first scan has completed: that is what separates "placeholder" from
+# "frozen figures" in the usageTotals block below.
 _last_result_at = None
 _SERVER_STARTED_MONO = time.monotonic()
-# Omräkningens hälsa: kraschar _compute serveras förra snapshotet vidare —
-# rätt beteende, men det får inte ske TYST (då fryser siffrorna för alltid
-# och ser färska ut). failing_since driver usageComputeOk på GET / och
-# röktestets FAIL; loggen får övergången plus ett strypt fel.
-# None = aldrig loggat. Inte 0.0: time.monotonic() räknar från boot, så på
-# en nystartad maskin är "nu - 0.0" MINDRE än strypfönstret och första
-# felet skulle sväljas — CI:ns färska VM fällde exakt det.
+# The recompute's health: if _compute crashes the previous snapshot keeps
+# being served -- correct, but it must not happen SILENTLY (the figures
+# would freeze forever and look fresh). failing_since drives
+# usageComputeOk on GET / and the smoke test's FAIL; the log gets the
+# transition plus a throttled error.
+# None = never logged. Not 0.0: time.monotonic() counts from boot, so on a
+# freshly started machine "now - 0.0" is LESS than the throttle window and
+# the first error would be swallowed -- CI's fresh VM tripped exactly that.
 _compute_failing_since = None
 _last_compute_error_logged = None
 _history_lock = threading.Lock()
@@ -457,12 +464,12 @@ def _quota_identity(provider, scope, raw_identity=None):
 
 
 def _merge_claude_plan_usage(claude, quota_cache, now_ts, path=None):
-    """Låt en färsk officiell lokal veckoprocent slå en äldre OAuthbild.
+    """Let a fresh official local week percentage beat an older OAuth picture.
 
-    Den lokala filen saknar reset-tid och modellpool. Därför får den endast
-    komplettera den generella veckan när en fortfarande giltig, tidigare
-    autentiserad cachepost bär samma pools reset. Modellkvoten förblir ärligt
-    stale tills OAuth-proben återhämtar sig.
+    The local file lacks the reset time and the model pool. It may therefore
+    only complement the general week when a still-valid, earlier
+    authenticated cache entry carries the same pool's reset. The model quota
+    stays honestly stale until the OAuth probe recovers.
     """
     global _claude_plan_usage_status
     local = _read_claude_plan_usage(path=path, now_ts=now_ts)
@@ -515,7 +522,7 @@ def _parse_file(path: Path, month_start: datetime, start_offset=0):
                 try:
                     entry = json.loads(raw_line)
                 except (json.JSONDecodeError, UnicodeDecodeError):
-                    continue  # halvskriven sista rad — nästa skanning tar den
+                    continue  # half-written last row -- the next scan takes it
                 usage = (entry.get("message") or {}).get("usage")
                 ts_raw = entry.get("timestamp")
                 if not usage or not ts_raw:
@@ -524,7 +531,7 @@ def _parse_file(path: Path, month_start: datetime, start_offset=0):
                     ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
                 except ValueError:
                     continue
-                ts = ts.astimezone()  # dygnsgränsen är Macens, inte UTC:s
+                ts = ts.astimezone()  # the day boundary is the Mac's, not UTC's
                 if ts < month_start:
                     continue
                 tokens = (
@@ -552,7 +559,7 @@ def _parse_file(path: Path, month_start: datetime, start_offset=0):
                     unpriced,
                 ))
     except OSError:
-        pass  # borttagen under läsning — nästa skanning ser det
+        pass  # removed while being read -- the next scan will see it
     return records, parsed_until
 
 
@@ -575,8 +582,8 @@ def _compute(projects_dir: Path, max_tracker_store=None):
             st = path.stat()
         except OSError:
             continue
-        # Äldre än månadsskiftet kan inte innehålla månadens rader (rader
-        # skrivs framåt i tiden): hoppa över utan att öppna.
+        # Older than the turn of the month cannot hold this month's rows
+        # (rows are written forward in time): skip without opening.
         if datetime.fromtimestamp(st.st_mtime).astimezone() < month_start:
             continue
         live_paths.add(path)
@@ -654,18 +661,19 @@ def _compute(projects_dir: Path, max_tracker_store=None):
     return {
         "v": 1,
         "dayTokens": day_tokens,
-        "dayTokensPerHour": hour_tokens,  # senaste timmen = takt per timme
+        "dayTokensPerHour": hour_tokens,  # the last hour = rate per hour
         "daySessions": len(day_sessions),
         "monthTokens": month_tokens,
-        # Ärlighetsinvarianten, API-sidan: på en Codex-only-maskin finns
-        # ingen Claude-katalog, och de fyra räknarna ovan blir nollor som
-        # inte är mätningar. Procenttalen säger redan sanningen (de blir
-        # null och skärmen visar streck), men räknarna kan inte bli null
-        # utan att äldre paneler slutar parsa payloaden helt
+        # The honesty invariant, API side: on a Codex-only machine there is
+        # no Claude directory, and the four counters above become zeros
+        # that are not measurements. The percentages already tell the
+        # truth (they become null and the screen shows dashes), but the
+        # counters cannot become null without older panels failing to
+        # parse the payload at all
         # (tokens_parse.c: `if (!num(root, "dayTokens", &day)) goto done;`).
-        # Den här flaggan säger i stället vad nollorna betyder, så ingen
-        # läsare — logg, panel eller framtida konsument — behöver gissa.
-        # Additiv nyckel, samma mönster som "value" nedan.
+        # This flag says instead what the zeros mean, so no reader -- log,
+        # panel or future consumer -- has to guess. Additive key, the same
+        # pattern as "value" below.
         "claudeSourcePresent": projects_dir.is_dir(),
         # Additive key: tokens_parse.c:219 skips unknown top-level keys, so
         # already-flashed screens ignore it instead of failing to parse.
@@ -681,27 +689,28 @@ def _compute(projects_dir: Path, max_tracker_store=None):
 
 
 # ---------------------------------------------------------------------------
-# Rate-limit-proben (Clawdmeter-mönstret): läs Claude Codes egen OAuth-token
-# från den aktiva Claude Desktop-processen eller nyckelringen och gör en
-# minimal API-förfrågan — svaret är ointressant,
-# HEADRARNA är datat (anthropic-ratelimit-unified-*: sessionens 5h-fönster
-# och veckofönstret, i procent + återställningstid). max_tokens=0 betyder
-# att inget genereras: proben är i praktiken gratis. Tokenen lämnar aldrig
-# Macen; skärmen får bara procenttal.
+# The rate-limit probe (the Clawdmeter pattern): read Claude Code's own
+# OAuth token from the active Claude Desktop process or the keychain and
+# make a minimal API request -- the answer is uninteresting, the HEADERS
+# are the data (anthropic-ratelimit-unified-*: the session's 5 h window
+# and the week window, as percent + reset time). max_tokens=0 means
+# nothing is generated: the probe is effectively free. The token never
+# leaves the Mac; the screen only gets percentages.
 
 _limits_lock = threading.Lock()
 _last_limits = None
 _last_probed = 0.0
 _limits_refreshing = False
 _headers_logged = False
-# Probe-diagnostik, exponerad på "/": var i kedjan Claude-proben fastnar
-# (nyckelring → HTTP → headrar → mappning) plus de råa headernamnen.
+# Probe diagnostics, exposed on "/": where in the chain the Claude probe
+# gets stuck (keychain -> HTTP -> headers -> mapping) plus the raw header
+# names.
 _probe_status = "not_run"
 _probe_headers = []
 _probe_unknown_buckets = []
 _probe_cooldown_until = 0.0
 _probe_failure_streak = 0
-_probe_status_logged = None  # senast loggade status — övergångar loggas, tillstånd inte
+_probe_status_logged = None  # last logged status: transitions are logged, states are not
 # OBS-20: why the keychain gave no token, as a content-free word ("None" =
 # it gave one, or was never asked). Set on the probe thread, logged on
 # change only, and carried into claudeProbe/claudeCredential on GET /.
@@ -715,12 +724,13 @@ _keychain_reason_logged = _KEYCHAIN_UNLOGGED
 # Content-free credential readiness captured on the probe thread. GET / must
 # never reread Keychain synchronously: startup health has a sub-second budget.
 _claude_credential = {"status": "unknown"}
-# Döda tokens (värde → orsak): en kandidat som fått 401/403 skickas ALDRIG
-# igen. Det var mönstret bakom 429-straffrutan: nyckelringstokenen dog på
-# natten och Desktops frusna processtoken hamrade API:t varje probecykel i
-# timmar (loggen 2026-08-14 03:51–10:45 visar sex straffrundor i rad). En
-# förnyad token har ett NYTT värde och provas därmed automatiskt igen;
-# ordboken kapas vid 8 poster så den aldrig kan växa fritt.
+# Dead tokens (value -> reason): a candidate that got a 401/403 is NEVER
+# sent again. That was the pattern behind the 429 penalty box: the
+# keychain token died overnight and Desktop's frozen process token hammered
+# the API every probe cycle for hours (the log for 2026-08-14 03:51-10:45
+# shows six penalty rounds in a row). A refreshed token has a NEW value and
+# is thereby tried again automatically; the dict is capped at 8 entries so
+# it can never grow unbounded.
 _dead_tokens = {}
 
 
@@ -786,7 +796,7 @@ def _note_keychain_reason(reason):
 
 
 def _read_keychain_oauth():
-    """Nyckelringsposten som ``(token, expires_at_ms)`` — det ``/login`` skrev.
+    """The keychain entry as ``(token, expires_at_ms)`` -- what ``/login`` wrote.
 
     OBS-20: a blanket ``except Exception`` used to fold "no ``security``
     binary", "the user clicked Deny on the keychain prompt", "the prompt sat
@@ -917,7 +927,7 @@ def _oauth_credential_snapshot(candidates, now_s=None):
 
 
 def _parse_reset_minutes(value: str, now_ts: float):
-    """Reset-headern kan vara epok-sekunder, sekunder-kvar eller ISO-tid."""
+    """The reset header can be epoch seconds, seconds left or an ISO time."""
     try:
         n = float(value)
         # Stort tal = epoktid; litet = sekunder kvar.
@@ -1034,12 +1044,13 @@ def _parse_usage_limits(body, now_ts):
         elif kind == "weekly_scoped" and (limit.get("is_active") is True or
                                           (isinstance(pct, (int, float)) and
                                            pct > 0)):
-            # is_active betyder "just nu BINDANDE gräns" (5-timmarsfönstret
-            # bär oftast den flaggan), INTE "poolen finns". Verifierat mot
-            # live-svaret 2026-08-14: Fable veckan låg på 11 % med
-            # is_active=false och försvann från glaset — verklig förbrukning
-            # ska alltid visas. Bara en orörd pool (0 % och inaktiv) lämnas
-            # onämnd, så en aldrig använd modell inte tar plats.
+            # is_active means "the BINDING limit right now" (the 5-hour
+            # window usually carries that flag), NOT "the pool exists".
+            # Verified against the live answer 2026-08-14: the Fable week
+            # sat at 11 % with is_active=false and vanished from the glass
+            # -- real consumption must always be shown. Only an untouched
+            # pool (0 % and inactive) is left unmentioned, so a never-used
+            # model takes no space.
             scope = limit.get("scope")
             model = scope.get("model") if isinstance(scope, dict) else None
             display = (model.get("display_name")
@@ -1075,17 +1086,19 @@ def _usage_request(token):
     )
 
 
-# Maskinvid probelås: OAVSETT hur många tokenservrar som råkar köra (launchd,
-# en worktree, en manuell start på annan port) får högst EN prata med
-# api.anthropic.com. Båda 429-incidenterna 2026-08-13/14 var i grunden
-# överflödig upstream-trafik — den här grinden gör varianten "en instans
-# till" strukturellt ofarlig i stället för att lita på att ingen startar en.
+# Machine-wide probe lock: NO MATTER how many tokenservers happen to run
+# (launchd, a worktree, a manual start on another port), at most ONE may
+# talk to api.anthropic.com. Both 429 incidents of 2026-08-13/14 were at
+# bottom redundant upstream traffic -- this gate makes the "one more
+# instance" variant structurally harmless instead of trusting that nobody
+# starts one.
 _PROBE_LOCK_PATH = _state_dir() / "claude-probe.lock"
 
-# Straffrutan ÖVERLEVER omstarter: cooldownen var ren minnesstat, så varje
-# serveromstart glömde pågående backoff och petade direkt på den heta
-# bucketen igen (sett två gånger 2026-08-14, båda självförvållade). Filen
-# bor bredvid probelåset och läses lat vid första probecykeln.
+# The penalty box SURVIVES restarts: the cooldown was pure memory state, so
+# every server restart forgot the backoff in progress and poked the hot
+# bucket again at once (seen twice on 2026-08-14, both self-inflicted). The
+# file lives next to the probe lock and is read lazily on the first probe
+# cycle.
 _PROBE_STATE_PATH = _state_dir() / "claude-probe-state.json"
 _probe_state_loaded = False
 
@@ -1119,24 +1132,25 @@ def _save_probe_state(cooldown_until):
             json.dumps({"cooldown_until": cooldown_until}),
             encoding="utf-8")
     except OSError:
-        pass  # utan disk är beteendet som förr: bättre än att krascha
+        pass  # without disk the behaviour is as before: better than crashing
 
 
 # ---------------------------------------------------------------------------
-# OTA-annonsen: senaste bygget på Macen, läst ur torget.bin:s inbäddade
-# appbeskrivning — samma sanning som enheten själv rapporterar om sin
-# körande version. Enheten jämför och visar UPDATE READY-notisen vid
-# skillnad (beslut 2026-08-14). Bara version och byggtid annonseras,
-# aldrig sökvägar eller innehåll.
+# The OTA announcement: the latest build on the Mac, read from torget.bin's
+# embedded app descriptor -- the same truth the device itself reports about
+# its running version. The device compares and shows the UPDATE READY
+# notice on a difference (decision 2026-08-14). Only version and build time
+# are announced, never paths or content.
 
 _OTA_BUILD_ROOT = Path(__file__).resolve().parents[2]
 _ota_desc_cache = {}  # path -> (mtime, version|None)
 
 
 def _read_app_desc_version(path):
-    """esp_app_desc_t bor på offset 32 (imageheader 24 B + segmentheader
-    8 B): magic_word, secure_version, reserv[2], version[32], project[32].
-    Fel magi eller fel projekt ⇒ None — hellre tyst än fel avbild."""
+    """esp_app_desc_t lives at offset 32 (image header 24 B + segment
+    header 8 B): magic_word, secure_version, reserv[2], version[32],
+    project[32]. Wrong magic or wrong project => None -- better silent than
+    the wrong image."""
     try:
         with open(path, "rb") as handle:
             handle.seek(32)
@@ -1173,10 +1187,10 @@ def _ota_available_version():
 
 
 def _hold_probe_lock():
-    """Icke-blockerande exklusivt lås; returnerar filobjektet eller None.
+    """Non-blocking exclusive lock; returns the file object or None.
 
-    ``flock`` på macOS/Linux, ``msvcrt.locking`` på Windows — samma grind,
-    olika systemanrop. Båda släpps när filen stängs.
+    ``flock`` on macOS/Linux, ``msvcrt.locking`` on Windows -- the same
+    gate, different system calls. Both are released when the file closes.
     """
     try:
         _PROBE_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -1184,9 +1198,10 @@ def _hold_probe_lock():
         if fcntl is not None:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         elif msvcrt is not None:
-            # LK_NBLCK låser ett byte utan att blockera och höjer OSError om
-            # en annan instans redan äger det. Filen måste ha en byte att
-            # låsa, annars lyckas anropet utan att grinden betyder något.
+            # LK_NBLCK locks one byte without blocking and raises OSError
+            # if another instance already owns it. The file must have a
+            # byte to lock, otherwise the call succeeds without the gate
+            # meaning anything.
             handle.write("1")
             handle.flush()
             handle.seek(0)
@@ -1312,28 +1327,29 @@ def _probe_diagnostics():
 
 
 def _probe_limits():
-    """Ett minimalt API-anrop; returnerar {sessionPct, sessionResetMin,
-    weekPct, weekResetMin} eller None om något saknas på vägen."""
+    """One minimal API call; returns {sessionPct, sessionResetMin,
+    weekPct, weekResetMin} or None if anything is missing along the way."""
     with _limits_lock:
         _load_probe_state_locked()
         resting = time.time() < _probe_cooldown_until
         if resting:
-            # I nedkylning efter 429 — statusen står kvar på backoff-
-            # strängen, och den överhoppade cykeln räknas som en miss HÄR,
-            # i samma sektion, inte senare i _refresh_limits.
+            # Cooling down after a 429 -- the status stays on the backoff
+            # string, and the skipped cycle counts as a miss HERE, in the
+            # same section, not later in _refresh_limits.
             _note_probe_schedule_locked(False)
     if resting:
         return None
     lock = _hold_probe_lock()
     if lock is None:
-        # En annan instans äger upstream-trafiken just nu. Ingen nätaktivitet
-        # härifrån — den andra instansens svar fyller ändå enhetens behov.
+        # Another instance owns the upstream traffic right now. No network
+        # activity from here -- the other instance's answer serves the
+        # device's needs anyway.
         _publish_probe_status("probe_held_by_other_instance")
         return None
     try:
         return _probe_limits_locked()
     finally:
-        lock.close()  # stänger filen = släpper flocken
+        lock.close()  # closing the file = releasing the flock
 
 
 def _probe_limits_locked():
@@ -1365,13 +1381,13 @@ def _probe_cycle(outcome):
     token = None
     for candidate, expires_at in candidates:
         if candidate in _dead_tokens:
-            # Värdet är redan avvisat av API:t — vänta på ett nytt i stället
-            # för att elda på 429-straffrutan med ett känt dött token.
+            # The value is already rejected by the API -- wait for a new one
+            # instead of feeding the 429 penalty box with a known dead token.
             outcome.status = "token_dead_awaiting_refresh"
             continue
         if expires_at and expires_at / 1000 < time.time():
-            # Tokenen har gått ut; Claude Code förnyar den i nyckelringen
-            # nästa gång den pratar med API:t — vänta och läs om.
+            # The token has expired; Claude Code renews it in the keychain
+            # the next time it talks to the API -- wait and reread.
             outcome.status = (f"token_expired_"
                              f"{datetime.fromtimestamp(expires_at / 1000):%H:%M}")
             continue
@@ -1386,29 +1402,32 @@ def _probe_cycle(outcome):
         except urllib.error.HTTPError as error:
             outcome.status = f"usage_http_{error.code}"
             if error.code == 429:
-                # Rate-limited: varje ytterligare anrop förlänger straffet.
-                # Avbryt hela cykeln — ingen andra källa, ingen header-probe
-                # — och vila minst tio minuter (mer om Retry-After kräver).
+                # Rate-limited: every further call extends the penalty.
+                # Abort the whole cycle -- no second source, no header
+                # probe -- and rest at least ten minutes (more if
+                # Retry-After demands it).
                 retry_after = 0
                 try:
                     retry_after = int((error.headers or {}).get(
                         "Retry-After", 0))
                 except (TypeError, ValueError):
                     retry_after = 0
-                # Publiceras tillsammans med statusen i _publish_probe_outcome
-                # så GET / aldrig ser ny nedkylning bredvid gammal status.
+                # Published together with the status in
+                # _publish_probe_outcome, so GET / never sees a new
+                # cooldown beside an old status.
                 outcome.cooldown_until = time.time() + max(retry_after, 600)
                 outcome.status = (
                     f"usage_http_429 + backoff_until_"
                     f"{datetime.fromtimestamp(outcome.cooldown_until):%H:%M}")
-                # En omstart får inte glömma straffet.
+                # A restart must not forget the penalty.
                 _save_probe_state(outcome.cooldown_until)
                 return None
             if error.code in (401, 403):
-                # Avvisad token säger inget om nästa källa — prova den innan
-                # vi ger upp. Men skicka ALDRIG samma värde igen: det är dött
-                # tills källan levererar ett nytt (ett felmarkerat värde
-                # självläker på samma sätt, nästa förnyelse byter strängen).
+                # A rejected token says nothing about the next source -- try
+                # it before giving up. But NEVER send the same value again:
+                # it is dead until the source delivers a new one (a
+                # wrongly marked value self-heals the same way, the next
+                # renewal changes the string).
                 _dead_tokens[candidate] = f"http_{error.code}"
                 while len(_dead_tokens) > 8:
                     _dead_tokens.pop(next(iter(_dead_tokens)))
@@ -1421,10 +1440,10 @@ def _probe_cycle(outcome):
             break
         else:
             found = _parse_usage_limits(usage, time.time())
-            # Kräv inte sessionPct: utan aktivt 5-timmarsfönster (bara mobil-
-            # eller molnarbete) rapporterar API:t sessionsraden med passerad
-            # reset, och parsern hoppar korrekt över den. Veckosiffrorna är
-            # fortfarande giltiga — kasta inte bort dem.
+            # Do not require sessionPct: without an active 5-hour window
+            # (only mobile or cloud work) the API reports the session row
+            # with a passed reset, and the parser correctly skips it. The
+            # week figures are still valid -- do not throw them away.
             if found:
                 outcome.status = "usage_http_200 + ok"
                 return found
@@ -1433,13 +1452,13 @@ def _probe_cycle(outcome):
             break
 
     if token is None:
-        # Alla källor avvisade eller utgångna — header-proben med samma
-        # tokens vore samma svar till högre kostnad.
+        # Every source rejected or expired -- the header probe with the
+        # same tokens would be the same answer at a higher cost.
         return None
 
     body = json.dumps({
-        "model": "claude-haiku-4-5",  # billigaste proben; headrarna är desamma
-        "max_tokens": 0,              # prefill utan output — i praktiken gratis
+        "model": "claude-haiku-4-5",  # the cheapest probe; the headers are the same
+        "max_tokens": 0,              # prefill without output -- effectively free
         "messages": [{"role": "user", "content": "ping"}],
     }).encode()
     req = urllib.request.Request(
@@ -1452,8 +1471,8 @@ def _probe_cycle(outcome):
             "anthropic-beta": "oauth-2025-04-20",
         },
     )
-    # Header-proben får aldrig skriva över usage-utfallet — det var så en
-    # felmappning maskerades som "http_401" en hel kväll.
+    # The header probe must never overwrite the usage outcome -- that is how
+    # a mapping bug was masked as "http_401" for a whole evening.
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             headers = dict(resp.headers)
@@ -1467,18 +1486,19 @@ def _probe_cycle(outcome):
         outcome.status += "; fallback_http_200"
 
     now_ts = time.time()
-    # Diagnostik vid första proben: headernamnen är hämtade ur Clawdmeters
-    # beskrivning, inte ur egen observation — loggen är facit om de skiljer.
+    # Diagnostics at the first probe: the header names come from
+    # Clawdmeter's description, not from our own observation -- the log is
+    # the answer key if they differ.
     global _headers_logged
     if not _headers_logged:
         _headers_logged = True
         for name in sorted(headers):
             if "ratelimit" in name.lower():
                 log.info("ratelimit-header: %s", name)
-    # Tre fönster, samma som Claudes egen usage-panel: 5-timmars, veckan
-    # (alla modeller) och veckan för tyngsta modellen (Fable/Opus). Fönster-
-    # namnet i headern varierar ("5h", "7d", "7d_opus", ...) — mappa på
-    # innehåll, inte exakt namn.
+    # Three windows, the same as Claude's own usage panel: 5-hour, the week
+    # (all models) and the week for the heaviest model (Fable/Opus). The
+    # window name in the header varies ("5h", "7d", "7d_opus", ...) -- map
+    # on content, not on the exact name.
     found = _parse_limit_headers(headers, now_ts)
 
     outcome.headers = sorted(
@@ -1492,18 +1512,19 @@ def _probe_cycle(outcome):
 
 
 def _probe_interval_s():
-    """Backa av vid upprepade misslyckanden: 240 → 480 → 960 s (tak).
+    """Back off on repeated failures: 240 -> 480 -> 960 s (cap).
 
-    En död token fick tidigare hamra API:t varannan minut i timmar — det
-    mönstret utlöste en 429-straffruta. Lyckad probe återställer takten.
+    A dead token used to hammer the API every other minute for hours --
+    that pattern triggered a 429 penalty box. A successful probe restores
+    the cadence.
     """
     if _probe_status.startswith((
             "no_claude_oauth_token",
             "token_expired_",
             "token_dead_awaiting_refresh")):
-        # De här lägena stannar i _probe_limits_locked innan urlopen. En kort
-        # kontroll läser bara om den lokala nyckelringen/credentials-filen och
-        # upptäcker snabbt när den officiella Claude-klienten bytt token.
+        # These states stop in _probe_limits_locked before urlopen. A short
+        # check only rereads the local keychain/credentials file and quickly
+        # notices when the official Claude client has changed the token.
         return AUTH_RECOVERY_EVERY_S
     return LIMITS_EVERY_S * (2 ** min(_probe_failure_streak, 2))
 
@@ -1517,18 +1538,19 @@ def _refresh_limits():
         refreshed = _probe_limits()
     except Exception as e:
         refreshed = None
-        # Kraschar proben INNAN den hunnit sätta status skulle den gamla
-        # strängen stå kvar — i värsta fall "usage_http_200 + ok" medan
-        # värdena försvinner. En krasch är en bugg (ingen vanlig felväg):
-        # sätt en egen status och logga traceback en gång per episod.
+        # If the probe crashes BEFORE it has set a status the old string
+        # would stand -- at worst "usage_http_200 + ok" while the values
+        # vanish. A crash is a bug (not an ordinary error path): set a
+        # status of its own and log the traceback once per episode.
         crashed = f"probe_crashed: {type(e).__name__}"
         if _probe_status != crashed:
-            log.exception("claude-proben kraschade (status var %s)",
+            log.exception("the claude probe crashed (status was %s)",
                           _probe_status)
         _publish_probe_status(crashed)
-    # Övergångsloggen: 401 som dyker upp, 429-backoff, återhämtningen.
-    # Läses här på probetråden (enda skrivaren), efter att statussträngen
-    # är färdigbyggd — samma läge står stilla utan att skriva en rad till.
+    # The transition log: a 401 appearing, the 429 backoff, the recovery.
+    # Read here on the probe thread (the only writer), after the status
+    # string is fully built -- the same state stays put without writing
+    # another line.
     if _probe_status != _probe_status_logged:
         log.info("claude-probe: %s -> %s",
                  _probe_status_logged or "start", _probe_status)
@@ -1561,19 +1583,19 @@ def get_limits():
 
 
 # ---------------------------------------------------------------------------
-# Codex-limits: PASSIV läsning — Codex CLI skriver sina rate-limits i
-# rollout-filerna (~/.codex/sessions/**/rollout-*.jsonl) varje gång den kör:
-# used_percent, window_minutes (10080 = veckofönstret) och resets_at (epok).
-# Vi läser senaste snapshoten; har fönstret hunnit nollas sedan dess (resets_at
-# passerat) är siffran meningslös och vi serverar null — aldrig gamla procent
-# som låtsas vara färska.
+# Codex limits: PASSIVE reading -- the Codex CLI writes its rate limits
+# into the rollout files (~/.codex/sessions/**/rollout-*.jsonl) every time
+# it runs: used_percent, window_minutes (10080 = the week window) and
+# resets_at (epoch). We read the latest snapshot; if the window has reset
+# since (resets_at passed) the figure is meaningless and we serve null --
+# never old percentages pretending to be fresh.
 
-# Följer CODEX_HOME, precis som Codex CLI och månadsskanningen: den
-# desktop-appen och managed Windows-installationer sätter den, och
-# run-windows-task.ps1 exporterar den innan tjänsten startar. En hårdkodad
-# ~/.codex här gjorde att beredskapsgrinden, rate-limit-skanningen,
-# agentstatus och Max Tracker läste en annan profil än månadsvärdet — på en
-# Codex-only-maskin med egen CODEX_HOME öppnades porten aldrig.
+# Follows CODEX_HOME, just like the Codex CLI and the month scan: the
+# desktop app and managed Windows installs set it, and run-windows-task.ps1
+# exports it before the service starts. A hard-coded ~/.codex here made the
+# readiness gate, the rate-limit scan, agent status and Max Tracker read a
+# different profile than the month value -- on a Codex-only machine with
+# its own CODEX_HOME the port never opened.
 CODEX_SESSIONS = codex_usage.default_sessions_dir()
 CODEX_LIMITS_EVERY_S = 30
 CODEX_APP_SERVER_TIMEOUT_S = 15
@@ -1584,10 +1606,10 @@ _last_codex_limits = None
 
 
 def _any_provider_dir(projects_dir):
-    """Sant när minst en av leverantörernas kataloger finns.
+    """True when at least one of the providers' directories exists.
 
-    Starten väntar på detta i stället för på Claude ensam: endera
-    leverantören räcker för att tjänsten ska ha något att servera.
+    Startup waits on this instead of on Claude alone: either provider is
+    enough for the service to have something to serve.
     """
     return projects_dir.is_dir() or CODEX_SESSIONS.is_dir()
 
@@ -1605,7 +1627,7 @@ _observation_timestamp = observation_timestamp
 
 
 def _codex_window(win, now_ts):
-    """{used_percent, window_minutes, resets_at} → (pct, reset_min) eller None."""
+    """{used_percent, window_minutes, resets_at} -> (pct, reset_min) or None."""
     if not isinstance(win, dict):
         return None
     pct = win.get("used_percent")
@@ -1727,17 +1749,18 @@ def _codex_app_server_command():
 
 
 def _pump_lines(stream):
-    """Rader från ``stream`` i en kö, lästa av en daemon-tråd.
+    """Lines from ``stream`` in a queue, read by a daemon thread.
 
-    ``select`` dög inte: på Windows tar ``select()`` bara sockets, aldrig
-    pipes, så app-server-läsningen kastade där i stället för att hämta
-    Codex-kvoten. En tråd som blockerar i ``readline`` ger samma
-    icke-blockerande läsning på alla plattformar.
+    ``select`` would not do: on Windows ``select()`` takes only sockets,
+    never pipes, so the app-server read raised there instead of fetching
+    the Codex quota. A thread blocking in ``readline`` gives the same
+    non-blocking read on every platform.
 
-    Tråden är daemon och äger inget: dör app-servern — eller dödar vi den i
-    ``finally`` — returnerar ``readline`` tomt och tråden tar slut av sig
-    själv. ``None`` i kön är EOF-vakten, så läsaren slipper vänta ut hela
-    sin deadline när strömmen redan är stängd.
+    The thread is a daemon and owns nothing: if the app server dies -- or
+    we kill it in ``finally`` -- ``readline`` returns empty and the thread
+    ends by itself. ``None`` in the queue is the EOF sentinel, so the
+    reader need not wait out its whole deadline when the stream is already
+    closed.
     """
     lines = queue.Queue()
 
@@ -1749,7 +1772,7 @@ def _pump_lines(stream):
                     break
                 lines.put(line)
         except (OSError, ValueError):
-            pass  # stängd ström under nedstängning är väntat, inte ett fel
+            pass  # a closed stream during shutdown is expected, not an error
         finally:
             lines.put(None)
 
@@ -1804,7 +1827,7 @@ def _read_codex_app_server_limits(timeout_s=CODEX_APP_SERVER_TIMEOUT_S):
                 if process.poll() is not None:
                     break
                 continue
-            if line is None:  # EOF-vakten: strömmen är slut
+            if line is None:  # the EOF sentinel: the stream is done
                 break
             try:
                 message = json.loads(line)
@@ -1829,11 +1852,12 @@ def _read_codex_app_server_limits(timeout_s=CODEX_APP_SERVER_TIMEOUT_S):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=1)
-            # Rören stängs uttryckligen, i den här ordningen: processen är
-            # redan död, så läsartråden har lämnat readline och kan inte
-            # väckas mitt i en stängd ström. Utan det här hängde tre
-            # deskriptorer per cykel på GC:n — en gång var 30:e sekund,
-            # dygnet runt, i en tjänst som aldrig startar om.
+            # The pipes are closed explicitly, in this order: the process
+            # is already dead, so the reader thread has left readline and
+            # cannot be woken in the middle of a closed stream. Without
+            # this, three descriptors per cycle hung on the GC -- once
+            # every 30 s, around the clock, in a service that never
+            # restarts.
             for pipe in (process.stdin, process.stdout, process.stderr):
                 if pipe is not None:
                     try:
@@ -1945,7 +1969,7 @@ def _read_codex_observations(path: Path, now_ts, block_size=64 * 1024,
 
 
 def _scan_codex_limits():
-    """Senaste rate_limits-snapshoten ur de nyaste rollout-filerna."""
+    """The latest rate_limits snapshot from the newest rollout files."""
     if not CODEX_SESSIONS.is_dir():
         return {}
     try:
@@ -2101,11 +2125,11 @@ def _persist_quota_records_async(cache, records):
 _max_tracker_writer_lock = threading.Lock()
 _max_tracker_dirty = False
 _max_tracker_writer_running = False
-_ERROR_LOG_THROTTLE_S = 300.0  # ihållande fel: en loggrad per 5 min räcker
-_max_tracker_save_failing_since = None  # monotonic; None = sparar fint
-_last_save_error_logged = None  # None = aldrig loggat (0.0 sväljer första
-                                # felet på en nystartad maskin — monotonic
-                                # räknar från boot)
+_ERROR_LOG_THROTTLE_S = 300.0  # persistent error: one log line per 5 min is enough
+_max_tracker_save_failing_since = None  # monotonic; None = saving fine
+_last_save_error_logged = None  # None = never logged (0.0 swallows the first
+                                # error on a freshly started machine --
+                                # monotonic counts from boot)
 
 
 def _max_tracker_writer(store):
@@ -2120,23 +2144,23 @@ def _max_tracker_writer(store):
         try:
             store.save()
             if _last_save_error_logged is not None:
-                # Lyckad skrivning stänger felepisoden: logga slutet och
-                # nollställ strypningen, så nästa fel (en NY episod) loggar
-                # direkt i stället för att ärva gamla fönstret.
-                log.info("max-tracker: save lyckades igen efter %.0f s",
+                # A successful write closes the error episode: log the end
+                # and reset the throttle, so the next error (a NEW episode)
+                # logs at once instead of inheriting the old window.
+                log.info("max-tracker: save succeeded again after %.0f s",
                          time.monotonic()
                          - (_max_tracker_save_failing_since
                             or time.monotonic()))
                 _last_save_error_logged = None
             _max_tracker_save_failing_since = None
         except Exception:
-            # En misslyckad skrivning får inte tappa dirty-signalen: markera
-            # om och avsluta, så NÄSTA observation (eller slutflushen)
-            # försöker igen — ingen het loop, ingen tyst dataförlust.
-            # Loggen är strypt: ett trasigt skrivmål ska inte fylla filen.
-            # Episoden syns på GET / (maxTrackerSaveOk) så en full disk
-            # (ENOSPC, issue #62) är degraderad hälsa, inte en loggrad
-            # ingen läser.
+            # A failed write must not drop the dirty signal: mark again
+            # and exit, so the NEXT observation (or the final flush) tries
+            # again -- no hot loop, no silent data loss. The log is
+            # throttled: a broken write target must not fill the file.
+            # The episode shows on GET / (maxTrackerSaveOk) so a full disk
+            # (ENOSPC, issue #62) is degraded health, not a log line nobody
+            # reads.
             now = time.monotonic()
             if _max_tracker_save_failing_since is None:
                 _max_tracker_save_failing_since = now
@@ -2144,8 +2168,8 @@ def _max_tracker_writer(store):
                     now - _last_save_error_logged >= _ERROR_LOG_THROTTLE_S):
                 _last_save_error_logged = now
                 log.exception(
-                    "max-tracker: save misslyckades — observationerna står "
-                    "kvar i minnet och nästa försök kommer")
+                    "max-tracker: save failed — the observations stay in "
+                    "memory and the next attempt is coming")
             with _max_tracker_writer_lock:
                 _max_tracker_dirty = True
                 _max_tracker_writer_running = False
@@ -2248,15 +2272,16 @@ def _refresh_usage_totals(projects_dir, max_tracker_store=None):
         if (_last_compute_error_logged is None or
                 now - _last_compute_error_logged >= _ERROR_LOG_THROTTLE_S):
             _last_compute_error_logged = now
-            log.exception("usage-omräkningen kraschade — /api/tokens "
-                          "serverar frysta siffror tills den lyckas igen")
+            log.exception("usage recompute crashed — /api/tokens serves "
+                          "frozen figures until it succeeds again")
     else:
         if _compute_failing_since is not None:
-            log.info("usage-omräkningen frisk igen efter %.0f s",
+            log.info("usage recompute healthy again after %.0f s",
                      time.monotonic() - _compute_failing_since)
             _compute_failing_since = None
-            # Återhämtningen stänger episoden: nästa fel är en NY episod
-            # och ska logga direkt, inte ärva gamla strypfönstret.
+            # The recovery closes the episode: the next error is a NEW
+            # episode and must log at once, not inherit the old throttle
+            # window.
             _last_compute_error_logged = None
     with _cache_lock:
         if refreshed is not None:
@@ -2379,13 +2404,13 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     global _snapshot_refreshing
     with _cache_lock:
         if _last_result is None:
-            # Första skanningen låg här, UNDER låset, och tog 211 s på en
-            # Mac med stor historik: varje /api/tokens-anrop köade bakom
-            # den och gick i timeout, så panelen blev STALE efter varje
-            # omstart av en frisk tjänst (issue #62). Nu startas den i
-            # bakgrunden och svaret är en platshållare som säger vad den
-            # är (usageTotals nedan). Kraschar den startas den om först
-            # efter RECOMPUTE_EVERY_S — inte per anrop.
+            # The first scan used to sit here, UNDER the lock, and took
+            # 211 s on a Mac with a large history: every /api/tokens call
+            # queued behind it and timed out, so the panel went STALE
+            # after every restart of a healthy service (issue #62). Now it
+            # is started in the background and the answer is a placeholder
+            # that says what it is (usageTotals below). If it crashes it
+            # is restarted only after RECOMPUTE_EVERY_S -- not per call.
             now = time.monotonic()
             if (not _snapshot_refreshing and
                     (_last_computed == 0.0 or
@@ -2404,8 +2429,8 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
             result = dict(_last_result)
             totals = _usage_totals_state_locked(have_result=True)
 
-    # null = ärlig frånvaro (nyckelring/probe/loggar otillgängliga) — skärmen
-    # visar streck, aldrig hittade procent. Samma regel som sharePct.
+    # null = honest absence (keychain/probe/logs unavailable) -- the screen
+    # shows dashes, never invented percentages. The same rule as sharePct.
     current_ts = time.time() if now_ts is None else now_ts
     usage_history = _get_usage_history() if history is None else history
     cache = _get_quota_cache() if quota_cache is None else quota_cache
@@ -2494,12 +2519,13 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
             _mark_max_tracker_dirty(max_tracker_store)
 
     claude_session_reset = session_reset_at
-    # Reset-tiderna tas från posten oavsett live/cache: en cachad post bär
-    # sin cykels riktiga reset (quota_cache räknar ut poster vid passerad
-    # reset), och deltan "idag" ska ÖVERLEVA en 429-mörkläggning — panelen
-    # får bli ärligt äldre (stale-flaggan), aldrig tom (kravet 2026-08-14:
-    # skottsäkert för alla som kör detta). I historiken SPELAS däremot bara
-    # live-observationer in — en cachad procent är ingen ny mätning.
+    # The reset times come from the entry whether live or cached: a cached
+    # entry carries its cycle's real reset (quota_cache expires entries at
+    # a passed reset), and the "today" delta must SURVIVE a 429 blackout
+    # -- the panel may become honestly older (the stale flag), never empty
+    # (the requirement of 2026-08-14: bulletproof for everyone running
+    # this). Only live observations are RECORDED into the history, though
+    # -- a cached percentage is not a new measurement.
     claude_week_reset = claude_week["reset_at"]
     claude_model_reset = claude_model["reset_at"]
     codex_week_reset = codex_week["reset_at"]
@@ -2549,12 +2575,14 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
                                now=current_ts))
     _add_forecast(result, "claude", claude_forecast)
     _add_forecast(result, "codex", codex_forecast)
-    # OTA-annonsen rider på kvotpollen: noll ny infrastruktur, och enheten
-    # avgör själv (mot sin körande version) om notisen ska visas.
+    # The OTA announcement rides on the quota poll: zero new infrastructure,
+    # and the device decides itself (against its running version) whether
+    # to show the notice.
     result["otaAvailableVersion"] = _ota_available_version()
-    # Additiv nyckel (tokens_parse.c hoppar över okända toppnivånycklar):
-    # säger om volymräknarna ovan är mätningar, platshållare eller frysta.
-    # Fångad under låset ovan, från SAMMA läsning som valde räknarna.
+    # Additive key (tokens_parse.c skips unknown top-level keys): says
+    # whether the volume counters above are measurements, placeholders or
+    # frozen. Captured under the lock above, from the SAME read that chose
+    # the counters.
     result["usageTotals"] = totals
     result["v"] = 2
     return result
@@ -2627,13 +2655,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    projects_dir = None  # sätts i main
-    agent_status = None  # bakgrundstjänst, sätts i main
-    max_tracker_store = None  # sätts i main
-    github_monitor = None  # frivillig publik repo-monitor, sätts i main
-    plans = {"claude": None, "codex": None}  # sätts i main från --*-plan
-    interaction_store = None  # "Needs You", av som standard; sätts i main
-    interaction_timeout_s = 120.0  # sätts i main från --interaction-timeout
+    projects_dir = None  # set in main
+    agent_status = None  # background service, set in main
+    max_tracker_store = None  # set in main
+    github_monitor = None  # optional public repo monitor, set in main
+    plans = {"claude": None, "codex": None}  # set in main from --*-plan
+    interaction_store = None  # "Needs You", off by default; set in main
+    interaction_timeout_s = 120.0  # set in main from --interaction-timeout
     claude_interactions = False
     codex_interactions = False
     interaction_detail = False
@@ -2644,11 +2672,11 @@ class Handler(BaseHTTPRequestHandler):
     agent_status_relay_reason = None
     discovery_status = "off"
     discovery_reason = None
-    # Innehållsfritt närvarobevis för startup-hälsan. Den befintliga panelen
-    # pollar /api/agent-status varje sekund. Två kända panel-GET från samma
-    # icke-loopback-klient inom ett kort fönster är starkare evidens än en
-    # ensam curl. Kandidatadressen hålls bara i processminnet och returneras
-    # eller loggas aldrig.
+    # Content-free presence evidence for the startup health. The existing
+    # panel polls /api/agent-status every second. Two known panel GETs from
+    # the same non-loopback client within a short window are stronger
+    # evidence than a lone curl. The candidate address is held only in
+    # process memory and is never returned or logged.
     panel_poll_lock = threading.Lock()
     panel_poll_candidate_host = None
     panel_poll_candidate_at = None
@@ -2663,8 +2691,8 @@ class Handler(BaseHTTPRequestHandler):
     request_drain_timeout_s = REQUEST_DRAIN_TIMEOUT_S
 
     def handle_one_request(self):
-        # Ny begäran, ny bokföring: kroppen är oläst tills _read_json_body
-        # säger något annat.
+        # New request, new bookkeeping: the body is unread until
+        # _read_json_body says otherwise.
         self._request_body_consumed = False
         super().handle_one_request()
 
@@ -2676,32 +2704,32 @@ class Handler(BaseHTTPRequestHandler):
         return length if length > 0 else 0
 
     def _drain_request_body(self):
-        """Töm en oläst, annonserad kropp innan svaret skickas.
+        """Drain an unread, announced body before the response is sent.
 
-        Ett tidigt avslag (403 fel Host/Origin, 415 fel Content-Type, 404
-        avstängd rutt) svarar på huvudena ensamma och stänger sedan — med
-        kroppen kvar oläst i sockeln. Windows behandlar en stängning med
-        olästa byte som en abort (WSAECONNABORTED, WinError 10053) och
-        kastar bort svaret som redan skickats, så en riktig hookklient ser
-        ett avbrott där ett 403/415/404 var meningen.
+        An early rejection (403 wrong Host/Origin, 415 wrong Content-Type,
+        404 disabled route) answers on the headers alone and then closes --
+        with the body still unread in the socket. Windows treats a close
+        with unread bytes as an abort (WSAECONNABORTED, WinError 10053) and
+        discards the response already sent, so a real hook client sees an
+        abort where a 403/415/404 was meant.
 
-        Samma idé som BoundedThreadingHTTPServer._reject_busy använder före
-        sin 503, men inte samma tak: den tömmer som mest 8 KiB *huvuden* och
-        stannar vid huvudenas slut, medan den här tömningen gäller den
-        annonserade kroppen. Gemensam är deadlinen (0.05 s). Två tak gäller
-        här: som mest request_drain_limit byte OCH som mest
-        request_drain_timeout_s totalt (en egen deadline, inte bara en
-        socket-timeout per läsning — annars kan en motpart som droppar en
-        byte i taget hålla oss kvar i det oändliga). En långsam eller
-        fientlig motpart kostar alltså aldrig mer än det. Byten kastas
-        oöppnade — de parsas aldrig och loggas aldrig.
+        The same idea BoundedThreadingHTTPServer._reject_busy uses before
+        its 503, but not the same cap: that one drains at most 8 KiB of
+        *headers* and stops at the end of the headers, while this drain
+        covers the announced body. The deadline (0.05 s) is shared. Two
+        caps apply here: at most request_drain_limit bytes AND at most
+        request_drain_timeout_s in total (a deadline of its own, not just
+        a socket timeout per read -- otherwise a peer dripping one byte at
+        a time could hold us forever). A slow or hostile peer therefore
+        never costs more than that. The bytes are discarded unopened --
+        never parsed, never logged.
 
-        Returnerar antalet tömda byte (0 när det inte fanns något att göra),
-        vilket bara testerna bryr sig om.
+        Returns the number of drained bytes (0 when there was nothing to
+        do), which only the tests care about.
         """
         if getattr(self, "_request_body_consumed", False):
             return 0
-        # Bara ett försök per begäran, oavsett hur det gick.
+        # Only one attempt per request, however it went.
         self._request_body_consumed = True
         remaining = min(self._advertised_body_length(),
                         self.request_drain_limit)
@@ -2801,7 +2829,7 @@ class Handler(BaseHTTPRequestHandler):
                 cls.panel_last_http_stall_recovery_boot = recovery_boot
                 became_ready = not was_fresh
         if became_ready:
-            log.info("startup-health: panelkontakt READY via %s", self.path)
+            log.info("startup-health: panel contact READY via %s", self.path)
 
     @classmethod
     def _panel_health_snapshot(cls):
@@ -2905,8 +2933,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         if len(raw) != length:
             return None
-        # Hela den annonserade kroppen ligger nu i minnet, inget kvar i
-        # sockeln — _drain_request_body har ingenting att göra.
+        # The whole announced body is now in memory, nothing left in the
+        # socket -- _drain_request_body has nothing to do.
         self._request_body_consumed = True
         try:
             return json.loads(raw)
@@ -2959,19 +2987,20 @@ class Handler(BaseHTTPRequestHandler):
         return payload
 
     def _reply(self, produce):
-        """Svara 200 med produce(), annars 500 {"error": ...} — skärmen
-        avvisar error-formen per kontrakt och behåller senaste goda värden.
-        Orsaken ska ändå alltid synas i loggen: ett tyst 500 var så
-        max-tracker-buggarna förblev osynliga.
+        """Answer 200 with produce(), otherwise 500 {"error": ...} -- the
+        screen rejects the error form by contract and keeps its last good
+        values. The cause must still always show in the log: a silent 500
+        is how the max-tracker bugs stayed invisible.
 
-        Producenten och svarsskrivningen bedöms VAR FÖR SIG: ett
-        ConnectionError/TimeoutError från producenten är ett serverfel som
-        ska loggas och bli 500 — bara under själva skrivningen betyder det
-        att klienten försvann.
+        The producer and the response write are judged SEPARATELY: a
+        ConnectionError/TimeoutError from the producer is a server error
+        that must be logged and become a 500 -- only during the write
+        itself does it mean the client went away.
 
-        Ett undantag: platshållare (issue #62) till en klient som inte sagt
-        att den förstår dem är inget serverfel utan ett 503 i felformen,
-        med usageTotals-blocket bredvid så den som läser vet varför."""
+        One exception: a placeholder (issue #62) to a client that has not
+        said it understands them is not a server error but a 503 in the
+        error form, with the usageTotals block beside it so the reader
+        knows why."""
         try:
             payload = produce()
         except self._NotMeasuredYet as pending:
@@ -2982,7 +3011,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         except Exception:
-            log.exception("500 på %s", self.path)
+            log.exception("500 on %s", self.path)
             try:
                 self._send(500, {"error": "internal server error"})
             except OSError:
@@ -2991,10 +3020,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._send(200, payload)
         except (ConnectionError, TimeoutError):
-            pass  # klienten försvann mitt i svaret — inte ett serverfel
+            pass  # the client went away mid-response -- not a server error
         except Exception:
-            # T.ex. oserialiserbar payload — serverfel, inte klientens.
-            log.exception("500 på %s (svarsskrivningen)", self.path)
+            # E.g. an unserializable payload -- a server error, not the client's.
+            log.exception("500 on %s (response write)", self.path)
             try:
                 self._send(500, {"error": "internal server error"})
             except OSError:
@@ -3022,9 +3051,9 @@ class Handler(BaseHTTPRequestHandler):
         candidate = dict(payload)
         candidate["pending"] = pending
         if not interactions.response_fits(candidate):
-            log.warning("pending-posten fick inte plats i /api/agent-status "
-                        "(%d jobb) — agentlistan går före och posten "
-                        "utelämnas", len(pending))
+            log.warning("the pending entry did not fit in /api/agent-status "
+                        "(%d jobs) — the agent list takes precedence and "
+                        "the entry is left out", len(pending))
             return payload
         return candidate
 
@@ -3065,8 +3094,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.interaction_store.await_verdict(
                 entry, is_alive=lambda: not self._hook_client_gone())
         except Exception:
-            log.exception("interaktionen kraschade — lämnar beslutet till "
-                          "terminalen")
+            log.exception("the interaction crashed — leaving the decision "
+                          "to the terminal")
             body = None
         try:
             if body is None:
@@ -3125,8 +3154,8 @@ class Handler(BaseHTTPRequestHandler):
             result = self.interaction_store.await_result(
                 entry, is_alive=lambda: not self._hook_client_gone())
         except Exception:
-            log.exception("Codex-frågan kraschade — lämnar beslutet till "
-                          "datorn")
+            log.exception("the Codex question crashed — leaving the "
+                          "decision to the computer")
             result = None
         try:
             if result is None:
@@ -3156,8 +3185,8 @@ class Handler(BaseHTTPRequestHandler):
             result = self.interaction_store.await_result(
                 entry, is_alive=lambda: not self._hook_client_gone())
         except Exception:
-            log.exception("Codex-behörigheten kraschade — lämnar beslutet "
-                          "till datorn")
+            log.exception("the Codex permission crashed — leaving the "
+                          "decision to the computer")
             result = None
         try:
             body = (codex_permission_response(result.verdict)
@@ -3196,7 +3225,7 @@ class Handler(BaseHTTPRequestHandler):
         if not accepted:
             self._send(409, {"ok": False, "reason": "signature rejected"})
             return
-        log.warning("panikstopp från enheten: %d väntande beslut nekade",
+        log.warning("panic stop from the device: %d pending decisions denied",
                     denied)
         self._send(200, {"ok": True, "denied": denied})
 
@@ -3217,8 +3246,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if claude_route or codex_route:
             if not self._is_loopback():
-                log.warning("hook-POST från %s avvisad — hookar får bara "
-                            "komma från den här maskinen",
+                log.warning("hook POST from %s rejected — hooks may only "
+                            "come from this machine",
                             self.address_string())
                 self._send(403, {"error": "hooks must be local"})
                 return
@@ -3269,10 +3298,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def _root_payload(self):
-        # EN läsning av failing_since — ok-flaggan och varaktigheten måste
-        # komma ur samma ögonblick. Två läsningar lät en återhämtning mitt
-        # emellan ge None i subtraktionen (500 på själva diagnostikrutten)
-        # och en nystartad episod ge ok=true med varaktighet bredvid.
+        # ONE read of failing_since -- the ok flag and the duration must
+        # come from the same instant. Two reads let a recovery in between
+        # put None into the subtraction (a 500 on the diagnostics route
+        # itself) and a freshly started episode give ok=true with a
+        # duration beside it.
         failing_since = _compute_failing_since
         save_failing_since = _max_tracker_save_failing_since
         endpoints = ["/api/tokens", "/api/agent-status",
@@ -3290,8 +3320,8 @@ class Handler(BaseHTTPRequestHandler):
                 # one locked read so they always describe the same cycle.
                 **_probe_view(),
                 "claudeLocalUsage": _claude_plan_usage_status,
-                # GET / parsas aldrig av skärmen — fält kan läggas till
-                # utan kontraktsrisk.
+                # GET / is never parsed by the screen -- fields can be
+                # added without contract risk.
                 "usageComputeOk": failing_since is None,
                 "usageComputeFailingForS":
                     (int(time.monotonic() - failing_since)
@@ -3333,12 +3363,12 @@ class Handler(BaseHTTPRequestHandler):
                 }}
 
     def log_message(self, fmt, *args):
-        pass  # 30 s-pollning ska inte fylla loggen
+        pass  # 30 s polling must not fill the log
 
     def log_error(self, fmt, *args):
-        # BaseHTTPRequestHandler ruttar log_error genom log_message, så den
-        # tystade accessloggen tystade felen med sig. Accessloggen ska vara
-        # tyst; felen ska inte.
+        # BaseHTTPRequestHandler routes log_error through log_message, so
+        # the silenced access log silenced the errors with it. The access
+        # log must be quiet; the errors must not.
         log.warning("http %s: %s", self.address_string(), fmt % args)
 
 
@@ -3348,8 +3378,8 @@ def _build_arg_parser():
     ap.add_argument("--dir", default=os.path.expanduser("~/.claude/projects"))
     ap.add_argument(
         "--claude-plan", choices=["pro", "max5x", "max20x"], default=None,
-        help="Claude-planen för Max Trackers badge (frivillig, allowlistad "
-             "i max_tracker.PLAN_LABELS)")
+        help="the Claude plan for Max Tracker's badge (optional, "
+             "allowlisted in max_tracker.PLAN_LABELS)")
     ap.add_argument(
         "--plan", action="append", metavar="PROVIDER=USD", default=[],
         help="what a subscription actually costs per month, in USD: "
@@ -3369,13 +3399,13 @@ def _build_arg_parser():
              "carry yet. No code change needed")
     ap.add_argument(
         "--codex-plan", choices=["plus", "pro"], default=None,
-        help="Codex-planen för Max Trackers badge (frivillig, allowlistad "
-             "i max_tracker.PLAN_LABELS)")
+        help="the Codex plan for Max Tracker's badge (optional, "
+             "allowlisted in max_tracker.PLAN_LABELS)")
     ap.add_argument(
         "--github-repo", type=normalize_repo,
         default=os.environ.get("VIBEPULSE_GITHUB_REPO") or None,
-        help="Frivilligt publikt GitHub-repo som owner/repository. "
-             "Kan också sättas med VIBEPULSE_GITHUB_REPO.")
+        help="optional public GitHub repo as owner/repository. "
+             "Can also be set with VIBEPULSE_GITHUB_REPO.")
     ap.add_argument(
         "--publish", metavar="RELAY_URL", default=None,
         help="also POST the numbers endpoints (/api/tokens, /api/max-tracker,"
@@ -3465,8 +3495,9 @@ def _resolve_interaction_config(args, path=None):
         try:
             saved = load_config(config_path)
         except ConfigError:
-            log.error("ogiltig VibePulse-konfiguration i %s — sparade "
-                      "interaktioner stängs av", config_path, exc_info=True)
+            log.error("invalid VibePulse configuration in %s — saved "
+                      "interactions are turned off", config_path,
+                      exc_info=True)
             saved = VibePulseConfig()
             invalid_saved = True
         claude_override = (True if args.interactions else
@@ -3776,7 +3807,7 @@ def main():
         name="log-rotation-watch",
         daemon=True,
     ).start()
-    log.info("startar: rev %s", _SERVER_REV)
+    log.info("starting: rev %s", _SERVER_REV)
     global _claude_plan, _codex_plan, _plan_costs, _price_table
     _claude_plan = args.claude_plan
     _codex_plan = args.codex_plan
@@ -3793,62 +3824,68 @@ def main():
         github_token = _read_github_token()
         github_monitor = GitHubMonitor(args.github_repo, token=github_token)
         github_monitor.start()
-        log.info("GitHub-monitor startad för publika repot %s (stargazare: %s)",
-                 args.github_repo,
-                 "auth" if github_token else "anonym — namn blir 'någon'")
+        log.info("GitHub monitor started for the public repo %s "
+                 "(stargazers: %s)", args.github_repo,
+                 "auth" if github_token else "anonymous — the name becomes "
+                 "'someone'")
     Handler.github_monitor = github_monitor
 
     Handler.projects_dir = Path(args.dir)
     if not _any_provider_dir(Handler.projects_dir):
-        # Var: SystemExit. Under launchd (KeepAlive utan ThrottleInterval)
-        # blev det en tyst respawn var ~10:e sekund som fyllde loggen.
-        # Vänta i stället — katalogen dyker upp när agenten körts en första
-        # gång på maskinen.
+        # Was: SystemExit. Under launchd (KeepAlive without
+        # ThrottleInterval) that became a silent respawn every ~10 s that
+        # filled the log. Wait instead -- the directory appears once the
+        # agent has run a first time on the machine.
         #
-        # Vänta på BÅDA leverantörerna, inte bara Claude. Codex-siffrorna
-        # läses ur CODEX_SESSIONS och behöver inte projects_dir alls, så en
-        # Codex-only-maskin har allt den behöver — väntade vi på Claude där
-        # skulle porten aldrig öppnas, inget annonseras över DNS-SD, och
-        # panelen hitta en dator den inte kan fråga. Förutsättningen i
-        # README är "Claude Code och/eller Codex"; endera räcker.
-        log.warning("hittar varken %s eller %s — finns Claude Code eller "
-                    "Codex på den här maskinen? Väntar på att någon av dem "
-                    "dyker upp (Ctrl-C avbryter).",
+        # Wait for EITHER provider, not just Claude. The Codex figures are
+        # read from CODEX_SESSIONS and do not need projects_dir at all, so
+        # a Codex-only machine has everything it needs -- had we waited for
+        # Claude there, the port would never open, nothing would be
+        # advertised over DNS-SD, and the panel would find a computer it
+        # cannot ask. The README's prerequisite is "Claude Code and/or
+        # Codex"; either is enough.
+        log.warning("found neither %s nor %s — is Claude Code or Codex on "
+                    "this machine? Waiting for one of them to appear "
+                    "(Ctrl-C aborts).",
                     Handler.projects_dir, CODEX_SESSIONS)
         try:
             while not _any_provider_dir(Handler.projects_dir):
                 time.sleep(30)
         except KeyboardInterrupt:
             raise SystemExit(1) from None
-        log.info("hittade en leverantörskatalog — fortsätter starten.")
+        log.info("found a provider directory — continuing startup.")
     if not Handler.projects_dir.is_dir():
-        # Startar ändå: Path.glob på en katalog som inte finns ger tomt
-        # resultat utan att kasta, så Claude-siffrorna blir noll i stället
-        # för ett fel. Codex-only är ett fullgott läge, inte ett halvtrasigt.
-        log.info("%s saknas — kör vidare utan Claude-siffror (Codex hittad).",
+        # Starts anyway: Path.glob on a directory that does not exist gives
+        # an empty result without raising, so the Claude figures become
+        # zero instead of an error. Codex-only is a fully valid state, not
+        # a half-broken one.
+        log.info("%s missing — continuing without Claude figures (Codex "
+                 "found).",
                  Handler.projects_dir)
 
-    # Förstaskanningen är en uppvärmning plus en loggrad — /api/tokens gör om
-    # get_snapshot per request ändå, och HTTP-trådarna kör den redan
-    # parallellt, så samma anrop tål en bakgrundstråd. Den låg tidigare FÖRE
-    # bind, vilket med stora loggkataloger höll porten stängd i minuter efter
-    # varje `launchctl kickstart`. Det var alltid trist för skärmen; med
-    # Needs You blev det på riktigt fel — en hook som får connection refused
-    # faller (helt säkert, men helt i onödan) tillbaka till terminalen fast
-    # tjänsten är sekunder från att kunna hålla den. Nu binder servern direkt
-    # och värmer i bakgrunden: agent-status och hookarna är incrementella och
-    # svarar meningsfullt på en gång, /api/tokens svarar när skanningen är
-    # klar (skärmen visar streck/stale tills dess, precis som vid nätfel).
+    # The first scan is a warm-up plus a log line -- /api/tokens redoes
+    # get_snapshot per request anyway, and the HTTP threads already run it
+    # in parallel, so the same call tolerates a background thread. It used
+    # to sit BEFORE bind, which with large log directories kept the port
+    # closed for minutes after every `launchctl kickstart`. That was always
+    # sad for the screen; with Needs You it became actually wrong -- a hook
+    # that gets connection refused falls back (entirely safely, but
+    # entirely needlessly) to the terminal although the service is seconds
+    # from being able to hold it. Now the server binds at once and warms
+    # up in the background: agent status and the hooks are incremental and
+    # answer meaningfully right away, /api/tokens answers once the scan is
+    # done (the screen shows dashes/stale until then, just as on a network
+    # error).
     def _first_scan_warmup():
         global _snapshot_refreshing
         t0 = time.monotonic()
-        # Gör själva skanningen här, i den här tråden, i stället för att
-        # gå via get_snapshot: den svarar numera direkt med en platshållare
-        # (issue #62) och startar skanningen i bakgrunden, och en logg-
-        # rad byggd på platshållaren hade sagt "0 tokens idag". Anspråket
-        # görs under låset så en tidig /api/tokens och uppvärmningen
-        # aldrig kör _compute samtidigt; förlorar vi kapplöpningen väntar
-        # vi in den trådens resultat i stället.
+        # Do the scan itself here, on this thread, instead of going via
+        # get_snapshot: that now answers at once with a placeholder (issue
+        # #62) and starts the scan in the background, and a log line built
+        # on the placeholder would have said "0 tokens today". The claim is
+        # made under the lock so an early /api/tokens and the warm-up never
+        # run _compute at the same time; if we lose the race we wait for
+        # that thread's result instead.
         with _cache_lock:
             claimed = _last_result is None and not _snapshot_refreshing
             if claimed:
@@ -3861,22 +3898,24 @@ def main():
                 time.sleep(0.2)
         snap = _last_result
         if snap is None:
-            # _refresh_usage_totals har redan loggat kraschen (strypt) och
-            # usageTotals på GET / står på refreshing tills nästa försök.
-            log.warning("förstaskanningen gav inget resultat på %.0f s — "
-                        "/api/tokens serverar platshållare tills en "
-                        "omräkning lyckas", time.monotonic() - t0)
+            # _refresh_usage_totals has already logged the crash (throttled)
+            # and usageTotals on GET / stays on refreshing until the next
+            # attempt.
+            log.warning("the first scan produced no result in %.0f s — "
+                        "/api/tokens serves placeholders until a recompute "
+                        "succeeds", time.monotonic() - t0)
             return
-        # Samma ärlighet som net.c och simulatorn: utan Claude-källa är
-        # nollorna inte mätningar, och "0 tokens idag" i starthändelsen
-        # läses som en dag utan arbete av den som kammar loggarna.
+        # The same honesty as net.c and the simulator: without a Claude
+        # source the zeros are not measurements, and "0 tokens today" in
+        # the startup event reads as a day without work to whoever combs
+        # the logs.
         if not snap.get("claudeSourcePresent", True):
-            log.info("förstaskanning %.1f s: ingen Claude-källa på den här "
-                     "maskinen — volym okänd, inte noll",
+            log.info("first scan %.1f s: no Claude source on this machine "
+                     "— volume unknown, not zero",
                      time.monotonic() - t0)
             return
-        log.info("förstaskanning %.1f s: %s tokens idag, %d sessioner, "
-                 "%s denna månad",
+        log.info("first scan %.1f s: %s tokens today, %d sessions, "
+                 "%s this month",
                  time.monotonic() - t0,
                  f"{snap['dayTokens']:,}".replace(",", " "),
                  snap["daySessions"],
@@ -3902,59 +3941,60 @@ def main():
     secret = _configure_interactions(
         interaction_config, args.interaction_timeout,
         audit=lambda action, row: log.info(
-            "interaktion %s: %s", action,
+            "interaction %s: %s", action,
             json.dumps(row, sort_keys=True)))
     if secret is None and interaction_config.agent_status_relay:
         secret = interactions.read_device_key()
     if interaction_config.legacy_claude_panel_v1:
-        log.warning("OSÄKER KOMPATIBILITET PÅ: gamla Claude-panelens "
-                    "v1-svar saknar provider/digest-bindning. Stäng av "
-                    "med --no-legacy-claude-panel-v1 när gammal firmware "
-                    "inte längre används. Codex förblir v2.")
+        log.warning("UNSAFE COMPATIBILITY ON: the old Claude panel's v1 "
+                    "answers lack the provider/digest binding. Turn it off "
+                    "with --no-legacy-claude-panel-v1 once old firmware is "
+                    "no longer in use. Codex stays v2.")
     if Handler.interaction_store is not None:
-        log.info("Needs You på: Claude=%s, Codex=%s på 127.0.0.1:%d, "
-                 "håller %.0f s. "
-                 "Enhetsnyckel: %s. Innehåll till skärmen: %s",
-                 "ja" if interaction_config.claude_interactions else "nej",
-                 "ja" if interaction_config.codex_interactions else "nej",
+        log.info("Needs You on: Claude=%s, Codex=%s on 127.0.0.1:%d, "
+                 "holding %.0f s. "
+                 "Device key: %s. Content to the screen: %s",
+                 "yes" if interaction_config.claude_interactions else "no",
+                 "yes" if interaction_config.codex_interactions else "no",
                  args.port, Handler.interaction_timeout_s,
-                 "finns" if secret else "SAKNAS — enheten kan inte svara",
-                 "ja (--interaction-detail)"
+                 "present" if secret else "MISSING — the device cannot answer",
+                 "yes (--interaction-detail)"
                  if interaction_config.interaction_detail
-                 else "nej, bara att något väntar")
+                 else "no, only that something is waiting")
         if not secret:
-            log.warning("ingen enhetsnyckel hittad — hookar parkeras och "
-                        "faller tillbaka till terminalen. Sätt "
-                        "TK_VIBEPULSE_DEVICE_KEY i secrets.h (samma värde "
-                        "som skärmen bygger med) för att kunna svara.")
+            log.warning("no device key found — hooks are parked and fall "
+                        "back to the terminal. Set TK_VIBEPULSE_DEVICE_KEY "
+                        "in secrets.h (the same value the screen is built "
+                        "with) to be able to answer.")
 
     interaction_relay_adapter = _configure_interaction_relay(
         interaction_config,
         secret,
         audit=lambda action, row: log.info(
-            "krypterat interaktionsrelä %s: %s", action,
+            "encrypted interaction relay %s: %s", action,
             json.dumps(row, sort_keys=True)),
     )
     if Handler.interaction_relay_status == "ready":
-        log.info("krypterat Needs You-relä redo (E2E; inga "
-                 "frågor eller kommandon loggas)")
+        log.info("encrypted Needs You relay ready (E2E; no questions or "
+                 "commands are logged)")
     elif Handler.interaction_relay_status == "disabled":
-        log.warning("krypterat Needs You-relä avstängt: %s; LAN och "
-                    "terminalfallback fortsätter",
+        log.warning("encrypted Needs You relay off: %s; LAN and the "
+                    "terminal fallback continue",
                     Handler.interaction_relay_reason)
     if Handler.agent_status_relay_status == "ready":
-        log.info("krypterat agentstatus-relä redo (E2E; fast storlek, "
-                 "kort livslängd, ingen klartext hos molnet)")
+        log.info("encrypted agent-status relay ready (E2E; fixed size, "
+                 "short lifetime, no plaintext at the cloud)")
     elif Handler.agent_status_relay_status == "disabled":
-        log.warning("krypterat agentstatus-relä avstängt: %s; direkt LAN "
-                    "fortsätter", Handler.agent_status_relay_reason)
+        log.warning("encrypted agent-status relay off: %s; direct LAN "
+                    "continues", Handler.agent_status_relay_reason)
 
     relay_publisher = None
     if args.publish:
-        # Producenterna ÄR handlarnas: reläet kan aldrig glida ifrån det
-        # LAN-endpointsen serverar. Agentstatus och Needs You publiceras
-        # medvetet inte — reläet bär siffror, aldrig aktivitet (samma gräns
-        # som firmwarens test/test_relay_boundary.py håller).
+        # The producers ARE the handler's: the relay can never drift from
+        # what the LAN endpoints serve. Agent status and Needs You are
+        # deliberately not published -- the relay carries figures, never
+        # activity (the same boundary the firmware's
+        # test/test_relay_boundary.py holds).
         def _tokens_payload():
             return get_snapshot(Handler.projects_dir,
                                 max_tracker_store=Handler.max_tracker_store)
@@ -3981,9 +4021,9 @@ def main():
             "/api/github": _github_payload,
         })
         relay_publisher.start()
-        log.info("publicerar siffror till reläet som \"%s\" (högst var "
-                 "5:e minut för kvoter och var 30:e minut för GitHub/Max "
-                 "Tracker; agentstatus och Needs You publiceras ALDRIG)",
+        log.info("publishing figures to the relay as \"%s\" (at most every "
+                 "5 min for quotas and every 30 min for GitHub/Max Tracker; "
+                 "agent status and Needs You are NEVER published)",
                  machine)
 
     backfill_stop = threading.Event()
@@ -4002,9 +4042,9 @@ def main():
         discovery.start(args.port)
         Handler.discovery_status = discovery.status
         Handler.discovery_reason = discovery.reason
-        log.info("serverar http://0.0.0.0:%d/api/tokens, "
-                 "/api/agent-status, /api/max-tracker och /api/github "
-                 "(LAN — exponera inte utåt)", args.port)
+        log.info("serving http://0.0.0.0:%d/api/tokens, "
+                 "/api/agent-status, /api/max-tracker and /api/github "
+                 "(LAN — do not expose it outward)", args.port)
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
@@ -4019,10 +4059,10 @@ def main():
         backfill_stop.set()
         backfill_thread.join(timeout=max(1.0, MAX_TRACKER_BACKFILL_TICK_S * 4))
         try:
-            max_tracker_store.save()  # slutlig flush, samma som stop()-flödet
+            max_tracker_store.save()  # final flush, the same as the stop() flow
         except Exception:
-            log.exception("max-tracker: slutlig flush misslyckades — "
-                          "dagens toppar kan saknas efter omstart")
+            log.exception("max-tracker: final flush failed — today's peaks "
+                          "may be missing after a restart")
         status_service.stop()
         if srv is not None:
             srv.server_close()

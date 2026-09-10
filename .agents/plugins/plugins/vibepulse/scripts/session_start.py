@@ -17,7 +17,7 @@ DEFAULT_PORT = 8737
 HEALTH_TIMEOUT_SECONDS = 0.45
 # Content fingerprint of the tokenserver Python sources shipped beside this
 # plugin release. A test forces this marker to move whenever host code moves.
-EXPECTED_HOST_SOURCE_FINGERPRINT = "0ea5ba40e144"
+EXPECTED_HOST_SOURCE_FINGERPRINT = "21d7f23c2103"
 CODEX_CONFIG_MAX_BYTES = 64 * 1024
 # Only the three top-level string settings that decide whether a permission
 # card can reach a user at all. Anchored and quote-matched so a value inside
@@ -123,7 +123,7 @@ def classify_startup_health(root, tokens):
                 "data is fresh but the token-volume recompute behind "
                 "/api/tokens is crashing, so the value page shows dashes or "
                 "frozen totals. Read the tokenserver log for "
-                "`usage-omräkningen kraschade` and run the tokenserver smoke "
+                "`usage recompute crashed` and run the tokenserver smoke "
                 f"test.{risk}")
     if totals_state == "refreshing":
         return ("VibePulse startup health: SERVICE WARMING UP; quota data is "

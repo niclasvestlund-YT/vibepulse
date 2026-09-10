@@ -1,13 +1,13 @@
 """Aggregate Max Tracker daily activity into streaks, windows and the v1 payload.
 
-Ren funktionsyta: inget IO, ingen tidszonlogik. Varje funktion tar redan
-lokaliserade datumsträngar ("YYYY-MM-DD") och räknar enbart på kalenderdatum
-(:mod:`datetime.date`), aldrig på klockslag eller epoktid — DST-växlingar och
-årsskiften (inklusive ISO-veckoår med 53 veckor) hanteras därför korrekt utan
-någon särskild tidszonskod.
+Pure functions: no IO, no time-zone logic. Every function takes already
+localised date strings ("YYYY-MM-DD") and reasons about calendar dates only
+(:mod:`datetime.date`), never about clock times or epoch seconds -- so DST
+transitions and year boundaries (including ISO week-years with 53 weeks)
+come out right without any dedicated time-zone code.
 
-``build_payload`` konsumerar ett internt ``state``-dict som en framtida
-``MaxTrackerStore`` (backfill/persistens) förväntas mata:
+``build_payload`` consumes an internal ``state`` dict that
+``MaxTrackerStore`` (backfill/persistence) feeds it:
 
     state = {
         "claude": {
@@ -18,26 +18,26 @@ någon särskild tidszonskod.
         "stale": False,  # optional, defaults to False
     }
 
-``pct`` är kvot-procent för dagen (``None`` = ingen kvotmätning den dagen);
-alltid ett heltal eller ``None`` — enhetens parser har ett int8_t-fält och
-avvisar HELA svaret om en enda dag bär ett brutet tal, så avrundning sker
-här, inte device-side (se ``_round_day_pct``). ``act`` är sant om det fanns
-någon agentaktivitet den dagen (används för både den kombinerade
-STREAK-räkningen och som förutsättning för att räkna ut ``lvl`` — se
+``pct`` is the day's quota percentage (``None`` = no quota reading that
+day); always an integer or ``None`` -- the device parser has an int8_t
+field and rejects the WHOLE response if a single day carries a fraction,
+so rounding happens here, not device-side (see ``_round_day_pct``). ``act``
+is true if there was any agent activity that day (used both for the
+combined STREAK count and as the precondition for computing ``lvl`` -- see
 ``_provider_days``).
 
-``lvl`` (tercilnivå 0-2) har TVÅ separata källpopulationer, aldrig blandade:
-en dag med en RÅ ``vol`` (dagsvolym i tokens; blir aldrig en del av svaret,
-bara underlag) rankas via :func:`volume_levels` mot alla andra ``vol``-
-bärande dagar. En dag som istället bär ett explicit ``lvl``-fält direkt
-(så här matar :class:`MaxTrackerStore` in en tidigare SPARAD, redan
-klassificerad tercil efter en omstart) är AUKTORITATIV för sig själv —
-den används verbatim och deltar aldrig i rankningen, varken som kandidat
-eller som underlag för andras trösklar. Utan den uppdelningen skulle en
-sparad tercil (som per designen aldrig kan backa till rå volym igen)
-tyst räknas om varje gång den nya poolen av session-volymer ändras —
-[0,1,2] blir [0,0,1] efter en enda spara/läs-cykel, permanent, eftersom
-avslutade backfill-filer aldrig läses om.
+``lvl`` (tercile level 0-2) has TWO separate source populations, never
+mixed: a day with a RAW ``vol`` (day volume in tokens; never part of the
+response, only input) is ranked by :func:`volume_levels` against every
+other ``vol``-bearing day. A day that instead carries an explicit ``lvl``
+field (this is how :class:`MaxTrackerStore` feeds back a previously SAVED,
+already classified tercile after a restart) is AUTHORITATIVE for itself --
+it is used verbatim and never takes part in the ranking, neither as a
+candidate nor as input to anyone else's thresholds. Without that split a
+saved tercile (which by design can never return to raw volume) would be
+silently re-ranked every time the new pool of session volumes changes --
+[0,1,2] becomes [0,0,1] after a single save/load cycle, permanently, since
+finished backfill files are never re-read.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ log = logging.getLogger("tokenserver.state")
 
 if __package__:
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
-else:  # direktkörning: python3 tools/tokenserver/max_tracker.py
+else:  # run directly: python3 tools/tokenserver/max_tracker.py
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
 
 
