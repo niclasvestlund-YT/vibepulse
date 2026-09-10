@@ -134,6 +134,17 @@ repeating deserves attention. What a healthy boot looks like:
 
 - **`claude-probe: X -> Y`** — every probe status transition: a 401
   appearing, a 429 backoff starting, and the recovery back to ok.
+- **`claude-keychain: X -> Y`** — macOS only (OBS-20): every change in why
+  the keychain read gave no token, logged once per transition like the
+  probe line. `X` is the previous word or `start`; `Y` is `ok` (a token
+  came back) or one of `keychain_security_missing` (no `security` binary),
+  `keychain_timeout` (the prompt sat unanswered), `keychain_no_entry`
+  (exit 44, never logged in on this account), `keychain_denied_or_locked
+  (exit N)` (Deny on the prompt, or a locked keychain),
+  `keychain_malformed` (the record is not JSON) or
+  `keychain_entry_without_token`. The same word rides on `claudeProbe`
+  after `no_claude_oauth_token:` and in `claudeCredential.reason` on
+  `GET /`; the fix per word is in [agent-setup.md](agent-setup.md).
 - **`agent-status <context>: <ErrorName>`** — throttled to one per error
   type per 30 s, deliberately content-free (privacy: never a path or
   message from your sessions).
