@@ -1357,6 +1357,28 @@ class MaxTrackerStorePersistenceTests(unittest.TestCase):
             self.assertTrue(path.exists())
             self.assertEqual(quarantined[0].read_bytes(), corrupt)
 
+    def test_a_parseable_file_without_both_provider_sections_is_quarantined(self):
+        # Codex review of #105: `{}` and `{"claude": [], "codex": {}}` parse
+        # fine, loaded nothing, and were overwritten by the next save.
+        for corrupt in (b"{}", b'{"claude": [], "codex": {}}',
+                        b'{"codex": {"days": {}}}'):
+            with self.subTest(corrupt=corrupt), \
+                    tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "nested" / "max-tracker.json"
+                path.parent.mkdir()
+                path.write_bytes(corrupt)
+                with self.assertLogs("tokenserver.state",
+                                     level="WARNING") as captured:
+                    store, _, _ = _new_store(directory, path=path)
+                self.assertEqual(store._state["claude"]["days"], {})
+                self.assertFalse(path.exists())
+                quarantined = list(
+                    path.parent.glob("max-tracker.json.corrupt-*"))
+                self.assertEqual(len(quarantined), 1)
+                self.assertEqual(quarantined[0].read_bytes(), corrupt)
+                self.assertIn("missing a provider section",
+                              "\n".join(captured.output))
+
     def test_a_non_utf8_file_is_quarantined_instead_of_crashing_startup(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "nested" / "max-tracker.json"

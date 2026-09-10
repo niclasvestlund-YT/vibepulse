@@ -1115,11 +1115,19 @@ class MaxTrackerStore:
         if not isinstance(payload, dict):
             quarantine_corrupt(self.path, "top level is not an object")
             return
+        # save() always writes a dict section per provider, so a file
+        # missing one (`{}`, `{"claude": []}`) is not an older format but a
+        # damaged one: quarantine it rather than load nothing and let the
+        # next save overwrite it (the same shape smoke._tracker_state_shape
+        # already refuses).
+        if any(not isinstance(payload.get(provider), dict)
+               for provider in PROVIDERS):
+            quarantine_corrupt(
+                self.path, "missing a provider section (claude/codex)")
+            return
         with self._lock:
             for provider in PROVIDERS:
-                section = payload.get(provider)
-                if isinstance(section, dict):
-                    self._load_provider(provider, section)
+                self._load_provider(provider, payload[provider])
 
     def _load_provider(self, provider: str, section: dict) -> None:
         """Populate ``self._state`` from one provider's persisted section.
