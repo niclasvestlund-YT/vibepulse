@@ -337,6 +337,12 @@ class ClassificationTests(unittest.TestCase):
             "o4-mini": "O4 MINI",
             "codex-mini-latest": "CODEX MINI LATEST",
             "ft:gpt-4o-2024-08-06": "GPT-4O",
+            # Compact MMDD snapshots, at the end and before a variant.
+            "gpt-4-0613": "GPT-4",
+            "gpt-3.5-turbo-0125": "GPT-3.5 TURBO",
+            "gpt-4-0125-preview": "GPT-4 PREVIEW",
+            "gpt-4-1106-preview": "GPT-4 PREVIEW",
+            "o1-2024-12-17": "O1",
             "Claude-Opus-4-8 ": "OPUS 4.8",
         }
         for model_id, expected in cases.items():

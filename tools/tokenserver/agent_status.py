@@ -81,7 +81,7 @@ def derive_model_label(model_id: str) -> str:
     """Typeset a model id the way the hand-picked labels are typeset.
 
     ``claude-opus-4-8`` -> ``OPUS 4.8``; ``claude-haiku-4-5-20251001`` ->
-    ``HAIKU 4.5``; ``claude-3-7-sonnet-20250219`` -> ``SONNET 3.7``;
+    ``HAIKU 4.5``; ``claude-3-7-sonnet-20250219`` -> ``SONNET 3.7``; ``gpt-4-0125-preview`` -> ``GPT-4 PREVIEW``;
     ``claude-mythos-preview`` -> ``MYTHOS PREVIEW``; ``gpt-5.4-mini`` ->
     ``GPT-5.4 MINI``; ``gpt-4o`` -> ``GPT-4O``; ``o4-mini`` -> ``O4 MINI``;
     ``codex-mini-latest`` -> ``CODEX MINI LATEST``. Pure string work on a
