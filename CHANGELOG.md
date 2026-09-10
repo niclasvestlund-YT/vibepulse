@@ -77,8 +77,16 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   pins the log level (INFO, maximum equals default, which compiles
   `ESP_LOGD` and with it the `HTTP_CLIENT` request-line leak out
   structurally), panic print-and-reboot, the task watchdog, and LVGL's own
-  log at WARN, each with its reason. `test/test_firmware_diagnostics.py`
-  holds the pins; `docs/observability.md` has the retrieval steps.
+  log at WARN, each with its reason. Because defaults never migrate an
+  existing generated `sdkconfig` (the 2026-08-19 lesson), the root CMake
+  now refuses to configure when the effective config has lost the coredump
+  writer, the ELF format, the log ceiling, the task watchdog or the LVGL
+  log (`cmake/torget_diagnostics_guard.cmake`, naming the missing values
+  and the `idf.py reconfigure` fix). `test/test_firmware_diagnostics.py`
+  holds the pins and exercises the guard both ways; `docs/observability.md`
+  has the retrieval steps, and its signature table now points a panic and a
+  watchdog at the dump and the ledger instead of calling the banner the
+  only witness.
 
 - **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
   pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`

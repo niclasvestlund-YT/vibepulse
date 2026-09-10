@@ -86,7 +86,11 @@ lines every 30 s and a `heap:` line every 10 s.
   which step failed and gives no counts, rather than a count that was not
   proven saved.
 - The log level, panic behaviour and task watchdog are pinned in
-  `sdkconfig.defaults` with their reasons (OBS-28). `LV_USE_LOG` is on at
+  `sdkconfig.defaults` with their reasons (OBS-28), and the root CMake
+  refuses to configure when the effective `sdkconfig` has lost the
+  coredump writer, the LVGL log, the task watchdog or the log ceiling
+  (`cmake/torget_diagnostics_guard.cmake`): defaults never migrate an old
+  generated file, so a stale checkout says so instead of building blind. `LV_USE_LOG` is on at
   WARN, so the launcher's "app skipped for API-version mismatch" report
   reaches the console.
 - Fetch failures name a *redacted* target (scheme, host, and whether LAN
@@ -302,9 +306,9 @@ Verbatim strings worth grepping for, and what they mean:
 | `agentstatus kunde inte skapa HTTP-klient` | fw `agent-net` | agent feed **dead until reboot**; screen shows a frozen header meanwhile (OBS-12). |
 | `heap: internt … DMA största …` | fw `torget` | every 10 s. Watch the DMA largest block: its collapse predicted the 2026-08-06 panel freeze. Nothing alerts on it yet (OBS-27). |
 | `overlaykostnad <namn>: LVGL-pool +N B …, internt ±N B …` | fw `torget` | three lines, once at boot: what each permanent top-layer overlay (wifi-setup, settings, ota) costs. The pool figure is PSRAM (LVGL's TLSF pool lives there since the 2026-08-16 freeze fix); the internal figure is the control — a zero delta means that overlay does not touch internal RAM at all. This is the measured budget the AMOLED rule requires for a persistent layer, so read it after any flash that adds or grows one. |
-| `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the whole backtrace *now* — it will not survive the reboot (OBS-02). |
-| `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. |
-| `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died and this line is the only witness. BROWNOUT → suspect the power supply first. |
+| `Guru Meditation` / `abort()` / backtrace | fw | panic. Capture the backtrace if you are watching, but since OBS-02 it also survives the reboot: the `coredump` partition holds the ELF dump, read it with `idf.py -p <port> coredump-info` (blind spots above). |
+| `Task watchdog got triggered` | fw | a task starved IDLE — the only hang ever seen on hardware surfaced this way. The task watchdog panics, so the same coredump path applies, and the ledger counts it under `vakthund`. |
+| `omstartsorsak PANIK` / `TASKVAKTHUND` / `BROWNOUT` | fw boot banner | the previous run died. The `omstartsliggare:` line right after it says how many boots did (OBS-03), and for PANIK/TASKVAKTHUND the `coredump i flash` line says the dump is there to read. BROWNOUT → suspect the power supply first; no dump is written for it. |
 | `hittar inte … — finns Claude Code på den här maskinen?` | server | logged once at boot; the server waits for the directory instead of crash-looping. Seeing it repeatedly means something else is killing the process. |
 | `500 på /api/…` + `Traceback` | server log | a route served the sanitized error-form and this is its cause — a server bug, file it. Any traceback *without* a `500 på` line above it is doubly interesting. |
 | `usage-omräkningen kraschade` | server log | `/api/tokens` is serving frozen totals that look fresh. `usage-omräkningen frisk igen` closes the episode; until it appears, distrust the day/month numbers. |

@@ -73,6 +73,15 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/torget_lvgl_memory_guard.cmake")
 torget_require_lvgl_pool("${CONFIG_LV_MEM_SIZE_KILOBYTES}")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/torget_lvgl_qrcode_guard.cmake")
 torget_require_lvgl_qrcode("${CONFIG_LV_USE_QRCODE}")
+# Crash and log evidence (OBS-02/03/28/35): an old generated sdkconfig would
+# silently drop the coredump writer, the LVGL warnings and the task watchdog.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/torget_diagnostics_guard.cmake")
+torget_require_diagnostics(
+  "${CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH}"
+  "${CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF}"
+  "${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"
+  "${CONFIG_ESP_TASK_WDT_INIT}"
+  "${CONFIG_LV_USE_LOG}")
 
 # LVGL:s minnespool till PSRAM (frysfix 2026-08-16, se docs/lessons.md och
 # main/lv_psram_pool.c). LVGL:s inbyggda allokator lägger annars sin

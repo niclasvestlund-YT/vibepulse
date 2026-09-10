@@ -8,6 +8,8 @@ Run from the repository root or the test directory:
     python3 test/test_firmware_diagnostics.py
 """
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -50,6 +52,56 @@ for pin in (
     assert re.search(rf"^{re.escape(pin)}$", config, re.M), f"missing pin {pin}"
 assert "CONFIG_LOG_DEFAULT_LEVEL_DEBUG" not in config, (
     "DEBUG as the default level puts the relay secret on the serial line")
+
+# --- CMake: the pins are enforced against the EFFECTIVE sdkconfig ---
+# Codex review of #109: defaults seed a new sdkconfig and never migrate an
+# old one (docs/lessons.md 2026-08-19), so without a configure-time guard a
+# panel checkout that already had a sdkconfig would build without coredump,
+# LVGL log or task watchdog while every pin above passed.
+GUARD = root / "cmake" / "torget_diagnostics_guard.cmake"
+root_cmake = read("CMakeLists.txt")
+assert 'include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/torget_diagnostics_guard.cmake")' in root_cmake
+for effective in (
+    '"${CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH}"',
+    '"${CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF}"',
+    '"${CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT}"',
+    '"${CONFIG_ESP_TASK_WDT_INIT}"',
+    '"${CONFIG_LV_USE_LOG}"',
+):
+    assert effective in root_cmake, f"guard must read {effective}"
+assert root_cmake.index("project(torget)") < root_cmake.index(
+    "torget_require_diagnostics("), "the guard reads CONFIG_* after project()"
+
+
+def run_guard(values):
+    with tempfile.TemporaryDirectory() as tmp:
+        script = Path(tmp) / "check.cmake"
+        quoted = " ".join(f'"{v}"' for v in values)
+        script.write_text(
+            f'include("{GUARD.as_posix()}")\n'
+            f"torget_require_diagnostics({quoted})\n",
+            encoding="utf-8")
+        return subprocess.run(["cmake", "-P", str(script)],
+                              capture_output=True, check=False, text=True)
+
+
+ok = run_guard(["y"] * 5)
+assert ok.returncode == 0, ok.stdout + ok.stderr
+for index, name in enumerate((
+        "CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y",
+        "CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y",
+        "CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y",
+        "CONFIG_ESP_TASK_WDT_INIT=y",
+        "CONFIG_LV_USE_LOG=y")):
+    for stale in ("", "n"):
+        values = ["y"] * 5
+        values[index] = stale
+        result = run_guard(values)
+        diagnostic = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode != 0, f"{name}={stale!r} must be refused"
+        assert name in diagnostic, diagnostic
+        assert "sdkconfig is stale" in diagnostic, diagnostic
+        assert "idf.py reconfigure && idf.py build" in diagnostic, diagnostic
 
 # --- main.c: the reboot ledger and the coredump notice at boot ---
 main_c = read("main/main.c")
