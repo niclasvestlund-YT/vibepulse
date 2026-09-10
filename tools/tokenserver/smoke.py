@@ -127,8 +127,13 @@ def _get_json(url, timeout=5):
     allt utom 200 (torget_http.c), så en proxy eller cache som svarar 502
     med frisk-seende kropp får inte bli grönt här. Serverns egna 500 bär
     kontraktets {"error": ...}-kropp och parsas också."""
+    # X-VibePulse-Accepts: röktestet förstår usageTotals och räknar aldrig
+    # platshållare som mätningar, så tjänsten får svara 200 med dem under
+    # första skanningen (en klient utan headern får 503 i felformen).
+    request = urllib.request.Request(
+        url, headers={"X-VibePulse-Accepts": "usage-totals"})
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
             return resp.status, json.loads(
                 resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as e:
@@ -244,6 +249,20 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
         results.append((FAIL, f"usage-omräkningen har kraschat (i {secs} s) "
                               f"— /api/tokens serverar frysta siffror som "
                               f"ser färska ut; läs loggfilen"))
+    totals = root.get("usageTotals")
+    if isinstance(totals, dict) and totals.get("state") == "refreshing":
+        secs = totals.get("sinceS")
+        secs = secs if isinstance(secs, int) else "?"
+        results.append((VARN, f"första skanningen pågår ({secs} s) — "
+                              f"/api/tokens serverar platshållare "
+                              f"(usageTotals=refreshing); kvoten är live, "
+                              f"volymen inte mätt än"))
+    if root.get("maxTrackerSaveOk") is False:
+        secs = root.get("maxTrackerSaveFailingForS") or 0
+        results.append((VARN, f"max-tracker kan inte spara (i {secs} s) — "
+                              f"observationerna står kvar i minnet och "
+                              f"nästa försök kommer; kontrollera "
+                              f"diskutrymme och rättigheter"))
     return results
 
 
