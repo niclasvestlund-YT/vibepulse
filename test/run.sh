@@ -213,6 +213,12 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-tokens-net-recovery-policy-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/poll_backoff_policy.c \
+  test_poll_backoff_policy.c \
+  -o /tmp/torget-poll-backoff-policy-test
+/tmp/torget-poll-backoff-policy-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/agent_status_source_policy.c \
   test_agent_status_source_policy.c \
   -o /tmp/torget-agent-status-source-policy-test

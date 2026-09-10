@@ -47,8 +47,8 @@ Eleven tags:
 | `rotation` | `main/rotation.c` | IMU reads, display rotation |
 | `torget-http` | `components/torget_net/torget_http.c` | every failed GET: error name, status, cap, and a **redacted target** — `<scheme>://<host> via LAN` or `… via relä`, never the path; `LAN svarade inte, provar reläet` when a fetch fails over to the relay |
 | `tokens` | `components/app_tokens/net.c` | /api/tokens + /api/max-tracker polls |
-| `agent-net` | `components/app_tokens/agent_net.c` | /api/agent-status poll (1 Hz, log rate-limited to 30 s) |
-| `github-net` | `components/app_tokens/github_net.c` | the optional /api/github poll |
+| `agent-net` | `components/app_tokens/agent_net.c` | /api/agent-status poll (1 Hz, backing off to 30 s on consecutive misses; log rate-limited to 30 s) |
+| `github-net` | `components/app_tokens/github_net.c` | the optional /api/github poll (30 s, backing off to 300 s) |
 | `needs-you-net` | `components/app_tokens/needs_you_net.c` | signed verdict/panic POSTs (LAN only, never the relay) |
 | `interaction-relay` | `components/app_tokens/interaction_relay_net.c` | optional encrypted request/verdict and live-status transport; logs readiness/failure only, never decrypted fields |
 | `boot-health` | `components/torget_ota/boot_health.c` | the 15 s boot-health gate: proofs landed, rollback verdicts |
@@ -326,7 +326,12 @@ Verbatim strings worth grepping for, and what they mean:
 | `oväntad statuskod 404 (https://<värd> via relä)` | fw `torget-http` | the target answered but not with 200. `via relä` says the cloud mailbox answered, `via LAN` the local tokenserver — the two are otherwise indistinguishable now that the path is gone. |
 | `kroppen större än … byte, avvisad` | fw `torget-http` | payload over cap — server-side schema growth. See lessons: the 1058-byte incident. |
 | `hämtningen avvisad, värden står kvar` | fw `tokens` | fetch rejected. If no `torget-http` line explains it, the parser rejected the schema — suspect server/firmware version skew (OBS-22). |
-| `agentstatus avvisad: transportfel ESP_FAIL` | fw `agent-net` | always literally `ESP_FAIL` — the real cause is discarded before logging (OBS-12). Only says "agent feed unhappy". |
+| `agentstatus avvisad: transportfel, IO-fel (öppna/läsa)` | fw `agent-net` | the agent feed's connection or read failed (OBS-12). This poller drives `esp_http_client` itself, not through `torget-http`, so there is no companion line with the target: the line stands alone, and the host it was polling is the one the service discovery or `TK_AGENT_STATUS_URL` chose at that time. Before 2026-09-10 this line always said `ESP_FAIL` whatever the cause. An over-cap body is checked before the transport result and logs as the next row, so `transportfel, överflöde` never appears. |
+| `agentstatus avvisad: svar större än N byte` / `HTTP 503` / `ogiltigt format` | fw `agent-net` | the host answered but the response was not applied: over the cap, non-200, or the parser rejected it (schema skew, OBS-22). Each of these counts as a miss for the backoff below. |
+| `N missar i rad — hämtar var N s tills tjänsten svarar` / `tjänsten svarar igen efter N missar` | fw `tokens` | the tokens poller slowing down (30 s doubling to 300 s) and recovering (OBS-13). Logged on the transition only, never per miss: one line per step is the whole outage story. |
+| `agentstatus: N missar i rad — pollar var N ms …` / `agentstatus svarar igen efter N missar` | fw `agent-net` | same for the agent feed (1 s doubling to 30 s). A miss is any response that was not applied, so a host that answers 200 with a rejected body backs off too. |
+| `max tracker: N missar i rad — hämtar var N s` | fw `tokens` | same for the Max Tracker poll (5 min doubling to 30 min). |
+| `GitHub-flödet: N missar i rad — hämtar var N s …` / `GitHub-flödet svarar igen efter N missar` | fw `github-net` | same for the optional GitHub feed (30 s doubling to 300 s). |
 | `agentstatus kunde inte skapa HTTP-klient` | fw `agent-net` | agent feed **dead until reboot**; screen shows a frozen header meanwhile (OBS-12). |
 | `heap: internt … DMA största …` | fw `torget` | every 10 s. Watch the DMA largest block: its collapse predicted the 2026-08-06 panel freeze. Nothing alerts on it yet (OBS-27). |
 | `overlaykostnad <namn>: LVGL-pool +N B …, internt ±N B …` | fw `torget` | three lines, once at boot: what each permanent top-layer overlay (wifi-setup, settings, ota) costs. The pool figure is PSRAM (LVGL's TLSF pool lives there since the 2026-08-16 freeze fix); the internal figure is the control — a zero delta means that overlay does not touch internal RAM at all. This is the measured budget the AMOLED rule requires for a persistent layer, so read it after any flash that adds or grows one. |
