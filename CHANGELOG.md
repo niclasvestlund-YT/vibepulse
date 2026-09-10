@@ -64,6 +64,21 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **The panel backs off from a dead service instead of hammering it
+  (OBS-13, OBS-12).** In source and CI-built, **not yet flashed**: every
+  device poller ran at a fixed cadence no matter what, so a stopped
+  tokenserver got a connect attempt every second from the agent-status
+  poller alone, all day. A small pure policy (`poll_backoff_policy.c`,
+  host-tested) now lets the first miss through at the normal cadence, then
+  doubles the wait per consecutive miss up to a cap (agent status 1 s to
+  30 s, tokens 30 s to 300 s, Max Tracker 5 to 30 min) and resets on the
+  first success, logging only the transitions. The tokens poller's
+  recovery notification still cuts a long wait short. Two diagnostic holes
+  closed on the way: the agent poller names the real fetch outcome
+  (`IO-fel` vs `överflöde`) instead of a collapsed `ESP_FAIL`, and the HTTP
+  helper's one silent failure path (no memory for a client) now logs, with
+  the target redacted like every other line there.
+
 - **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
   pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`
   and the rest, per worktree, including the extra parents a multi-line one

@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <inttypes.h>
 #include <stdatomic.h>
 
 #include "esp_log.h"
@@ -25,12 +26,17 @@
 #include "max_tracker_parse.h"
 #include "tokens_parse.h"
 #include "tokens_net_recovery_policy.h"
+#include "poll_backoff_policy.h"
 #include "torget.h"
 #include "torget_http.h"
 
 static const char *TAG = "tokens";
 
 #define FETCH_EVERY_MS 30000
+/* OBS-13: consecutive misses double the wait, 30 s -> 60 -> 120 -> 240 ->
+ * 300 s cap; a success resets. The recovery task's notification still cuts
+ * a long wait short, so a station recycle gets its immediate retry. */
+#define FETCH_CAP_MS 300000
 #define BODY_MAX 2048
 #define RECOVERY_CHECK_MS 5000
 #define TOKENS_STALE_AFTER_US (120LL * 1000000LL)
@@ -103,16 +109,20 @@ static void net_task(void *arg) {
    * hamnar sedan i motfas mot Solelkollens 30-sekunderskadens. */
   vTaskDelay(pdMS_TO_TICKS(10000));
 
+  tk_poll_backoff backoff;
+  tk_poll_backoff_init(&backoff, FETCH_EVERY_MS, FETCH_CAP_MS);
   for (;;) {
     /* The recovery wake can arrive before reassociation completes. Wait for
      * live IP here on every pass so the immediate retry is not spent while
      * the station is still disconnected. */
     torget_net_wait();
     tk_tokens t;
+    bool fetched = false;
     if (torget_http_get_service("/api/tokens", TK_TOKENS_URL,
                                 TK_TOKENS_RELAY_URL,
                                 body, sizeof body, &len)
         && tk_tokens_parse(body, len, &t)) {
+      fetched = true;
       torget_ui_lock();
       tokens_apply(&t);
       torget_ui_unlock();
@@ -141,12 +151,25 @@ static void net_task(void *arg) {
       ESP_LOGW(TAG, "hämtningen avvisad, värden står kvar");
     }
     /* Misslyckad hämtning gör ingenting: appens tick tänder stale efter
-     * två minuter — Macen kan ju vara avstängd, det är inte ett fel. */
+     * två minuter — Macen kan ju vara avstängd, det är inte ett fel. Men
+     * den jagas inte heller: efter två missar i rad glesnar pollen. */
+    uint32_t streak_before = backoff.streak;
+    if (tk_poll_backoff_note(&backoff, fetched)) {
+      if (fetched) {
+        ESP_LOGI(TAG, "tjänsten svarar igen efter %" PRIu32 " missar",
+                 streak_before);
+      } else {
+        ESP_LOGW(TAG, "%" PRIu32 " missar i rad — hämtar var %" PRIu32
+                      " s tills tjänsten svarar",
+                 backoff.streak, tk_poll_backoff_delay_ms(&backoff) / 1000);
+      }
+    }
 
     /* The recovery task can interrupt this sleep after a station recycle.
      * A notification delivered while HTTP is still unwinding is retained and
      * makes the next retry immediate. */
-    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(FETCH_EVERY_MS));
+    (void)ulTaskNotifyTake(pdTRUE,
+                           pdMS_TO_TICKS(tk_poll_backoff_delay_ms(&backoff)));
   }
 }
 
@@ -165,6 +188,7 @@ static void net_task(void *arg) {
  * över 2x marginal kvar även mot ett konstruerat värsta fall.
  */
 #define MT_FETCH_EVERY_MS 300000
+#define MT_FETCH_CAP_MS 1800000  /* OBS-13: 5 -> 10 -> 20 -> 30 min cap */
 #define MT_BODY_MAX 8192
 
 #ifdef TK_MAX_TRACKER_URL
@@ -181,12 +205,16 @@ static void max_tracker_task(void *arg) {
    * aldrig konkurrerar om internminnet på en och samma gång. */
   vTaskDelay(pdMS_TO_TICKS(15000));
 
+  tk_poll_backoff backoff;
+  tk_poll_backoff_init(&backoff, MT_FETCH_EVERY_MS, MT_FETCH_CAP_MS);
   for (;;) {
     tk_max_tracker t;
+    bool fetched = false;
     if (torget_http_get_service("/api/max-tracker", TK_MAX_TRACKER_URL,
                                 TK_MAX_TRACKER_RELAY_URL,
                                 body, sizeof body, &len)
         && tk_max_tracker_parse(body, len, &t)) {
+      fetched = true;
       torget_ui_lock();
       tokens_apply_max_tracker(&t);
       torget_ui_unlock();
@@ -195,10 +223,15 @@ static void max_tracker_task(void *arg) {
     } else {
       ESP_LOGW(TAG, "max tracker-hämtningen avvisad, värden står kvar");
     }
+    if (tk_poll_backoff_note(&backoff, fetched) && !fetched) {
+      ESP_LOGW(TAG, "max tracker: %" PRIu32 " missar i rad — hämtar var %"
+                    PRIu32 " s", backoff.streak,
+               tk_poll_backoff_delay_ms(&backoff) / 1000);
+    }
     /* Misslyckad hämtning gör ingenting: skärmens egen tick tänder stale
      * efter två minuter — Macen kan ju vara avstängd, det är inte ett fel. */
 
-    vTaskDelay(pdMS_TO_TICKS(MT_FETCH_EVERY_MS));
+    vTaskDelay(pdMS_TO_TICKS(tk_poll_backoff_delay_ms(&backoff)));
   }
 }
 

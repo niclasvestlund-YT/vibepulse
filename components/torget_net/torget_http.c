@@ -95,7 +95,15 @@ static bool http_get_timeout(const char *url, char *buf, size_t cap,
   };
 
   client = esp_http_client_init(&cfg);
-  if (!client) goto done;
+  if (!client) {
+    /* OBS-12: the one silent failure path in an otherwise well-logged
+     * function. No memory for a client is a real symptom worth a line;
+     * the target is redacted like every other line here. */
+    char target[TG_NET_LOG_TARGET_CAP];
+    tg_net_log_target(target, sizeof target, url, cloud);
+    ESP_LOGW(TAG, "kunde inte skapa HTTP-klient (%s)", target);
+    goto done;
+  }
 
   /* Content-free post-restart evidence for the local health endpoint. Never
    * send it to a public relay, and never make data delivery depend on this
