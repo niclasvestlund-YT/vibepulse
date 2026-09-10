@@ -17,7 +17,9 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   option to look or hand-repair is kept. Wrong-shape JSON counts too, and
   a non-UTF-8 `max-tracker.json`, which used to raise out of the
   constructor and stop the service from starting, is quarantined the same
-  way. One helper (`state_files.py`) holds the rule for all three.
+  way. One helper (`state_files.py`) holds the rule for all three, and the
+  quarantine rename gets the same directory fsync as a save, so the kept
+  copy is durable before the warning says it is.
 
 - **Two of three state writers stopped one fsync short of durable
   (OBS-21).** `quota-cache.json` always did the full atomic dance: file

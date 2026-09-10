@@ -90,6 +90,34 @@ class UsageHistoryPersistenceTests(unittest.TestCase):
                 "claude", "week", 10, reset_at=DAY, at=0))
             self.assertTrue(path.exists())
 
+    def test_quarantine_rename_is_fsynced_like_a_save(self):
+        # Codex review of #105: the rename that keeps the corrupt bytes is
+        # only durable once its directory entry is, same as a save.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            path.write_text("{broken", encoding="utf-8")
+            with mock.patch(
+                    "tools.tokenserver.state_files.fsync_parent") as fsync, \
+                    self.assertLogs("tokenserver.state", level="WARNING"):
+                UsageHistory(path)
+            quarantined = list(path.parent.glob("usage-history.json.corrupt-*"))
+            self.assertEqual(len(quarantined), 1)
+            fsync.assert_called_once_with(quarantined[0])
+
+    def test_quarantine_survives_a_failed_directory_fsync(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            path.write_text("{broken", encoding="utf-8")
+            with mock.patch("tools.tokenserver.state_files.fsync_parent",
+                            side_effect=OSError("EIO")), \
+                    self.assertLogs("tokenserver.state",
+                                    level="WARNING") as captured:
+                history = UsageHistory(path)
+            self.assertEqual(history.records, ())
+            self.assertEqual(
+                len(list(path.parent.glob("usage-history.json.corrupt-*"))), 1)
+            self.assertIn("not yet durable", "\n".join(captured.output))
+
     def test_wrong_shape_is_quarantined_too(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "usage-history.json"

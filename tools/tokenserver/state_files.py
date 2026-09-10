@@ -43,6 +43,17 @@ def quarantine_corrupt(path: Path, reason: str) -> Path | None:
                     "(%s): starting empty; the next save overwrites it",
                     path.name, reason, type(error).__name__)
         return None
+    # The rename is only durable once the directory entry is (OBS-21):
+    # without this, power loss before the next state save could drop the
+    # quarantined copy the warning below promises is kept.
+    try:
+        fsync_parent(target)
+    except OSError as error:
+        log.warning("%s is unreadable (%s): quarantined as %s and starting "
+                    "empty, but the directory fsync failed (%s) so the "
+                    "copy is not yet durable.",
+                    path.name, reason, target.name, type(error).__name__)
+        return target
     log.warning("%s is unreadable (%s): quarantined as %s and starting "
                 "empty. The bytes are kept for inspection or hand repair.",
                 path.name, reason, target.name)
