@@ -28,7 +28,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "09ea41e4c7b4"
+HOST_SOURCE_FINGERPRINT = "72b051a141be"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -3449,8 +3449,7 @@ class RelaySetupTests(unittest.TestCase):
                         ["doctor"], repo_root=ROOT, config_path=path,
                         python=Path(sys.executable), codex=Path("/codex"),
                         run=runner,
-                        urlopen=lambda *_args, _response=response,
-                        **_kwargs: _response,
+                        urlopen=lambda *_args, **_kwargs: response,
                         stdout=output), 1)
                     self.assertIn("FIX Tokenserver", output.getvalue())
                     self.assertEqual(response.limits,
@@ -3761,8 +3760,7 @@ class RelaySetupTests(unittest.TestCase):
                         ["doctor"], config_path=path,
                         python=Path(sys.executable), codex=None,
                         run=FakeRunner([python_probe_ok()]),
-                        urlopen=lambda *_args, _response=response,
-                        **_kwargs: _response,
+                        urlopen=lambda *_args, **_kwargs: response,
                         stdout=output), 1)
                     self.assertIn("FIX Tokenserver", output.getvalue())
 
@@ -3853,9 +3851,7 @@ class RelaySetupTests(unittest.TestCase):
                     real_save = setup.save_config
                     calls = []
 
-                    def post_commit_failure(save_path, config, *,
-                                            calls=calls, real_save=real_save,
-                                            restore_ok=restore_ok):
+                    def post_commit_failure(save_path, config):
                         calls.append(config)
                         if len(calls) == 1:
                             real_save(save_path, config)

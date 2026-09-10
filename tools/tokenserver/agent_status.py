@@ -181,6 +181,15 @@ def _claude_event(event: Dict[str, Any], state: str,
     else:
         model = None
         effort = None
+    if effort is None:
+        # Claude Code writes ``effort`` on the transcript RECORD, beside
+        # ``type`` and ``version``, not inside the API ``message`` where
+        # ``model`` lives. Measured on a live 2.1.267 transcript: 125 of
+        # 125 assistant records carried it at the top level, none nested.
+        # Reading only the nested place served ``effort: null`` for every
+        # Claude job. The nested read stays first so a layout that ever
+        # puts it there keeps working; tool_input is still never a source.
+        effort = normalize_effort(event.get("effort"))
     return Event(state, activity, task_id, source_id, project, model, effort)
 
 
