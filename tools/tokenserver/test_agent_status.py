@@ -337,6 +337,8 @@ class ClassificationTests(unittest.TestCase):
             "o4-mini": "O4 MINI",
             "codex-mini-latest": "CODEX MINI LATEST",
             "ft:gpt-4o-2024-08-06": "GPT-4O",
+            "ft:gpt-4o-2024-08-06:acme:support-bot:abc123": "GPT-4O",
+            "ft:gpt-4.1-mini-2025-04-14:acme::xyz": "GPT-4.1 MINI",
             # Compact MMDD snapshots, at the end and before a variant.
             "gpt-4-0613": "GPT-4",
             "gpt-3.5-turbo-0125": "GPT-3.5 TURBO",

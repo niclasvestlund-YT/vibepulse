@@ -87,9 +87,13 @@ def derive_model_label(model_id: str) -> str:
     ``codex-mini-latest`` -> ``CODEX MINI LATEST``. Pure string work on a
     bounded, control-free input; never raises.
     """
-    base = _DATED_SUFFIX.sub("", model_id.strip().lower())
+    base = model_id.strip().lower()
     if base.startswith("ft:"):
-        base = base[3:]
+        # A fine-tune id is `ft:<base>:<org>:<suffix>:<id>`: only the base
+        # model is a label, the rest is account metadata that must never
+        # reach the panel (Codex review of #106).
+        base = base[3:].split(":", 1)[0]
+    base = _DATED_SUFFIX.sub("", base)
     tokens = [token for token in base.split("-") if token]
     if not tokens:
         return model_id.upper()
