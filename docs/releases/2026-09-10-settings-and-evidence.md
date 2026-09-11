@@ -48,7 +48,7 @@ python3 tools/vibepulse_setup.py status
 
 Restart the service to load the new code: on macOS, run `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`; on Windows, follow the [stop, wait, then start instructions](https://github.com/niclasvestlund-YT/vibepulse/blob/v1.1.0/docs/windows-setup.md#restarting-the-scheduled-task). Then run `python3 tools/tokenserver/smoke.py` to check the running service.
 
-Firmware installation remains a separate, explicitly authorized step. Follow the [flash-session run sheet](https://github.com/niclasvestlund-YT/vibepulse/blob/v1.1.0/docs/flash-session-2026-09.md). The coredump partition also needs a one-time USB `partition-table-flash`: OTA does not update the partition table.
+Firmware installation remains a separate, explicitly authorized step. Follow the [flash-session run sheet](https://github.com/niclasvestlund-YT/vibepulse/blob/v1.1.0/docs/flash-session-2026-09.md), but replace the run sheet's `main` checkout with `git switch --detach v1.1.0` so you build this release. The coredump partition also needs a one-time USB `partition-table-flash`: OTA does not update the partition table.
 
 This release is **source-only**. **Do not attach `torget.bin`**: local firmware builds contain Wi-Fi credentials and may contain a private device key.
 

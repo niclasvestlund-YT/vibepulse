@@ -1806,7 +1806,9 @@ class PluginPackageTests(unittest.TestCase):
                 "torget-home-01", "v1.0.0-25-g054db68", "partition-table-flash",
                 "bee5d8c", "not inherited", "Simulator captures",
                 "source-only", "Do not attach `torget.bin`",
-                "v1.0.0...v1.1.0", "docs/observability.md"):
+                "v1.0.0...v1.1.0", "docs/observability.md",
+                "replace the run sheet's `main` checkout with "
+                "`git switch --detach v1.1.0`"):
             self.assertIn(required, release)
         # The evidence boundary precedes every feature and screenshot.
         opening = release.split("\n## ", 1)[0]
