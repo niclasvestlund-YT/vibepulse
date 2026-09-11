@@ -1796,24 +1796,32 @@ class PluginPackageTests(unittest.TestCase):
                        encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        self.assertFalse(release.lstrip().startswith("# "))
+        self.assertTrue(release.startswith("VibePulse v1.1.0"))
+        self.assertIsNone(re.search(r"^# ", release, re.MULTILINE))
         for required in (
-                "VibePulse v1.1.0", "SETTINGS on the glass",
-                "An honest warm-up", "Evidence after a crash",
-                "not yet flashed or physically verified",
-                "v1.0.0-25-g054db68", "partition-table-flash",
-                "What was not re-verified", "bee5d8c", "not inherited",
+                "Settings from the panel", "Live quotas while history loads",
+                "Clearer diagnostics and recovery", "coredump partition",
+                "reboot ledger", "Poller backoff", "pinned logging",
+                "CI-built", "not yet flashed or physically verified",
+                "torget-home-01", "v1.0.0-25-g054db68", "partition-table-flash",
+                "bee5d8c", "not inherited", "Simulator captures",
                 "source-only", "Do not attach `torget.bin`",
-                "v1.0.0...v1.1.0", "serving http://", "usage recompute crashed"):
+                "v1.0.0...v1.1.0", "docs/observability.md"):
             self.assertIn(required, release)
+        # The evidence boundary precedes every feature and screenshot.
+        opening = release.split("\n## ", 1)[0]
+        for boundary in ("CI-built", "not yet flashed or physically verified",
+                         "v1.0.0-25-g054db68", "bee5d8c", "not inherited"):
+            self.assertIn(boundary, opening)
         for image in (
                 "vibepulse-settings-menu.png",
-                "vibepulse-settings-no-address.png",
-                "vibepulse-settings-about.png"):
+                "vibepulse-settings-no-address.png"):
             self.assertIn(
                 "https://raw.githubusercontent.com/"
                 "niclasvestlund-YT/vibepulse/v1.1.0/docs/img/" + image,
                 release)
+        # The ABOUT fixture displays an older sample firmware version.
+        self.assertNotIn("vibepulse-settings-about.png", release)
         # The README's release section carries the same evidence boundary.
         self.assertIn("NOT YET FLASHED", readme)
         self.assertIn("Pinned to v1.0.0's runtime `bee5d8c`", readme)
