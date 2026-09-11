@@ -792,8 +792,13 @@ Same code, same fonts, same pixels as the device — it builds the real
 platform and VibePulse against the real LVGL, and feeds it the recorded
 fixtures in `sim-fixtures/` through the same parsers the board runs. Every
 device screenshot in this README is an unmodified simulator frame (the
-banner just places three of them side by side), and the physical panel was
-reviewed against them ([review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)).
+banner just places three of them side by side). The
+[2026-08-13 physical review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)
+covered the quota pages, agent monitor states and Max Tracker pages in that
+build. It does not verify later screenshots or firmware: the v1.1.0 SETTINGS
+frames are simulator evidence only, and the firmware changes in this release
+remain CI-built and **not flashed** on `torget-home-01`, which still runs
+`v1.0.0-25-g054db68`.
 
 Keys: `[` / `]` change VibePulse page, `S` cycles agent status, `M` cycles
 Max Tracker fixtures, `T` re-feeds tokens, `G` simulates a new GitHub star,
