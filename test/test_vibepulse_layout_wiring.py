@@ -15,7 +15,7 @@ attention_fonts = (
 )
 
 assert (
-    "#define TK_USAGE_SCREEN_VIEWS (6 + TK_GITHUB_SCREEN_ENABLED + 1)" in header
+    '#include "labs_features.h"' in header
 )
 for enum_literal in (
     "VIEW_CLAUDE_FABLE = 0",
@@ -25,11 +25,9 @@ for enum_literal in (
     "VIEW_TRACKER_CLAUDE = 4",
     "VIEW_TRACKER_CODEX = 5",
     "VIEW_GITHUB = 6",
-    # Value moves with the optional GitHub tile so the indices stay dense; a
-    # fixed 7 put it past the end of ui.tiles whenever GitHub was disabled.
-    "VIEW_VALUE = 6 + TK_GITHUB_SCREEN_ENABLED",
+    "VIEW_VALUE = 7",
 ):
-    assert enum_literal in app_header
+    assert enum_literal in (root / "components/app_tokens/labs_features.h").read_text()
 assert "VIEW_VOLUME" not in app_header
 
 for removed in (
@@ -256,7 +254,7 @@ for removed_volume in (
     assert removed_volume not in source, \
         f"removed volume structure remains: {removed_volume}"
 
-assert 'lv_obj_set_tile_id(ui.tileview, index, 0, LV_ANIM_OFF)' in source
+assert 'lv_obj_set_tile_id(ui.tileview, position, 0, LV_ANIM_OFF)' in source
 assert "lv_timer_create" not in source, "steady pages must not rotate themselves"
 assert "lv_anim" not in source, "physical static gate forbids LVGL animation objects"
 assert "lv_obj_set_style_opa" not in source

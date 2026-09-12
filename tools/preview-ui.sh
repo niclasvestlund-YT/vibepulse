@@ -66,6 +66,7 @@ mkdir -m 0700 "$capture_dir"
 cmake -S "$repo/sim" -B "$repo/sim/build" -G Ninja
 cmake --build "$repo/sim/build"
 TORGET_CAPTURE_DIR="$capture_dir" "$repo/sim/build/torget-sim" --vibepulse-static-qa
+TORGET_CAPTURE_DIR="$capture_dir" "$repo/sim/build/torget-sim" --vibepulse-labs-captures
 
 "$PYTHON_BIN" - "$repo" "$output_dir" "$capture_dir" <<'PREVIEW_CONVERTER_PY'
 import os
@@ -151,6 +152,10 @@ expected_names = {
     "torget-wifi-joined.bmp",
     "torget-wifi-failed-password.bmp",
     "torget-settings-menu.bmp",
+    "torget-settings-labs-analytics.bmp",
+    "torget-settings-labs-pending.bmp",
+    "torget-settings-labs-github.bmp",
+    "torget-settings-labs-return.bmp",
     "torget-settings-over-wifi-searching.bmp",
     "torget-settings-notice-takes-over.bmp",
     "torget-settings-wifi-handoff-closed.bmp",

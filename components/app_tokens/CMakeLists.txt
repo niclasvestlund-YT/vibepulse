@@ -1,5 +1,5 @@
 set(TK_APP_TOKEN_SRCS
-       "app.c" "tokens_parse.c" "usage_presenter.c" "usage_screen.c"
+       "app.c" "labs_features.c" "labs_store.c" "tokens_parse.c" "usage_presenter.c" "usage_screen.c"
        "agent_status_parse.c" "agent_usage.c"
        "agent_monitor_policy.c" "usage_live_policy.c" "agent_completion_policy.c"
        "needs_you_policy.c" "needs_you_send_policy.c"
@@ -70,7 +70,7 @@ idf_component_register(
   REQUIRES torget_app torget_fmt cjson
   # secrets.h bor i repytroten (gitignorad), därav "../..".
   PRIV_INCLUDE_DIRS "../.."
-  PRIV_REQUIRES torget_net esp_http_client)
+  PRIV_REQUIRES torget_net esp_http_client nvs_flash)
 
 # ESP-IDF discovers PRIV_REQUIRES before Kconfig values exist. Add the optional
 # relay dependencies to the component target after configuration instead, so a

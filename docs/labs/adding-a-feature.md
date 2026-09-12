@@ -21,7 +21,10 @@ separate choices. Optional failure must not block quota updates or questions.
 
 Keep existing code in place. Introduce `components/labs_<feature>` or
 `tools/labs/<feature>` only when the feature needs its own module; reuse the
-app's existing interfaces and source ownership. Do not build a package loader
+app's existing interfaces and source ownership. Current display choices live
+in `components/app_tokens/labs_features.*` and the five-choice SETTINGS binding;
+extend the versioned NVS migration and all-mask tests when adding a choice.
+Do not build a package loader
 or framework ahead of a concrete requirement.
 
 When implementation changes defaults or activation, update this catalogue,

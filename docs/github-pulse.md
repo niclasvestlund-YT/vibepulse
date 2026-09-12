@@ -43,8 +43,10 @@ total:
    the token/agent feeds at boot); `usage_screen.c` renders the card as an extra
    carousel view; `project_star_popup.c` draws the event.
 3. **Config** (`secrets.h`, see `secrets.h.example`): `TK_GITHUB_URL` plus the
-   opt-in flags `TK_GITHUB_SCREEN_ENABLED`, `TK_GITHUB_NOTIFICATIONS_ENABLED`,
-   `TK_GITHUB_SOUND_ENABLED` (all default 0).
+   flags `TK_GITHUB_SCREEN_ENABLED`, `TK_GITHUB_NOTIFICATIONS_ENABLED`,
+   `TK_GITHUB_SOUND_ENABLED` (all default 0). Since Labs, the first two only
+   seed the defaults of a panel without a saved record; the page and the popup
+   are switched on in SETTINGS → LABS → MORE.
 
 ## What it took to make it live (2026-08-15)
 
