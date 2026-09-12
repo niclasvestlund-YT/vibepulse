@@ -76,7 +76,8 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 
 ```json
 "waits": {"todayS": 2040, "longestTodayS": 660, "blockedNowS": 252,
-          "claudeTodayS": 1500, "codexTodayS": 540, "countToday": 7}
+          "claudeTodayS": 1500, "codexTodayS": 540, "countToday": 7,
+          "dayEndsInS": 30540}
 ```
 
 `blockedNowS` is the age of the oldest still-parked interaction, or 0.
@@ -101,7 +102,14 @@ NOW`, which is the hold's whole live age, for two reasons the page
 accepts: the checkpoint lag, and midnight — at 00:10 a hold parked at
 23:50 shows `blockedNowS` 1200 and contributes at most 600 to
 `longestTodayS`, because the other 600 belong to yesterday. The provider
-header names the providers of open holds as well. When an open hold
+header is derived from the provider totals alone — the block carries no
+presence flags and the encrypted relay strips `pending`, so a relay-fed
+panel has nothing else to read — and so a freshly parked hold, whose
+first checkpoint is near zero, can leave `countToday` at 1 and
+`blockedNowS` running while both provider totals still read 0 until the
+next checkpoint; in that state the header reads the neutral `AGENTS`
+rather than guessing a name, and it becomes `CLAUDE`, `CODEX` or
+`CLAUDE + CODEX` as soon as a total is non-zero. When an open hold
 closes, the aggregate keeps publishing its **checkpointed** contribution
 until the writer has saved the row; only then does the full measured
 duration replace it. The rule is the same one throughout: the hero
@@ -146,8 +154,10 @@ visual gate below — with one correction the concept needs before it
 becomes a frame: its header row reads `CLAUDE`, but the
 dominant number is the sum over both providers. The header must name what
 the number measures — `CLAUDE + CODEX` when both contributed today,
-`CLAUDE` or `CODEX` when only one did, never one provider's name over a
-combined total — and the split bar carries the per-provider share. Then
+`CLAUDE` or `CODEX` when only one did, the neutral `AGENTS` when
+something is counted but no provider total is non-zero yet, never one
+provider's name over a combined total — and the split bar carries the
+per-provider share. Then
 the label `BLOCKED ON YOU · TODAY`, one dominant number in minutes, the
 bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
 (live, from `blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
@@ -166,7 +176,16 @@ and keeps the day totals and `LONGEST WAIT` visible with the page's
 stale marker (`STALE`, the treatment the other pages use for a source
 that stopped answering), so the reader sees a number *as of* the last
 answer, not a claim about now. The relay-fed variant follows the same
-rule with the relay's own timestamps. The number
+rule with the relay's own timestamps. **Yesterday is never shown as
+today:** the block carries `dayEndsInS`, the whole seconds until the
+host's next local midnight (DST-correct, at most 90 000), because the
+panel cannot infer the host's calendar boundary from its own clock,
+least of all over the relay. The page counts that down from the accept
+time on its monotonic clock, and once it reaches zero a retained block
+is no longer rendered as today's measurement: the totals and `LONGEST
+WAIT` become dashes with the stale marker (`DAY ENDED`), and a fresh
+accepted block — which the server has already rolled over — replaces
+them. The number
 is **never framed as waste**: the label is what it measures, not a verdict
 on the reader.
 
@@ -212,9 +231,11 @@ payload over `MAX_STATUS_BYTES` (2560) outright, and the field-wise full
 agent snapshot already measures 2 394 bytes, so the block is serialized
 as **bounded integers**: every seconds field is a whole number of
 seconds (floored) clamped to 999 999, `countToday` is clamped to 9 999,
-never a float, never scientific notation. The worst-case block is then
-132 bytes and the worst-case relay payload 2 526 bytes; the fixed-frame
-test proves it rather than the spec assuming it (below).
+`dayEndsInS` to 90 000, never a float, never scientific notation. The
+worst-case block is then 151 bytes and the worst-case relay payload
+2 545 bytes, 15 bytes under the frame; the fixed-frame test proves it
+rather than the spec assuming it (below), and any further field must
+first be paid for there.
 
 ## Data flow
 
@@ -273,14 +294,17 @@ test proves it rather than the spec assuming it (below).
    and `blockedNowS` is the largest elapsed among them. No new public API
    and nothing leaves the process; the method exists so the two sources
    are read together.
-5. The firmware's agent-status parser reads `waits` optionally (all six
+5. The firmware's agent-status parser reads `waits` optionally (all seven
    fields numeric and non-negative, else the block is treated as absent),
    stamps the accepted block with the monotonic clock, and the page
    renders it, or its stale form once `TK_WAITS_STALE_MS` has passed
    without a newer accepted block.
-6. `GET /` reports `waits: {rows, oldestDay, saveOk}` for the doctor and
-   the smoke test; a failing save uses the same FIX/VARN language as
-   `maxTrackerSaveOk`.
+6. `GET /` reports `waits: {rows, unsaved, open, oldestDay, saveOk}` —
+   rows on disk, rows closed but not yet written, open-hold markers, the
+   oldest retained day, the last save's outcome — the one schema the
+   durability section refers to, for the doctor and the smoke test; a
+   failing save uses the same FIX/VARN language as `maxTrackerSaveOk`,
+   and the smoke test asserts all five keys are present.
 
 ## Failure and privacy boundaries
 
@@ -379,7 +403,7 @@ Regression tests must prove:
   plus a full pending block and agent list, and
   `test_encrypted_status_strips_pending_and_fits_fixed_frame` gains the
   worst-case `waits` block (every seconds field 999 999, `countToday`
-  9 999) beside the field-wise full agent snapshot and still fits
+  9 999, `dayEndsInS` 90 000) beside the field-wise full agent snapshot and still fits
   `MAX_STATUS_BYTES`; a float or an over-clamp value never reaches the
   wire;
 - a corrupt ledger is quarantined and a failing save shows on `GET /`;
@@ -389,8 +413,13 @@ Regression tests must prove:
 - the page's stale rule (C host test on the page model): a retained
   snapshot older than `TK_WAITS_STALE_MS` renders `BLOCKED RIGHT NOW` as
   dashes and the totals with the stale marker, a newer accepted block
-  clears it, and a snapshot that was never accepted shows the absent
-  state, not stale;
+  clears it, a snapshot that was never accepted shows the absent state,
+  not stale, and a retained block whose `dayEndsInS` has counted down to
+  zero renders the totals as dashes with `DAY ENDED` until a newer block
+  arrives; the header reads `AGENTS` for a block with `countToday` 1 and
+  both provider totals 0;
+- `dayEndsInS` is the whole seconds to the host's next local midnight,
+  23 or 25 hours across a DST change, never more than 90 000;
 - the page's landmark captures match the seven frames above, and the header
   reads `CLAUDE + CODEX` in the both-providers frame and the single name
   in the one-provider frame.
