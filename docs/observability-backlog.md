@@ -418,16 +418,21 @@ has no post-close reading. No leak is visible across the two cycles that have
 both readings.
 
 Critically, **it does not lower the low-water mark per open.** Cycles 2 and 3
-moved it by zero. Cycle 1's 556-byte drop was a transient that happened to
-coincide with an open window, not a consequence of opening one. A prediction of
-~-556 B per cycle was made from cycle 1 and is refuted by cycles 2 and 3.
+moved it by zero. Cycle 1's 556-byte drop coincided with an open window; cycles 2 and 3 moved
+nothing. That disproves the fixed ~-556 B per-open cost predicted from cycle 1,
+but one drop in three deliberate opens, after two window-adjacent drops that
+prompted the experiment, does not exclude an intermittent or timing-dependent
+listener effect: the listener is unproven as a cause, not refuted, until the
+attribution instrumentation below exists.
 
 So the honest state of this item, after three wrong turns:
 
 1. The heap low-water figure and the LVGL lock failures were first treated as one
    problem. They are two: one is memory, the other is a mutex timeout.
-2. TLS was blamed next. The interval analysis refutes it — the handshakes
-   precede everything because they happen every 2.5 s.
+2. TLS was blamed next. The interval analysis does not support it — the
+   handshakes precede everything because they happen every 2.5 s — so an
+   immediate mechanism is unsupported; delayed contention is not ruled out,
+   and excluding TLS needs a build with every TLS client off.
 3. The OTA listener was blamed third, on two coincidences. Three measured
    cycles refute that too.
 
