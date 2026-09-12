@@ -79,6 +79,11 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
           "claudeS": 1500, "codexS": 540, "count": 7, "dayEndS": 30540}
 ```
 
+One optional key, `"reset": 1`, is added only while the served day is the
+day of a persisted `dayReset` (the clock-correction release below) and is
+absent otherwise; the panel treats absent as 0 and any other value as a
+malformed block.
+
 The keys are short on purpose: the direct-LAN capacity gate
 (`test/test_agent_status_body_capacity.py`) encodes the worst-case
 snapshot with Python's default JSON separators and requires it to stay
@@ -128,9 +133,19 @@ the reset `servedDay` in one write; and retention prunes on both sides
 of the window in general — rows older than the cutoff and rows ending
 after the served day's end plus one day, the most a legitimate midnight
 overlap can reach — so a future-dated row never survives a prune even
-when a reset was missed. The page then shows the real day's waits from
-the next poll rather than an empty future day for as long as the clock
-error was large. The single wall anchor
+when a reset was missed. **The discontinuity is shown, not smoothed
+over:** the page may already have displayed the future day's non-zero
+totals under `TODAY`, and the real day's total is usually smaller, so
+a reset must never look like a counter that retreated. The block
+carries `"reset": 1` for the rest of the reset day (served from the
+persisted `dayReset` epoch, so it survives a restart and ends at the
+next rollover), and the page renders such a block's totals under a
+`CLOCK RESET` marker in the same slot `STALE` and `DAY ENDED` use — the
+numbers are the real day's measurement and are shown as such, and the
+marker names why they are lower than what the glass showed before. The
+page then shows the real day's waits from the next poll rather than an
+empty future day for as long as the clock error was large. The single
+wall anchor
 keeps rows from relocating; this rule keeps "today" itself from
 relocating, so `todayS` cannot change on a backward step even though
 the host's calendar briefly says an earlier date. **Open holds count too, but only what is on disk:** `todayS`, the
@@ -254,7 +269,23 @@ fetch, and never more than 60 s
 past the snapshot's build, and the spec says so rather than promising
 the LAN's 20 s over a path that cannot deliver it; on the LAN the budget
 starts at `TK_WAITS_STALE_MS` (20 000 ms) minus the measured request
-duration. **Yesterday is never shown as
+duration. **The relay source clear is not a frame.** The relay poller
+today synthesises an empty snapshot once `TK_AGENT_RELAY_STALE_MS`
+(20 000 ms) passes without a frame (`clear_stale_status` in
+`interaction_relay_net.c` through `tokens_clear_agent_status_relay`,
+gated once per relay-owned generation by
+`tk_agent_source_should_clear_relay`), so the agent rows do not linger;
+that clear is a local timer, not something the server said, and it
+carries no information about `waits`. So the clear path empties the
+agent rows only — `tokens_clear_agent_status_relay` gains no `waits`
+and the page model's `waits` slot is written by accepted frames alone —
+and the retained block keeps its accept stamp, ages into `STALE` on its
+own 60 s relay budget above, and stays `STALE` (or becomes `DAY ENDED`
+when its countdown runs out) until a frame arrives; it never becomes
+absent on a timer. An **accepted** frame without a `waits` block — an
+older server, or a rollback — is a server statement and renders the
+absent state, on the LAN and over the relay alike, so a rollback does
+not leave retained data on the glass. **Yesterday is never shown as
 today:** the block carries `dayEndS`, the whole seconds until the
 host's next local midnight (DST-correct, at most 90 000), because the
 panel cannot infer the host's calendar boundary from its own clock,
@@ -382,13 +413,14 @@ agent snapshot already measures 2 394 bytes, so the block is serialized
 as **bounded integers**: every seconds field is a whole number of
 seconds (floored) clamped to 999 999, `count` is clamped to 9 999,
 `dayEndS` to 90 000, never a float, never scientific notation. The
-worst-case block is then 121 bytes in the relay's compact encoding and
-the worst-case relay payload 2 515 bytes, 45 under the frame; on the
-direct path the worst-case snapshot plus pending item plus this block
-encodes to 3 257 bytes with the capacity test's default separators, 19
-under its 80 % headroom gate. Both tests prove it rather than the spec
-assuming it (below), and any further field must first be paid for in
-both.
+worst-case block, `reset` included, is then 131 bytes in the relay's
+compact encoding and the worst-case relay payload 2 524 bytes, 36 under
+the frame; on the direct path the worst-case snapshot plus pending item
+plus this block encodes to 3 269 bytes with the capacity test's default
+separators, 7 under its 80 % headroom gate. Both tests prove it rather
+than the spec assuming it (below), and any further field must first be
+paid for in both — at 7 bytes of direct headroom, by shortening a key
+rather than by adding one.
 
 ## Data flow
 
@@ -457,10 +489,12 @@ both.
    and nothing leaves the process; the method exists so the two sources
    are read together.
 5. The firmware's agent-status parser reads `waits` optionally (all seven
-   fields numeric and non-negative, else the block is treated as absent),
-   stamps the accepted block with the monotonic clock, and the page
-   renders it, or its stale form once `TK_WAITS_STALE_MS` has passed
-   without a newer accepted block.
+   fields numeric and non-negative, `reset` absent, 0 or 1, else the
+   block is treated as absent), stamps the accepted block with the
+   monotonic clock, and the page renders it, or its stale form once
+   `TK_WAITS_STALE_MS` has passed without a newer accepted block; the
+   relay source clear's synthetic empty snapshot bypasses the `waits`
+   slot and leaves the retained block and its stamp in place.
 6. `GET /` reports `waits: {rows, unsaved, open, oldestDay, saveOk,
    dayHeld, dayReset}` — rows on disk, rows closed but not yet written,
    open-hold markers, the oldest retained day, the last save's outcome,
@@ -508,12 +542,14 @@ applies in full. Exact 480 × 480 simulator frames for: zero state (dashes),
 a live blocked state with a running mm:ss and the hero at `<1 MIN` (the
 first checkpoint of the day's first wait), a day with both providers, a
 day with one provider (bar is one colour), the relay-fed variant, the
-stale state and the day-ended state — **both rendered from the same
-non-zero fixture as the both-providers frame**, as the skill requires,
+stale state, the day-ended state and the clock-reset state — **all
+three rendered from the same non-zero fixture as the both-providers
+frame**, as the skill requires,
 so provenance is the only visual change between live, stale (totals
-with the `STALE` marker, `BLOCKED RIGHT NOW` as dashes) and day-ended
+with the `STALE` marker, `BLOCKED RIGHT NOW` as dashes), day-ended
 (every total dashed under the wider `DAY ENDED` marker, a different
-layout from stale that must be seen to fit before it ships), and a
+layout from stale that must be seen to fit before it ships) and
+clock-reset (the totals shown, under the `CLOCK RESET` marker), and a
 capture cannot hide or mislay a measurement behind the treatment —
 the broad-number state (every seconds field at the
 wire maximum of 999 999 and `count` at 9 999, so the hero reads a
@@ -578,7 +614,9 @@ Regression tests must prove:
   restart with the clock regressed across midnight serves the same day
   the last snapshot did; a clock that jumped a year
   forward, served a snapshot and was corrected releases the hold on the
-  next snapshot (`waits.dayReset`) and today's waits reappear, the rows
+  next snapshot (`waits.dayReset`) and today's waits reappear with
+  `reset` 1 on the wire for the rest of that served day and absent
+  after the next rollover and on every block before the reset, the rows
   the future day accumulated are absent from the file after the write
   that persists the reset, an open hold parked under the bad clock keeps
   its checkpointed seconds in the real day, and advancing the clock to
@@ -630,9 +668,19 @@ Regression tests must prove:
   stale 4 s sooner), so no live label outlives 20 s (LAN) or 60 s
   (relay) from the snapshot's build — a newer accepted block
   clears it, a snapshot that was never accepted shows the absent state,
-  not stale, and a retained block whose `dayEndS` has counted down to
+  not stale, a retained block whose `dayEndS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
-  arrives; the header reads `AGENTS` for a block with `count` 1 and
+  arrives, and a block with `reset` 1 renders its totals under `CLOCK
+  RESET` while a `reset` of 2 or `true` makes the block absent; the relay
+  source-policy integration (C host test through
+  `tokens_apply_agent_status_relay` and `tokens_clear_agent_status_relay`
+  on the source policy, not the page model alone): a relay frame with a
+  `waits` block followed by relay silence has its agent rows cleared at
+  `TK_AGENT_RELAY_STALE_MS` while the block, its totals and its accept
+  stamp survive the clear, the block goes `STALE` at its own relay
+  budget and is still `STALE`, never absent, 5 minutes later, and an
+  accepted relay or LAN frame without `waits` afterwards renders the
+  absent state; the header reads `AGENTS` for a block with `count` 1 and
   both provider totals 0; the hero reads `<1 MIN` for `todayS` 1 to 59,
   `<1 MIN` for 0 as well whenever `count` is above 0 (a completed
   sub-second wait floors to `todayS` 0 with `count` 1 and is still a
@@ -661,7 +709,7 @@ Regression tests must prove:
   `nowS` runs (the writer window after a park), never `0`;
 - `dayEndS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
-- the page's landmark captures match the nine frames above, the
+- the page's landmark captures match the ten frames above, the
   broad-number frame shows every glyph inside its box with no overlap
   (a pixel test on the capture, not only a landmark), and the header
   reads `CLAUDE + CODEX` in the both-providers frame and the single name
