@@ -30,7 +30,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "3d96bb679447"
+HOST_SOURCE_FINGERPRINT = "82ca65619f70"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -4909,6 +4909,13 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.assertEqual(self.record()["chained_command"], "my-status --x")
         self.assertIn("exec /bin/sh -c 'my-status --x'",
                       self.launcher.read_text())
+        # So does an uninstall without the record.
+        (self.state / "claude-statusline-bridge.json").unlink()
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0, text)
+        self.assertIn("restored 'my-status --x'", text)
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         "my-status --x")
 
 
 if __name__ == "__main__":

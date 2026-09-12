@@ -310,12 +310,18 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
                    seen_ago=tokenserver.STATUSLINE_FRESH_S + 1)
         probe = {"sessionPct": 40.0, "sessionResetAt": self.NOW + 3600}
         merged = self.merge(probe)
-        self.assertEqual(merged["sessionPct"], 60.0)
+        # The week is a floor, flagged stale; the session has no stale
+        # flag on the wire, so a live probe reading of the window wins.
+        self.assertEqual(merged["sessionPct"], 40.0)
+        self.assertNotIn("sessionLive", merged)
         self.assertEqual(merged["weekPct"], 12.5)
-        self.assertFalse(tokenserver._claude_statusline_bridged)
-        # Served as a floor, flagged as not a new measurement.
-        self.assertIs(merged["sessionLive"], False)
         self.assertIs(merged["weekStaleFloor"], True)
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+        # Without a probe reading the stale session floor is carried but
+        # marked not live (the snapshot withholds it).
+        merged = self.merge({})
+        self.assertEqual(merged["sessionPct"], 60.0)
+        self.assertIs(merged["sessionLive"], False)
         self.write(five=(60.0, self.NOW + 3600), week=(12.5, self.NOW + 86400))
         fresh = self.merge(probe)
         self.assertIs(fresh["sessionLive"], True)
@@ -430,6 +436,21 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
             claude, cache, self.NOW, path=usage)
         self.assertEqual(merged["weekPct"], 13.0)
         self.assertNotIn("weekStaleFloor", merged)
+        # An equal fresh reading is new evidence for the same figure.
+        usage.write_text(json.dumps({"version": 2, "samples": [{
+            "t": int(self.NOW * 1000), "org": "o",
+            "u": {"fh": 1, "sd": 12}}]}), encoding="utf-8")
+        merged = tokenserver._merge_claude_plan_usage(
+            claude, cache, self.NOW, path=usage)
+        self.assertEqual(merged["weekPct"], 12.0)
+        self.assertEqual(merged["weekObservedAt"], self.NOW)
+        self.assertNotIn("weekStaleFloor", merged)
+        self.assertEqual(tokenserver._claude_plan_usage_status,
+                         "fresh_applied")
+        # Without a stale floor an equal reading is still a replay.
+        live = dict(claude, weekStaleFloor=False)
+        self.assertIs(tokenserver._merge_claude_plan_usage(
+            live, cache, self.NOW, path=usage), live)
 
     def test_plan_usage_replay_never_lowers_a_same_window_figure(self):
         usage = self.dir / "plan-usage-history.json"
@@ -509,7 +530,8 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
         store = mock.Mock()
         history = StubHistory()
         snapshot, persisted = self._snapshot(store=store, history=history)
-        self.assertEqual(snapshot["claudeSessionPct"], 42.0)
+        self.assertIsNone(snapshot["claudeSessionPct"])  # no stale flag
+        self.assertIsNone(snapshot["claudeSessionResetMin"])
         self.assertEqual(snapshot["claudeWeekPct"], 12.5)
         self.assertEqual(snapshot["claudeWeekResetMin"], 1440)
         self.assertTrue(snapshot["claudeWeekStale"])

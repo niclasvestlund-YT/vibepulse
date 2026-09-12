@@ -343,10 +343,12 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
     for the same reset is lagging, not newer. Freshness (Claude Code spoke
     within STATUSLINE_FRESH_S, judged per window) decides two things: a
     window that wins while stale is served as that floor but flagged
-    (``sessionLive`` false, ``weekStaleFloor`` true) so it reaches the
-    screen with ``*Stale: true`` and never the cache, Max Tracker or the
-    history as a new measurement; and both windows fresh and no older
-    than the probe's own is ``bridged``, which lets the probe slow down.
+    (``sessionLive`` false, ``weekStaleFloor`` true) so the week reaches
+    the screen with ``claudeWeekStale: true`` and the session -- which has
+    no stale flag on the wire -- is withheld rather than shown as live,
+    and neither reaches the cache, Max Tracker or the history as a new
+    measurement; and both windows fresh and no older than the probe's
+    own is ``bridged``, which lets the probe slow down.
     The model week has no statusLine counterpart and is never touched.
     """
     global _claude_statusline_bridged
@@ -367,8 +369,14 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
         if five["fresh"] and (not probe_session
                               or five["resets_at"] >= probe_reset):
             covered += 1
-        if (not probe_session or _window_wins(
-                five["resets_at"], five["pct"], probe_reset, probe_pct)):
+        wins = (not probe_session or _window_wins(
+            five["resets_at"], five["pct"], probe_reset, probe_pct))
+        if wins and not five["fresh"] and probe_session:
+            # The wire has no session-stale flag, so a stale floor cannot
+            # be shown honestly beside a live week: a live probe reading
+            # of the window beats it, lower or not.
+            wins = False
+        if wins:
             merged["sessionPct"] = five["pct"]
             merged["sessionResetAt"] = five["resets_at"]
             merged["sessionSource"] = "statusline"
@@ -647,10 +655,15 @@ def _merge_claude_plan_usage(claude, quota_cache, now_ts, path=None):
         return claude
     existing_pct = claude.get("weekPct")
     if (claude.get("weekResetAt") == cached.reset_at and
-            _valid_pct(existing_pct) and local["week_pct"] <= existing_pct):
+            _valid_pct(existing_pct) and (
+                local["week_pct"] < existing_pct
+                or (local["week_pct"] == existing_pct
+                    and claude.get("weekStaleFloor") is not True))):
         # Same window, no higher figure: usage only accumulates within a
         # window, so a later-but-lower local sample is a replay of an
         # earlier reading (the statusLine bridge made this case real).
+        # An EQUAL fresh reading over a stale floor is new evidence for
+        # the same figure and falls through to lift the floor.
         _claude_plan_usage_status = "not_higher"
         return claude
 
@@ -2627,6 +2640,12 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     session_pct = claude.get("sessionPct")
     session_reset_at = claude.get("sessionResetAt")
     session_reset_min = _reset_minutes(session_reset_at, current_ts)
+    # A statusLine window that won while stale (sessionLive false): the
+    # wire has no session-stale flag, so it is withheld -- dashes, as
+    # before the bridge existed -- rather than shown as a live figure.
+    session_live = claude.get("sessionLive", True) is True
+    if not session_live:
+        session_pct = None
     if session_pct is None or session_reset_min is None:
         session_pct = None
         session_reset_at = None
@@ -2637,11 +2656,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     # fallback would be meaningless) -- a non-None reading here is always a
     # genuinely fresh probe result, the honest gate Task 6 requires before
     # anything reaches Max Tracker's day peaks.
-    # A statusLine window that won while stale is the same kind of floor
-    # (sessionLive false): shown, never recorded as a new measurement.
-    session_live = claude.get("sessionLive", True) is True
-    if (max_tracker_store is not None and session_pct is not None
-            and session_live):
+    if max_tracker_store is not None and session_pct is not None:
         max_tracker_store.observe_quota(
             "claude", MAX_TRACKER_CLAUDE_SESSION_MINUTES, session_pct,
             current_ts)
@@ -2723,7 +2738,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         (provider, window, pct, reset_at)
         for provider, window, pct, reset_at, is_live in (
             ("claude", "session", result["claudeSessionPct"],
-             claude_session_reset, session_live),
+             claude_session_reset, True),
             ("claude", "week", result["claudeWeekPct"],
              claude_week_reset, claude_week["live"]),
             ("claude", "model_week", result["claudeModelWeekPct"],

@@ -2339,6 +2339,12 @@ def _statusline_uninstall(*, config_dir: Path, state_dir: Path,
         return True
 
     chained = record.get("chained_command") if record else None
+    if ours and not _statusline_valid_command(chained):
+        # No record (deleted by hand): the launcher still carries the
+        # previous line as its baked-in fallback.
+        program = _statusline_command_path(current)
+        chained = (_statusline_launcher_chained(Path(program))
+                   if program else None)
     if ours:
         settings = dict(settings)
         new_block = dict(block)
