@@ -313,6 +313,13 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
         self.assertEqual(merged["sessionPct"], 60.0)
         self.assertEqual(merged["weekPct"], 12.5)
         self.assertFalse(tokenserver._claude_statusline_bridged)
+        # Served as a floor, flagged as not a new measurement.
+        self.assertIs(merged["sessionLive"], False)
+        self.assertIs(merged["weekStaleFloor"], True)
+        self.write(five=(60.0, self.NOW + 3600), week=(12.5, self.NOW + 86400))
+        fresh = self.merge(probe)
+        self.assertIs(fresh["sessionLive"], True)
+        self.assertIs(fresh["weekStaleFloor"], False)
         # A newer probe window still wins over the stale floor.
         probe = {"sessionPct": 1.0, "sessionResetAt": self.NOW + 7200}
         self.assertEqual(self.merge(probe)["sessionPct"], 1.0)
@@ -410,6 +417,20 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
                                       "usage_http_200 + ok"):
                 self.assertEqual(tokenserver._probe_interval_s(), 240)
 
+    def test_fresh_plan_usage_lifts_the_stale_floor_flag(self):
+        usage = self.dir / "plan-usage-history.json"
+        usage.write_text(json.dumps({"version": 2, "samples": [{
+            "t": int(self.NOW * 1000), "org": "o",
+            "u": {"fh": 1, "sd": 13}}]}), encoding="utf-8")
+        cache = self.cache(pct=12.0, reset=self.NOW + 86400)
+        claude = {"weekPct": 12.0, "weekResetAt": self.NOW + 86400,
+                  "weekObservedAt": self.NOW - 7200,
+                  "weekIdentity": self.IDENTITY, "weekStaleFloor": True}
+        merged = tokenserver._merge_claude_plan_usage(
+            claude, cache, self.NOW, path=usage)
+        self.assertEqual(merged["weekPct"], 13.0)
+        self.assertNotIn("weekStaleFloor", merged)
+
     def test_plan_usage_replay_never_lowers_a_same_window_figure(self):
         usage = self.dir / "plan-usage-history.json"
         usage.write_text(json.dumps({"version": 2, "samples": [{
@@ -480,13 +501,23 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
                       history.record_calls)
 
     def test_snapshot_serves_a_stale_sample_as_a_floor(self):
+        # Codex P1 on #116: shown with the stale flag, never recorded into
+        # the cache, Max Tracker or the history as a new measurement.
         self.write(five=(42.0, self.NOW + 3600),
                    week=(12.5, self.NOW + 86400),
                    seen_ago=tokenserver.STATUSLINE_FRESH_S + 1)
-        snapshot, persisted = self._snapshot()
+        store = mock.Mock()
+        history = StubHistory()
+        snapshot, persisted = self._snapshot(store=store, history=history)
         self.assertEqual(snapshot["claudeSessionPct"], 42.0)
         self.assertEqual(snapshot["claudeWeekPct"], 12.5)
+        self.assertEqual(snapshot["claudeWeekResetMin"], 1440)
+        self.assertTrue(snapshot["claudeWeekStale"])
         self.assertFalse(tokenserver._claude_statusline_bridged)
+        store.observe_quota.assert_not_called()
+        self.assertEqual(persisted, [])
+        self.assertEqual([c for c in history.record_calls
+                          if c[0] == "claude"], [])
         # Expired windows are gone for good.
         self.write(five=(42.0, self.NOW - 1), week=(12.5, self.NOW - 1))
         snapshot, persisted = self._snapshot()

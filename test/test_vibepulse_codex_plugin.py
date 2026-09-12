@@ -30,7 +30,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "c2e8d9f1af40"
+HOST_SOURCE_FINGERPRINT = "3d96bb679447"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -4894,11 +4894,21 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.assertFalse(shared.exists())
 
     def test_settings_points_at_launcher_without_a_record_is_a_fix(self):
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status --x"}})
         self.run_setup("statusline", "install", "--yes-single-account")
         (self.state / "claude-statusline-bridge.json").unlink()
         code, text = self.run_setup("statusline", "status")
         self.assertEqual(code, 1)
         self.assertIn("install record is gone", text)
+        # The reinstall status asks for recovers the previous line from
+        # the launcher's baked-in fallback instead of erasing it.
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.record()["chained_command"], "my-status --x")
+        self.assertIn("exec /bin/sh -c 'my-status --x'",
+                      self.launcher.read_text())
 
 
 if __name__ == "__main__":

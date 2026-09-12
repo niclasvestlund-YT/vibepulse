@@ -524,7 +524,11 @@ Rules, shared with the doctor and smoke test:
   within one window the higher figure is the later one, because usage only
   accumulates. Ties keep the probe. A stored window is therefore a floor
   until it resets, fresh or not: a lagging probe cannot pull the figure
-  down. The model week has no statusLine counterpart and is never touched.
+  down. A window that wins while stale is served as that floor with
+  `claudeWeekStale: true` (the session simply shown), and is not recorded
+  into the cache, Max Tracker or the history as a new measurement -- the
+  fresh sample already did that. The model week has no statusLine
+  counterpart and is never touched.
 - Freshness (`seen` within 15 min, `STATUSLINE_FRESH_S`) is judged per
   window and decides only the probe cadence: while a fresh sample covers
   both windows, no older than the probe's own, and the probe is healthy

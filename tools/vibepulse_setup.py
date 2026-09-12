@@ -1976,6 +1976,25 @@ def _statusline_command_is_launcher(command, launcher: Path) -> bool:
     return _statusline_launcher_is_ours(Path(program))
 
 
+def _statusline_launcher_chained(path: Path) -> str | None:
+    """The previous status line a generated launcher bakes in (its
+    ``CHAINED=`` line), for a reinstall whose record is gone."""
+    try:
+        text = _read_small_regular(path, 64 * 1024).decode("utf-8", "replace")
+    except (FileNotFoundError, ConfigError):
+        return None
+    for line in text.splitlines():
+        if line.startswith("CHAINED="):
+            try:
+                words = shlex.split(line[len("CHAINED="):])
+            except ValueError:
+                return None
+            if len(words) == 1 and _statusline_valid_command(words[0]):
+                return words[0]
+            return None
+    return None
+
+
 def _statusline_command_runs_launcher(command, launcher: Path) -> bool:
     """Would the shell actually start the launcher from this command?"""
     return _statusline_command_path(command) == str(launcher)
@@ -2231,11 +2250,18 @@ def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
     elif (_statusline_command_is_launcher(current, launcher)
           or _statusline_command_is_launcher(current, previous_launcher)):
         # Reinstall: the previous status line lives in our record, not
-        # in settings.json (which points at us).
+        # in settings.json (which points at us). Without a record (deleted
+        # by hand, status said to reinstall) the launcher still running
+        # carries it as its baked-in fallback: recover it from there
+        # rather than erase it.
         chained = (previous.get("chained_command")
                    if previous is not None else None)
         if not _statusline_valid_command(chained):
             chained = None
+        if chained is None and previous is None:
+            program = _statusline_command_path(current)
+            chained = (_statusline_launcher_chained(Path(program))
+                       if program else None)
     elif _statusline_valid_command(current):
         chained = current
     else:

@@ -341,10 +341,13 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
     sample is fresh: within a window usage only accumulates, so a stored
     60 % is a floor until that window resets, and a probe that says 40 %
     for the same reset is lagging, not newer. Freshness (Claude Code spoke
-    within STATUSLINE_FRESH_S, judged per window) decides only whether the
-    probe may slow down: both windows fresh and no older than the probe's
-    own is ``bridged``. The model week has no statusLine counterpart and
-    is never touched.
+    within STATUSLINE_FRESH_S, judged per window) decides two things: a
+    window that wins while stale is served as that floor but flagged
+    (``sessionLive`` false, ``weekStaleFloor`` true) so it reaches the
+    screen with ``*Stale: true`` and never the cache, Max Tracker or the
+    history as a new measurement; and both windows fresh and no older
+    than the probe's own is ``bridged``, which lets the probe slow down.
+    The model week has no statusLine counterpart and is never touched.
     """
     global _claude_statusline_bridged
     summary = _read_claude_statusline(path=path, now_ts=now_ts)
@@ -369,6 +372,7 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
             merged["sessionPct"] = five["pct"]
             merged["sessionResetAt"] = five["resets_at"]
             merged["sessionSource"] = "statusline"
+            merged["sessionLive"] = bool(five["fresh"])
 
     week = windows.get("seven_day")
     probe_reset = claude.get("weekResetAt")
@@ -397,6 +401,7 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
             merged["weekObservedAt"] = int(week["at"])
             merged["weekIdentity"] = _quota_identity("claude", "general_weekly")
             merged["weekSource"] = "statusline"
+            merged["weekStaleFloor"] = not week["fresh"]
     _claude_statusline_bridged = covered == 2
     return merged
 
@@ -650,6 +655,7 @@ def _merge_claude_plan_usage(claude, quota_cache, now_ts, path=None):
         return claude
 
     merged = dict(claude)
+    merged.pop("weekStaleFloor", None)  # a fresh local reading, not a floor
     merged.update({
         "weekPct": local["week_pct"],
         "weekResetAt": cached.reset_at,
@@ -2381,6 +2387,20 @@ def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
         not isinstance(observed_at, bool) and math.isfinite(observed_at) and
         isinstance(identity, str) and bool(identity)
     )
+    if live and source.get(f"{prefix}StaleFloor") is True:
+        # A statusLine window nobody has watched for a while: the figure
+        # is a true floor until its reset, so it is served, but as stale
+        # -- and a stale value is not a new measurement for the cache,
+        # Max Tracker or the history (the fresh sample already fed them).
+        return {
+            "pct": round(float(pct), 1),
+            "reset_at": int(reset_at),
+            "observed_at": int(observed_at),
+            "label": None,
+            "stale": True,
+            "live": False,
+            "cache_record": None,
+        }
     if live:
         label = source.get(label_key) if label_key else None
         record = CachedQuota(
@@ -2617,7 +2637,11 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     # fallback would be meaningless) -- a non-None reading here is always a
     # genuinely fresh probe result, the honest gate Task 6 requires before
     # anything reaches Max Tracker's day peaks.
-    if max_tracker_store is not None and session_pct is not None:
+    # A statusLine window that won while stale is the same kind of floor
+    # (sessionLive false): shown, never recorded as a new measurement.
+    session_live = claude.get("sessionLive", True) is True
+    if (max_tracker_store is not None and session_pct is not None
+            and session_live):
         max_tracker_store.observe_quota(
             "claude", MAX_TRACKER_CLAUDE_SESSION_MINUTES, session_pct,
             current_ts)
@@ -2699,7 +2723,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         (provider, window, pct, reset_at)
         for provider, window, pct, reset_at, is_live in (
             ("claude", "session", result["claudeSessionPct"],
-             claude_session_reset, True),
+             claude_session_reset, session_live),
             ("claude", "week", result["claudeWeekPct"],
              claude_week_reset, claude_week["live"]),
             ("claude", "model_week", result["claudeModelWeekPct"],
