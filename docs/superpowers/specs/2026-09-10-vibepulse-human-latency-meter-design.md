@@ -43,8 +43,10 @@ that needs no telemetry, adopt the span when it leaves beta.
 
 **A ledger of waits, on the server, durations only.** When a parked
 interaction ends, the store appends one row to a `WaitLedger`: provider
-(`claude`/`codex`), kind (`approval`/`question`), `startedAt` and `endedAt`
-as wall-clock epoch seconds, `durationS` measured on the monotonic clock,
+(`claude`/`codex`), kind (`approval`/`question`), `startedAt` as
+wall-clock epoch seconds read once at park, `durationS` measured on the
+monotonic clock, `endedAt` = `startedAt + durationS` (derived, never a
+second wall reading),
 and `outcome` in `{panel, computer, expired, panic, removed, restart}`. The mapping
 is from the store's removal reason **and the verdict together**, because
 the reason alone cannot tell a panel answer from a hand-back: a direct-LAN
@@ -104,14 +106,21 @@ closes, its row replaces its checkpointed contribution with the full
 measured duration; the total never steps back at that moment. Closed rows
 contribute only the part of their measured duration that falls in the
 day. The split is made on the interval
-`[endedAt - durationS, endedAt]`, not on `[startedAt, endedAt]`: the
-monotonic `durationS` is the measurement, `endedAt` is the one wall-clock
-reading taken at the moment the row is written, and a wall-clock
-correction during the hold (an NTP step, a manual change) can therefore
-shift *where* the seconds land but never *how many* there are — a
-ten-second hold across a one-hour forward step contributes ten seconds,
-not 3 610. `startedAt` is kept for the record and is not used in
-aggregation. A wait parked at 23:50 and answered at 00:10 puts ten
+`[startedAt, startedAt + durationS]`: the monotonic `durationS` is the
+measurement and `startedAt` — the **one** wall-clock reading a hold ever
+takes, at park — is the only calendar anchor, for the checkpointed open
+hold, the closed row and the `restart` row alike. No second wall reading
+is taken at close, because two anchors would let a clock correction
+between them move seconds across midnight at the handoff: a checkpoint
+just after 00:05 counted in today, then a ten-minute backward step before
+the close, would otherwise land the finished row in yesterday and step
+`todayS` back. With one anchor a wall-clock correction during the hold
+(an NTP step, a manual change) changes neither *how many* seconds there
+are nor *where* they land — a ten-second hold across a one-hour forward
+step contributes ten seconds, not 3 610, in the day the park was in.
+What a correction can do is date a hold by a clock that was later found
+wrong; the spec accepts that as the honest reading of the clock at the
+time. A wait parked at 23:50 and answered at 00:10 puts ten
 minutes in yesterday and ten in today, in `todayS`, the provider totals
 and `countToday` alike (a split row counts once, in the day it ended).
 `longestTodayS` is the longest in-day part, not the longest whole row,
@@ -140,7 +149,21 @@ the label `BLOCKED ON YOU · TODAY`, one dominant number in minutes, the
 bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
 (live, from `blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
 block is absent
-(older server) or `countToday` is 0 and nothing is blocked now. The number
+(older server) or `countToday` is 0 and nothing is blocked now.
+**Stale is shown, never guessed.** The agent-status client keeps the last
+accepted snapshot when a poll fails (`agent_net.c`, by design), so
+without a rule a wait that closed while the service was unreachable
+would stay on the glass as `BLOCKED RIGHT NOW` for as long as the outage
+lasts, with frozen totals. The page therefore keeps the monotonic time
+of the last accepted `waits` block and, once it is older than
+`TK_WAITS_STALE_MS` (proposed 20 000 ms, the same boundary the relay
+source policy uses in `TK_AGENT_RELAY_STALE_MS`), renders `BLOCKED RIGHT
+NOW` as dashes — a live number the panel cannot verify is not shown —
+and keeps the day totals and `LONGEST WAIT` visible with the page's
+stale marker (`STALE`, the treatment the other pages use for a source
+that stopped answering), so the reader sees a number *as of* the last
+answer, not a claim about now. The relay-fed variant follows the same
+rule with the relay's own timestamps. The number
 is **never framed as waste**: the label is what it measures, not a verdict
 on the reader.
 
@@ -242,7 +265,9 @@ test proves it rather than the spec assuming it (below).
    are read together.
 5. The firmware's agent-status parser reads `waits` optionally (all six
    fields numeric and non-negative, else the block is treated as absent),
-   and the page renders it.
+   stamps the accepted block with the monotonic clock, and the page
+   renders it, or its stale form once `TK_WAITS_STALE_MS` has passed
+   without a newer accepted block.
 6. `GET /` reports `waits: {rows, oldestDay, saveOk}` for the doctor and
    the smoke test; a failing save uses the same FIX/VARN language as
    `maxTrackerSaveOk`.
@@ -275,9 +300,10 @@ test proves it rather than the spec assuming it (below).
 The page is AMOLED work: `.claude/skills/iterating-esp32-amoled-ui/SKILL.md`
 applies in full. Exact 480 × 480 simulator frames for: zero state (dashes),
 a live blocked state with a running mm:ss, a day with both providers, a
-day with one provider (bar is one colour), the relay-fed variant, and the
-Labs off state (page absent, tiles dense). Static physical review before
-any motion. No frame here authorizes a flash.
+day with one provider (bar is one colour), the relay-fed variant, the
+stale state (totals with the `STALE` marker, `BLOCKED RIGHT NOW` as
+dashes), and the Labs off state (page absent, tiles dense). Static
+physical review before any motion. No frame here authorizes a flash.
 
 ## Tests
 
@@ -321,9 +347,13 @@ Regression tests must prove:
   writer window is absent after restart and the test names that as the
   accepted bound;
 - a row's `durationS` comes from the monotonic pair and its days from
-  `[endedAt - durationS, endedAt]`: a wall-clock jump of an hour during a
-  hold changes neither the total nor the longest wait, and the day parts
-  of every row always sum to its `durationS`;
+  `[startedAt, startedAt + durationS]`: a wall-clock jump of an hour
+  during a hold changes neither the total nor the longest wait nor the
+  day placement, a backward step across local midnight between a
+  checkpoint and the close leaves `todayS` exactly where it was (the
+  open-to-closed handoff test), `endedAt` equals `startedAt + durationS`
+  on every row, and the day parts of every row always sum to its
+  `durationS`;
 - aggregates roll over at local midnight, a wait spanning midnight is
   split by overlap into both days, a wait spanning a DST change is placed
   by local wall-clock boundaries, and the 8-day retention prunes;
@@ -342,7 +372,12 @@ Regression tests must prove:
 - the firmware parser accepts the block, rejects a malformed one as absent
   without dropping the rest of the payload, and older payloads without it
   still parse (C host test);
-- the page's landmark captures match the six frames above, and the header
+- the page's stale rule (C host test on the page model): a retained
+  snapshot older than `TK_WAITS_STALE_MS` renders `BLOCKED RIGHT NOW` as
+  dashes and the totals with the stale marker, a newer accepted block
+  clears it, and a snapshot that was never accepted shows the absent
+  state, not stale;
+- the page's landmark captures match the seven frames above, and the header
   reads `CLAUDE + CODEX` in the both-providers frame and the single name
   in the one-provider frame.
 
@@ -366,7 +401,7 @@ page off.
    the same minute? The spec leans single source.
 4. Should a `restart` row be shown apart from the others on the page one
    day? Its duration is the marker's monotonic-derived checkpoint and its
-   synthetic end is `startedAt + elapsedS`, the last moment the old
-   process observed the hold, not the human's answer and not the new
-   process's start. The spec counts it in the totals so the number never
+   end is `startedAt + elapsedS` like every other row's, the last moment
+   the old process observed the hold, not the human's answer and not the
+   new process's start. The spec counts it in the totals so the number never
    steps back, and leaves any separate rendering to a later design.
