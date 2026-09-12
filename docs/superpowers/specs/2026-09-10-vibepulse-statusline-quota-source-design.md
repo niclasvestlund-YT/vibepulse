@@ -206,13 +206,30 @@ write lands the token resolves to one account and the file names
 another, no mark is recorded, and once it lands the mark is that
 second write's time, so a session started inside the pause stays
 `unknown` while a session started right after it, before the
-tokenserver's next look, binds. The mark is kept while the pair stays
-the same, however many later writes bump either file (Claude Code
-rewrites `.claude.json` for many reasons, and a token refresh rewrites
-the store without changing the account), and an unresolved token
-(during a cooldown) neither confirms nor moves it; only an observed
-change of the account on either side clears it, and the next consistent
-observation records a new one. The bridge reads the mark from the
+tokenserver's next look, binds. The mark survives an observation only
+when the interval before it **could not have hidden a login**. Reading
+the same pair twice proves nothing about the time between: an
+A→B→A round trip completed inside one interval leaves both files
+naming A again, and a session started while B was active would then
+satisfy the start-time test and be bound to A while it holds B's
+credential. A login is a new grant, so it always writes a new token
+into the store *and* rewrites `.claude.json`; therefore, if since the
+previous observation the store's credential fingerprint changed **and**
+`.claude.json`'s modification time changed — whatever both read now —
+the tokenserver treats the interval as an **uncertain transition**: the
+old mark is discarded, and once the pair reads consistent a new one is
+recorded at the later of the two modification times, so a session
+started anywhere inside that interval stays `unknown` (its transcript
+predates the new mark). A token refresh alone (store rewritten, file
+untouched) and a `.claude.json` rewrite alone (file touched, token
+unchanged — Claude Code rewrites it for many reasons) retain the mark,
+because neither can be a completed login; an unresolved token (during
+a cooldown) neither confirms nor moves it; and an observed change of
+the account on either side clears it until the next consistent
+observation. The same comparison runs at tokenserver start against the
+persisted last observation (credential fingerprint, account fingerprint
+and both modification times, hashes and times only), so an outage
+hides no more than a watch interval does. The bridge reads the mark from the
 tokenserver's state (the same directory its own state lives in, read
 only) and never derives one of its own for the home directory. For
 another `CLAUDE_CONFIG_DIR`, which the tokenserver does not watch, the
@@ -712,8 +729,14 @@ Regression tests must prove:
   a login whose credential write lands a minute after its `.claude.json`
   write records no mark until it does and then one at the second write,
   so a session started in between stays `unknown` and one started after
-  it binds; a token refresh and a `.claude.json` rewrite move neither
-  the mark nor the binding; a fresh install seeds the mark so the first
+  it binds; a token refresh alone and a `.claude.json` rewrite alone
+  move neither the mark nor a binding, while a round trip to another
+  account and back completed inside one watch interval (both files
+  rewritten, the token string different, the account the same) discards
+  the mark and records a new one at the later modification time, so a
+  session started during the excursion stays `unknown` — and the same
+  holds for a round trip completed while the tokenserver was down,
+  judged against its persisted last observation; a fresh install seeds the mark so the first
   post-install session binds; two concurrent sessions in different
   `CLAUDE_CONFIG_DIR`s keep two independent marks and both bind, while a
   login in a non-default directory followed directly by a session leaves
