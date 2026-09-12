@@ -214,62 +214,69 @@ so **an observed account transition in a config directory invalidates
 every binding made under the previous value in that directory** — those
 sessions go to `unknown` for the rest of their lifetime, their later
 increases and rollovers land in the `unknown` entry rather than in A's,
-and a switch back never revives the old binding. The tokenserver derives the probe's fingerprint the same
-way, from the `.claude.json` beside the credential store the winning token
-came from: the keychain entry and the credentials file are written by
-that `/login`, so a probe served by either carries the home directory's
-fingerprint; Claude Desktop's injected token carries it only when it
-equals the keychain token (the candidates are already compared), and
-otherwise no fingerprint, because Desktop's account is not readable from
-outside its process. **The fingerprint is bound to the token the request
-actually used**, because `/login` writes the credential store and
-`.claude.json` as two separate files and the probe's reads of them are
-not atomic: the probe reads `.claude.json` *before* it reads the
-candidates and *again after* the response arrives, and re-reads the
-candidates after the response too; the result carries an account
-fingerprint only when both `.claude.json` reads agree **and** the
-credential store still holds the token that was sent. A `/login` that
-lands anywhere between the token read and the post-response check —
-account A's token sent, `.claude.json` already naming B — therefore
-yields a result with **no account fingerprint**: it is keyed under the
-sent token's credential fingerprint (the cache rule below), never merged
-into B's cache, rings or Max Tracker, and the bridge is not accepted on
-its strength; the next probe, which reads a consistent pair, carries B's
-fingerprint normally. **The fingerprint survives a cooldown restart:**
-`_probe_limits()` today loads a persisted 429 cooldown and returns
-before `_read_oauth_candidates()` runs, and the probe state file holds
-only `cooldown_until`, so a tokenserver restarted while resting would
-have no winning token to derive a fingerprint from and would reject an
-otherwise fresh bridge for the rest of the cooldown — the opposite of
-what the bridge is for. So `_save_probe_state` persists the fingerprint
-and its source beside `cooldown_until`, `_load_probe_state` restores
-them, and when an older state file has none the tokenserver derives the
-fingerprint from the local credential store without any HTTP call
-(reading the candidates is local; only the request is what the cooldown
-rests) **only when that store is unambiguous about the account**: a
-lone keychain or credentials-file candidate (both written by the
-`/login` that writes `oauthAccount`), or a Desktop token equal to the
-keychain's. A lone Desktop token is *not* unambiguous — its account is
-unknowable from outside its process, as above, and `.claude.json` may
-name a different CLI account — so it yields no account fingerprint,
-only the token-derived cache identity. What is persisted is the **cache
-identity** the probe last used — the account fingerprint when it had
-one, otherwise the credential fingerprint the cache rule below derives
-from the token — with its source, never the token itself, so a restart
-during a cooldown with a Desktop token that differs from the keychain's
-still finds the persisted session and weekly floors under the identity
-they were written to. A legacy file cannot say which
-of two differing tokens took the 429, so with a Desktop token that
-differs from the keychain's the account stays unknown until a probe
-succeeds, rather than attributing the cooldown — and the bridge's
-acceptance — to whichever account happens to be readable. No fingerprint on either side, or two that differ,
-means **no merge**: the probe stays the panel's source exactly as today,
-the bridge sample stays in its file but is skipped by arbitration and by
-the interval rule, and the doctor says `VARN statusLine bridge: sample is
-from another Claude account` or `… account unknown (Claude Desktop
-token)`, so the bridge never silently does nothing. The fingerprint is a
-hash: neither the uuid nor the e-mail is written to the sample file, to
-`GET /` or to a log line.
+and a switch back never revives the old binding. The tokenserver derives the probe's fingerprint
+**from the token itself**, not from a file beside it. `/login` writes
+the credential store and `.claude.json` as two separate files, and no
+read of the two — however stable across the request — proves that the
+token sent belongs to the account the file names: a `/login` that has
+written one file and not yet the other leaves both reads consistent
+and wrong. The proof is the API's own. The OAuth profile endpoint
+(`api.anthropic.com/api/oauth/profile`, the read the `user:profile`
+scope listed in the credential record exists for) answers with the
+account and organization the bearer token authenticates as, so the
+probe's account fingerprint is `sha256(<profile account uuid>)[:16]` —
+the same value the bridge derives from `oauthAccount.accountUuid`, so
+bridge and probe still match when the files are consistent — and its
+organization hash comes from the same response. The call is made
+**once per credential fingerprint** (a new token string), never per
+cycle: the resolved pairs `credentialFp → {accountFp, orgFp}` are kept
+in the probe state file (hashes only, never a token), so a cycle whose
+token is already resolved makes exactly the usage call it makes today,
+and a token refresh costs one profile call. The profile call follows
+the probe's rules: it is never made during a cooldown, a 429 on it
+starts the same cooldown a usage 429 does and skips the usage call, and
+it is made *before* the usage call so a token that cannot be resolved
+is known before its figures exist. A token whose profile call fails —
+any non-2xx, a credential record without the `user:profile` scope, a
+response without the account field — is **account-unknown**: its
+figures are keyed under its credential fingerprint (the cache rule
+below), never merged into any account's cache, rings or Max Tracker,
+the bridge is not accepted on its strength, and the next cycle retries
+the profile call before the usage call. This covers Claude Desktop's
+injected token too, whose account no file beside it can name, and it
+makes `.claude.json` irrelevant to the probe: a `/login` racing the
+request cannot misattribute anything, because nothing the probe
+attributes comes from the file. The implementation's first task records
+a fixture of the real profile response and pins the field path; until
+that fixture exists the resolver returns unknown rather than guessing,
+and the fixture, like every fixture here, holds placeholder uuids and
+hashes, never a real account. **The fingerprint survives a cooldown
+restart:** `_probe_limits()` today loads a persisted 429 cooldown and
+returns before `_read_oauth_candidates()` runs, and the probe state file
+holds only `cooldown_until`, so a tokenserver restarted while resting
+would have no identity to accept an otherwise fresh bridge under for the
+rest of the cooldown — the opposite of what the bridge is for. So
+`_save_probe_state` persists, beside `cooldown_until`, the resolved
+pairs and the **cache identity** the probe last used — the account
+fingerprint when it had one, otherwise the credential fingerprint the
+cache rule below derives from the token — with its source, never the
+token itself; `_load_probe_state` restores them, and a restart during a
+cooldown reads the candidates locally (only the requests are what the
+cooldown rests), looks the current token's credential fingerprint up in
+the restored pairs, and carries the account fingerprint when it is
+there, so the persisted session and weekly floors are found under the
+identity they were written to. A token the pairs do not know, and every
+token under a legacy state file that has no pairs, stays account-unknown
+until the cooldown ends and its profile call succeeds — rather than
+attributing the cooldown, and the bridge's acceptance, to whichever
+account happens to be readable. No fingerprint on either side, or two
+that differ, means **no merge**: the probe stays the panel's source
+exactly as today, the bridge sample stays in its file but is skipped by
+arbitration and by the interval rule, and the doctor says `VARN
+statusLine bridge: sample is from another Claude account` or `… account
+unknown (token not yet resolved)`, so the bridge never silently does
+nothing. The fingerprint is a hash: neither the uuid nor the e-mail is
+written to the sample file, to `GET /` or to a log line.
 
 **The user's status line keeps working.** `settings.json` allows one
 `statusLine` object, `{"type": "command", "command": "…"}`; setup writes
@@ -386,9 +393,9 @@ timestamp, not by which source it is:
    outright only for a later reset. The account gate: the file names its organization
    (`org`, which `_read_claude_plan_usage` validates and today discards),
    and Desktop can be signed into a different account than the probe and
-   bridge. So the reader keeps `org` as a hash, the fingerprint side
-   records `sha256(oauthAccount.organizationUuid)[:16]` from the same
-   `.claude.json` beside its account fingerprint, and the plan-usage
+   bridge. So the reader keeps `org` as a hash, the probe side
+   records `sha256(<profile organization uuid>)[:16]` from the same
+   profile response that named its account, and the plan-usage
    step runs only when the two organization hashes are equal; when either
    is unknown or they differ the step is skipped and `GET /` says
    `claudePlanUsage: other_account` / `account_unknown`, rather than
@@ -401,14 +408,15 @@ timestamp, not by which source it is:
    value into the cache, a probe switched to account B that momentarily
    has no live result would fall through to A's number. So the Claude
    identity fed to `_quota_identity` becomes the account fingerprint
-   when it is known and, when it is not (a Desktop token that differs
-   from the keychain's), a **credential fingerprint** — the first 16 hex
+   when it is known and, when it is not (a token whose profile call has
+   not succeeded), a **credential fingerprint** — the first 16 hex
    characters of `sha256` over the winning token, one-way, never the
    token, shown nowhere — so that two unidentified accounts in a row
    land in two partitions rather than one shared `default-v1` bucket
    that would let A's unexpired quota serve B after Desktop switches
    accounts and B's probe momentarily fails. A token refresh changes the
-   credential fingerprint and costs one cache miss; that is the accepted
+   credential fingerprint: with the account known nothing moves, and
+   with it unknown the refresh costs one cache miss; that is the accepted
    price of never crossing accounts. Every Claude record — probe- or
    bridge-fed — is persisted under that identity, `latest` gains an
    identity argument the tokenserver always passes, records under
@@ -419,8 +427,8 @@ timestamp, not by which source it is:
    lookup would leave them unreadable until the next successful probe —
    during a failing probe or a persisted cooldown that is exactly when
    the cache matters, bridge or no bridge. They are **not** re-keyed:
-   the old identity carries no provenance, and an unambiguous credential
-   store today says nothing about who produced a record last week (the
+   the old identity carries no provenance, and a token resolved today
+   says nothing about who produced a record last week (the
    user may have switched from A to B before upgrading), so relabelling
    would hand A's unexpired quota to B exactly when B's probe is
    failing. Legacy Claude records stay under `default-v1`, unreadable,
@@ -613,36 +621,41 @@ Regression tests must prove:
   of 40 % for the same reset, so the ring holds 60 % until the window
   resets while the bridge counts as stale for scheduling;
 - the plan-usage step runs only when the file's organization hash equals
-  the one beside the probe's fingerprint: Desktop signed into account A
+  the probe's, from its profile response: Desktop signed into account A
   beside a probe and bridge on B leaves B's figures untouched and `GET /`
   reports `other_account`; an unknown organization on either side skips
   the step; a matching-account plan-usage sample of 40 % with a borrowed
   reset equal to the retained window's leaves a retained 60 % in place;
-- a `/login` to another account that lands between the probe's token
-  read and its post-response check (the `.claude.json` reads disagree,
-  or the credential store no longer holds the sent token) yields a probe
-  result with no account fingerprint: its values are keyed under the sent
-  token's credential fingerprint, B's cache, rings and Max Tracker are
-  untouched, the bridge is not accepted on it, and the next probe with a
-  consistent pair carries B's fingerprint;
-- a legacy probe state file during a cooldown yields an account
-  fingerprint only from a lone keychain or credentials-file candidate,
-  or a Desktop token equal to the keychain's; a lone Desktop token
-  yields only the credential-fingerprint cache identity and the account
-  stays unknown even when `.claude.json` names an account; with two
-  differing tokens the account stays unknown too, and in both cases the
-  bridge is not accepted until a probe succeeds;
+- a `/login` to another account that lands anywhere in the probe's
+  cycle cannot misattribute: a test swaps `.claude.json` from A to B
+  between the token read and the response and asserts the result carries
+  A's fingerprint (the token's own profile) with B's cache, rings and Max
+  Tracker untouched, and the next cycle, whose new token resolves to B,
+  carries B's; a token whose profile call fails, whose record lacks the
+  `user:profile` scope, or whose response has no account field is
+  account-unknown, keyed under its credential fingerprint, and retried
+  next cycle before the usage call; a 429 on the profile call starts the
+  same cooldown a usage 429 does with no usage call made; the profile
+  call is made once per credential fingerprint — a second cycle with the
+  same token makes only the usage call — and a Claude Desktop token that
+  differs from the keychain's resolves to its own account;
+- a legacy probe state file during a cooldown yields no account
+  fingerprint for any token — the identity is the credential fingerprint
+  and `.claude.json` naming an account changes nothing — and the bridge
+  is not accepted until the cooldown ends and a profile call succeeds;
 - legacy `default-v1` Claude records are never re-keyed: with a legacy
   record present and a fingerprint known, the lookup returns nothing for
   the fingerprint, `GET /` names the unreadable records and their count,
   and the first successful probe writes under the fingerprint, bridge
   installed or not;
 - a session whose `rate_limits` are unchanged since its last run keeps
-  the fingerprint bound then even if `.claude.json` now names another
-  account — including after 36 idle hours, and including a session
-  whose `seven_day` window resets 7.5 days after it was seen, the record
+  its binding while its config directory's account value is unchanged —
+  including after 36 idle hours, and including a session whose
+  `seven_day` window resets 7.5 days after it was seen, the record
   surviving until every bound window has expired and
-  `STATUSLINE_SESSION_TTL_S` of bridge silence has passed — a payload
+  `STATUSLINE_SESSION_TTL_S` of bridge silence has passed — while the
+  same unchanged payload after `.claude.json` has come to name another
+  account lands in `unknown` (the account-transition row below); a payload
   with a later `resets_at` or a higher same-reset percentage takes the
   current fingerprint, a payload that only dropped an expired window or
   lowered a value keeps the old binding (the reset-trigger case), every
@@ -665,18 +678,20 @@ Regression tests must prove:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
   card), never A's; the reverse holds; two consecutive unidentified
-  accounts (Desktop tokens differing from the keychain's) land in two
+  accounts (tokens whose profile calls failed) land in two
   credential-fingerprint partitions and the second never reads the
   first's record; and the persisted cache never contains a token or
   `default-v1` for Claude;
 - a tokenserver restarted during a persisted 429 cooldown restores the
-  cache identity from the probe state file (or derives it locally
-  without an HTTP call when the file predates the field) and accepts a
+  cache identity and the resolved pairs from the probe state file,
+  carries the account fingerprint for a current token whose credential
+  fingerprint is among the pairs without any HTTP call, and accepts a
   matching fresh bridge sample for the rest of the cooldown, so the card
-  is not stale while the bridge is fresh; with a Desktop token differing
-  from the keychain's the restored identity is the credential
-  fingerprint and the persisted session and weekly floors are found
-  under it; the state file never contains a token;
+  is not stale while the bridge is fresh; a current token the pairs do
+  not know restores only the credential-fingerprint identity, the
+  persisted session and weekly floors are found under it, and no bridge
+  is accepted until the cooldown ends and the profile call succeeds; the
+  state file never contains a token;
 - two bridges run concurrently against one file (a real second process,
   not a mock) end with, per window, the winning observation and the `at`
   that belongs to it — a lower percentage with a newer `at` loses whole,
@@ -709,8 +724,9 @@ Regression tests must prove:
   differs from the probe's, or is missing on either side, is skipped by
   the arbitration and the interval rule, the probe's figures reach the
   panel unchanged, and `GET /` and the doctor report `other_account` /
-  `account_unknown`; a Desktop process token equal to the keychain token
-  carries the keychain's fingerprint and one that differs carries none;
+  `account_unknown`; the probe's fingerprint comes from the token's own
+  profile, so a Desktop process token that differs from the keychain's
+  carries its own account's fingerprint once resolved and none before;
 - for the same reset window the tokenserver serves the higher of the
   bridge and probe percentages whichever was observed later, so a probe
   seeing cross-device usage wins over a fresher bridge replay and a bridge
@@ -792,12 +808,14 @@ beyond the one-time unreadable legacy cache window that step 3 names.
    a timer while idle)? It keeps the sample fresh across long idle periods
    at the cost of a process spawn every N seconds in every open session.
    The default in this spec is not to set it.
-3. Could the probe bind its account from the API response itself (an
-   organization id header) instead of the `.claude.json` beside the
-   credential, which would also cover Claude Desktop's injected token?
-   The spec does not rely on it because the header's value and its
-   relation to `oauthAccount` are unverified; if they match in practice,
-   it is a strict improvement on the `account_unknown` case.
+3. The probe binds its account from the token's own profile response
+   rather than from the `.claude.json` beside the credential (resolved
+   above, after review showed that no file read proves the pairing).
+   What remains open is only the field path, which the recorded fixture
+   pins in the first implementation task; if the response turns out not
+   to name the account, the probe stays account-unknown and the bridge
+   is never merged — the spec degrades to today's behaviour, never to a
+   guess.
 4. Windows: `statusLine.command` runs through the user's shell; the
    launcher is a `.cmd` there, invoking the verified `python.exe` path,
    and the doctor must check the registered command matches this
