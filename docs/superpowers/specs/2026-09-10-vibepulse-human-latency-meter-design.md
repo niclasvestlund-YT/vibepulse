@@ -199,7 +199,14 @@ What a correction can do is date a hold by a clock that was later found
 wrong; the spec accepts that as the honest reading of the clock at the
 time. A wait parked at 23:50 and answered at 00:10 puts ten
 minutes in yesterday and ten in today, in `todayS`, the provider totals
-and `count` alike (a split row counts once, in the day it ended).
+and `count` alike. A split row counts once, and only in a day it has
+**positive overlap** with: a row's interval is end-exclusive,
+`[startedAt, startedAt + durationS)`, so a wait answered exactly at
+midnight belongs wholly to the preceding day and gives the new day
+neither seconds nor a count — never a `count` of 1 over a `todayS` of 0
+that would render `<1 MIN` for a day holding no measured wait — and a
+zero-length row (a sub-second wait floored to 0) counts in the day of
+its `startedAt`, the one day the rule above leaves it.
 `longestS` is the longest in-day part, not the longest whole row,
 over open holds and closed rows alike.
 Day boundaries are local wall-clock midnights (`datetime.astimezone()`),
@@ -430,7 +437,11 @@ rather than by adding one.
 2. The interaction ends. In the one place each ending already passes
    through (`resolve`, `resolve_relay`, `panic`, expiry sweep, computer
    fallback removal), the store calls `ledger.close(entry, outcome, now)`.
-3. `WaitLedger` appends the row in memory and marks itself dirty; a
+3. `WaitLedger` inserts the row in memory **in `endedAt` order**
+   (`bisect.insort` on the derived `endedAt`, not an append: a clock
+   regression between two parks makes a later close carry an earlier
+   `endedAt`, and an appended row would break the sorted invariant the
+   aggregation bisects on) and marks itself dirty; a
    background writer persists it with the same coalescing pattern as the
    Max Tracker (`_mark_max_tracker_dirty`), never on the hook's thread.
    **Durability boundary:** the writer runs within `WAIT_LEDGER_FLUSH_S`
@@ -473,8 +484,13 @@ rather than by adding one.
    entries (provider, kind, `started_wall`, the last persisted checkpoint
    and the live monotonic elapsed, nothing else) in the same critical
    section — and releases the lock. Rows are
-   kept in `endedAt` order and a row touches today only if its `endedAt`
-   is at or after today's local midnight, so that copy is a bisect plus a
+   kept in `endedAt` order — maintained by sorted insertion at close and
+   **validated on load**, where an out-of-order file (an older writer, a
+   hand edit) is sorted stably once and logged rather than trusted — and
+   a row touches today only if its `endedAt` is strictly after today's
+   local midnight (end-exclusive, so a row ending exactly at midnight is
+   yesterday's) or it is the zero-length row starting exactly at
+   midnight, so that copy is a bisect plus a
    slice of today's tail, not a walk of the eight-day file. The overlap
    and local-calendar arithmetic then runs on the copy outside the lock,
    so a park, a resolve, the expiry sweep or a concurrent relay snapshot
@@ -641,8 +657,16 @@ Regression tests must prove:
   on every row, and the day parts of every row always sum to its
   `durationS`;
 - aggregates roll over at local midnight, a wait spanning midnight is
-  split by overlap into both days, a wait spanning a DST change is placed
+  split by overlap into both days, a wait answered exactly at midnight
+  counts wholly in the preceding day and leaves the new day at `count` 0
+  with no seconds (no `<1 MIN` for an empty day), a zero-length row
+  counts in its start day, a wait spanning a DST change is placed
   by local wall-clock boundaries, and the 8-day retention prunes;
+- two closes anchored at 00:05 and then, after a backward step, at
+  23:55 the previous day leave the ledger in `endedAt` order and today's
+  slice still holds the 00:05 row, so `todayS` does not retreat; a file
+  saved out of order is sorted on load, logged once, and aggregates the
+  same as its sorted form;
 - `nowS` follows the oldest open interaction and drops to 0 on
   close;
 - the persisted file and the payload carry no content fields (the
