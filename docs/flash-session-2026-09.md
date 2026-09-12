@@ -23,8 +23,11 @@ before the session and add a check for anything new:
 - `f01210f` (#109) coredump to flash, reboot ledger, pinned logging — check:
   the `omstartsliggare` line after the banner; for the dump, note that the
   `coredump i flash` notice appears only when a dump exists, so after the
-  one-time partition-table flash below either read the table back
-  (`idf.py -p <port> partition-table` shows `coredump`) or, only if the user
+  one-time partition-table flash below either reboot and confirm the boot log no longer carries the
+  missing-coredump-partition notice, or read the table back from the device
+  (`esptool.py -p <port> read_flash 0x8000 0xc00 table.bin`, then
+  `gen_esp32part.py table.bin` lists `coredump`; `idf.py partition-table`
+  only prints the checkout's table and proves nothing about the device) or, only if the user
   authorizes it in the session, trigger the controlled panic described in
   OBS-02 and read the notice on the next boot.
 - `5bc2792` (#110) poller backoff — check: stop the tokenserver, watch the

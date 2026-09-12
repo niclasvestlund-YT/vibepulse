@@ -313,11 +313,15 @@ wrong turn in the investigation.
 internal-free low-water and no warnings at all. The difference is not the new overlays —
 all three report `internt +0 B`, and opening and closing SETTINGS twelve times
 inside two minutes did **not** move the lowest-ever figure off 11 143. The
-difference is that the old image **did no TLS at all**: zero
+difference first blamed — the initial hypothesis, discarded below — was that
+the old image **did no TLS at all**: zero
 `esp-x509-crt-bundle: Certificate validated` lines across its whole uptime, no
-encrypted interaction relay, and every payload marked `stale=1`. Its roomy heap
-was the heap of a panel that was not doing its job. The new image completes a
-handshake every ~2.5 s.
+encrypted interaction relay, and every payload marked `stale=1`, a roomy heap
+on a panel that was not doing its job, against a new image that completes a
+handshake every ~2.5 s. The interval analysis that follows supports no
+immediate TLS mechanism, delayed contention stays merely possible, and no
+trigger was identified for any low-water step; the old/new comparison is the
+measured part, the attribution is not.
 
 **Correlation result — no client is implicated.** For all 17 lock failures,
 the interval back to the nearest preceding handshake was `min 178 ms, max
