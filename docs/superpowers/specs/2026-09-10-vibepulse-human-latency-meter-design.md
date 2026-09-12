@@ -586,8 +586,9 @@ paid for in both; there is no key left to shorten.
    removes an expired hold itself without going through `_sweep_locked`
    and is the normal ending while the panel is disconnected with the
    relay off, and the abandoned pop a few lines above it, which removes
-   a hold whose waiter gave up (outcome `abandoned`, a new outcome
-   value beside the others) — the
+   a hold whose waiter gave up — both recorded with the outcomes the
+   schema above already declares, the timeout pop as `expired` and the
+   abandoned pop as `removed`, no new outcome value — the
    store calls `ledger.close(entry, outcome, now)` exactly once per
    hold: the close is issued by whichever path wins the pop under the
    store lock, and a path that finds the entry already gone issues
@@ -867,10 +868,10 @@ Regression tests must prove:
 - `nowS` follows the oldest open interaction and drops to 0 on
   close;
 - a hold that expires in `await_result()` with the panel disconnected
-  and the relay off gets exactly one `timeout` row from that pop, the
+  and the relay off gets exactly one `expired` row from that pop, the
   sweep that runs afterwards adds none, and the day's total counts its
   seconds; a hold removed by the abandoned pop gets exactly one
-  `abandoned` row the same way;
+  `removed` row the same way;
 - the persisted file and the payload carry no content fields (the
   denylist test above);
 - the `/api/agent-status` body stays inside the device budget with `waits`
