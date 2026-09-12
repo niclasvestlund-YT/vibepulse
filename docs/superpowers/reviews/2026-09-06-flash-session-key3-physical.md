@@ -5,11 +5,11 @@
 **DRAFT, FOR REVIEW. USB FLASH TO `v1.0.0-67-ge51b79f` PASSED AND THE `settings`
 INTERNAL-RAM QUESTION IS SETTLED AT `+0 B`. §2 BOOT-LOG EVIDENCE IS COMPLETE. A
 DEFECT WAS FOUND AND MEASURED: THE PANEL RUNS BELOW ITS OWN FREEZE THRESHOLD
-(OBS-35). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
+(OBS-37). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
 ALL NOT EXERCISED. §5 IS RUNNING UNATTENDED FOR SIX HOURS AS PASSIVE
 OBSERVATION ONLY. §3.5 CODEX AND MANUAL-TEST 4.4/4.5 ARE NOT EXERCISED.**
 
-The evening's substance is the flash and the OBS-35 investigation, not the
+The evening's substance is the flash and the OBS-37 investigation, not the
 checklist. Three deliberate OTA-window cycles were measured because the
 investigation needed them; they are not manual-test 4.1/4.2 results, because
 4.1–4.3 were never walked as written and their pass criteria (menu route,
@@ -234,7 +234,7 @@ defect against `v1.0.0-67`, not as a run-sheet checkbox.
 
 ## The OTA window measured, three cycles
 
-Run deliberately as part of the OBS-35 investigation, not as manual-test
+Run deliberately as part of the OBS-37 investigation, not as manual-test
 4.1/4.2. The user held KEY3 for 3 s, chose UPDATE, waited for a heap reading,
 then short-tapped to close.
 
@@ -267,7 +267,7 @@ Eight downward steps over roughly 45 minutes, ending 1 897 B below the 11 520 B
 a display flush requires. No trigger is identified for any single step. The
 sampled `heap:` figure never went below 16 384 across the whole session, so none
 of this is visible in the number a soak would normally watch. This is the open
-question OBS-35 carries forward.
+question OBS-37 carries forward.
 
 ## The window that cannot be attributed — and why that is the finding
 
@@ -349,7 +349,7 @@ Nothing in `docs/manual-test-key3.md` was walked as written. Specifically:
 - **§5 soak** — a six-hour unattended passive observation ran 02:03–08:03 and
   completed with no alarm. It is **not** the run sheet's §5, which also requires
   a dozen SETTINGS opens under watch; those were done earlier as part of the
-  OBS-35 investigation, not as §5. Results are in OBS-35: the low-water
+  OBS-37 investigation, not as §5. Results are in OBS-37: the low-water
   plateaued at 9 355 (36 bytes of movement in six hours, against 34 576 bytes in
   the first 45 minutes), lock failures fell to effectively zero once the panel
   was left alone, and the block range held at 19 456–31 744. The panel was still

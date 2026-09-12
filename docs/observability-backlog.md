@@ -260,7 +260,7 @@ Physical dedicated-power acceptance remains separate evidence.
 
 ---
 
-### OBS-35 · The panel runs below its own freeze threshold, and the 10 s sample cannot see it
+### OBS-37 · The panel runs below its own freeze threshold, and the 10 s sample cannot see it
 `firmware · M · open` — on `v1.0.0-67-ge51b79f`, physically observed
 2026-09-06 over ~30 minutes of uptime on `torget-home-01`. Two distinct
 signals, which should not be conflated:
@@ -468,7 +468,7 @@ block dips under 11 520, or whether it retries and hides it.
 
 ---
 
-### OBS-36 · A maintenance window cannot be attributed after the fact
+### OBS-38 · A maintenance window cannot be attributed after the fact
 `firmware · S · open` — found 2026-09-06 while trying to answer a simple
 question: did the operator open the window, or did it open itself?
 
