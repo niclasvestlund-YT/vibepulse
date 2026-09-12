@@ -280,18 +280,28 @@ observations, after another process returned the files to A, while the
 persisted mark still says A and generation N — and a sample merged then
 cannot be un-merged when the watcher catches up. So the bridge gates
 every write under a fingerprint on the mark being **current**: the mark
-records the `.claude.json` modification time the tokenserver last
-confirmed, and the bridge, which `stat`s that file anyway, compares.
-A payload arriving while the file's modification time differs from the
+records the modification times of **both** stores the tokenserver last
+confirmed — `.claude.json`, and the credential store: the credentials
+file's `mtime`, or on macOS the `mtime` of the login keychain database
+(`~/Library/Keychains/login.keychain-db`), which any keychain write
+bumps and which the bridge can `stat` without spawning `security`, a
+coarser signal than the item's `mdat` (the watcher records both, the
+`mdat` for the mark and the database time for this comparison) that
+errs only towards `unknown` — and the bridge `stat`s both and compares.
+A payload arriving while **either** modification time differs from the
 confirmed one is handled as if the account were unknown — it lands in
 the `unknown` entry, no binding is made and none is used — until the
 watcher's next observation either re-confirms the mark with the new
-time (a rewrite alone) or replaces it (a transition). A login always
-rewrites `.claude.json`, so the window between a hidden round trip and
-its detection admits no write under a fingerprint; the price is up to
-one watch interval of `unknown` after every `.claude.json` rewrite,
-which delays a session's next proving payload rather than losing the
-session. The bridge reads the mark from the tokenserver's state (the
+times (a rewrite or a refresh alone) or replaces it (a transition). A
+completed login rewrites both stores and a half-written one has
+rewritten one of them, so neither the window between a hidden round
+trip and its detection nor the pause of a split login — B's credential
+written, `.claude.json` still naming A, a session started in between
+holding B's token — admits a write under a fingerprint; the price is up
+to one watch interval of `unknown` after every rewrite of either store
+(a `.claude.json` rewrite, a token refresh, on macOS any keychain
+write), which delays a session's next proving payload rather than
+losing the session. The bridge reads the mark from the tokenserver's state (the
 same directory its own state lives in, read only) and **never derives
 one of its own**: reading `.claude.json` once at setup or doctor time
 would seed a mark from one file, which proves nothing about the
@@ -355,7 +365,15 @@ organization hash comes from the same response. The call is made
 cycle: the resolved pairs `credentialFp → {accountFp, orgFp}` are kept
 in the probe state file (hashes only, never a token), so a cycle whose
 token is already resolved makes exactly the usage call it makes today,
-and a token refresh costs one profile call. The profile call follows
+and a token refresh costs one profile call. **The profile call exists
+for the bridge-enabled path only.** With the bridge declined or not
+installed the probe keeps today's path exactly — one usage call, no
+profile call, no cooldown it could not have had before — and keeps
+today's cache identity, `default-v1`, so its cache behaviour, its
+refresh cost and its cross-account exposure are unchanged from today;
+the account partition below is a property of the bridge-enabled path,
+and installing the bridge later is what starts writing under
+fingerprints and opens the legacy window step 3 names. The profile call follows
 the probe's rules: it is never made during a cooldown, a 429 on it
 starts the same cooldown a usage 429 does and skips the usage call, and
 it is made *before* the usage call so a token that cannot be resolved
@@ -555,7 +573,7 @@ timestamp, not by which source it is:
    bridge-fed — is persisted under that identity, `latest` gains an
    identity argument the tokenserver always passes, records under
    another identity are never candidates, and `default-v1` is no longer
-   written for Claude. **Legacy records get one migration, not silent
+   written for Claude while the bridge is enabled. **Legacy records get one migration, not silent
    loss:** an existing installation carries still-valid Claude records
    under the hashed `default-v1` identity, and an identity-filtered
    lookup would leave them unreadable until the next successful probe —
@@ -683,9 +701,25 @@ window as "no observation", not zero.
    consider only samples under it, so a switch from A at 10 % to B at
    80 % inside one reset cycle reports no 70-point delta as B's usage
    today and B's forecast starts from B's samples alone. Existing Claude
-   peaks and history samples without an identity are the legacy case:
-   kept, never re-keyed, read only while no identity is known, and left
-   to age out, the same rule as legacy cache records. The wire has no session-stale
+   peaks and history samples without an identity are **neither hidden
+   on upgrade nor crossed into an account**: hiding them would empty the
+   tracker and move usage-today and the forecast backward the moment
+   the first identity resolved, a larger change than the acceptance
+   section allows. Tracker day peaks and maxed weeks recorded before the
+   upgrade form an explicit **legacy layer** the page shows under every
+   identity exactly as today, never merged into a per-identity bucket
+   (a post-upgrade observation for the upgrade day goes to its
+   identity's bucket and the page shows the higher of the two for that
+   day), reported as `maxTracker: legacyDays` on `GET /` and left to
+   age out with the tracker's own retention. History samples, which
+   live at most one reset cycle, are **adopted once** by the first
+   identity resolved after the upgrade — re-keyed to it and recorded as
+   `usageHistory: legacyAdoptedBy` so the doctor can say so — and never
+   by a later, different identity: the user upgrading is overwhelmingly
+   the user who produced samples minutes old, and a wrong adoption
+   skews one forecast for one reset cycle rather than putting a live
+   quota on the wrong ring, which is why the cache's legacy records get
+   no such adoption. The wire has no session-stale
    key the firmware would honour — `test/test_tokens.c` asserts that
    `claudeSessionStale` never sets provenance, and the card's only stale
    mark is `claudeWeekStale` — so a session value is sent only when the
@@ -991,9 +1025,22 @@ Regression tests must prove:
   identity on each Claude sample and `delta_since()` and `forecast()`
   under B's identity see none of A's samples (a switch from A at 10 %
   to B at 80 % inside one reset cycle yields no delta and a forecast
-  from B's samples alone), and a legacy peak or sample without an
-  identity is read only while no identity is known and is never
-  re-keyed;
+  from B's samples alone), legacy tracker days stay visible under every
+  identity as the legacy layer and are never merged into an identity
+  bucket, legacy history samples are adopted by the first identity
+  resolved after the upgrade and not by a later different one, and the
+  tracker, usage-today and forecast values neither disappear nor move
+  backward on upgrade;
+- with the bridge declined the probe makes no profile call, a token
+  refresh causes no request the probe does not make today, a 429 on the
+  usage call rests exactly as today, and the cache identity stays
+  `default-v1`;
+- a login whose credential write lands before its `.claude.json`
+  write: a proving payload from a session started in the pause, sent
+  while the credential store's modification time differs from the
+  confirmed one, lands in `unknown` and makes no binding, on Linux and
+  Windows through the credentials file's `mtime` and on macOS through
+  the login keychain database's;
 - registering a `CLAUDE_CONFIG_DIR` with setup while the tokenserver is
   running makes the directory watched within one `ACCOUNT_WATCH_S` with
   no restart, `GET /` lists it, the doctor shows it as `pending` until
@@ -1039,8 +1086,10 @@ On a Pro or Max account with the bridge installed, the panel's Claude
 session and weekly rings follow the statusLine within one panel poll of a
 Claude Code turn, the probe's 429 cooldowns no longer produce a stale
 Claude card while the bridge is fresh, the Fable/Opus ring behaves exactly
-as before, and a user who declines the bridge sees no change at all
-beyond the one-time unreadable legacy cache window that step 3 names.
+as before, and a user who declines the bridge sees no change at all —
+no profile call, no new cooldown, the same cache identity and the same
+tracker — while the one-time unreadable legacy cache window that step 3
+names opens only when the bridge is installed.
 
 ## Open questions for the maintainer
 
