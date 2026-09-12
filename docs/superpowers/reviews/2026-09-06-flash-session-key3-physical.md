@@ -107,9 +107,12 @@ asked for, and it retires the internal-RAM worry with evidence: the FEATURES row
 has no internal budget to fit under. All three overlays live entirely in the
 LVGL pool, which is 34 % used with all three accounted for.
 
-## §2 — the heap drop is the relays working, not a regression
+## §2 — the heap drop: the measured old/new comparison, and a first reading later discarded
 
-Steady-state internal heap is roughly half what the previous image showed:
+Steady-state internal heap is roughly half what the previous image showed. The
+comparison below is measured; the explanation that followed it that night (the
+relays' TLS churn) was the initial reading and is marked discarded further
+down — OBS-37 identified no trigger for the drop.
 
 | | old `v1.0.0-33` (55 min up) | new `v1.0.0-67` (95 s up) |
 |---|---|---|
