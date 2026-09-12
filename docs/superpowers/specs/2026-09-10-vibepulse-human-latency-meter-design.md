@@ -85,10 +85,11 @@ provider totals, `count` the number of waits, `endS` the seconds to the
 host's next local midnight, and `g` the ledger's build generation
 (below).
 
-One optional key, `"reset": 1`, is added only while the served day is the
-day of a persisted `dayReset` (the clock-correction release below) and is
-absent otherwise; the panel treats absent as 0 and any other value as a
-malformed block.
+One optional key, `reset`, names a discontinuity: `1` while the served
+day is the day of a persisted `dayReset` (the clock-correction release
+below), `2` while it is the day of a persisted `ledgerReset` (a
+quarantined file, below); absent otherwise. The panel treats absent as
+0 and any value other than 0, 1 or 2 as a malformed block.
 
 The keys are short on purpose: the direct-LAN capacity gate
 (`test/test_agent_status_body_capacity.py`) encodes the worst-case
@@ -148,7 +149,16 @@ persisted `dayReset` epoch, so it survives a restart and ends at the
 next rollover), and the page renders such a block's totals under a
 `CLOCK RESET` marker in the same slot `STALE` and `DAY ENDED` use — the
 numbers are the real day's measurement and are shown as such, and the
-marker names why they are lower than what the glass showed before. The
+marker names why they are lower than what the glass showed before. A
+**quarantined ledger** is the other discontinuity: when `state_files`
+moves a corrupt `interaction-waits.json` aside, the fresh file records
+`ledgerReset` (the wall-clock time of the quarantine) the moment it is
+created, the block carries `"reset": 2` for the rest of that served
+day, and the page renders those totals — an empty or much smaller day
+— under a `LEDGER RESET` marker, so a corruption recovery is never
+presented as a continuation either; the marker travels in the block
+itself, so it is on the glass the moment the new ledger's first block
+is accepted, never after. The
 page then shows the real day's waits from the next poll rather than an
 empty future day for as long as the clock error was large. The single
 wall anchor
@@ -296,9 +306,15 @@ and the retained block keeps its accept stamp, ages into `STALE` on its
 own 60 s relay budget above, and stays `STALE` (or becomes `DAY ENDED`
 when its countdown runs out) until a frame arrives; it never becomes
 absent on a timer. An **accepted** frame without a `waits` block — an
-older server, or a rollback — is a server statement and renders the
-absent state, on the LAN and over the relay alike, so a rollback does
-not leave retained data on the glass. **A block never replaces a newer
+older server, or a rollback — is a server statement, but one the page
+cannot order: absence carries no `g`, and a pre-upgrade frame the
+mailbox still holds can be 42 s older than the LAN block it would
+clear. So absence is ordered as a block with `g` 0 under the rule
+below: inside the age bound it leaves the retained block alone, and it
+renders the absent state only once the retained block was accepted
+more than `RELAY_AGE_BOUND_MS` plus the request's duration ago — a
+genuine rollback clears the glass within 42 s plus a fetch, on the LAN
+and over the relay alike, and a stale mailbox frame never does. **A block never replaces a newer
 one.** Frames reach the page from two transports whose order the page
 cannot infer on its own: `seq` counts agent-row changes, not builds
 (`_seq` in `agent_status.py` moves only when a record changes), the
@@ -309,11 +325,21 @@ with the LAN gone quiet, a mailbox frame built *before* the last LAN
 block could otherwise overwrite it and the cumulative totals would
 retreat. The block therefore carries the ledger's **build generation**
 `g`: a counter the ledger increments on every snapshot build (changed
-or not), persisted in the ledger file by every write and, while the
-file is otherwise clean, every `WAIT_GEN_PERSIST_S` (proposed 60 s),
-and restored on start as the persisted value plus 120 — more than the
-builds a clean interval can hold — so a restarted server never serves a
-generation the panel has already seen. The page keeps the `g` of its
+or not). The ledger **never serves a `g` it has not first made durable
+room for**, because the build rate is unbounded — the panel, the relay
+publisher and any local `/api/agent-status` client each build — so no
+fixed restart increment could be proven larger than what a crash
+loses. The file holds a **reservation**, `gReserved`, and a build may
+serve only `g < gReserved`: on start the ledger reads `gReserved`, sets
+`g` to it and persists `gReserved + WAIT_GEN_RESERVE` (proposed
+100 000) *before* the first build; while serving, the writer persists
+the next reservation once half of the current one is consumed, off the
+request path; and a build that finds the reservation exhausted before
+that write landed re-serves the last `g` — a duplicate the page refuses
+as not newer, never a step back — until it has. The first post-restart
+`g` is therefore above anything the previous process could have
+served, whatever the build rate, and a crash costs at most the unused
+part of one reservation. The page keeps the `g` of its
 retained block and lets a frame's block replace it only when the
 frame's `g` is **greater**: a smaller or equal `g` leaves the block, its
 totals and its accept stamp untouched whichever transport brought it
@@ -458,9 +484,10 @@ payload over `MAX_STATUS_BYTES` (2560) outright, and the field-wise full
 agent snapshot already measures 2 394 bytes, so the block is serialized
 as **bounded integers**: every seconds field is a whole number of
 seconds (floored) clamped to 999 999, `count` is clamped to 9 999,
-`endS` to 90 000, `g` to 999 999 999 (nine digits; at one build a
-second plus the restart step it wraps after about thirty years, and a
-wrap is covered by the stale rule below), never a float, never
+`endS` to 90 000, `g` to 999 999 999 (nine digits; a wrap needs a
+billion builds and reservations together — at one build a second and
+100 000 per restart, decades — and is covered by the age-bound rule
+below), never a float, never
 scientific notation. The
 worst-case block, `reset` and `g` included, is then 119 bytes in the
 relay's compact encoding and the worst-case relay payload 2 522 bytes,
@@ -549,7 +576,7 @@ paid for in both; there is no key left to shorten.
    are read together.
 5. The firmware's agent-status parser reads `waits` optionally (all
    eight fields, `g` included, numeric and non-negative, `reset` absent,
-   0 or 1, else the block is treated as absent), lets it replace the
+   0, 1 or 2, else the block is treated as absent), lets it replace the
    retained block only when its `g` is greater or the retained block was
    accepted more than `RELAY_AGE_BOUND_MS` plus this request's duration
    ago, stamps the accepted block with the monotonic clock,
@@ -561,17 +588,19 @@ paid for in both; there is no key left to shorten.
    relay source clear's synthetic empty snapshot bypasses the `waits`
    slot and leaves the retained block and its stamp in place.
 6. `GET /` reports `waits: {rows, unsaved, open, oldestDay, saveOk,
-   dayHeld, dayReset}` — rows on disk, rows closed but not yet written,
+   dayHeld, dayReset, ledgerReset}` — rows on disk, rows closed but not yet written,
    open-hold markers, the oldest retained day, the last save's outcome,
    whether the served day is currently held past a regressed clock, and
    the wall-clock time of the last future-day release (`null` when none
    has happened since the file was created; kept until the next release
    overwrites it, so the doctor can tell a deliberate reset from an
-   unexpectedly empty ledger for as long as the question can arise) —
+   unexpectedly empty ledger for as long as the question can arise), and
+   the wall-clock time of the last quarantine (`null` when the file was
+   never recreated after a corrupt one) —
    the one schema the durability and day-policy sections refer to, for
    the doctor and the smoke test; a failing save uses the same FIX/VARN
-   language as `maxTrackerSaveOk`, and the smoke test asserts all seven
-   keys are present and `dayReset` is `null` or an epoch.
+   language as `maxTrackerSaveOk`, and the smoke test asserts all eight
+   keys are present and `dayReset` and `ledgerReset` are `null` or an epoch.
 
 ## Failure and privacy boundaries
 
@@ -614,7 +643,8 @@ so provenance is the only visual change between live, stale (totals
 with the `STALE` marker, `BLOCKED RIGHT NOW` as dashes), day-ended
 (every total dashed under the wider `DAY ENDED` marker, a different
 layout from stale that must be seen to fit before it ships) and
-clock-reset (the totals shown, under the `CLOCK RESET` marker), and a
+clock-reset (the totals shown, under the `CLOCK RESET` marker) and its
+ledger-reset twin (the same layout under `LEDGER RESET`), and a
 capture cannot hide or mislay a measurement behind the treatment —
 the broad-number state (every seconds field at the
 wire maximum of 999 999 and `count` at 9 999, so the hero reads a
@@ -729,13 +759,20 @@ Regression tests must prove:
   still pass their own bounds — the 80 % headroom gate on the direct
   path and `MAX_STATUS_BYTES` on the relay; a float or an over-clamp
   value never reaches the wire;
-- a corrupt ledger is quarantined and a failing save shows on `GET /`;
+- a corrupt ledger is quarantined, the fresh file records `ledgerReset`
+  and a reservation from zero, every block for the rest of that served
+  day carries `reset` 2, the panel that retained a non-zero block
+  refuses the new ledger's blocks inside the age bound and then renders
+  its totals under `LEDGER RESET`, `GET /` reports `ledgerReset`, and a
+  failing save shows on `GET /`;
 - `g` increments on every snapshot build whether or not anything
-  changed, is in the file after every write and within
-  `WAIT_GEN_PERSIST_S` of a build with the file otherwise clean, and a
-  restart serves the persisted value plus 120 on its first build, so
-  the first block after a restart carries a `g` above any the previous
-  process served;
+  changed and never reaches the persisted `gReserved`: the reservation
+  is persisted before the first build after a start, the next one lands
+  once half is consumed, a build storm that exhausts a reservation
+  before the writer landed the next re-serves the last `g` (the page
+  keeps its block, nothing retreats), and a crash at any point followed
+  by a restart serves a first `g` above every `g` the previous process
+  served, at whatever build rate the test drives;
 - the firmware parser accepts the block, rejects a malformed one as absent
   without dropping the rest of the payload, and older payloads without it
   still parse (C host test);
@@ -749,8 +786,12 @@ Regression tests must prove:
   clears it, a snapshot that was never accepted shows the absent state,
   not stale, a retained block whose `endS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
-  arrives, and a block with `reset` 1 renders its totals under `CLOCK
-  RESET` while a `reset` of 2 or `true` makes the block absent; the relay
+  arrives, a block with `reset` 1 renders its totals under `CLOCK
+  RESET`, one with `reset` 2 under `LEDGER RESET`, and a `reset` of 3 or
+  `true` makes the block absent; an accepted frame without `waits`
+  arriving 25 s after a LAN block's accept, over either transport,
+  leaves that block on the glass, and one arriving `RELAY_AGE_BOUND_MS`
+  plus its fetch after the accept renders the absent state; the relay
   source-policy integration (C host test through
   `tokens_apply_agent_status_relay` and `tokens_clear_agent_status_relay`
   on the source policy, not the page model alone): a relay frame with a
@@ -796,7 +837,7 @@ Regression tests must prove:
   `nowS` runs (the writer window after a park), never `0`;
 - `endS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
-- the page's landmark captures match the ten frames above, the
+- the page's landmark captures match the eleven frames above, the
   broad-number frame shows every glyph inside its box with no overlap
   (a pixel test on the capture, not only a landmark), and the header
   reads `CLAUDE + CODEX` in the both-providers frame and the single name
