@@ -102,8 +102,11 @@ accepts: the checkpoint lag, and midnight — at 00:10 a hold parked at
 23:50 shows `blockedNowS` 1200 and contributes at most 600 to
 `longestTodayS`, because the other 600 belong to yesterday. The provider
 header names the providers of open holds as well. When an open hold
-closes, its row replaces its checkpointed contribution with the full
-measured duration; the total never steps back at that moment. Closed rows
+closes, the aggregate keeps publishing its **checkpointed** contribution
+until the writer has saved the row; only then does the full measured
+duration replace it. The rule is the same one throughout: the hero
+contains persisted seconds only, and the total never steps back at the
+close, at the save, or at a crash between the two. Closed rows
 contribute only the part of their measured duration that falls in the
 day. The split is made on the interval
 `[startedAt, startedAt + durationS]`: the monotonic `durationS` is the
@@ -228,19 +231,26 @@ test proves it rather than the spec assuming it (below).
    (proposed 2 s) of a close, and `main` gives the ledger the same final
    flush on shutdown the Max Tracker already gets (`max_tracker_store.save()`
    after `serve_forever` returns), so a clean stop loses nothing. An
-   unclean stop (crash, power) can lose rows closed inside that last
-   window, and a total the panel already showed can then be lower after
-   the restart; the spec accepts that bound rather than writing on the
-   hook's thread, and `GET /` reports `waits.rows` so the doctor can show
-   the file's state. What is persisted for an open hold is only its
-   marker (provider, kind, `startedAt`, checkpointed `elapsedS`),
-   rewritten by the same writer at park, at ending and on the checkpoint
-   cadence while anything is open, and closed by the final flush on a
-   clean stop, so a restart closes it at the last observation rather
-   than forgetting it or extending it to the next boot. The aggregate
-   counts each open hold by that persisted checkpoint (the store keeps
-   the value the writer last wrote beside the pending entry) and only
-   `blockedNowS` by its live age.
+   unclean stop (crash, power) can lose a row closed inside that last
+   window — but not the seconds the panel showed for it: rows and
+   open-hold markers live in the **same file** and one atomic write
+   moves a hold from marker to row, so a crash inside the window leaves
+   the marker, with its checkpoint, on disk, and the next start closes
+   it as a `restart` row worth exactly what the aggregate was still
+   publishing. The row's full duration is exposed only once that write
+   has happened (`close` records the row as *unsaved* and the aggregate
+   counts it by its last checkpoint until the writer reports the save),
+   so the on-disk state is never behind the glass by more than
+   `blockedNowS`. `GET /` reports `waits.rows` and `waits.unsaved` so
+   the doctor can show the file's state. What is persisted for an open
+   hold is only its marker (provider, kind, `startedAt`, checkpointed
+   `elapsedS`), rewritten by the same writer at park, at ending and on
+   the checkpoint cadence while anything is open, and closed by the
+   final flush on a clean stop, so a restart closes it at the last
+   observation rather than forgetting it or extending it to the next
+   boot. The aggregate counts each open or unsaved hold by that persisted
+   checkpoint (the store keeps the value the writer last wrote beside
+   the entry) and only `blockedNowS` by its live age.
 4. `AgentStatusService.snapshot()` calls one method,
    `InteractionStore.wait_aggregates(now)`, in two steps. Under the
    store's own lock it takes one coherent **snapshot** — the ledger's
@@ -337,15 +347,19 @@ Regression tests must prove:
   oldest; and closing one does not step the total back — including a
   close that races the 1 s snapshot, which a test drives by interleaving
   `close` between what would have been two separate reads and asserting
-  the block is monotone;
+  the block is monotone — and the closed row's full duration appears in
+  the totals only after the writer has saved it, its checkpoint
+  contribution standing in until then;
 - `wait_aggregates` holds the store lock only for the snapshot copy: a
   test with a large synthetic ledger asserts the lock is released before
   the day arithmetic runs (a park issued from another thread during the
   aggregation completes without waiting for it);
 - a close followed by a clean shutdown before the writer ran is on disk
   after the final flush; a close followed by a simulated crash inside the
-  writer window is absent after restart and the test names that as the
-  accepted bound;
+  writer window leaves the row absent but the marker present, the next
+  start closes the marker as a `restart` row worth its checkpoint, and
+  `todayS`, the provider totals and `longestTodayS` after the restart
+  equal what the aggregate published before the crash;
 - a row's `durationS` comes from the monotonic pair and its days from
   `[startedAt, startedAt + durationS]`: a wall-clock jump of an hour
   during a hold changes neither the total nor the longest wait nor the
