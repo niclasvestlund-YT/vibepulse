@@ -78,9 +78,13 @@ file in the tokenserver's state directory, `claude-statusline-quota.json`.
 **Per window, not per invocation:** each window in the file carries its
 own `at` (the bridge's wall-clock time when that window was last seen).
 The bridge reads the existing file first; a window absent from stdin keeps
-its previous entry, a window present replaces the stored one only if its
-`at` is not older than the stored `at`, and a window whose `resets_at`
-has passed is dropped. That matters because the statusLine runs at
+its previous entry; a window present replaces the stored one when its
+`resets_at` is newer (a new window), or when the reset matches and the
+percentage is higher; a replay of the same window with the same or a
+lower percentage leaves the stored entry **and its `at`** untouched, so
+a cached value re-emitted by a non-API trigger neither regresses the
+figure nor pretends to be a fresh observation; and a window whose
+`resets_at` has passed is dropped. That matters because the statusLine runs at
 session start *before* the session's first API response, with no
 `rate_limits` at all: an invocation like that must not erase the fresh
 sample another open session wrote seconds earlier. The whole
@@ -130,13 +134,21 @@ timestamp, not by which source it is:
 1. Among the bridge window (when its own `at` is younger than
    `STATUSLINE_FRESH_S`, proposed 15 minutes, and its `resets_at` has not
    passed) and the probe's last successful observation of the same window
-   (when it succeeded within its own interval), the one observed later
-   wins. A probe that completes after a bridge sample therefore corrects
-   cross-device drift at once — quota burned on a laptop shows on the
-   shelf on the next probe, not fifteen minutes later — and a bridge
-   sample written after a probe overrides it the same way. Two
-   observations of the same reset window never move the ring backward
-   through source priority alone; only a newer observation can.
+   (when it succeeded within its own interval): if they describe
+   different reset windows, the one with the later `resets_at` is the
+   current window and wins; if they describe the **same** reset window,
+   the **higher percentage** wins, whatever the timestamps say. Usage
+   inside one window only accumulates, so the higher figure is the truer
+   one and the ring never moves backward within a window — not through
+   source priority, and not through a stale replay either: the statusLine
+   also runs on permission-mode, vim-mode and timer triggers that make no
+   API request and re-emit Claude Code's cached `rate_limits`, so a
+   bridge write can carry a *newer* `at` with an *older* percentage than
+   what the probe just saw on another device. A probe that observes more
+   usage than the bridge therefore corrects cross-device drift at once,
+   and a bridge sample that observes more than the probe overrides it the
+   same way. `at` decides freshness and the reset window, never the
+   direction.
 2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
    record).
@@ -192,7 +204,13 @@ sample file too, and the merge treats it as "no observation", not zero.
    `_refresh_limits`: `get_limits()` starts that only when the probe
    interval expires, and with the bridged interval at 30 minutes a sample
    read there would sit invisible for up to that long. `_refresh_limits`
-   consults the file's freshness only to pick the probe interval. `GET /`
+   consults the file's freshness only to pick the probe interval, and
+   that predicate lives in `_probe_interval_s()` itself — the function
+   `get_limits()` calls on every request to decide whether a probe is
+   due — not in `_refresh_limits`, so the moment the bridge crosses
+   `STATUSLINE_FRESH_S` the interval drops back to the ladder and an
+   overdue verifier starts on the next request rather than at the end of
+   a 30-minute schedule set while the bridge was fresh. `GET /`
    reports `claudeStatusline: {status, ageS, claudeCodeVersion}` with
    statuses `fresh`, `stale`, `missing`, `invalid`, `not_installed`, where
    `ageS` is the age of the youngest window.
@@ -224,11 +242,16 @@ sample file too, and the merge treats it as "no observation", not zero.
   does not claim it is. The doctor is where failures show.
 - Setup never installs the bridge without the user's explicit yes and
   never overwrites a foreign `statusLine.command` without recording it.
-  Uninstall restores the recorded command (or removes the key if none was
-  recorded) **only if `statusLine.command` still points at this
-  installation's launcher**; if the user changed it after installing, the
-  current value is left untouched and the doctor reports the drift instead
-  of replacing a newer edit with an older one. `settings.json` edits go
+  Setup records, beside the chained command, which fields it owned: whether
+  the `statusLine` object existed at all, whether `type` and `command`
+  were present, and their previous values. Uninstall — **only if
+  `statusLine.command` still points at this installation's launcher** —
+  restores exactly those fields: an object that did not exist is removed
+  whole, a `type` the installer added is removed, a `command` it replaced
+  is restored, and sibling keys that were there before or were added
+  since (`padding`, for instance) are left as they are. If the user
+  changed the command after installing, nothing is touched and the doctor
+  reports the drift instead of replacing a newer edit with an older one. `settings.json` edits go
   through the same read-modify-write with backup that the hook
   installation already uses.
 - Two Claude Code sessions writing the file concurrently: the lock
@@ -253,8 +276,10 @@ Regression tests must prove:
   key, including nested ones;
 - a session-start invocation without `rate_limits` leaves both existing
   windows in the file untouched, an invocation with one window replaces
-  that window only, an invocation whose window is older than the stored
-  one leaves the stored one, and a window past its `resets_at` is dropped;
+  that window only, a replay of the same window with the same or a lower
+  percentage leaves the stored entry and its `at` unchanged, a new
+  `resets_at` replaces the window, and a window past its `resets_at` is
+  dropped;
 - two bridges run concurrently against one file (a real second process,
   not a mock) end with the newer `at` per window and no lost window; a
   bridge that cannot take the lock within the bound writes nothing and
@@ -270,17 +295,22 @@ Regression tests must prove:
   a probe cycle in between, and an unchanged file is not re-parsed;
 - the bridge rejects a non-object, oversized or non-UTF-8 stdin with exit 0
   and no file written;
-- the tokenserver serves whichever of the bridge window and the probe
-  observation was observed later: a probe completing after a fresh bridge
-  sample wins, a bridge sample written after a probe wins, and neither
-  moves the ring backward; it prefers both over an older plan-usage
-  sample, falls back to the probe when the sample is stale or its reset
-  has passed, and never invents a model-pool percentage from the bridge;
+- for the same reset window the tokenserver serves the higher of the
+  bridge and probe percentages whichever was observed later, so a probe
+  seeing cross-device usage wins over a fresher bridge replay and a bridge
+  seeing more wins over an older probe, and the persisted quota cache
+  never records a lower figure for a window it already holds; for
+  different windows the later `resets_at` wins; it prefers both over an
+  older plan-usage sample, falls back to the probe when the sample is
+  stale or its reset has passed, and never invents a model-pool
+  percentage from the bridge;
 - the probe interval is `PROBE_WHEN_BRIDGED_S` only while both windows
   are fresh and the last status was a completed probe; one fresh window
   beside a missing or stale one keeps the current ladder, the
   auth-recovery statuses keep `AUTH_RECOVERY_EVERY_S` with a fresh bridge
-  sample present, and the ladder returns otherwise;
+  sample present, the ladder returns otherwise, and a bridge that goes
+  stale after a probe was scheduled at the long interval makes
+  `get_limits()` start a probe on the next request;
 - a bridge observation reaches the Max Tracker only through the existing
   live gate;
 - `GET /` reports the five bridge statuses; the doctor and smoke test map
@@ -290,9 +320,11 @@ Regression tests must prove:
   diff, refuses an unrepresentable existing command, records a chained
   command, and a second install over an existing launcher keeps the
   originally recorded chained command instead of recording the launcher
-  (the recursion test); uninstall restores the recorded command when the
-  command is still the launcher, and leaves a command the user changed
-  afterwards alone while reporting the drift;
+  (the recursion test); uninstall, when the command is still the
+  launcher, removes a `statusLine` object that did not exist before,
+  removes a `type` the installer added, restores a replaced `command`,
+  and keeps unrelated siblings in every case; it leaves a command the
+  user changed afterwards alone while reporting the drift;
 - the `/api/tokens` body-capacity test still passes (no new wire fields).
 
 ## Acceptance
