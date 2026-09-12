@@ -172,10 +172,10 @@ rather than guessing.
 window, newest honest observation wins — and "newest" is decided by
 timestamp, not by which source it is:
 
-1. Among the bridge window (when its `seen` is younger than
-   `STATUSLINE_FRESH_S`, proposed 15 minutes, its `resets_at` has not
-   passed, and its entry's account fingerprint is the probe's) and the
-   probe's last successful observation of the same window: if they
+1. Among the bridge window (when its `resets_at` has not passed and its
+   entry's account fingerprint is the probe's — its `seen` plays no part
+   here) and the probe's last successful observation of the same window
+   (likewise until its `resets_at` passes): if they
    describe different reset windows, the one with the later `resets_at`
    is the current window and wins; if they describe the **same** reset
    window, the **higher percentage** wins, whatever the timestamps say.
@@ -189,26 +189,46 @@ timestamp, not by which source it is:
    probe that observes more usage than the bridge therefore corrects
    cross-device drift at once, and a bridge sample that observes more
    than the probe overrides it the same way. **The higher observation
-   stays eligible until its reset, not until its source goes quiet:**
-   the probe's last successful observation takes part in this comparison
-   as long as its `resets_at` has not passed, whether or not the probe
-   has succeeded within its interval since — the tokenserver keeps it as
-   a per-window monotonic floor (the quota cache already stores exactly
-   that record, and the session window gets the same treatment in
+   stays eligible until its reset, not until its source goes quiet, on
+   both sides:** the probe's last successful observation takes part in
+   this comparison as long as its `resets_at` has not passed, whether or
+   not the probe has succeeded within its interval since, and the
+   bridge's stored value takes part as long as *its* `resets_at` has not
+   passed, whether or not a status-line trigger has fired within
+   `STATUSLINE_FRESH_S` — the tokenserver keeps both as a per-window
+   monotonic floor (the quota cache already stores exactly that record
+   for the week, and the session window gets the same treatment in
    memory). Otherwise a probe that saw 60 % and then hit a 429 would drop
-   out of the comparison while a status-line trigger keeps replaying a
-   cached 40 %, and both rings would walk backward inside one reset
-   window on nothing but a cooldown. What the probe's freshness still
-   governs is the `claudeWeekStale` flag and the probe interval, never
-   which value is served. `seen` decides freshness, `resets_at` the
-   window, `at` is the record of when the winning value was observed;
-   none of them decides the direction.
+   out while a status-line trigger keeps replaying a cached 40 %, or a
+   bridge that saw 60 % and then went quiet for 15 minutes would drop
+   out while an unexpired probe observation of 40 % remains, and either
+   way a ring would walk backward inside one reset window on nothing but
+   a timer. What freshness still governs is liveness and scheduling:
+   the probe's age drives the `claudeWeekStale` flag and its own
+   interval, the bridge's `seen` (younger than `STATUSLINE_FRESH_S`,
+   proposed 15 minutes) drives the bridged probe interval and the
+   doctor's `fresh`/`stale` word — never which value is served.
+   `seen` decides liveness, `resets_at` the window, `at` is the record
+   of when the winning value was observed; none of them decides the
+   direction.
 2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
    record).
-3. The quota cache, marked stale, as today.
+3. The quota cache, marked stale, as today — **filtered by the same
+   account**. `QuotaCache.latest(provider, scope)` today returns the
+   newest unexpired record across every identity, and `_quota_identity`
+   hashes `default-v1` for Claude, so once the bridge has fed account A's
+   value into the cache, a probe switched to account B that momentarily
+   has no live result would fall through to A's number. So the Claude
+   identity fed to `_quota_identity` becomes the account fingerprint
+   (`default-v1` only while it is unknown), every Claude record — probe-
+   or bridge-fed — is persisted under it, and `latest` gains an identity
+   argument the tokenserver always passes; records under another
+   identity are never candidates, and an `unknown` identity never reads a
+   known one's record or vice versa.
 
-The heaviest-model weekly window keeps today's order: probe, then cache.
+The heaviest-model weekly window keeps today's order: probe, then cache,
+under the same identity filter.
 
 **The probe becomes a background verifier.** While **both** bridge windows
 are independently fresh (`five_hour` and `seven_day` each with `seen`
@@ -359,7 +379,15 @@ Regression tests must prove:
 - an actively reported window whose percentage has not moved for longer
   than `STATUSLINE_FRESH_S` is still fresh (by `seen`) and still keeps
   the bridged probe interval, while its `at` stays at the observation
-  that set the value;
+  that set the value; and a bridge value of 60 % whose `seen` then ages
+  past `STATUSLINE_FRESH_S` still beats an unexpired probe observation
+  of 40 % for the same reset, so the ring holds 60 % until the window
+  resets while the bridge counts as stale for scheduling;
+- the quota cache serves only records under the probe's own identity:
+  after the bridge has fed account A's value into the cache, a probe
+  switched to account B with no live result gets no cached value (stale
+  card), never A's; the reverse holds; and an `unknown` identity neither
+  reads nor is read by a known one;
 - two bridges run concurrently against one file (a real second process,
   not a mock) end with, per window, the winning observation and the `at`
   that belongs to it — a lower percentage with a newer `at` loses whole,
