@@ -135,7 +135,18 @@ that `/login`, so a probe served by either carries the home directory's
 fingerprint; Claude Desktop's injected token carries it only when it
 equals the keychain token (the candidates are already compared), and
 otherwise no fingerprint, because Desktop's account is not readable from
-outside its process. No fingerprint on either side, or two that differ,
+outside its process. **The fingerprint survives a cooldown restart:**
+`_probe_limits()` today loads a persisted 429 cooldown and returns
+before `_read_oauth_candidates()` runs, and the probe state file holds
+only `cooldown_until`, so a tokenserver restarted while resting would
+have no winning token to derive a fingerprint from and would reject an
+otherwise fresh bridge for the rest of the cooldown — the opposite of
+what the bridge is for. So `_save_probe_state` persists the fingerprint
+and its source beside `cooldown_until`, `_load_probe_state` restores
+them, and when an older state file has none the tokenserver derives the
+fingerprint once from the local credential store without any HTTP call
+(reading the candidates is local; only the request is what the cooldown
+rests). No fingerprint on either side, or two that differ,
 means **no merge**: the probe stays the panel's source exactly as today,
 the bridge sample stays in its file but is skipped by arbitration and by
 the interval rule, and the doctor says `VARN statusLine bridge: sample is
@@ -247,11 +258,19 @@ timestamp, not by which source it is:
    value into the cache, a probe switched to account B that momentarily
    has no live result would fall through to A's number. So the Claude
    identity fed to `_quota_identity` becomes the account fingerprint
-   (`default-v1` only while it is unknown), every Claude record — probe-
-   or bridge-fed — is persisted under it, and `latest` gains an identity
-   argument the tokenserver always passes; records under another
-   identity are never candidates, and an `unknown` identity never reads a
-   known one's record or vice versa.
+   when it is known and, when it is not (a Desktop token that differs
+   from the keychain's), a **credential fingerprint** — the first 16 hex
+   characters of `sha256` over the winning token, one-way, never the
+   token, shown nowhere — so that two unidentified accounts in a row
+   land in two partitions rather than one shared `default-v1` bucket
+   that would let A's unexpired quota serve B after Desktop switches
+   accounts and B's probe momentarily fails. A token refresh changes the
+   credential fingerprint and costs one cache miss; that is the accepted
+   price of never crossing accounts. Every Claude record — probe- or
+   bridge-fed — is persisted under that identity, `latest` gains an
+   identity argument the tokenserver always passes, records under
+   another identity are never candidates, and `default-v1` is no longer
+   written for Claude.
 
 The heaviest-model weekly window keeps today's order: probe, then cache,
 under the same identity filter.
@@ -421,8 +440,16 @@ Regression tests must prove:
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
-  card), never A's; the reverse holds; and an `unknown` identity neither
-  reads nor is read by a known one;
+  card), never A's; the reverse holds; two consecutive unidentified
+  accounts (Desktop tokens differing from the keychain's) land in two
+  credential-fingerprint partitions and the second never reads the
+  first's record; and the persisted cache never contains a token or
+  `default-v1` for Claude;
+- a tokenserver restarted during a persisted 429 cooldown restores the
+  fingerprint from the probe state file (or derives it locally without
+  an HTTP call when the file predates the field) and accepts a matching
+  fresh bridge sample for the rest of the cooldown, so the card is not
+  stale while the bridge is fresh;
 - two bridges run concurrently against one file (a real second process,
   not a mock) end with, per window, the winning observation and the `at`
   that belongs to it — a lower percentage with a newer `at` loses whole,
