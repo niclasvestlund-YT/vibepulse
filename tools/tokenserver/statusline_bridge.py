@@ -88,6 +88,10 @@ WINDOW_HORIZON_S = {
     "seven_day": 8 * 24 * 3600,
 }
 STDIN_MAX_BYTES = 256 * 1024
+# The chained status line was promised the same stdin: everything is
+# forwarded, up to this hard bound, even when the sample parser refuses
+# more than STDIN_MAX_BYTES of it.
+STDIN_FORWARD_MAX_BYTES = 8 * 1024 * 1024
 SAMPLE_MAX_BYTES = 64 * 1024
 CONFIG_MAX_BYTES = 64 * 1024
 VERSION_MAX_CHARS = 64
@@ -488,24 +492,44 @@ def run_chained(command: str | None, stdin_bytes: bytes,
     return int(completed.returncode or 0)
 
 
-def _directory_from_argv(argv) -> Path | None:
-    """``--state-dir PATH`` -- the launcher bakes in the directory it was
-    installed to, so the bridge and the record it reads never disagree."""
+def parse_argv(argv) -> dict:
+    """``--state-dir PATH`` and ``--chained COMMAND``, both baked into the
+    launcher at install time: the directory so the bridge and the record
+    it reads never disagree, the previous status line so a record that
+    cannot be read (corrupt, mid-rewrite, permissions) still leaves the
+    user their own status line.  Anything else is ignored."""
     argv = list(argv or [])
-    if len(argv) == 2 and argv[0] == "--state-dir" and argv[1]:
-        return Path(argv[1])
-    return None
+    found = {"directory": None, "chained": None}
+    index = 0
+    while index + 1 < len(argv):
+        flag, value = argv[index], argv[index + 1]
+        if flag == "--state-dir" and value:
+            found["directory"] = Path(value)
+        elif flag == "--chained" and value and "\n" not in value:
+            found["chained"] = value
+        index += 2
+    return found
+
+
+def _directory_from_argv(argv) -> Path | None:
+    return parse_argv(argv)["directory"]
+
+
+def read_stdin(stdin) -> bytes:
+    """Everything Claude Code wrote, up to the forward bound."""
+    try:
+        return stdin.read(STDIN_FORWARD_MAX_BYTES) or b""
+    except OSError:
+        return b""
 
 
 def main(argv=None, *, stdin=None, stdout=None, env=None,
          now=None, directory=None) -> int:
+    options = parse_argv(argv)
     if directory is None:
-        directory = _directory_from_argv(argv)
+        directory = options["directory"]
     stdin = sys.stdin.buffer if stdin is None else stdin
-    try:
-        raw = stdin.read(STDIN_MAX_BYTES + 1)
-    except OSError:
-        raw = b""
+    raw = read_stdin(stdin)
     try:
         record_sample(raw, now=now, directory=directory)
     except Exception:  # noqa: S110 - a bridge bug must not take the status line down
@@ -513,6 +537,10 @@ def main(argv=None, *, stdin=None, stdout=None, env=None,
     config_dir = claude_config_dir(env)
     command = chained_command(
         config_dir, None if directory is None else config_path(directory))
+    if command is None:
+        # No readable record for this config directory: the launcher's
+        # baked-in copy of the previous status line stands in.
+        command = options["chained"]
     return run_chained(command, raw, stdout=stdout)
 
 

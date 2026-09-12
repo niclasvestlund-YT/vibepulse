@@ -1977,8 +1977,9 @@ def _statusline_launcher_text(python: Path, bridge: Path, state_dir: Path,
         f"PY={shlex.quote(str(python))}\n"
         f"BRIDGE={shlex.quote(str(bridge))}\n"
         f"STATE={shlex.quote(str(state_dir))}\n"
+        f"CHAINED={shlex.quote(chained or '')}\n"
         'if [ -x "$PY" ] && [ -f "$BRIDGE" ]; then\n'
-        '  exec "$PY" "$BRIDGE" --state-dir "$STATE"\n'
+        '  exec "$PY" "$BRIDGE" --state-dir "$STATE" --chained "$CHAINED"\n'
         "fi\n"
         "# The checkout or interpreter moved: keep the previous status line.\n"
         f"{fallback}\n")
@@ -2251,14 +2252,21 @@ def _statusline_uninstall(*, config_dir: Path, state_dir: Path,
     chained = record.get("chained_command") if record else None
     if ours:
         settings = dict(settings)
+        new_block = dict(block)
         if _statusline_valid_command(chained):
-            new_block = dict(block)
             new_block["command"] = chained
-            settings["statusLine"] = new_block
             restored = f"restored {chained[:60]!r}"
         else:
+            # Only what the install wrote goes; a sibling such as
+            # ``padding`` -- there before, or added since -- stays.
+            new_block.pop("command", None)
+            new_block.pop("type", None)
+            restored = "removed the command (there was none before)"
+        if new_block:
+            settings["statusLine"] = new_block
+        else:
             settings.pop("statusLine", None)
-            restored = "removed the statusLine entry (there was none before)"
+            restored += " and the empty statusLine entry"
         _statusline_write_settings(settings_path, settings)
     else:
         shown = repr(current[:60]) if isinstance(current, str) else "nothing"

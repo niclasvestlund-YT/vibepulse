@@ -30,7 +30,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "cab1857bae12"
+HOST_SOURCE_FINGERPRINT = "123f8a3ac979"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -4645,8 +4645,36 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.run_setup("statusline", "install", "--yes-single-account")
         code, text = self.run_setup("statusline", "uninstall")
         self.assertEqual(code, 0, text)
-        self.assertIn("removed the statusLine entry", text)
+        self.assertIn("removed the command", text)
+        self.assertIn("empty statusLine entry", text)
         self.assertEqual(self.read_settings(), {"other": True})
+
+    def test_uninstall_keeps_siblings_it_did_not_create(self):
+        # A statusLine block with no command, only padding, and a sibling
+        # added after the install: neither is the installer's to delete.
+        self.write_settings({"statusLine": {"padding": 2}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        saved = self.read_settings()
+        saved["statusLine"]["later"] = True
+        self.write_settings(saved)
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.read_settings(),
+                         {"statusLine": {"padding": 2, "later": True}})
+        self.assertNotIn("empty statusLine entry", text)
+
+    def test_launcher_bakes_in_the_previous_line_as_a_fallback(self):
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "printf old; exit 3"}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        self.assertIn("--chained \"$CHAINED\"", self.launcher.read_text())
+        (self.state / "claude-statusline-bridge.json").write_text("{corrupt")
+        completed = subprocess.run(
+            ["/bin/sh", "-c", self.read_settings()["statusLine"]["command"]],
+            input=b"{}", capture_output=True, timeout=30,
+            env={**os.environ, "CLAUDE_CONFIG_DIR": str(self.config_dir)})
+        self.assertEqual(completed.returncode, 3, completed.stderr)
+        self.assertEqual(completed.stdout, b"old")
 
     def test_uninstall_leaves_a_replaced_status_line_alone(self):
         self.write_settings({"statusLine": {"type": "command",

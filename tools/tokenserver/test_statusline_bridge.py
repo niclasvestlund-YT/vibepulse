@@ -94,6 +94,13 @@ class ParsePayloadTests(unittest.TestCase):
         with self.assertRaises(bridge.RejectedPayload):
             bridge.parse_payload(raw, NOW)
 
+    def test_read_stdin_forwards_past_the_parse_cap(self):
+        raw = b"x" * (bridge.STDIN_MAX_BYTES + 10)
+        self.assertEqual(bridge.read_stdin(io.BytesIO(raw)), raw)
+        self.assertEqual(len(bridge.read_stdin(io.BytesIO(
+            b"y" * (bridge.STDIN_FORWARD_MAX_BYTES + 1)))),
+            bridge.STDIN_FORWARD_MAX_BYTES)
+
     def test_version_is_bounded_and_printable(self):
         for bad in ("", "x" * 65, "1.0\n", 7, None):
             with self.subTest(bad):
@@ -471,6 +478,58 @@ class MainTests(unittest.TestCase):
         self.assertIsNone(bridge._directory_from_argv(["--state-dir"]))
         self.assertIsNone(bridge._directory_from_argv(["--other", "x"]))
         self.assertIsNone(bridge._directory_from_argv(None))
+        options = bridge.parse_argv(["--chained", "my-status", "--state-dir",
+                                     "/s", "--junk", "1"])
+        self.assertEqual(options, {"directory": Path("/s"),
+                                   "chained": "my-status"})
+        self.assertIsNone(bridge.parse_argv(["--chained", ""])["chained"])
+        self.assertIsNone(bridge.parse_argv(["--chained", "a\nb"])["chained"])
+
+    def _capture_chained(self):
+        calls = []
+
+        def fake(command, stdin_bytes, stdout=None, run=None):
+            calls.append((command, stdin_bytes))
+            if stdout is not None and command:
+                stdout.write(b"old line")
+            return 0
+        return calls, mock.patch.object(bridge, "run_chained", fake)
+
+    def test_baked_chained_command_stands_in_for_an_unreadable_record(self):
+        self.dir.mkdir()
+        (self.dir / bridge.CONFIG_NAME).write_text("{corrupt")
+        out = io.BytesIO()
+        calls, patch = self._capture_chained()
+        with patch:
+            code = bridge.main(["--state-dir", str(self.dir),
+                                "--chained", "my-status"],
+                               stdin=io.BytesIO(payload()), stdout=out,
+                               env={"CLAUDE_CONFIG_DIR": str(self.config_dir)},
+                               now=NOW)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue(), b"old line")
+        self.assertEqual(calls[-1][0], "my-status")
+        # The record, when readable, still wins over the baked copy.
+        key = bridge.config_dir_key(self.config_dir)
+        (self.dir / bridge.CONFIG_NAME).write_text(json.dumps(
+            {"v": 1, "dirs": {key: {"chained_command": "from-record"}}}))
+        with patch:
+            bridge.main(["--state-dir", str(self.dir), "--chained", "baked"],
+                        stdin=io.BytesIO(payload()), stdout=io.BytesIO(),
+                        env={"CLAUDE_CONFIG_DIR": str(self.config_dir)},
+                        now=NOW)
+        self.assertEqual(calls[-1][0], "from-record")
+
+    def test_oversized_stdin_still_reaches_the_chained_command_whole(self):
+        raw = b'{"pad":"' + b"x" * bridge.STDIN_MAX_BYTES + b'"}'
+        calls, patch = self._capture_chained()
+        with patch:
+            bridge.main(["--state-dir", str(self.dir), "--chained", "c"],
+                        stdin=io.BytesIO(raw), stdout=io.BytesIO(),
+                        env={"CLAUDE_CONFIG_DIR": str(self.config_dir)},
+                        now=NOW)
+        self.assertEqual(calls[-1], ("c", raw))
+        self.assertFalse((self.dir / bridge.SAMPLE_NAME).exists())
 
     def test_bridge_prints_nothing_without_a_chained_command(self):
         out = io.BytesIO()
