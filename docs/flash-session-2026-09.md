@@ -17,10 +17,12 @@ firmware row below is on the glass since then, unverified (the last row is
 host-side behaviour, not panel image), and the starting state for §1 is an
 image that *has* the SETTINGS menu. What is still missing from the
 glass is every firmware commit after `e51b79f` — the list below is
-`git log e51b79f..main -- main components platform partitions.csv
-sdkconfig.defaults CMakeLists.txt cmake` as of 2026-09-12 (every path that
-ends up in the image, `platform/` included — the same six commits as
-`main components` alone at that date); regenerate it
+`git log e51b79f..main -- main components platform third_party
+partitions.csv sdkconfig.defaults CMakeLists.txt cmake dependencies.lock`
+as of 2026-09-12 (every path the root `CMakeLists.txt` and ESP-IDF read
+into the image, the vendored `third_party/` tree and the managed-component
+lock included — the same six commits as `main components` alone at that
+date); regenerate it
 before the session and add a check for anything new:
 
 - `f01210f` (#109) coredump to flash, reboot ledger, pinned logging — check:
