@@ -494,8 +494,12 @@ both.
   block, the digest binding and the relay encryption are untouched.
 - Clock regression on the host makes `nowS` clamp at 0 and a
   negative duration is dropped rather than written; a `restart` row's
-  duration is the checkpoint, monotonic-derived like every other, so a
-  wall step between two processes moves only where its seconds land.
+  duration is the checkpoint, monotonic-derived like every other, and
+  its placement is `[startedAt, startedAt + elapsedS]` from the
+  persisted marker alone, so a wall step between the two processes
+  changes nothing about the row — the new process's clock may alter
+  only the served logical day, never where already-counted seconds
+  land, and `todayS` cannot retreat across a restart.
 
 ## Visual gate
 
