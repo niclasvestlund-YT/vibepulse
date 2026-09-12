@@ -593,7 +593,7 @@ paid for in both; there is no key left to shorten.
    hold: the close is issued by whichever path wins the pop under the
    store lock, and a path that finds the entry already gone issues
    none, so the await path and the sweep can never both record a
-   `timeout` row for one hold.
+   `expired` row for one hold.
 3. `WaitLedger` inserts the row in memory **in `endedAt` order**
    (`bisect.insort` on the derived `endedAt`, not an append: a clock
    regression between two parks makes a later close carry an earlier
