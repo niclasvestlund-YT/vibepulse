@@ -224,7 +224,20 @@ and `_read_keychain_oauth()` today asks `security find-generic-password
 takes the item's modification date from its `mdat` attribute, reading
 the secret only when `mdat` moved; that date is the Keychain's own
 record of the last write, the equivalent of the file's `mtime`, and is
-persisted beside the mark like the file times. A store whose
+persisted beside the mark like the file times. `mdat` is printed to the
+whole second, so a mark taken from it is **rounded up to the next whole
+second** before it is compared or persisted (a nanosecond-resolved file
+`mtime` is used as it is, and any other store time a platform reports
+coarsely is rounded up to its own granularity the same way): the mark
+must not precede any instant inside the second the write landed in, or
+a session whose transcript was created between a login's two writes,
+inside that second — `.claude.json` already naming B, the item written
+after the transcript but timestamped at the start of the second — would
+pass the start-time test and bind under B while holding A's credential.
+The start-time test is strict, the transcript's creation time must be
+**later than** the rounded mark, so a session started anywhere inside
+that second stays `unknown`: the cost is one second's worth of sessions
+started right after a login, never a wrong binding. A store whose
 modification time cannot be obtained — a `security` output without a
 parseable `mdat`, a credentials file that cannot be `stat`ed — yields
 no mark at all and the directory is `unproven_dir`; the watcher's
@@ -283,12 +296,20 @@ cannot be un-merged when the watcher catches up. So the bridge gates
 every write under a fingerprint on the mark being **current**: the mark
 records the modification times of **both** stores the tokenserver last
 confirmed — `.claude.json`, and the credential store: the credentials
-file's `mtime`, or on macOS the `mtime` of the login keychain database
-(`~/Library/Keychains/login.keychain-db`), which any keychain write
-bumps and which the bridge can `stat` without spawning `security`, a
-coarser signal than the item's `mdat` (the watcher records both, the
-`mdat` for the mark and the database time for this comparison) that
-errs only towards `unknown` — and the bridge `stat`s both and compares.
+file's `mtime`, or on macOS the `mtime` of **the keychain database
+that holds the item** — the path the attribute lookup prints on its
+`keychain:` line, which the watcher persists beside the mark; never an
+assumed `~/Library/Keychains/login.keychain-db`, because
+`find-generic-password` searches the user's whole keychain list and an
+item kept in another keychain would change while the login database's
+time stood still — which any write to that keychain bumps and which
+the bridge can `stat` without spawning `security`, a
+coarser signal than the item's `mdat` (the watcher records all three,
+the `mdat` for the mark and the database path and time for this
+comparison) that
+errs only towards `unknown` — and the bridge `stat`s both and compares,
+the keychain path included: a confirmed path the bridge cannot `stat`,
+or a mark with no path, counts as a differing modification time.
 A payload arriving while **either** modification time differs from the
 confirmed one is handled as if the account were unknown — it lands in
 the `unknown` entry, no binding is made and none is used — until the
@@ -316,10 +337,13 @@ through `state_files`, and the running tokenserver **picks it up
 without a restart**: the watcher `stat`s that configuration file on
 every tick and re-reads the directory list when its modification time
 moved, the same way it reads `.claude.json`, so a directory registered
-against a running service is watched within one `ACCOUNT_WATCH_S`;
+against a running service is watched within one `ACCOUNT_WATCH_S` and,
+outside a home cooldown, confirmed within three (one tick to discover
+it, one to resolve its token, one to record its mark);
 the doctor lists the registered directories, shows one the running
 service has not yet confirmed (per `GET /`) as `pending` for at most
-that interval, and warns about a directory it is run in that is not
+those three intervals — or, during a home cooldown, until it ends — and
+warns about a directory it is run in that is not
 registered — each
 with its own credential store (`<dir>/.credentials.json`), `.claude.json`,
 profile resolution, mark and generation. **A registered directory's
@@ -329,8 +353,12 @@ a registered directory's store is not a probe candidate and would never
 meet the profile call. The watcher therefore hands every newly observed
 credential fingerprint from a registered directory that is absent from
 the resolved pairs to the probe's resolver, which makes the profile
-call on the probe's own cadence, never during the home probe's
-cooldown and once per credential fingerprint — but **an auxiliary
+call **at the watcher's next tick after discovery** — never on the
+usage probe's cadence, which `PROBE_WHEN_BRIDGED_S` stretches to thirty
+minutes while the bridge is fresh, a wait that would leave a freshly
+registered directory `pending`, and its sessions unbindable, for most
+of an hour — never during the home probe's cooldown, and once per
+credential fingerprint — but **an auxiliary
 resolution never blocks the home usage cycle**: a 429 on a registered
 directory's profile call rests *that directory's* resolution on its
 own per-directory backoff (the same ladder the probe uses, persisted
@@ -1007,7 +1035,10 @@ Regression tests must prove:
   tokenserver's first consistent observation, not the observation time;
   a login whose credential write lands a minute after its `.claude.json`
   write records no mark until it does and then one at the second write,
-  so a session started in between stays `unknown` and one started after
+  so a session started in between stays `unknown` (and so does one whose
+  transcript was created in the same whole second as a Keychain `mdat`
+  that reads earlier within it: the mark rounds up to the next second
+  and the test is strict) and one started after
   it binds; a token refresh alone and a `.claude.json` rewrite alone
   move neither the mark nor a binding, while a round trip to another
   account and back completed inside one watch interval (both files
@@ -1185,15 +1216,21 @@ Regression tests must prove:
   while the credential store's modification time differs from the
   confirmed one, lands in `unknown` and makes no binding, on Linux and
   Windows through the credentials file's `mtime` and on macOS through
-  the login keychain database's;
+  the database time of the keychain the attribute lookup named — with
+  the item in a non-login keychain of the search list, that keychain's
+  path is what the mark records and the bridge `stat`s, and a login
+  database left untouched by the write does not admit the payload;
 - registering a `CLAUDE_CONFIG_DIR` with setup while the tokenserver is
   running makes the directory watched within one `ACCOUNT_WATCH_S` with
   no restart, `GET /` lists it, the doctor shows it as `pending` until
   then and as watched afterwards, and a session in it binds from the
   watcher's first confirmed observation; a registered directory whose
   credentials file holds a token the tokenserver has never seen gets
-  that token resolved by the probe's next cycle (one profile call, no
-  usage call for it, none during the home probe's cooldown), a 429 on
+  that token resolved at the watcher's next tick after discovery (one
+  profile call, no usage call for it, none during the home probe's
+  cooldown) — with the home probe idle on its bridged thirty-minute
+  interval the test asserts the directory confirmed within three
+  `ACCOUNT_WATCH_S` of the registration — a 429 on
   that call rests only that directory's resolution while the home
   usage call in the same cycle still runs and the panel's figures keep
   updating, the directory shows as
