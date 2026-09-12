@@ -35,9 +35,9 @@ extern const lv_font_t plex_ui_21;
 #define SETTINGS_WORD_Y         24
 #define SETTINGS_ROW_X          74
 #define SETTINGS_ROW_WIDTH      332
-#define SETTINGS_ROW_HEIGHT     84
-#define SETTINGS_ROW_GAP        16
-#define SETTINGS_FIRST_ROW_Y    120
+#define SETTINGS_ROW_HEIGHT     66
+#define SETTINGS_ROW_GAP        12
+#define SETTINGS_FIRST_ROW_Y    108
 #define SETTINGS_ROW_RADIUS     28
 #define SETTINGS_ROW_BORDER_W   2
 #define SETTINGS_FOOTER_Y       442
@@ -52,6 +52,8 @@ extern const lv_font_t plex_ui_21;
 typedef enum {
   VIEW_MENU,
   VIEW_ABOUT,
+  VIEW_LABS_ANALYTICS,
+  VIEW_LABS_GITHUB,
 } settings_view;
 
 static struct {
@@ -72,10 +74,11 @@ static struct {
   char version[ABOUT_VALUE_CAP];
   char ip[ABOUT_VALUE_CAP];
   bool about_dirty;
+  tg_settings_labs labs;
 } ui;
 
 static const char *const ROW_TEXT[TG_SETTINGS_ROW_COUNT] = {
-  "UPDATE", "WIFI", "ABOUT",
+  "UPDATE", "WIFI", "LABS", "ABOUT",
 };
 
 static const char *const ABOUT_LABEL[ABOUT_ROWS] = {
@@ -143,6 +146,11 @@ void torget_settings_click_row(tg_settings_row row) {
       ui.pending = TG_SETTINGS_INTENT_OPEN_WIFI;
       torget_settings_close();
       break;
+    case TG_SETTINGS_ROW_LABS:
+      if (!ui.labs.name) break;
+      ui.view = VIEW_LABS_ANALYTICS;
+      render();
+      break;
     case TG_SETTINGS_ROW_ABOUT:
       ui.view = VIEW_ABOUT;
       render();
@@ -152,10 +160,29 @@ void torget_settings_click_row(tg_settings_row row) {
   }
 }
 
+void torget_settings_bind_labs(const tg_settings_labs *labs) {
+  ui.labs = labs ? *labs : (tg_settings_labs){0};
+}
+
+void torget_settings_click_slot(unsigned slot) {
+  if (!ui.open || slot >= TG_SETTINGS_ROW_COUNT) return;
+  if (ui.view == VIEW_MENU) {
+    torget_settings_click_row((tg_settings_row)slot);
+    return;
+  }
+  if (ui.view == VIEW_LABS_ANALYTICS) {
+    if (slot < 3) ui.labs.toggle((int)slot);
+    else ui.view = VIEW_LABS_GITHUB;
+  } else if (ui.view == VIEW_LABS_GITHUB) {
+    if (slot < 2) ui.labs.toggle((int)slot + 3);
+    else ui.view = slot == 2 ? VIEW_LABS_ANALYTICS : VIEW_MENU;
+  }
+  render();
+}
+
 static void row_clicked_cb(lv_event_t *event) {
   if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-  torget_settings_click_row(
-      (tg_settings_row)(intptr_t)lv_event_get_user_data(event));
+  torget_settings_click_slot((unsigned)(uintptr_t)lv_event_get_user_data(event));
 }
 
 static void back_clicked_cb(lv_event_t *event) {
@@ -212,23 +239,50 @@ void torget_settings_create(void) {
 static void render(void) {
   if (!ui.overlay) return;
   bool menu = (ui.view == VIEW_MENU);
+  bool about = (ui.view == VIEW_ABOUT);
+  bool labs = ui.view == VIEW_LABS_ANALYTICS || ui.view == VIEW_LABS_GITHUB;
+  lv_label_set_text(ui.word, labs ? "LABS" : "SETTINGS");
+  lv_label_set_text(ui.foot,
+      labs && ui.labs.storage_error() ? "COULD NOT SAVE" :
+      labs && ui.labs.pending() ? "RESTART TO APPLY" : "KEY3 CLOSES");
 
-  for (int i = 0; i < TG_SETTINGS_ROW_COUNT; i++) show(ui.rows[i], menu);
+  for (int i = 0; i < TG_SETTINGS_ROW_COUNT; i++) {
+    show(ui.rows[i], !about);
+    lv_obj_set_style_text_color(ui.row_labels[i], lv_color_white(), 0);
+    if (menu) lv_label_set_text(ui.row_labels[i], ROW_TEXT[i]);
+    if (labs) {
+      int feature = ui.view == VIEW_LABS_ANALYTICS ? i : i + 3;
+      if ((ui.view == VIEW_LABS_ANALYTICS && i < 3) ||
+          (ui.view == VIEW_LABS_GITHUB && i < 2)) {
+        char text[40];
+        bool enabled = ui.labs.selected(feature);
+        snprintf(text, sizeof text, "%s  %s", ui.labs.name(feature),
+                 enabled ? "ON" : "OFF");
+        lv_label_set_text(ui.row_labels[i], text);
+        lv_obj_set_style_text_color(ui.row_labels[i],
+                                    enabled ? lv_color_white() : COL_MUTED, 0);
+      } else {
+        lv_label_set_text(ui.row_labels[i],
+            ui.view == VIEW_LABS_ANALYTICS ? "MORE" :
+            i == 2 ? "BACK" : "SETTINGS");
+      }
+    }
+  }
   /* Samma sanning i två uttryck: tonen på raden och trycket som ignoreras.
    * Muted text + muted kant läser som "går inte att välja just nu" utan att
    * raden försvinner — den ska finnas kvar så menyn inte byter form. */
   {
     bool can_update = ui.ip[0] != '\0';
-    lv_obj_set_style_text_color(ui.row_labels[TG_SETTINGS_ROW_UPDATE],
+    if (menu) lv_obj_set_style_text_color(ui.row_labels[TG_SETTINGS_ROW_UPDATE],
                                 can_update ? lv_color_white() : COL_MUTED, 0);
   }
   for (int i = 0; i < ABOUT_ROWS; i++) {
-    show(ui.about_labels[i], !menu);
-    show(ui.about_values[i], !menu);
+    show(ui.about_labels[i], about);
+    show(ui.about_values[i], about);
   }
-  show(ui.about_back, !menu);
+  show(ui.about_back, about);
 
-  if (!menu && ui.about_dirty) {
+  if (about && ui.about_dirty) {
     /* Streck för det som saknas — aldrig en tom rad och aldrig en påhittad
      * nolla. Samma regel som resten av skärmen. */
     lv_label_set_text(ui.about_values[0],
@@ -236,6 +290,7 @@ static void render(void) {
     lv_label_set_text(ui.about_values[1], ui.ip[0] ? ui.ip : "–");
     ui.about_dirty = false;
   }
+
 }
 
 void torget_settings_open(const char *version, const char *ip) {

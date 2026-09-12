@@ -145,8 +145,7 @@ bool torget_service_endpoint_url(const char *path, const char *configured_url,
                                  char *url, size_t cap,
                                  tg_service_source *source) {
   if (source) *source = TG_SERVICE_SOURCE_CONFIGURED;
-  if (!path || !configured_url || !url || cap == 0 || !ensure_lock())
-    return false;
+  if (!path || !url || cap == 0 || !ensure_lock()) return false;
 
   const int64_t now_us = esp_timer_get_time();
   bool should_query = false;
@@ -179,7 +178,9 @@ bool torget_service_endpoint_url(const char *path, const char *configured_url,
     if (source) *source = TG_SERVICE_SOURCE_DISCOVERED;
     return true;
   }
-  return bounded_copy(url, cap, configured_url);
+  /* No compiled-in fallback and nothing advertised: fail closed, so the
+   * caller logs a miss rather than chasing a NULL. */
+  return configured_url && bounded_copy(url, cap, configured_url);
 }
 
 void torget_service_note_result(tg_service_source source, const char *url,
