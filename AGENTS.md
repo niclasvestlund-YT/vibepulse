@@ -53,9 +53,13 @@ dokumentation/test, inte runtime. Se den fullständiga sanerade rapporten och
 uppvärmning (`usageTotals`-platshållare i stället för STALE efter omstart),
 coredump till flash, omstartsliggare i NVS, backoff i panelens pollers,
 karantän av korrupta tillståndsfiler och en engelsk tokenserver-katalog.
-Firmwaredelen är CI-byggd men **inte flashad**: `torget-home-01` kör
-fortfarande `v1.0.0-25-g054db68`, körschemat är `docs/flash-session-2026-09.md`,
-och coredump-partitionen kräver en engångs `partition-table-flash` över USB.
+Firmwaredelen är bara delvis på glaset: `torget-home-01` kör
+`v1.0.0-67-ge51b79f` (USB 2026-09-06), som har SETTINGS-menyn men inte
+coredump, liggare, backoff, platshållare eller LABS — de är CI-byggda men
+**inte flashade**.
+SETTINGS statiska panelgranskning (§3 i `docs/manual-test-key3.md`) är inte
+körd, körschemat är `docs/flash-session-2026-09.md`, och coredump-partitionen
+kräver en engångs `partition-table-flash` över USB.
 Windows-PASS:et ovan förblir bundet till `bee5d8c` och ärvs inte av v1.1.0.
 
 Solelkollen och Vibbe/Buddy är egna produkter i egna repon och dras in som
