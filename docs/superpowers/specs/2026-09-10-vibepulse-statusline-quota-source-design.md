@@ -356,12 +356,26 @@ say so rather than letting the gap pass as `account_unknown`. And it takes the
 session's start time from the creation time of the `transcript_path`
 the payload names (a `stat`, never a read; `st_birthtime` on macOS,
 creation time on Windows), a file Claude Code creates when the session
-starts. The binding is made only if the session started **after**
-`accountSeenSince`; otherwise the session stays `unknown` for its
-lifetime, because the account file changed during it or before the
-bridge could witness it — the racing-login case, an in-session
-`/login`, and a session that predates the bridge install all land
-there, by design, rather than under a fingerprint nobody proved. A
+starts. The binding is made only if the session started **after
+both** `accountSeenSince` **and the directory's install epoch** —
+`installedAt`, which setup records in the directory's record (below,
+beside the chained command) as the modification time of the
+`settings.json` it has just written, the earliest moment Claude Code
+could run the bridge for that directory; a reinstall records a new
+epoch, and uninstall leaves the last one in place. Otherwise the
+session stays `unknown` for its lifetime, because the account file
+changed during it or before the bridge could witness it — the
+racing-login case, an in-session `/login`, and a session that predates
+the bridge install all land there, by design, rather than under a
+fingerprint nobody proved. The epoch is what keeps the last case true:
+the tokenserver may have watched a stable home directory for days
+before the user installed the bridge, so `accountSeenSince` alone would
+let a session started in that stretch bind at its first proving payload
+after the install (Claude Code picks the new `statusLine` up in a
+running session), and a session started during an uninstalled stretch
+would bind again after a reinstall; the mark cannot promise on its own
+what the spec promises, that no session older than the installation
+ever binds. A
 bound session never re-reads the file to *re-bind*: later proving
 payloads keep the binding made at the first one. But a binding is not
 permanent either: an in-session `/login` changes the account behind an
@@ -483,11 +497,24 @@ status line Claude Code runs) and preserves any other supported sibling
 keys such as `padding`. If a command already exists, setup records it
 inside the bridge's own configuration (the bridge never rewrites
 `settings.json` itself) and the bridge executes it with the same stdin,
-passing its stdout and exit status through unchanged. **Install is
+passing its stdout and exit status through unchanged. **Everything
+setup records is keyed per config directory**, by the same normalized
+identity as the mark — `sha256(CLAUDE_CONFIG_DIR path)[:16]` of the
+resolved path, the home directory when the variable is unset — because
+each `CLAUDE_CONFIG_DIR` has its own `settings.json` and therefore its
+own status line: the chained command, the launcher path, the ownership
+record and the install epoch each live in that directory's record; the
+bridge picks the record for the `CLAUDE_CONFIG_DIR` of the environment
+Claude Code spawned it with (the same variable it reads `.claude.json`
+by) and runs that directory's chained command, and a directory with no
+record chains nothing. A single record would let the second install
+overwrite the first directory's chained command, so both launchers
+would run one directory's line and uninstall could restore only one of
+them. **Install is
 idempotent:** if the existing command is this checkout's launcher, or any
 earlier VibePulse launcher — recognised **either** by the launcher path
-setup recorded in the bridge configuration at the last install (that
-file lives in the tokenserver's state directory, so it survives a
+setup recorded in that directory's record at the last install (the
+configuration lives in the tokenserver's state directory, so it survives a
 checkout being moved or deleted) **or** by a fixed marker in the
 launcher file the command points at, when that file can still be read —
 setup keeps the chained command it already recorded and rewrites only
@@ -801,10 +828,26 @@ window as "no observation", not zero.
    window is **withheld** — `claudeSessionPct` null, the ring's absent
    state — rather than presented as live, and it reaches the tracker and
    the history in no case.
-5. The doctor prints `PASS statusLine bridge: fresh (N s)` / `WAIT statusLine
-   bridge: installed, no sample yet` / `FIX statusLine bridge: the
-   configured command is not this checkout's bridge` / `OFF`. The smoke test
-   mirrors it as OK / VARN / FAIL. The SessionStart hook adds no new class:
+5. The doctor maps **every** `claudeStatusline` status `GET /` can
+   report, and the smoke test mirrors each line as OK / VARN / FAIL:
+   `fresh` → `PASS statusLine bridge: fresh (N s)` (OK); `missing` →
+   `WAIT statusLine bridge: installed, no sample yet` (VARN — the panel
+   still runs on the probe); `stale` → `VARN statusLine bridge: sample is
+   N s old, no Claude Code turn since` (VARN); `invalid` → `FIX
+   statusLine bridge: sample file rejected (<reason>)` (FAIL); `other_account`
+   → `VARN statusLine bridge: sample is from another Claude account`
+   (VARN); `account_unknown` → `VARN statusLine bridge: account unknown
+   (token not yet resolved)` (VARN); `unproven_dir` → `FIX statusLine
+   bridge: <dir> is not registered, or its credential store cannot be
+   read` (FAIL, naming the setup command that registers it);
+   `not_installed` → `OFF statusLine bridge: not installed` (OK — the
+   bridge is opt-in). Independently of the status, command drift prints
+   `FIX statusLine bridge: the configured command is not this checkout's
+   bridge` (FAIL), and `launcher missing` / `interpreter not found` are
+   the FAIL lines the setup section names. One table-driven test feeds
+   each of the eight statuses and the drift case through the doctor and
+   the smoke test and asserts the line and the severity of every one.
+   The SessionStart hook adds no new class:
    a fresh bridge simply makes `PROVIDER DATA STALE (Claude)` rarer.
 
 ## Failure and privacy boundaries
@@ -841,10 +884,12 @@ window as "no observation", not zero.
   does not claim it is. The doctor is where failures show.
 - Setup never installs the bridge without the user's explicit yes and
   never overwrites a foreign `statusLine.command` without recording it.
-  Setup records, beside the chained command, which fields it owned: whether
+  Setup records, in the directory's record beside the chained command,
+  which fields it owned: whether
   the `statusLine` object existed at all, whether `type` and `command`
   were present, their previous values, **and the values it installed**.
-  Uninstall — only if `statusLine.command` still points at this
+  Uninstall — run per config directory against that directory's record,
+  and only if its `statusLine.command` still points at this
   installation's launcher — restores those fields field by field, never
   the object as a unit, and **each field only if its current value still
   equals what setup installed**: a `type` the installer added is removed
@@ -992,7 +1037,10 @@ Regression tests must prove:
   a login to another account completed between the
   session's response and the bridge run resets `accountSeenSince` and
   leaves that session `unknown` for its lifetime, as does a session that
-  predates the bridge install, and a bound session loses its binding
+  predates the bridge install — started after a days-old
+  `accountSeenSince` but before the directory's `installedAt`, and
+  likewise one started during an uninstalled stretch before a reinstall
+  recorded a new epoch — and a bound session loses its binding
   when the file later names another account (the observed transition
   sends it to `unknown` for its lifetime, as the account-transition row
   below asserts) — the bridge only ever
@@ -1165,8 +1213,10 @@ Regression tests must prove:
   session bound under the previous value to `unknown` for its lifetime,
   their later proving payloads land in the `unknown` entry, and a
   switch back does not revive the old binding;
-- `GET /` reports the five bridge statuses; the doctor and smoke test map
-  them as specified; the SessionStart context stays within its byte bound;
+- `GET /` reports each of the eight bridge statuses; the doctor and the
+  smoke test map every one of them, and the drift case, to the line and
+  severity the data-flow section tabulates; the SessionStart context
+  stays within its byte bound;
 - setup writes a complete `{"type": "command", "command": …}` object
   when none existed and preserves sibling keys when one did, shows the
   diff, refuses an unrepresentable existing command, records a chained
@@ -1175,7 +1225,13 @@ Regression tests must prove:
   (the recursion test), and so does a second install from a **moved**
   checkout whose old launcher path no longer exists but matches the
   recorded one (the moved-checkout test: the chained command survives
-  and the doctor's `launcher missing` clears); uninstall, when the command is still the
+  and the doctor's `launcher missing` clears); setup run for two
+  `CLAUDE_CONFIG_DIR`s whose `settings.json` files chain two different
+  existing commands keeps two records, the bridge spawned with each
+  directory's variable runs that directory's chained command with the
+  other's untouched, and uninstall in each directory restores that
+  directory's own command and ownership fields (the two-directory
+  install/uninstall test); uninstall, when the command is still the
   launcher, removes a `type` the installer added, restores a replaced
   `command`, keeps unrelated siblings in every case — including a
   `padding` added after an install that created the object, which then
