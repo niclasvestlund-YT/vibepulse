@@ -193,8 +193,9 @@ the `build*` glob, it is gone.
 ## FINDING: the heap low-water cannot answer the flush question
 
 Discovered from the serial log before the §1 gesture tests had produced a
-single result. The firmware carries its own guard for this and it has been
-firing continuously since 23 seconds after boot:
+single result. The firmware carries its own guard for this and it had fired on
+76 of roughly 120 samples since 23 seconds after boot (43 % over the full
+session):
 
 ```
 W (307120) torget: LÅGT DMA-block: 19456 byte (flush behöver 11520) — nära fryströskeln
@@ -208,7 +209,7 @@ Counts over ~20 minutes of uptime on `v1.0.0-67-ge51b79f`:
 | `LÅGT DMA-block … nära fryströskeln` | **76** of roughly 120 samples, about 63 %, since t=23 s (the full session came to 1 083 of 2 527, 43 %; see OBS-37) |
 | `esp_lv_adapter_lock: Failed to acquire LVGL lock` | **10**, clustered at t≈317–335 s, t≈819–827 s, t=1188 s |
 
-The decisive number is `lägsta någonsin`, which the periodic `heap:` line
+The number this finding rests on is `lägsta någonsin`, which the periodic `heap:` line
 tracks separately from the sampled value. Precisely: it is
 `heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)` (`main/main.c:650`),
 which ESP-IDF computes by summing each internal heap region's own lifetime
@@ -252,16 +253,19 @@ tied this to the relay finding above: the old image did zero TLS and held a
 TLS handshake every 2.5 s, and mbedTLS session buffers are internal and
 DMA-capable, so the churn would fragment the pool the display flush allocates
 from, with the LVGL lock failures clustering near the low-water drops. The
-interval analysis in OBS-37 refuted it the same night: the handshakes precede
-everything because they happen every 2.5 s, the lock failures and the memory
-figure are two separate signals, and no trigger was identified for any
-low-water step. Do not start from TLS.
+interval analysis in OBS-37 found it unsupported the same night: the handshakes
+precede everything because they happen every 2.5 s, so an immediate mechanism
+has no support; the lock failures and the memory figure are two separate
+signals, and no trigger was identified for any low-water step. Delayed
+contention is not ruled out by timing alone — excluding TLS needs a build with
+every TLS client off — so do not start from TLS, and do not strike it either.
 
 The overlays are not implicated: all three report `internt +0 B`, and the
 condition was already present before SETTINGS was ever opened.
 
-This is the §5 result, obtained without the soak. It should be treated as a
-measurement gap to instrument on `v1.0.0-67` — the DMA block's own minimum is
+This is what the evening produced in place of §5, which was not run (its
+dozen SETTINGS cycles under watch were never done as §5). It should be treated
+as a measurement gap to instrument on `v1.0.0-67` — the DMA block's own minimum is
 not tracked, so the transient is inferred from a total — not as a run-sheet
 checkbox and not as a measured threshold breach.
 

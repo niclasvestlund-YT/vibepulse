@@ -394,8 +394,9 @@ moment the panel is drawing progress UI and is about to receive a firmware
 image. Lowest observed so far is a summed low-water of 10 179 B — a figure that, as
 above, proves nothing about any single instant.
 
-**SECOND UPDATE, same session — the listener is a constant cost, not the
-cause.** The claim above was made on two coincidences. Three measured
+**SECOND UPDATE, same session — the listener measured: a fixed per-open cost
+is disproved, an intermittent effect is not.** The claim above was made on two
+coincidences. Three measured
 open/close cycles were then run deliberately, reading the heap before, during
 and after each:
 
@@ -434,7 +435,8 @@ So the honest state of this item, after three wrong turns:
    immediate mechanism is unsupported; delayed contention is not ruled out,
    and excluding TLS needs a build with every TLS client off.
 3. The OTA listener was blamed third, on two coincidences. Three measured
-   cycles refute that too.
+   cycles disprove a fixed per-open cost; an intermittent effect stays
+   unproven, not refuted.
 
 **What remains unexplained is the thing to chase:** the low-water mark walked
 from 44 199 down to 9 623 over ~45 minutes in steps
