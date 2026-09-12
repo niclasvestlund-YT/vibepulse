@@ -398,7 +398,19 @@ today's cache identity, `default-v1`, so its cache behaviour, its
 refresh cost and its cross-account exposure are unchanged from today;
 the account partition below is a property of the bridge-enabled path,
 and installing the bridge later is what starts writing under
-fingerprints and opens the legacy window step 3 names. The profile call follows
+fingerprints and opens the legacy window step 3 names. **Uninstalling
+the bridge does not switch back to `default-v1`.** A tokenserver that
+has ever resolved an identity keeps the **last verified identity** as
+its cache, tracker and history identity after the bridge is removed:
+the profile call stops, the resolved pairs stay persisted, and the
+probe reads and writes under that identity, so the fingerprint-keyed
+cache records, tracker peaks and history samples the bridge era
+accumulated stay readable and a probe failure right after uninstall
+still finds its cache, with nothing disappearing or moving backward.
+`GET /` reports `quotaIdentity: retained_after_uninstall`. Only an
+installation that never had the bridge uses `default-v1`; a later
+reinstall resumes profile resolution and, if the account turns out to
+have changed since, the ordinary transition rules apply. The profile call follows
 the probe's rules: it is never made during a cooldown, a 429 on it
 starts the same cooldown a usage 429 does and skips the usage call, and
 it is made *before* the usage call so a token that cannot be resolved
@@ -565,7 +577,15 @@ timestamp, not by which source it is:
    step runs only when the two organization hashes are equal; when either
    is unknown or they differ the step is skipped and `GET /` says
    `claudePlanUsage: other_account` / `account_unknown`, rather than
-   borrowing B's cache record to relabel A's number. The raw
+   borrowing B's cache record to relabel A's number. **The gate exists
+   on the bridge-enabled path only**: with the bridge declined there is
+   no profile call and so no organization hash, and no bridge sample
+   for a plan-usage sample to be merged across accounts with, so the
+   plan-usage step keeps today's ungated behaviour exactly — the
+   fresh-week fallback during a stale probe that
+   `test_snapshot_uses_fresh_local_claude_week_when_oauth_is_stale`
+   asserts stays as it is — rather than being skipped for want of a
+   hash the disabled path never has. The raw
    organization id still never leaves the reader.
 3. The quota cache, marked stale, as today — **filtered by the same
    account**. `QuotaCache.latest(provider, scope)` today returns the
@@ -1069,8 +1089,16 @@ Regression tests must prove:
   cap is trimmed on load by the same rule;
 - with the bridge declined the probe makes no profile call, a token
   refresh causes no request the probe does not make today, a 429 on the
-  usage call rests exactly as today, and the cache identity stays
-  `default-v1`;
+  usage call rests exactly as today, the cache identity stays
+  `default-v1`, and the plan-usage step is ungated so a fresh matching
+  plan-usage sample during a stale probe keeps the week live exactly as
+  today;
+- uninstalling the bridge after an identity was resolved keeps that
+  identity for the cache, tracker and history: a probe failure right
+  after uninstall serves the fingerprint-keyed cache record, the
+  tracker and forecast values are unchanged, `GET /` reports
+  `retained_after_uninstall`, and a reinstall resumes resolution under
+  the same identity;
 - a login whose credential write lands before its `.claude.json`
   write: a proving payload from a session started in the pause, sent
   while the credential store's modification time differs from the
