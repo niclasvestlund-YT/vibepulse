@@ -134,6 +134,11 @@ repeating deserves attention. What a healthy boot looks like:
 
 - **`claude-probe: X -> Y`** — every probe status transition: a 401
   appearing, a 429 backoff starting, and the recovery back to ok.
+- **`claude-statusline: X -> Y`** — the statusLine bridge sample's status
+  (`not_installed`, `missing`, `unreadable`, `invalid`, `empty`, `stale`,
+  `fresh`), logged once per transition. `fresh -> stale` every evening and
+  `stale -> fresh` every morning is a healthy rhythm; `invalid` means the
+  bridge will quarantine the file on its next run.
 - **`claude-keychain: X -> Y`** — macOS only (OBS-20): every change in why
   the keychain read gave no token, logged once per transition like the
   probe line. `X` is the previous word, `ok` after a recovery, or `start`
@@ -210,6 +215,11 @@ Returns live server state, added after real debugging nights:
   `keychain_security_missing` / `keychain_malformed` the tool or the
   record itself. The string is assembled per probe cycle and published
   once, so it never reads half-built.
+- `claudeStatusline` — the statusLine bridge: `status` (as in the log
+  line above), `ageS` of the newest sample, `claudeCodeVersion`,
+  `bridged` (a fresh sample covers both windows, so the probe runs every
+  1800 s) and `account: "assumed-single"` — the install consent, not a
+  measurement.
 - `claudeProbeStreak` / `claudeProbeIntervalS` / `claudeProbeCooldownLeftS`
   / `claudeProbeAgeS` — the backoff behind `claudeProbe` (OBS-18):
   consecutive failed cycles, the current gap between cycles (240 s,
@@ -290,6 +300,7 @@ lives in this section only (OBS-23).
 | `usage-history.json` | quota trend points, ≥15 min apart | 8 days |
 | `quota-cache.json` | last-known quota truths + reset times | until reset passes |
 | `max-tracker.json` | daily peaks, streaks, backfill watermarks | 400 days |
+| `claude-statusline-quota.json` | the statusLine bridge's session/week windows (+ lock file, install record `claude-statusline-bridge.json`, launcher `statusline-bridge.sh`) | until each window resets |
 
 All three are written atomically (temp + fsync + rename + parent-directory
 fsync, OBS-21). An unreadable one — invalid JSON, non-UTF-8 bytes, or the

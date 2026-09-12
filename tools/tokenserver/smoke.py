@@ -257,6 +257,33 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
         results.append((WARN, "claude credential missing from the "
                               "diagnostics — restart the tokenserver with "
                               "current code"))
+    # The statusLine bridge is optional: an older server has no field and
+    # an uninstalled bridge says nothing. Installed, it is judged.
+    statusline = root.get("claudeStatusline")
+    if isinstance(statusline, dict):
+        state = statusline.get("status")
+        age = statusline.get("ageS")
+        version = statusline.get("claudeCodeVersion")
+        tag = f" (Claude Code {version})" if isinstance(version, str) else ""
+        if state == "fresh":
+            bridged = statusline.get("bridged") is True
+            results.append((OK, f"claude statusLine bridge: sample {age} s "
+                                f"old{tag}; the probe is "
+                                f"{'a cross-check' if bridged else 'still primary'}"))
+        elif state == "stale":
+            minutes = age // 60 if isinstance(age, int) else "?"
+            results.append((WARN, f"claude statusLine bridge: last sample "
+                                  f"{minutes} min ago{tag} — no Claude Code "
+                                  "session has spoken since; the probe is the "
+                                  "source until one does"))
+        elif state in ("missing", "empty"):
+            results.append((WARN, "claude statusLine bridge: installed but "
+                                  "no sample yet — finish one Claude Code "
+                                  "turn"))
+        elif state in ("invalid", "unreadable"):
+            results.append((WARN, f"claude statusLine bridge: sample file is "
+                                  f"{state} — run `vibepulse_setup.py "
+                                  "statusline status`"))
     unknown = root.get("unknownRateLimitBuckets") or []
     if unknown:
         results.append((WARN, f"unknown rate-limit buckets: {unknown} — "

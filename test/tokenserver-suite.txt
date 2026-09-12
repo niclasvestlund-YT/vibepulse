@@ -23,3 +23,4 @@ tools.tokenserver.test_interaction_relay_crypto
 tools.tokenserver.test_publisher
 tools.tokenserver.test_discovery
 tools.tokenserver.test_smoke
+tools.tokenserver.test_statusline_bridge

@@ -33,6 +33,18 @@ from tools.tokenserver.vibepulse_config import (
 )
 
 
+def setUpModule():
+    # A bridge installed on the developer's own machine must never leak
+    # into the snapshot assertions below: point the reader at a file that
+    # does not exist unless a test says otherwise.
+    tokenserver._claude_statusline_path_override = (
+        Path(tempfile.gettempdir()) / "vibepulse-no-statusline-sample.json")
+
+
+def tearDownModule():
+    tokenserver._claude_statusline_path_override = None
+
+
 class StubHistory:
     def __init__(self, forecasts=None):
         self.forecasts = forecasts or {}
@@ -171,6 +183,299 @@ class ClaudePlanUsageFallbackTests(unittest.TestCase):
         self.assertEqual(merged, {})
         self.assertEqual(tokenserver._claude_plan_usage_status,
                          "fresh_without_reset")
+
+
+class ClaudeStatuslineBridgeTests(unittest.TestCase):
+    """The statusLine sample as a quota source: read, arbitrated per
+    window against the probe and the cache, and only while fresh."""
+
+    NOW = 1_800_000_000
+    IDENTITY = None  # filled in setUp: the general-week identity
+
+    def setUp(self):
+        self.IDENTITY = tokenserver._quota_identity("claude", "general_weekly")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.path = self.dir / "claude-statusline-quota.json"
+        saved = (tokenserver._claude_statusline_status,
+                 tokenserver._claude_statusline_logged,
+                 tokenserver._claude_statusline_view,
+                 tokenserver._claude_statusline_bridged,
+                 tokenserver._claude_statusline_cache)
+
+        def restore():
+            (tokenserver._claude_statusline_status,
+             tokenserver._claude_statusline_logged,
+             tokenserver._claude_statusline_view,
+             tokenserver._claude_statusline_bridged,
+             tokenserver._claude_statusline_cache) = saved
+        self.addCleanup(restore)
+        tokenserver._claude_statusline_cache = (None, None)
+        tokenserver._claude_statusline_logged = None
+        tokenserver._claude_statusline_bridged = False
+
+    def write(self, *, five=None, week=None, seen_ago=10, at_ago=None,
+              version="2.1.0"):
+        at_ago = seen_ago if at_ago is None else at_ago
+        entry = {"claude_code_version": version}
+        if five is not None:
+            pct, reset = five
+            entry["five_hour"] = {"pct": pct, "resets_at": reset,
+                                  "at": self.NOW - at_ago,
+                                  "seen": self.NOW - seen_ago}
+        if week is not None:
+            pct, reset = week
+            entry["seven_day"] = {"pct": pct, "resets_at": reset,
+                                  "at": self.NOW - at_ago,
+                                  "seen": self.NOW - seen_ago}
+        self.path.write_text(json.dumps(
+            {"v": 1, "accounts": {"single": entry}}), encoding="utf-8")
+
+    def cache(self, pct=None, reset=None):
+        cache = QuotaCache(self.dir / "quota.json", now=lambda: self.NOW)
+        if pct is not None:
+            cache.put(CachedQuota(
+                provider="claude", scope="general_weekly",
+                identity=self.IDENTITY, pct=pct, reset_at=reset,
+                observed_at=self.NOW - 600))
+        return cache
+
+    def merge(self, claude, cache=None):
+        return tokenserver._merge_claude_statusline(
+            claude, self.cache() if cache is None else cache, self.NOW,
+            path=self.path)
+
+    # -- reading ---------------------------------------------------------
+
+    def test_status_words_and_one_log_line_per_transition(self):
+        with self.assertLogs("tokenserver", level="INFO") as captured:
+            self.assertIsNone(tokenserver._read_claude_statusline(
+                self.path, now_ts=self.NOW))
+            self.assertEqual(tokenserver._claude_statusline_status,
+                             "not_installed")
+            (self.dir / "claude-statusline-bridge.json").write_text("{}")
+            tokenserver._read_claude_statusline(self.path, now_ts=self.NOW)
+            self.assertEqual(tokenserver._claude_statusline_status, "missing")
+            self.path.write_text("{oops")
+            tokenserver._read_claude_statusline(self.path, now_ts=self.NOW)
+            self.assertEqual(tokenserver._claude_statusline_status, "invalid")
+            self.assertEqual(self.path.read_text(), "{oops")  # not quarantined
+            self.write(five=(42.0, self.NOW + 3600), seen_ago=5)
+            summary = tokenserver._read_claude_statusline(
+                self.path, now_ts=self.NOW)
+            self.assertEqual(tokenserver._claude_statusline_status, "fresh")
+            self.assertEqual(summary["windows"]["five_hour"]["pct"], 42.0)
+            self.assertEqual(tokenserver._claude_statusline_view, {
+                "status": "fresh", "ageS": 5, "claudeCodeVersion": "2.1.0"})
+            # The same file, read again: same status, no new log line.
+            tokenserver._read_claude_statusline(self.path, now_ts=self.NOW)
+            self.write(five=(42.0, self.NOW + 3600),
+                       seen_ago=tokenserver.STATUSLINE_FRESH_S + 1)
+            tokenserver._read_claude_statusline(self.path, now_ts=self.NOW)
+            self.assertEqual(tokenserver._claude_statusline_status, "stale")
+            self.write(five=(42.0, self.NOW - 1))
+            self.assertIsNone(tokenserver._read_claude_statusline(
+                self.path, now_ts=self.NOW))
+            self.assertEqual(tokenserver._claude_statusline_status, "empty")
+        lines = [line for line in captured.output
+                 if "claude-statusline:" in line]
+        self.assertEqual([line.split("claude-statusline: ")[1]
+                          for line in lines], [
+            "start -> not_installed", "not_installed -> missing",
+            "missing -> invalid", "invalid -> fresh", "fresh -> stale",
+            "stale -> empty"])
+
+    def test_unchanged_file_is_not_reparsed(self):
+        self.write(five=(42.0, self.NOW + 3600))
+        tokenserver._read_claude_statusline(self.path, now_ts=self.NOW)
+        with mock.patch.object(tokenserver.statusline_bridge, "peek_sample",
+                               side_effect=AssertionError("reparsed")):
+            summary = tokenserver._read_claude_statusline(
+                self.path, now_ts=self.NOW + 1)
+        self.assertEqual(summary["windows"]["five_hour"]["pct"], 42.0)
+
+    # -- arbitration -----------------------------------------------------
+
+    def test_fresh_sample_stands_in_for_an_absent_probe(self):
+        self.write(five=(42.0, self.NOW + 3600),
+                   week=(12.5, self.NOW + 86400), at_ago=30)
+        merged = self.merge({})
+        self.assertEqual(merged["sessionPct"], 42.0)
+        self.assertEqual(merged["sessionResetAt"], self.NOW + 3600)
+        self.assertEqual(merged["sessionSource"], "statusline")
+        self.assertEqual(merged["weekPct"], 12.5)
+        self.assertEqual(merged["weekResetAt"], self.NOW + 86400)
+        self.assertEqual(merged["weekResetMin"], 1440)
+        self.assertEqual(merged["weekObservedAt"], self.NOW - 30)
+        self.assertEqual(merged["weekIdentity"], self.IDENTITY)
+        self.assertEqual(merged["weekSource"], "statusline")
+        self.assertTrue(tokenserver._claude_statusline_bridged)
+
+    def test_stale_sample_is_a_no_op_and_not_bridged(self):
+        self.write(five=(42.0, self.NOW + 3600),
+                   week=(12.5, self.NOW + 86400),
+                   seen_ago=tokenserver.STATUSLINE_FRESH_S + 1)
+        probe = {"sessionPct": 3.0, "sessionResetAt": self.NOW + 100}
+        self.assertIs(self.merge(probe), probe)
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+        self.path.unlink()
+        self.assertIs(self.merge(probe), probe)
+
+    def test_later_reset_wins_and_same_reset_higher_figure_wins(self):
+        probe = {"sessionPct": 50.0, "sessionResetAt": self.NOW + 3600,
+                 "weekPct": 20.0, "weekResetAt": self.NOW + 86400,
+                 "weekObservedAt": self.NOW - 100,
+                 "weekIdentity": self.IDENTITY}
+        # Older session window, lower week figure: the probe stands.
+        self.write(five=(90.0, self.NOW + 1800),
+                   week=(19.0, self.NOW + 86400))
+        merged = self.merge(probe)
+        self.assertEqual(merged["sessionPct"], 50.0)
+        self.assertEqual(merged["weekPct"], 20.0)
+        self.assertNotIn("weekSource", merged)
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+        # Same session reset, higher figure; newer week window.
+        self.write(five=(51.0, self.NOW + 3600),
+                   week=(1.0, self.NOW + 7 * 86400))
+        merged = self.merge(probe)
+        self.assertEqual(merged["sessionPct"], 51.0)
+        self.assertEqual(merged["weekPct"], 1.0)
+        self.assertEqual(merged["weekResetAt"], self.NOW + 7 * 86400)
+        self.assertTrue(tokenserver._claude_statusline_bridged)
+        # A tie keeps the probe's reading but still counts as covered.
+        self.write(five=(50.0, self.NOW + 3600),
+                   week=(20.0, self.NOW + 86400))
+        merged = self.merge(probe)
+        self.assertNotIn("sessionSource", merged)
+        self.assertNotIn("weekSource", merged)
+        self.assertTrue(tokenserver._claude_statusline_bridged)
+
+    def test_cache_that_knows_the_week_better_keeps_the_bridge_out(self):
+        self.write(week=(12.0, self.NOW + 86400))
+        merged = self.merge({}, self.cache(pct=13.0, reset=self.NOW + 86400))
+        self.assertNotIn("weekPct", merged)
+        merged = self.merge({}, self.cache(pct=1.0, reset=self.NOW + 2 * 86400))
+        self.assertNotIn("weekPct", merged)
+        merged = self.merge({}, self.cache(pct=11.0, reset=self.NOW + 86400))
+        self.assertEqual(merged["weekPct"], 12.0)
+        # The bridge's own earlier sample, persisted, must not make the
+        # next poll stale: an equal reading is still live.
+        merged = self.merge({}, self.cache(pct=12.0, reset=self.NOW + 86400))
+        self.assertEqual(merged["weekPct"], 12.0)
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+
+    def test_model_week_is_never_touched(self):
+        self.write(five=(42.0, self.NOW + 3600), week=(12.5, self.NOW + 86400))
+        probe = {"modelPct": 70.0, "modelResetAt": self.NOW + 86400,
+                 "modelObservedAt": self.NOW, "modelIdentity": "m"}
+        merged = self.merge(probe)
+        for key in probe:
+            self.assertEqual(merged[key], probe[key])
+
+    def test_probe_slows_down_only_while_bridged_and_healthy(self):
+        with mock.patch.object(tokenserver, "_probe_failure_streak", 0):
+            with mock.patch.object(tokenserver, "_claude_statusline_bridged",
+                                   True), \
+                    mock.patch.object(tokenserver, "_probe_status",
+                                      "usage_http_200 + ok"):
+                self.assertEqual(tokenserver._probe_interval_s(),
+                                 tokenserver.PROBE_WHEN_BRIDGED_S)
+            with mock.patch.object(tokenserver, "_claude_statusline_bridged",
+                                   True), \
+                    mock.patch.object(tokenserver, "_probe_status",
+                                      "usage_request_failed: TimeoutError"):
+                self.assertEqual(tokenserver._probe_interval_s(), 240)
+            with mock.patch.object(tokenserver, "_claude_statusline_bridged",
+                                   True), \
+                    mock.patch.object(tokenserver, "_probe_status",
+                                      "token_expired_18:15"):
+                self.assertEqual(tokenserver._probe_interval_s(), 15.0)
+            with mock.patch.object(tokenserver, "_claude_statusline_bridged",
+                                   False), \
+                    mock.patch.object(tokenserver, "_probe_status",
+                                      "usage_http_200 + ok"):
+                self.assertEqual(tokenserver._probe_interval_s(), 240)
+
+    def test_plan_usage_replay_never_lowers_a_same_window_figure(self):
+        usage = self.dir / "plan-usage-history.json"
+        usage.write_text(json.dumps({"version": 2, "samples": [{
+            "t": int(self.NOW * 1000), "org": "o",
+            "u": {"fh": 1, "sd": 11}}]}), encoding="utf-8")
+        cache = self.cache(pct=11.0, reset=self.NOW + 86400)
+        claude = {"weekPct": 12.0, "weekResetAt": self.NOW + 86400,
+                  "weekObservedAt": self.NOW - 30,
+                  "weekIdentity": self.IDENTITY}
+        merged = tokenserver._merge_claude_plan_usage(
+            claude, cache, self.NOW, path=usage)
+        self.assertIs(merged, claude)
+        self.assertEqual(tokenserver._claude_plan_usage_status, "not_higher")
+
+    # -- the snapshot ----------------------------------------------------
+
+    def _snapshot(self, claude=None, store=None, history=None):
+        base = {"v": 1, "dayTokens": 0, "dayTokensPerHour": 0,
+                "daySessions": 0, "monthTokens": 0,
+                "at": "2026-08-07T10:00:00+02:00"}
+        persisted = []
+        with mock.patch.object(tokenserver, "_compute", return_value=base), \
+                mock.patch.object(tokenserver, "get_limits",
+                                  return_value=claude or {}), \
+                mock.patch.object(tokenserver, "_read_codex_limits",
+                                  return_value={}), \
+                mock.patch.object(tokenserver, "_claude_statusline_path_override",
+                                  self.path), \
+                mock.patch.object(tokenserver, "_read_claude_plan_usage",
+                                  return_value=None), \
+                mock.patch.object(
+                    tokenserver, "_persist_quota_records_async",
+                    side_effect=lambda cache, records: persisted.extend(
+                        r for r in records if r is not None)):
+            tokenserver._last_result = tokenserver._compute(Path("/unused"))
+            tokenserver._last_computed = time.monotonic()
+            snapshot = tokenserver.get_snapshot(
+                Path("/unused"), history=history or StubHistory(),
+                now_ts=self.NOW, quota_cache=self.cache(),
+                max_tracker_store=store)
+        return snapshot, persisted
+
+    def test_snapshot_serves_records_and_tracks_a_fresh_sample(self):
+        self.write(five=(42.0, self.NOW + 3600),
+                   week=(12.5, self.NOW + 86400), at_ago=30)
+        store = mock.Mock()
+        history = StubHistory()
+        snapshot, persisted = self._snapshot(store=store, history=history)
+        self.assertEqual(snapshot["claudeSessionPct"], 42.0)
+        self.assertEqual(snapshot["claudeSessionResetMin"], 60)
+        self.assertEqual(snapshot["claudeWeekPct"], 12.5)
+        self.assertEqual(snapshot["claudeWeekResetMin"], 1440)
+        self.assertFalse(snapshot["claudeWeekStale"])
+        self.assertEqual(snapshot["claudeWeekObservedAt"], self.NOW - 30)
+        self.assertIsNone(snapshot["claudeModelWeekPct"])
+        store.observe_quota.assert_any_call("claude", 300, 42.0, self.NOW)
+        store.observe_quota.assert_any_call(
+            "claude", 10080, 12.5, self.NOW - 30)
+        self.assertEqual([r for r in persisted if r.scope == "general_weekly"],
+                         [CachedQuota(
+                             provider="claude", scope="general_weekly",
+                             identity=self.IDENTITY, pct=12.5,
+                             reset_at=self.NOW + 86400,
+                             observed_at=self.NOW - 30, label=None)])
+        self.assertIn(("claude", "session", 42.0, self.NOW + 3600, self.NOW),
+                      history.record_calls)
+        self.assertIn(("claude", "week", 12.5, self.NOW + 86400, self.NOW),
+                      history.record_calls)
+
+    def test_snapshot_ignores_a_stale_sample(self):
+        self.write(five=(42.0, self.NOW + 3600),
+                   week=(12.5, self.NOW + 86400),
+                   seen_ago=tokenserver.STATUSLINE_FRESH_S + 1)
+        store = mock.Mock()
+        snapshot, persisted = self._snapshot(store=store)
+        self.assertIsNone(snapshot["claudeSessionPct"])
+        self.assertIsNone(snapshot["claudeWeekPct"])
+        store.observe_quota.assert_not_called()
+        self.assertEqual(persisted, [])
 
 
 class ClaudeLimitHeaderTests(unittest.TestCase):
@@ -2911,6 +3216,10 @@ class HandlerPrivacyTests(unittest.TestCase):
             "anthropic-ratelimit-unified-7d-utilization"])
         self.assertEqual(payload["unknownRateLimitBuckets"], ["7d_haiku"])
         self.assertEqual(payload["claudeLocalUsage"], "fresh_applied")
+        self.assertEqual(payload["claudeStatusline"]["account"],
+                         "assumed-single")
+        for key in ("status", "ageS", "claudeCodeVersion", "bridged"):
+            self.assertIn(key, payload["claudeStatusline"])
         self.assertEqual(payload["claudeCredential"], {
             "status": "expiring", "expiresInMin": 17})
         # OBS-18: the backoff state rides beside the status string.

@@ -503,6 +503,42 @@ The booleans `claudeWeekStale`, `claudeModelWeekStale` and `codexWeekStale`
 are optional additions to the v2 contract. If the percentage is missing
 the corresponding stale is always `false`.
 
+## Claude Code statusLine bridge
+
+`statusline_bridge.py` is a second, passive source for the Claude session
+and general week: Claude Code runs the `statusLine` command from
+`settings.json` on every assistant message and pipes it a JSON document
+whose `rate_limits.five_hour` / `seven_day` carry the same percentages and
+resets the OAuth probe fetches. `python3 tools/vibepulse_setup.py statusline
+install --yes-single-account` points that command at a generated launcher
+in the state directory; the bridge keeps only those two windows and the
+Claude Code version in `claude-statusline-quota.json`, then runs the status
+line the user had before with the same stdin and passes its output and
+exit status through. The bridge prints nothing itself and never lets its
+own failure take the status line down.
+
+Rules, shared with the doctor and smoke test:
+
+- The sample is used only while **fresh** (newest `seen` within 15 min,
+  `STATUSLINE_FRESH_S`). Stale means no session has spoken; the probe is
+  the source again and the cache keeps the last live figure.
+- Each window is arbitrated separately against the probe's reading, and
+  the week also against the cache: the later reset is the newer window;
+  within one window the higher figure is the later one, because usage only
+  accumulates. Ties keep the probe. The model week has no statusLine
+  counterpart and is never touched.
+- While a fresh sample covers both windows and the probe is healthy
+  (`usage_http_200 + ok`), the probe runs every 1800 s
+  (`PROBE_WHEN_BRIDGED_S`) instead of 240 s. Every failure state keeps its
+  own ladder.
+- `GET /` shows `claudeStatusline: {status, ageS, claudeCodeVersion,
+  bridged, account: "assumed-single"}`; the log line
+  `claude-statusline: X -> Y` records status transitions once.
+- Single account only: the install command makes the operator assert that
+  Claude Code and the tokenserver use the same Claude account on this
+  computer. The account-binding machinery the spec describes is not
+  implemented; `statusline uninstall` restores the previous command.
+
 ## Local usage history
 
 The service saves the history atomically in

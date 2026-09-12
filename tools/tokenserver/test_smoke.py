@@ -147,6 +147,34 @@ class ServerCheckTests(unittest.TestCase):
         self.assertTrue(any("rereads it automatically" in text
                             for text in warnings))
 
+    def test_statusline_bridge_is_judged_only_when_installed(self):
+        cases = {
+            "not_installed": None,
+            "fresh": smoke.OK,
+            "stale": smoke.WARN,
+            "missing": smoke.WARN,
+            "empty": smoke.WARN,
+            "invalid": smoke.WARN,
+        }
+        for state, level in cases.items():
+            with self.subTest(state=state):
+                root = dict(HEALTHY_ROOT, claudeStatusline={
+                    "status": state, "ageS": 1200, "bridged": False,
+                    "claudeCodeVersion": "2.1.0",
+                    "account": "assumed-single"})
+                with canned_server({"/": root}) as base:
+                    results = smoke.check_server(base, checkout_rev="abc1234")
+                lines = [(lvl, text) for lvl, text in results
+                         if "statusLine bridge" in text]
+                if level is None:
+                    self.assertEqual(lines, [])
+                else:
+                    self.assertEqual([lvl for lvl, _ in lines], [level])
+                    if state in ("fresh", "stale"):
+                        self.assertIn("2.1.0", lines[0][1])
+                    if state == "stale":
+                        self.assertIn("20 min ago", lines[0][1])
+
     def test_unknown_buckets_warn(self):
         root = dict(HEALTHY_ROOT, unknownRateLimitBuckets=["7d_haiku"])
         with canned_server({"/": root}) as base:

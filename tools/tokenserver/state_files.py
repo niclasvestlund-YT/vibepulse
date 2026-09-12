@@ -13,10 +13,28 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger("tokenserver.state")
+
+
+def state_dir() -> Path:
+    """The service's state directory -- the lock, cache, history, tracker.
+
+    ``~/Library/Application Support`` is the macOS convention; the Windows
+    counterpart is ``%LOCALAPPDATA%``. Lives here rather than only in
+    ``tokenserver.py`` because the statusLine bridge, a short-lived process
+    Claude Code spawns on every status-line trigger, must find the same
+    directory without importing the whole service.
+    """
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base = (Path(local_app_data) if local_app_data
+                else Path.home() / "AppData" / "Local")
+        return base / "VibePulse"
+    return Path.home() / "Library" / "Application Support" / "VibePulse"
 
 
 def quarantine_corrupt(path: Path, reason: str) -> Path | None:

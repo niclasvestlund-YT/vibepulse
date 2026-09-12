@@ -92,7 +92,7 @@ if __package__:
         load_config,
         save_config,
     )
-    from . import codex_usage, interactions, value_meter
+    from . import codex_usage, interactions, statusline_bridge, value_meter
 else:  # run directly: python3 tools/tokenserver/tokenserver.py
     from discovery import DiscoveryAdvertiser
     from agent_status import AgentStatusService
@@ -119,6 +119,7 @@ else:  # run directly: python3 tools/tokenserver/tokenserver.py
     )
     import codex_usage
     import interactions
+    import statusline_bridge
     import value_meter
 
 RECOMPUTE_EVERY_S = 30
@@ -132,6 +133,13 @@ LIMITS_EVERY_S = 240  # the rate-limit probe: 15 calls/h -- the account's
 AUTH_RECOVERY_EVERY_S = 15.0  # local token check; no upstream while waiting
 CLAUDE_CREDENTIAL_WARNING_S = 30 * 60
 CLAUDE_PLAN_USAGE_FRESH_S = 20 * 60
+# The Claude Code statusLine bridge (tools/tokenserver/statusline_bridge.py)
+# leaves the account's session and week windows in the state directory on
+# every assistant message. While both are fresh the OAuth probe is only a
+# cross-check and runs at this slower cadence instead of LIMITS_EVERY_S --
+# the account's rate-limit bucket is shared with Claude Code itself.
+STATUSLINE_FRESH_S = statusline_bridge.FRESH_S
+PROBE_WHEN_BRIDGED_S = 1800
 CLAUDE_PLAN_USAGE_MAX_BYTES = 2 * 1024 * 1024
 HTTP_MAX_WORKERS = 32
 JSON_BODY_TIMEOUT_S = 2.0
@@ -147,6 +155,20 @@ REQUEST_DRAIN_TIMEOUT_S = 0.05
 # branches on a Mac.
 _IS_WINDOWS = sys.platform == "win32"
 _claude_plan_usage_status = "not_checked"
+# The statusLine bridge sample: content-free status word for GET / and
+# the transition log (not_installed / missing / unreadable / invalid /
+# empty / stale / fresh), the last summary served, and a (mtime, size)
+# keyed parse cache so the 30 s polls do not reparse an unchanged file.
+_claude_statusline_status = "not_checked"
+_claude_statusline_logged = None
+_claude_statusline_view = {"status": "not_checked", "ageS": None,
+                           "claudeCodeVersion": None}
+_claude_statusline_bridged = False
+_claude_statusline_cache = (None, None)
+_claude_statusline_lock = threading.Lock()
+# Tests point this at a file that does not exist so a bridge installed on
+# the developer's own machine never leaks into snapshot assertions.
+_claude_statusline_path_override = None
 
 
 def _state_dir():
@@ -247,6 +269,148 @@ def _read_claude_plan_usage(path=None, now_ts=None):
         "week_pct": values[1],
         "observed_at": int(observed_at),
     }
+
+
+def _claude_statusline_path():
+    if _claude_statusline_path_override is not None:
+        return Path(_claude_statusline_path_override)
+    return _state_dir() / statusline_bridge.SAMPLE_NAME
+
+
+def _read_claude_statusline(path=None, now_ts=None):
+    """The bridge's validated windows, or ``None`` when there is nothing
+    usable.  Sets the status word and logs its transitions once."""
+    global _claude_statusline_status, _claude_statusline_logged, \
+        _claude_statusline_view, _claude_statusline_cache
+    sample_path = _claude_statusline_path() if path is None else Path(path)
+    current_ts = time.time() if now_ts is None else now_ts
+    with _claude_statusline_lock:
+        try:
+            info = sample_path.stat()
+            key = (info.st_mtime_ns, info.st_size)
+        except FileNotFoundError:
+            key = None
+            installed = statusline_bridge.config_path(
+                sample_path.parent).exists()
+            status, document = ("missing" if installed
+                                else "not_installed"), None
+        except OSError:
+            key, status, document = None, "unreadable", None
+        else:
+            if key == _claude_statusline_cache[0]:
+                status, document = "ok", _claude_statusline_cache[1]
+            else:
+                status, document = statusline_bridge.peek_sample(sample_path)
+        summary = None
+        if status == "ok":
+            _claude_statusline_cache = (key, document)
+            summary = statusline_bridge.summarize_sample(document, current_ts)
+            status = summary["status"]
+        else:
+            _claude_statusline_cache = (None, None)
+        view = {"status": status,
+                "ageS": summary["ageS"] if summary else None,
+                "claudeCodeVersion":
+                    summary["claudeCodeVersion"] if summary else None}
+        _claude_statusline_status = status
+        _claude_statusline_view = view
+        if status != _claude_statusline_logged:
+            log.info("claude-statusline: %s -> %s",
+                     _claude_statusline_logged or "start", status)
+            _claude_statusline_logged = status
+    if summary is None or not summary["windows"]:
+        return None
+    return summary
+
+
+def _valid_epoch_after(value, now_ts):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value > now_ts)
+
+
+def _valid_pct(value):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and 0 <= value <= 100)
+
+
+def _window_wins(candidate_reset, candidate_pct, incumbent_reset,
+                 incumbent_pct):
+    """The spec's arbitration between two readings of one rate-limit
+    window: the later reset is the newer window; within one window usage
+    only accumulates, so the higher figure is the later one.  Ties keep
+    the incumbent."""
+    if incumbent_reset is None:
+        return True
+    if candidate_reset != incumbent_reset:
+        return candidate_reset > incumbent_reset
+    return candidate_pct > incumbent_pct
+
+
+def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
+    """Let a fresh statusLine sample stand in for -- or ahead of -- the
+    OAuth probe's session and general week figures.
+
+    Only a FRESH sample (Claude Code spoke within STATUSLINE_FRESH_S) is
+    used: a stale one means no session is active and the probe is the
+    better source again, so the merge is then a no-op and the cache keeps
+    the last live figure.  Each window is arbitrated separately against
+    the probe's (and, for the week, the cache's) reading by
+    :func:`_window_wins`.  The model week has no statusLine counterpart
+    and is never touched.
+    """
+    global _claude_statusline_bridged
+    summary = _read_claude_statusline(path=path, now_ts=now_ts)
+    if summary is None or summary["status"] != "fresh":
+        _claude_statusline_bridged = False
+        return claude
+    windows = summary["windows"]
+    merged = dict(claude)
+    covered = 0
+
+    five = windows.get("five_hour")
+    probe_reset = claude.get("sessionResetAt")
+    probe_pct = claude.get("sessionPct")
+    probe_session = (_valid_epoch_after(probe_reset, now_ts)
+                     and _valid_pct(probe_pct))
+    if five is not None:
+        if not probe_session or five["resets_at"] >= probe_reset:
+            covered += 1
+        if (not probe_session or _window_wins(
+                five["resets_at"], five["pct"], probe_reset, probe_pct)):
+            merged["sessionPct"] = five["pct"]
+            merged["sessionResetAt"] = five["resets_at"]
+            merged["sessionSource"] = "statusline"
+
+    week = windows.get("seven_day")
+    probe_reset = claude.get("weekResetAt")
+    probe_pct = claude.get("weekPct")
+    probe_week = (_valid_epoch_after(probe_reset, now_ts)
+                  and _valid_pct(probe_pct)
+                  and isinstance(claude.get("weekIdentity"), str))
+    if week is not None:
+        if not probe_week or week["resets_at"] >= probe_reset:
+            covered += 1
+        cached = quota_cache.latest("claude", "general_weekly", now=now_ts)
+        wins = (not probe_week or _window_wins(
+            week["resets_at"], week["pct"], probe_reset, probe_pct))
+        if wins and cached is not None and _window_wins(
+                cached.reset_at, cached.pct, week["resets_at"], week["pct"]):
+            # The cache knows a strictly better reading (a later window,
+            # or a higher figure in this one). An equal reading is the
+            # bridge's own earlier sample coming back: still live.
+            wins = False
+        if wins:
+            merged["weekPct"] = week["pct"]
+            merged["weekResetAt"] = week["resets_at"]
+            merged["weekResetMin"] = max(
+                0, int(round((week["resets_at"] - now_ts) / 60)))
+            merged["weekObservedAt"] = int(week["at"])
+            merged["weekIdentity"] = _quota_identity("claude", "general_weekly")
+            merged["weekSource"] = "statusline"
+    # Both windows covered by a fresh sample no older than the probe's own
+    # windows: the probe is a cross-check now and may slow down.
+    _claude_statusline_bridged = covered == 2
+    return merged
 
 
 def _log_dir():
@@ -487,6 +651,14 @@ def _merge_claude_plan_usage(claude, quota_cache, now_ts, path=None):
     cached = quota_cache.latest("claude", "general_weekly", now=now_ts)
     if cached is None or cached.reset_at <= now_ts:
         _claude_plan_usage_status = "fresh_without_reset"
+        return claude
+    existing_pct = claude.get("weekPct")
+    if (claude.get("weekResetAt") == cached.reset_at and
+            _valid_pct(existing_pct) and local["week_pct"] <= existing_pct):
+        # Same window, no higher figure: usage only accumulates within a
+        # window, so a later-but-lower local sample is a replay of an
+        # earlier reading (the statusLine bridge made this case real).
+        _claude_plan_usage_status = "not_higher"
         return claude
 
     merged = dict(claude)
@@ -1526,6 +1698,11 @@ def _probe_interval_s():
         # check only rereads the local keychain/credentials file and quickly
         # notices when the official Claude client has changed the token.
         return AUTH_RECOVERY_EVERY_S
+    if _claude_statusline_bridged and _probe_status == "usage_http_200 + ok":
+        # The statusLine bridge covers both windows with a fresh sample:
+        # the probe is a cross-check and spends fewer of the shared
+        # bucket's calls. Any failure state keeps its own ladder.
+        return PROBE_WHEN_BRIDGED_S
     return LIMITS_EVERY_S * (2 ** min(_probe_failure_streak, 2))
 
 
@@ -2435,7 +2612,8 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     usage_history = _get_usage_history() if history is None else history
     cache = _get_quota_cache() if quota_cache is None else quota_cache
     claude = _merge_claude_plan_usage(
-        get_limits() or {}, cache, current_ts)
+        _merge_claude_statusline(get_limits() or {}, cache, current_ts),
+        cache, current_ts)
     codex = _read_codex_limits()
 
     session_pct = claude.get("sessionPct")
@@ -3320,6 +3498,9 @@ class Handler(BaseHTTPRequestHandler):
                 # one locked read so they always describe the same cycle.
                 **_probe_view(),
                 "claudeLocalUsage": _claude_plan_usage_status,
+                "claudeStatusline": {**_claude_statusline_view,
+                                     "bridged": _claude_statusline_bridged,
+                                     "account": "assumed-single"},
                 # GET / is never parsed by the screen -- fields can be
                 # added without contract risk.
                 "usageComputeOk": failing_since is None,

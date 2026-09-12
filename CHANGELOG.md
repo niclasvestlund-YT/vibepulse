@@ -7,6 +7,19 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **Claude Code's statusLine as a quota source (host side).**
+  `python3 tools/vibepulse_setup.py statusline install --yes-single-account`
+  points Claude Code's `statusLine` at a generated launcher; the bridge
+  (`tools/tokenserver/statusline_bridge.py`) keeps the session and weekly
+  rate-limit windows Claude Code already hands that command, then runs the
+  status line you had before with the same stdin. The tokenserver uses a
+  fresh sample ahead of the OAuth probe per window (later reset wins;
+  within a window the higher figure), slows the probe to 30 min while both
+  windows are covered, and never touches the model week. `statusline
+  status`, `doctor`, `smoke.py` and `GET /` (`claudeStatusline`) report
+  it. Single-account slice of the 2026-09-10 spec; account binding is not
+  implemented, and Windows install is refused for now.
+
 - SETTINGS → LABS stores independent choices for burn rate, Max Tracker,
   API-equivalent Value, the GitHub page and star popups. Choices apply after
   restart. Fresh sample configurations start with quotas/activity; upgrades

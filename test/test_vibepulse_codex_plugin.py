@@ -14,6 +14,7 @@ import plistlib
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "21d7f23c2103"
+HOST_SOURCE_FINGERPRINT = "435d13fe2445"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -4441,6 +4442,298 @@ class RelaySetupTests(unittest.TestCase):
                     marketplace_remove, message))
         self.assertFalse(setup._known_absent(
             ["/codex", "mcp", "remove", "vibepulse"], accepted))
+
+
+@unittest.skipIf(sys.platform == "win32", "the launcher is a POSIX shell script")
+class StatusLineBridgeSetupTests(unittest.TestCase):
+    """`vibepulse_setup.py statusline install|uninstall|status` and the
+    doctor line: settings.json is edited strictly, the previous status
+    line is kept and restored, and every drift is named, never guessed."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.config_dir = root / "claude"
+        self.config_dir.mkdir()
+        self.settings = self.config_dir / "settings.json"
+        self.state = root / "state"
+        self.config = root / "config.json"
+        self.setup = load_setup()
+        self.launcher = self.state / self.setup.STATUSLINE_LAUNCHER_NAME
+
+    def run_setup(self, *argv, interactive=False, input_fn=None):
+        output = io.StringIO()
+        code = self.setup.main(
+            list(argv), config_path=self.config, python=Path(sys.executable),
+            codex=None, stdout=output, stdin_isatty=interactive,
+            input_fn=input_fn or (lambda prompt: ""),
+            claude_config_dir=self.config_dir,
+            statusline_state_dir=self.state)
+        return code, output.getvalue()
+
+    def read_settings(self):
+        return json.loads(self.settings.read_text(encoding="utf-8"))
+
+    def write_settings(self, document):
+        self.settings.write_text(json.dumps(document, indent=2) + "\n",
+                                 encoding="utf-8")
+
+    def record(self):
+        path = self.state / "claude-statusline-bridge.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        bridge = self.setup.statusline_bridge
+        return document["dirs"][bridge.config_dir_key(self.config_dir)]
+
+    def test_install_requires_the_single_account_consent(self):
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status"}})
+        code, text = self.run_setup("statusline", "install")
+        self.assertEqual(code, 1)
+        self.assertIn("FIX statusLine bridge: not installed", text)
+        self.assertIn("SAME Claude account", text)
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         "my-status")
+        self.assertFalse(self.state.exists())
+
+        code, text = self.run_setup(
+            "statusline", "install", interactive=True,
+            input_fn=lambda prompt: "no")
+        self.assertEqual(code, 1)
+        code, text = self.run_setup(
+            "statusline", "install", interactive=True,
+            input_fn=lambda prompt: "YES\n")
+        self.assertEqual(code, 0, text)
+
+    def test_install_keeps_the_previous_status_line_and_siblings(self):
+        self.write_settings({
+            "permissions": {"allow": ["Bash(ls:*)"]},
+            "statusLine": {"type": "command", "command": "my-status --x",
+                           "padding": 0},
+        })
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 0, text)
+        self.assertIn("PASS statusLine bridge: installed", text)
+        self.assertIn("'my-status --x'", text)
+        saved = self.read_settings()
+        self.assertEqual(saved["permissions"], {"allow": ["Bash(ls:*)"]})
+        self.assertEqual(saved["statusLine"], {
+            "type": "command", "command": str(self.launcher), "padding": 0})
+        record = self.record()
+        self.assertEqual(record["chained_command"], "my-status --x")
+        self.assertEqual(record["python"], sys.executable)
+        launcher = self.launcher.read_text(encoding="utf-8")
+        self.assertIn(self.setup.STATUSLINE_LAUNCHER_MARKER, launcher)
+        self.assertIn("statusline_bridge.py", launcher)
+        self.assertIn("exec /bin/sh -c 'my-status --x'", launcher)
+        self.assertEqual(
+            stat.S_IMODE(self.launcher.stat().st_mode) & 0o077, 0)
+        self.assertTrue(os.access(self.launcher, os.X_OK))
+
+    def test_install_without_a_status_line_creates_the_block(self):
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 0, text)
+        self.assertIn("no status line before", text)
+        self.assertEqual(self.read_settings(), {"statusLine": {
+            "type": "command", "command": str(self.launcher)}})
+        self.assertIsNone(self.record()["chained_command"])
+        self.assertIn("exit 0\n", self.launcher.read_text(encoding="utf-8"))
+
+    def test_launcher_round_trip_runs_the_bridge_then_the_old_line(self):
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "cat; exit 4"}})
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 0, text)
+        payload = json.dumps({
+            "version": "2.1.0",
+            "rate_limits": {
+                "five_hour": {"used_percentage": 42, "resets_at":
+                              int(time.time()) + 3600},
+                "seven_day": {"used_percentage": 7, "resets_at":
+                              int(time.time()) + 86400}}}).encode()
+        completed = subprocess.run(
+            [str(self.launcher)], input=payload, capture_output=True,
+            timeout=30, env={**os.environ,
+                             "CLAUDE_CONFIG_DIR": str(self.config_dir),
+                             "HOME": self.tmp.name})
+        self.assertEqual(completed.returncode, 4, completed.stderr)
+        self.assertEqual(completed.stdout, payload)
+        # The launcher bakes in the state directory it was installed to.
+        sample = self.state / self.setup.statusline_bridge.SAMPLE_NAME
+        self.assertTrue(sample.is_file(), sample)
+        document = json.loads(sample.read_text())
+        self.assertEqual(document["accounts"]["single"]["five_hour"]["pct"],
+                         42.0)
+
+    def test_reinstall_is_idempotent_and_never_chains_itself(self):
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status"}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.record()["chained_command"], "my-status")
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         str(self.launcher))
+        self.assertIn("exec /bin/sh -c my-status", self.launcher.read_text())
+
+    def test_install_refuses_untrusted_settings_and_commands(self):
+        self.settings.write_text('{"statusLine": {"type": "command", '
+                                 '"command": "a"}, "statusLine": 1}')
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 1)
+        self.assertIn("not strict JSON", text)
+        self.assertFalse(self.state.exists())
+
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "a\nrm -rf /"}})
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 1)
+        self.assertIn("not a single printable line", text)
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         "a\nrm -rf /")
+
+        self.write_settings({"statusLine": "junk"})
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 1)
+        self.assertIn("statusLine is not an object", text)
+
+        self.write_settings({"statusLine": {"type": "other",
+                                            "command": "a"}})
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 1)
+        self.assertIn("not a command", text)
+
+    def test_uninstall_restores_the_previous_line_and_cleans_up(self):
+        self.write_settings({"other": True,
+                             "statusLine": {"type": "command",
+                                            "command": "my-status",
+                                            "padding": 1}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        (self.state / "claude-statusline-quota.json").write_text("{}")
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0, text)
+        self.assertIn("restored 'my-status'", text)
+        self.assertEqual(self.read_settings(), {
+            "other": True,
+            "statusLine": {"type": "command", "command": "my-status",
+                           "padding": 1}})
+        self.assertFalse(self.launcher.exists())
+        self.assertFalse((self.state / "claude-statusline-bridge.json").exists())
+        self.assertFalse((self.state / "claude-statusline-quota.json").exists())
+
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0)
+        self.assertIn("OFF statusLine bridge: not installed", text)
+
+    def test_uninstall_removes_a_block_it_created(self):
+        self.write_settings({"other": True})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0, text)
+        self.assertIn("removed the statusLine entry", text)
+        self.assertEqual(self.read_settings(), {"other": True})
+
+    def test_uninstall_leaves_a_replaced_status_line_alone(self):
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status"}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "their-new-line"}})
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0, text)
+        self.assertIn("left", text)
+        self.assertIn("'their-new-line'", text)
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         "their-new-line")
+        self.assertFalse(self.launcher.exists())
+
+    def test_status_and_doctor_name_each_state(self):
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 0)
+        self.assertIn("OFF statusLine bridge: not installed", text)
+
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status"}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 0, text)
+        self.assertIn("WAIT statusLine bridge: installed, no sample yet", text)
+
+        bridge = self.setup.statusline_bridge
+        now = int(time.time())
+        sample = self.state / bridge.SAMPLE_NAME
+        sample.write_text(json.dumps({"v": 1, "accounts": {"single": {
+            "five_hour": {"pct": 42.0, "resets_at": now + 3600,
+                          "at": now - 30, "seen": now - 30},
+            "claude_code_version": "2.1.0"}}}))
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 0, text)
+        self.assertRegex(text, r"PASS statusLine bridge: fresh sample \d+ s "
+                               r"ago, Claude Code 2\.1\.0; account assumed "
+                               r"single")
+
+        sample.write_text(json.dumps({"v": 1, "accounts": {"single": {
+            "five_hour": {"pct": 42.0, "resets_at": now + 3600,
+                          "at": now - 4000, "seen": now - 4000}}}}))
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 0, text)
+        self.assertIn("VARN statusLine bridge: last sample 66 min ago", text)
+
+        sample.write_text("{oops")
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 0, text)
+        self.assertIn("sample file is invalid", text)
+        self.assertEqual(sample.read_text(), "{oops")
+
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "their-new-line"}})
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 1)
+        self.assertIn("no longer points at the launcher", text)
+        self.assertIn("'their-new-line'", text)
+
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": str(self.launcher)}})
+        self.launcher.unlink()
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 1)
+        self.assertIn("launcher missing", text)
+
+        self.run_setup("statusline", "install", "--yes-single-account")
+        record_path = self.state / "claude-statusline-bridge.json"
+        document = json.loads(record_path.read_text())
+        for entry in document["dirs"].values():
+            entry["python"] = str(self.state / "gone-python")
+        record_path.write_text(json.dumps(document))
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 1)
+        self.assertIn("interpreter", text)
+        self.assertIn("is gone", text)
+
+        # The doctor prints the same line and counts the fix.
+        self.setup.save_config(self.config, self.setup.VibePulseConfig())
+        output = io.StringIO()
+        code = self.setup.main(
+            ["doctor"], config_path=self.config, python=Path(sys.executable),
+            codex=None, run=FakeRunner([python_probe_ok()]), stdout=output,
+            claude_config_dir=self.config_dir, statusline_state_dir=self.state)
+        self.assertEqual(code, 1)
+        self.assertIn("FIX statusLine bridge: interpreter", output.getvalue())
+
+    def test_settings_points_at_launcher_without_a_record_is_a_fix(self):
+        self.run_setup("statusline", "install", "--yes-single-account")
+        (self.state / "claude-statusline-bridge.json").unlink()
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 1)
+        self.assertIn("install record is gone", text)
 
 
 if __name__ == "__main__":
