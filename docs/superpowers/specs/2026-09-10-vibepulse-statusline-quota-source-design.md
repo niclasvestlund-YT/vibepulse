@@ -76,15 +76,27 @@ and `rate_limits.seven_day` (each as `used_percentage` and `resets_at`)
 plus the Claude Code `version` string and an **account fingerprint**
 (below), and writes them atomically to one
 file in the tokenserver's state directory, `claude-statusline-quota.json`.
-**Per window, not per invocation:** each window in the file carries its
-own `at` (the bridge's wall-clock time when that window was last seen).
-The bridge reads the existing file first; a window absent from stdin keeps
+**Per account, per window, not per invocation:** the file holds one
+entry per account fingerprint (an invocation without a fingerprint goes
+under `unknown`), and the bridge merges only into the entry of the
+fingerprint it carries — the other accounts' windows are neither read
+into the merge nor relabelled, so a session-start run from account B with
+no `rate_limits`, or B's lower same-reset sample, can never retain A's
+windows under B's name and hand A's quota to B's probe. An entry whose
+windows have all expired is dropped. Each window carries two timestamps
+with two jobs: `at`, the bridge's wall-clock time when the **winning
+value** was observed, and `seen`, the wall-clock time the window was
+**last reported** by any valid run, replay or not. The bridge reads the
+existing file first; a window absent from stdin keeps
 its previous entry; a window present replaces the stored one when its
 `resets_at` is newer (a new window), or when the reset matches and the
 percentage is higher; a replay of the same window with the same or a
-lower percentage leaves the stored entry **and its `at`** untouched, so
-a cached value re-emitted by a non-API trigger neither regresses the
-figure nor pretends to be a fresh observation; and a window whose
+lower percentage leaves the stored value **and its `at`** untouched and
+advances only `seen`, so a cached value re-emitted by a non-API trigger
+neither regresses the figure nor claims to be a newer observation of it
+— while the bridge still counts as alive, because a weekly window that
+sits at the same percentage for an hour of real turns is the normal
+case, not a dead bridge; and a window whose
 `resets_at` has passed is dropped. That matters because the statusLine runs at
 session start *before* the session's first API response, with no
 `rate_limits` at all: an invocation like that must not erase the fresh
@@ -160,9 +172,9 @@ rather than guessing.
 window, newest honest observation wins — and "newest" is decided by
 timestamp, not by which source it is:
 
-1. Among the bridge window (when its own `at` is younger than
+1. Among the bridge window (when its `seen` is younger than
    `STATUSLINE_FRESH_S`, proposed 15 minutes, its `resets_at` has not
-   passed, and its account fingerprint matches the probe's) and the
+   passed, and its entry's account fingerprint is the probe's) and the
    probe's last successful observation of the same window
    (when it succeeded within its own interval): if they describe
    different reset windows, the one with the later `resets_at` is the
@@ -177,8 +189,9 @@ timestamp, not by which source it is:
    what the probe just saw on another device. A probe that observes more
    usage than the bridge therefore corrects cross-device drift at once,
    and a bridge sample that observes more than the probe overrides it the
-   same way. `at` decides freshness and the reset window, never the
-   direction.
+   same way. `seen` decides freshness, `resets_at` the window, `at` is
+   the record of when the winning value was observed; none of them
+   decides the direction.
 2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
    record).
@@ -187,8 +200,8 @@ timestamp, not by which source it is:
 The heaviest-model weekly window keeps today's order: probe, then cache.
 
 **The probe becomes a background verifier.** While **both** bridge windows
-are independently fresh (`five_hour` and `seven_day` each younger than
-`STATUSLINE_FRESH_S` and unexpired, and the sample's fingerprint matches
+are independently fresh (`five_hour` and `seven_day` each with `seen`
+younger than `STATUSLINE_FRESH_S` and unexpired, and the entry's fingerprint matches
 the probe's — a sample the arbitration will not use must not slow the
 probe either — a fresh session window beside a
 missing or stale weekly one does not count, because the probe is then the
@@ -223,9 +236,9 @@ sample file too, and the merge treats it as "no observation", not zero.
    statusLine bridge: not installed`.
 2. Claude Code runs the launcher on its normal triggers. The bridge merges
    stdin into the existing file per window and writes
-   `{"v": 1, "five_hour": {"pct": 23.5, "resets_at": 1738425600, "at":
-   <epoch s>}, "seven_day": {...}, "claude_code_version": "2.1.267",
-   "account": "3f9c0a7e1b2d4c65"}`
+   `{"v": 1, "accounts": {"3f9c0a7e1b2d4c65": {"five_hour": {"pct":
+   23.5, "resets_at": 1738425600, "at": <epoch s>, "seen": <epoch s>},
+   "seven_day": {...}, "claude_code_version": "2.1.267"}}}`
    through the existing atomic-write discipline (`state_files`), 0600, in
    well under 100 ms, then runs the chained command if any.
 3. The tokenserver reads the sample file **on the request path**, in the
@@ -246,8 +259,10 @@ sample file too, and the merge treats it as "no observation", not zero.
    a 30-minute schedule set while the bridge was fresh. `GET /`
    reports `claudeStatusline: {status, ageS, claudeCodeVersion, account}`
    with statuses `fresh`, `stale`, `missing`, `invalid`, `not_installed`,
-   `other_account`, `account_unknown`, where `ageS` is the age of the
-   youngest window and `account` is `match`, `mismatch` or `unknown`.
+   `other_account`, `account_unknown`, where `ageS` is the age by `seen`
+   of the youngest window in the probe's own entry and `account` is
+   `match`, `mismatch` or `unknown`; the tokenserver reads only that
+   entry and never the other accounts'.
 4. `/api/tokens` is byte-identical in shape. `claudeWeekStale` and
    `claudeSessionPct` come from whichever source won; `claudeModelWeekPct`
    keeps its probe-or-cache path. The Max Tracker records a bridge
@@ -266,7 +281,9 @@ sample file too, and the merge treats it as "no observation", not zero.
   also carries `cwd`, `transcript_path`, `session_id`, `model`, `cost`,
   `workspace.repo` and, on some builds, PR and worktree names. **None of it
   is written anywhere.** A test feeds a payload with every documented key
-  and asserts the sample file contains only the six allowed keys.
+  and asserts the sample file contains only the allowed keys: `v` and
+  `accounts` at the top, per entry `five_hour`, `seven_day` and
+  `claude_code_version`, per window `pct`, `resets_at`, `at` and `seen`.
 - The bridge never contacts the network and never reads a credential. The
   one file it reads besides its own is `.claude.json`, for the single
   `oauthAccount.accountUuid` field, and only its hash leaves the process.
@@ -302,10 +319,10 @@ sample file too, and the merge treats it as "no observation", not zero.
   the two ran in — never the newest `at` stapled to a different
   percentage, which would advance freshness for a value nobody observed
   at that moment.
-- The sample file's `at` is the bridge's wall clock, compared against the
-  tokenserver's wall clock on the same machine. Clock regression makes the
-  sample stale by age, never fresh by mistake (`age_s < -60` rejects, as in
-  the plan-usage reader).
+- The sample file's `at` and `seen` are the bridge's wall clock, compared
+  against the tokenserver's wall clock on the same machine. Clock
+  regression makes the sample stale by age, never fresh by mistake
+  (`age_s < -60` rejects, as in the plan-usage reader).
 - The 2026-08-23 recovery spec's rules stand: the probe still never sends a
   dead or expired token, and a 429 cooldown is never shortened. This spec
   only lengthens the probe interval while a better source is fresh.
@@ -320,9 +337,18 @@ Regression tests must prove:
 - a session-start invocation without `rate_limits` leaves both existing
   windows in the file untouched, an invocation with one window replaces
   that window only, a replay of the same window with the same or a lower
-  percentage leaves the stored entry and its `at` unchanged, a new
-  `resets_at` replaces the window, and a window past its `resets_at` is
-  dropped;
+  percentage leaves the stored value and its `at` unchanged and advances
+  `seen` only, a new `resets_at` replaces the window, and a window past
+  its `resets_at` is dropped;
+- alternating accounts: runs from fingerprints A and B, including B's
+  session-start run without `rate_limits` and B's lower same-reset
+  sample, leave A's windows under A and B's under B, never relabelled or
+  merged; the tokenserver whose probe is B serves B's entry only; an
+  entry whose windows have all expired disappears;
+- an actively reported window whose percentage has not moved for longer
+  than `STATUSLINE_FRESH_S` is still fresh (by `seen`) and still keeps
+  the bridged probe interval, while its `at` stays at the observation
+  that set the value;
 - two bridges run concurrently against one file (a real second process,
   not a mock) end with, per window, the winning observation and the `at`
   that belongs to it — a lower percentage with a newer `at` loses whole,
