@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import atexit
 import importlib.util
 import io
 import hashlib
@@ -27,7 +28,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "8772b9339e93"
+HOST_SOURCE_FINGERPRINT = "21d7f23c2103"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -187,6 +188,19 @@ def closed_port():
 SCRIPT_HANG_TIMEOUT_SECONDS = 30
 
 
+# Every script run gets an EMPTY Codex home unless a test hands it one.
+# session_start.py reads the saved approval/reviewer/sandbox modes from
+# $CODEX_HOME/config.toml (else ~/.codex/config.toml) BEFORE it checks
+# service health, on purpose: a saved `approval_policy = "never"` is the
+# failure that looks exactly like a broken panel. Inherited from the
+# developer's real machine, that same setting turned five service-health
+# tests red on an unchanged checkout (issue #93). The permission-mode tests
+# pass their own CODEX_HOME explicitly and are unaffected by this default.
+_ISOLATED_CODEX_HOME = tempfile.TemporaryDirectory(
+    prefix="vibepulse-test-codex-home-")
+atexit.register(_ISOLATED_CODEX_HOME.cleanup)
+
+
 def run_script(name, stdin=b"", *, port=None, env=None,
                timeout=SCRIPT_HANG_TIMEOUT_SECONDS):
     process_env = os.environ.copy()
@@ -196,6 +210,7 @@ def run_script(name, stdin=b"", *, port=None, env=None,
     for key in ("VIBEPULSE_PORT", "VIBEPULSE_CWD", "VIBEPULSE_SESSION_ID",
                 "VIBEPULSE_TURN_ID", "_VIBEPULSE_TEST_READ_TIMEOUT"):
         process_env.pop(key, None)
+    process_env["CODEX_HOME"] = _ISOLATED_CODEX_HOME.name
     if port is not None:
         process_env["VIBEPULSE_PORT"] = str(port)
     if env:
@@ -808,6 +823,33 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("VibePulse startup health: SERVER UNAVAILABLE", context)
         self.assertNotIn(str(ROOT), context)
 
+    def test_service_health_ignores_the_developers_own_codex_config(self):
+        """Issue #93: the suite must not inherit the machine it runs on.
+
+        A developer whose real ~/.codex/config.toml says
+        approval_policy = "never" saw five service-health tests fail on an
+        unchanged checkout, because session_start.py reports that saved
+        mode BEFORE it looks at the service, exactly as it should for a
+        real user. The harness therefore hands every script an empty
+        CODEX_HOME. This test poisons the home directory the fallback
+        would otherwise read (HOME on POSIX, USERPROFILE on Windows) and
+        checks that the isolated default still wins; the explicit
+        permission-mode tests below keep proving the production check.
+        """
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        with tempfile.TemporaryDirectory() as home:
+            codex = Path(home, ".codex")
+            codex.mkdir()
+            (codex / "config.toml").write_text(
+                'approval_policy = "never"\n', encoding="utf-8")
+            completed = run_script(
+                "session_start.py", compact(payload).encode(),
+                port=closed_port(), env={"HOME": home, "USERPROFILE": home})
+        context = json.loads(completed.stdout)["hookSpecificOutput"][
+            "additionalContext"]
+        self.assertIn("startup health: SERVER UNAVAILABLE", context)
+        self.assertNotIn("approval_policy is never", context)
+
     def test_startup_health_names_saved_codex_modes_that_hide_cards(self):
         """The failure that looks exactly like a broken panel.
 
@@ -949,6 +991,57 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn("PROVIDER DATA STALE (Claude)", context)
         self.assertIn("active Claude probe is live", context)
         self.assertNotIn("DEVICE PATH STALE", context)
+
+    def test_startup_health_names_a_warming_up_and_a_failing_recompute(self):
+        # Issue #62: /api/tokens answers during the first history scan with
+        # placeholder counters; the hook must not call that HEALTHY.
+        payload = {"hook_event_name": "SessionStart", "session_id": "s"}
+        root = {
+            "service": "torget-tokenserver",
+            "srcFingerprint": HOST_SOURCE_FINGERPRINT,
+            "claudeProbe": "usage_http_200 + ok",
+            "claudeCredential": {"status": "ready", "expiresInMin": 480},
+            "usageComputeOk": True,
+            "interactions": {
+                "claude": True, "codex": True,
+                "panel": {"status": "ready", "ageS": 3},
+            },
+        }
+        fresh = {
+            "claudeWeekStale": False,
+            "claudeModelWeekStale": False,
+            "codexWeekStale": False,
+        }
+        cases = [
+            (dict(root), dict(fresh, usageTotals={
+                "state": "refreshing", "sinceS": 12, "placeholder": True}),
+             "SERVICE WARMING UP"),
+            (dict(root), dict(fresh, usageTotals={
+                "state": "failing", "sinceS": 900, "placeholder": True}),
+             "VOLUME RECOMPUTE FAILING"),
+            (dict(root, usageComputeOk=False), dict(fresh, usageTotals={
+                "state": "failing", "ageS": 300, "placeholder": False}),
+             "VOLUME RECOMPUTE FAILING"),
+            (dict(root), dict(fresh, usageTotals={
+                "state": "ready", "ageS": 5, "placeholder": False}),
+             "HEALTHY"),
+        ]
+        for root_body, tokens_body, expected in cases:
+            with self.subTest(expected=expected):
+                routes = {
+                    "/": {"body": compact(root_body).encode()},
+                    "/api/tokens": {"body": compact(tokens_body).encode()},
+                }
+                with LocalServer(routes=routes) as server:
+                    completed = run_script(
+                        "session_start.py", compact(payload).encode(),
+                        port=server.port)
+                context = json.loads(completed.stdout)["hookSpecificOutput"][
+                    "additionalContext"]
+                self.assertIn(expected, context)
+                if expected != "HEALTHY":
+                    self.assertNotIn("HEALTHY", context)
+                self.assertNotIn("sinceS", context)
 
     def test_startup_health_reports_ready_and_credential_risk_separately(self):
         payload = {"hook_event_name": "SessionStart", "session_id": "s"}
@@ -1689,15 +1782,64 @@ class PluginPackageTests(unittest.TestCase):
         self.assertNotIn("eventual `v0.7.1` tag", release)
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("## Latest release: v1.0.0", readme)
-        self.assertIn("Compare v0.7.1...v1.0.0", readme)
-        self.assertIn("### Windows v1 verification", readme)
-        self.assertIn("788 tests, 11 named skips, 0 failures/errors", readme)
-        self.assertIn("14/14 and 7/7 jobs", readme)
+        self.assertIn("## Latest release: v1.1.0", readme)
+        self.assertIn("Compare v1.0.0...v1.1.0", readme)
+        self.assertIn("### v1.1.0 verification", readme)
         self.assertIn("windows-v1-full-lifecycle.md", readme)
         self.assertNotIn(
             "latest sanitized checkpoint is explicitly\n"
             "  **[PARTIAL]", readme)
+
+    def test_v110_release_is_honest_about_unflashed_firmware(self):
+        release = (ROOT / "docs/releases/"
+                   "2026-09-10-settings-and-evidence.md").read_text(
+                       encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertTrue(release.startswith("VibePulse v1.1.0"))
+        self.assertIsNone(re.search(r"^# ", release, re.MULTILINE))
+        for required in (
+                "Settings from the panel", "Live quotas while history loads",
+                "Clearer diagnostics and recovery", "coredump partition",
+                "reboot ledger", "Poller backoff", "pinned logging",
+                "CI-built", "not yet flashed or physically verified",
+                "torget-home-01", "v1.0.0-25-g054db68", "partition-table-flash",
+                "bee5d8c", "not inherited", "Simulator captures",
+                "source-only", "Do not attach `torget.bin`",
+                "v1.0.0...v1.1.0", "docs/observability.md",
+                "replace the run sheet's `main` checkout with "
+                "`git switch --detach v1.1.0`"):
+            self.assertIn(required, release)
+        # The evidence boundary precedes every feature and screenshot.
+        opening = release.split("\n## ", 1)[0]
+        for boundary in ("CI-built", "not yet flashed or physically verified",
+                         "v1.0.0-25-g054db68", "bee5d8c", "not inherited"):
+            self.assertIn(boundary, opening)
+        for image in (
+                "vibepulse-settings-menu.png",
+                "vibepulse-settings-no-address.png"):
+            self.assertIn(
+                "https://raw.githubusercontent.com/"
+                "niclasvestlund-YT/vibepulse/v1.1.0/docs/img/" + image,
+                release)
+        # The ABOUT fixture displays an older sample firmware version.
+        self.assertNotIn("vibepulse-settings-about.png", release)
+        # The README's release section carries the same evidence boundary.
+        self.assertIn("NOT YET FLASHED", readme)
+        self.assertIn("Pinned to v1.0.0's runtime `bee5d8c`", readme)
+        self.assertIn("## v1.1.0 — 2026-09-10", changelog)
+        self.assertIn("2026-09-10-settings-and-evidence.md", changelog)
+        self.assertLess(changelog.index("## Unreleased"),
+                        changelog.index("## v1.1.0"))
+        self.assertLess(changelog.index("## v1.1.0"),
+                        changelog.index("## v1.0.0"))
+        # The cut left nothing behind: Unreleased is empty until the next change.
+        between = changelog[changelog.index("## Unreleased"):
+                            changelog.index("## v1.1.0")]
+        self.assertEqual(between.strip(), "## Unreleased")
+        for forbidden in ("oauth token:", "refresh token:",
+                          "account id:", "relay address:"):
+            self.assertNotIn(forbidden, release.lower())
 
     def test_v100_release_is_major_windows_honest_and_source_only(self):
         release = (ROOT / "docs/releases/"
@@ -3407,7 +3549,7 @@ class RelaySetupTests(unittest.TestCase):
                         ["doctor"], repo_root=ROOT, config_path=path,
                         python=Path(sys.executable), codex=Path("/codex"),
                         run=runner,
-                        urlopen=lambda *_args, **_kwargs: response,
+                        urlopen=lambda *_args, _r=response, **_kwargs: _r,
                         stdout=output), 1)
                     self.assertIn("FIX Tokenserver", output.getvalue())
                     self.assertEqual(response.limits,
@@ -3718,7 +3860,7 @@ class RelaySetupTests(unittest.TestCase):
                         ["doctor"], config_path=path,
                         python=Path(sys.executable), codex=None,
                         run=FakeRunner([python_probe_ok()]),
-                        urlopen=lambda *_args, **_kwargs: response,
+                        urlopen=lambda *_args, _r=response, **_kwargs: _r,
                         stdout=output), 1)
                     self.assertIn("FIX Tokenserver", output.getvalue())
 
@@ -3809,7 +3951,9 @@ class RelaySetupTests(unittest.TestCase):
                     real_save = setup.save_config
                     calls = []
 
-                    def post_commit_failure(save_path, config):
+                    def post_commit_failure(save_path, config, calls=calls,
+                                            real_save=real_save,
+                                            restore_ok=restore_ok):
                         calls.append(config)
                         if len(calls) == 1:
                             real_save(save_path, config)

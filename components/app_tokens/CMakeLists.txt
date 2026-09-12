@@ -9,6 +9,7 @@ set(TK_APP_TOKEN_SRCS
        "github_status_parse.c" "project_star_popup_policy.c"
        "project_star_assets.c" "project_star_chime.c" "project_star_popup.c"
        "agent_net_policy.c" "tokens_net_recovery_policy.c"
+       "poll_backoff_policy.c"
        "net.c" "agent_net.c" "needs_you_net.c"
        "github_net.c"
        "max_tracker_parse.c" "max_tracker_presenter.c")

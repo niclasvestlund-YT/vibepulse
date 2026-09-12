@@ -111,13 +111,19 @@ exactly as before. With it, several computers may advertise simultaneously;
 the panel pins one healthy origin and changes only after failure. On Windows,
 `ipconfig` plus a DHCP reservation still makes the compiled fallback durable.
 
-**Verify:** `secrets.h` has a non-empty SSID and no `DIN-MAC` placeholder:
+**Verify:** `secrets.h` has a non-empty SSID and no `DIN-MAC` placeholder
+left in the URL:
 
 ```sh
-grep -q 'DIN-MAC' secrets.h && echo "PLACEHOLDER STILL THERE" || echo "host set"
+grep -q '://DIN-MAC' secrets.h && echo "PLACEHOLDER STILL THERE" || echo "host set"
 ```
 
-It must print `host set`. If the placeholder is still there,
+It must print `host set`. The match is anchored to `://` on purpose:
+`secrets.h.example` also says `DIN-MAC` in the comment that tells you to
+replace it, and that comment is meant to survive the edit, so an unanchored
+grep cried wolf on every correct setup (issue #64). The define itself spans
+two lines, which is why the anchor is the URL and not `#define`. If the
+placeholder is still there,
 the board's fallback will name a host that does not exist. Discovery may still
 find an advertising service, but a release must not depend on hiding a broken
 fallback. On macOS, replace a raw IP with the Bonjour name. On Windows,
@@ -195,8 +201,12 @@ readable OAuth copy is expired:
 | `claudeProbe` | Meaning | What to do |
 |---|---|---|
 | `usage_http_200 + ok` | Working. Limits parsed. | Nothing |
-| `not_run` | Probe has not fired yet | Normally clears itself within seconds: the startup warmup calls `get_snapshot()`, which calls `get_limits()`, which starts the probe. If it persists, look for `förstaskanningen kraschade` in the server log — the warmup failed and the first `/api/tokens` request warms it instead, so make one. 240 s (`LIMITS_EVERY_S`) is the gap between *completed* probes, not a wait for the first |
-| `no_claude_oauth_token` | No Claude Desktop / Claude Code token found | Have them sign in to Claude Code on this computer |
+| `not_run` | Probe has not fired yet | Normally clears itself within seconds: the startup warmup calls `get_snapshot()`, which calls `get_limits()`, which starts the probe. If it persists, look for `the first scan produced no result` or `usage recompute crashed` in the server log — the warmup failed and the first `/api/tokens` request warms it instead, so make one. 240 s (`LIMITS_EVERY_S`) is the gap between *completed* probes, not a wait for the first |
+| `no_claude_oauth_token` | No Claude Desktop / Claude Code token found (on Windows: no `.credentials.json`) | Have them sign in to Claude Code on this computer |
+| `no_claude_oauth_token: keychain_no_entry` | macOS: the keychain has no `Claude Code-credentials` item for this account | Have them sign in to Claude Code on this computer |
+| `no_claude_oauth_token: keychain_denied_or_locked (exit N)` | macOS: `security` was refused — the keychain prompt got **Deny**, or the keychain is locked | Restart the service and click **Always Allow** on the prompt (README, keychain step); unlock the login keychain if it is locked |
+| `no_claude_oauth_token: keychain_timeout` | macOS: the keychain prompt sat unanswered for 10 s | Same as above; the service asks again on its next local check (15 s) |
+| `no_claude_oauth_token: keychain_security_missing` / `keychain_malformed` / `keychain_entry_without_token` | macOS: the `security` tool is missing, or the item is not the JSON record `/login` writes | Sign in to Claude Code again so it rewrites the item; a missing `security` binary is a broken macOS install |
 | `token_expired_…` | Token found but expired; Claude may still say logged in because login state and the exported usage credential are different | The service rechecks locally every 15 s. `claudeLocalUsage: fresh_applied` can keep the general week live; for Fable, start a **new Claude Code CLI turn** and send one short message so Claude's supported client refreshes Keychain |
 | `usage_http_401` / `usage_http_403` | Every token source rejected (on macOS the probe tries Claude Desktop's process token, then the keychain, and falls back automatically; on Windows there is only `%USERPROFILE%\.claude\.credentials.json`) | Re-authenticate in Claude Code |
 | `usage_http_200 + no_mapped_limits` | Authenticated, but nothing in the usage response mapped (a `; fallback_…` suffix records the header-probe outcome) | Plan may not expose limits; Codex half still works |
