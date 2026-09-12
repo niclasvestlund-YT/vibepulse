@@ -329,11 +329,19 @@ a registered directory's store is not a probe candidate and would never
 meet the profile call. The watcher therefore hands every newly observed
 credential fingerprint from a registered directory that is absent from
 the resolved pairs to the probe's resolver, which makes the profile
-call on the probe's own cadence and under its own rules (never during
-a cooldown, one call per credential fingerprint, a 429 resting exactly
-as a usage 429 does) — the registered directory's token is a
-*resolution* candidate only, never a usage candidate, so the panel's
-figures still come from the home directory's token — and the watcher
+call on the probe's own cadence, never during the home probe's
+cooldown and once per credential fingerprint — but **an auxiliary
+resolution never blocks the home usage cycle**: a 429 on a registered
+directory's profile call rests *that directory's* resolution on its
+own per-directory backoff (the same ladder the probe uses, persisted
+beside the directory's mark) and leaves the home token's usage call
+untouched, because the registered token is not a usage candidate and
+an auxiliary account must not be able to suppress the only source of
+model-pool and cross-device data for a whole cooldown; only a 429 on
+the home token's own profile or usage call rests the home probe. The
+registered directory's token is a *resolution* candidate only, never a
+usage candidate, so the panel's figures still come from the home
+directory's token — and the watcher
 records the directory's mark at its next tick after the pair resolves,
 at the two stores' modification times as for the home directory. Until
 then `GET /` shows the directory as `pending`, never as `unproven_dir`,
@@ -385,12 +393,16 @@ in the probe state file (hashes only, never a token), so a cycle whose
 token is already resolved makes exactly the usage call it makes today,
 and a token refresh costs one profile call. The pairs are **bounded**:
 every refresh mints a credential fingerprint, so the file keeps at most
-`PROBE_PAIR_CAP` (proposed 8) pairs, evicting the least recently used
-on every save while never evicting a pair whose credential fingerprint
-is one of the current candidates (`_read_oauth_candidates()` lists at
-most a handful), and a pair carries the time it was last used so the
-eviction order is explicit; an evicted pair costs at most one profile
-call if its token ever returns. **The profile call exists
+`PROBE_PAIR_CAP` (proposed 8) pairs **plus one per registered
+directory**, evicting the least recently used on every save while never
+evicting a **live** pair — one whose credential fingerprint is a
+current home candidate (`_read_oauth_candidates()` lists at most a
+handful) or the current credential of any registered directory, which
+that list does not contain — so every registered directory's mapping
+survives every save whatever the count of directories, and a pair
+carries the time it was last used so the eviction order is explicit;
+an evicted pair, always a stale one, costs at most one profile call if
+its token ever returns. **The profile call exists
 for the bridge-enabled path only.** With the bridge declined or not
 installed the probe keeps today's path exactly — one usage call, no
 profile call, no cooldown it could not have had before — and keeps
@@ -1088,10 +1100,13 @@ Regression tests must prove:
   resolved after the upgrade and not by a later different one, and the
   tracker, usage-today and forecast values neither disappear nor move
   backward on upgrade;
-- the probe state file holds at most `PROBE_PAIR_CAP` resolved pairs
-  after any number of refreshes, the pair for every current candidate
-  survives every save, and a legacy state file with more pairs than the
-  cap is trimmed on load by the same rule;
+- the probe state file holds at most `PROBE_PAIR_CAP` plus the number
+  of registered directories resolved pairs after any number of
+  refreshes, the pair for every current home candidate and for every
+  registered directory's current credential survives every save (with
+  twelve registered directories all twelve mappings stay and no
+  directory is re-resolved), and a legacy state file with more pairs
+  than the cap is trimmed on load by the same rule;
 - with the bridge declined the probe makes no profile call, a token
   refresh causes no request the probe does not make today, a 429 on the
   usage call rests exactly as today, the cache identity stays
@@ -1120,7 +1135,10 @@ Regression tests must prove:
   watcher's first confirmed observation; a registered directory whose
   credentials file holds a token the tokenserver has never seen gets
   that token resolved by the probe's next cycle (one profile call, no
-  usage call for it, none during a cooldown), the directory shows as
+  usage call for it, none during the home probe's cooldown), a 429 on
+  that call rests only that directory's resolution while the home
+  usage call in the same cycle still runs and the panel's figures keep
+  updating, the directory shows as
   `pending` until then and as watched afterwards, and a session started
   in it before the resolution binds at its first proving payload after
   it; the watcher's own tick makes no HTTP call in any of this;
