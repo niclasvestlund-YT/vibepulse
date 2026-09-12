@@ -336,8 +336,10 @@ held — the window did not open at boot.
 trace at all except the window-open line itself. The absence of preceding lines
 before t=837 s therefore proves nothing.
 
-What the log does show is that someone was at the panel shortly before the
-*second* window:
+What the log does show is that the firmware registered a panic action — a
+sustained KEY3 input it classified as a ~2 s press — fourteen seconds before
+the *second* window. It cannot say who or what drove that input; the operator
+is recorded as asleep and away from the screen:
 
 ```
 I (2142567) needs-you-net: skickade deny                        <- panic, i.e. a ~2 s KEY3 press
@@ -345,7 +347,7 @@ I (2156363) ota-service: underhållsfönstret öppet i tio minuter
 ```
 
 Fourteen seconds apart. The panic only appears in the log because it sends a
-network message; the gesture itself is invisible.
+network message; the input itself, and its source, are invisible.
 
 So the honest finding is not "a window opened by itself". It is that **the
 consent model has no audit trail.** `CLAUDE.md` calls it non-negotiable that the

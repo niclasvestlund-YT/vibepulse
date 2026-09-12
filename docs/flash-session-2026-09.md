@@ -174,7 +174,14 @@ Buddy carries a DMA configuration that has frozen the glass before. So,
 from a fresh configure: read the build's own status lines — `Solelkollen
 saknas` / `~/Buddy saknas` mean not included; otherwise record each
 companion's `git describe --tags --always --dirty` from its own checkout
-in the review, refuse a `-dirty` companion the same way the uploader
+in the review — and for a companion that is not a git checkout, which
+Solelkollen is on this Mac, its deterministic fingerprint instead:
+`cd ~/Solelkollen/components/app_solelkollen && find . -type f | LC_ALL=C sort
+| xargs sha256sum | sha256sum`, recorded in the review and in the
+`spec/hardware-sources.yaml` companion record together with that command,
+so the next session can tell whether the tree changed (the 2026-09-06 digest
+was computed with an unrecorded method and cannot be compared; this run
+replaces it), refuse a `-dirty` companion the same way the uploader
 refuses a dirty platform, and compare against
 `spec/hardware-sources.yaml`. Buddy stays **OFF** unless the user asks
 for it in this session.
