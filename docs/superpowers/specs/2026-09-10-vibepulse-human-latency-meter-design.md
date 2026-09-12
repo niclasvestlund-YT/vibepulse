@@ -37,8 +37,15 @@ that needs no telemetry, adopt the span when it leaves beta.
 interaction ends, the store appends one row to a `WaitLedger`: provider
 (`claude`/`codex`), kind (`approval`/`question`), `startedAt` and `endedAt`
 as wall-clock epoch seconds, `durationS` measured on the monotonic clock,
-and `outcome` in `{panel, computer, expired, panic, removed}`, mapped from
-the removal reasons the store already produces. Two clocks on purpose:
+and `outcome` in `{panel, computer, expired, panic, removed}`. The mapping
+is from the store's removal reason **and the verdict together**, because
+the reason alone cannot tell a panel answer from a hand-back: a direct-LAN
+`resolve` reports `resolved` for `approve`, `deny` and `leave_it` alike,
+and the relay path reports `terminal` for its LEAVE IT. So: `resolved` +
+`approve`/`deny` → `panel`; `resolved` + `leave_it` and `terminal` →
+`computer`; the expiry sweep → `expired`; `panic` → `panic`; any other
+removal (the computer answered first, the hook went away) → `removed`.
+Two clocks on purpose:
 the store's existing `created_at` is monotonic (`InteractionStore._now`,
 `time.monotonic` by default), which is right for expiry and elapsed time
 and useless for "which day was that" — a row stamped with it would land
@@ -62,8 +69,17 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 
 `blockedNowS` is the age of the oldest still-parked interaction, or 0.
 "Today" is the host's local calendar day, the same rule the Max Tracker
-uses, and a row contributes only the part of its measured duration that
-falls in that day. The split is made on the interval
+uses. **Open holds count too:** `todayS`, the provider totals and
+`countToday` include the in-day elapsed part of every still-parked
+interaction, computed the same way as a closed row with `endedAt` taken
+as now, so the day's first wait is visible on the hero while it is
+happening and not only once it closes — a page saying `0` over a
+`BLOCKED RIGHT NOW` of several minutes would be the invented-zero the
+honesty rule forbids. The provider header names the providers of open
+holds as well. When an open hold closes, its row replaces its live
+contribution; the total never steps back at that moment. Closed rows
+contribute only the part of their measured duration that falls in the
+day. The split is made on the interval
 `[endedAt - durationS, endedAt]`, not on `[startedAt, endedAt]`: the
 monotonic `durationS` is the measurement, `endedAt` is the one wall-clock
 reading taken at the moment the row is written, and a wall-clock
@@ -85,9 +101,12 @@ ignores unknown root keys, so already-flashed panels are unaffected.
 
 **One optional page, "Blocked on you".** Chosen through SETTINGS → LABS
 (the mechanism PR #98 introduces; this page is not built until that lands)
-and off by default. Layout per the approved mockup
-`docs/img/mockups/latency-meter.png`, with one correction the mockup
-needs before it becomes a frame: its header row reads `CLAUDE`, but the
+and off by default. Layout after the concept image
+`docs/img/mockups/latency-meter.png` — concept art from the brainstorm
+document, not a Studio capture and not an approved design; the approved
+artefacts are the exact 480 × 480 shared-LVGL frames reviewed under the
+visual gate below — with one correction the concept needs before it
+becomes a frame: its header row reads `CLAUDE`, but the
 dominant number is the sum over both providers. The header must name what
 the number measures — `CLAUDE + CODEX` when both contributed today,
 `CLAUDE` or `CODEX` when only one did, never one provider's name over a
@@ -126,6 +145,16 @@ relay-fed panel sees the same page. No new relay endpoint.
 3. `WaitLedger` appends the row in memory and marks itself dirty; a
    background writer persists it with the same coalescing pattern as the
    Max Tracker (`_mark_max_tracker_dirty`), never on the hook's thread.
+   **Durability boundary:** the writer runs within `WAIT_LEDGER_FLUSH_S`
+   (proposed 2 s) of a close, and `main` gives the ledger the same final
+   flush on shutdown the Max Tracker already gets (`max_tracker_store.save()`
+   after `serve_forever` returns), so a clean stop loses nothing. An
+   unclean stop (crash, power) can lose rows closed inside that last
+   window, and a total the panel already showed can then be lower after
+   the restart; the spec accepts that bound rather than writing on the
+   hook's thread, and `GET /` reports `waits.rows` so the doctor can show
+   the file's state. The open-hold live contribution above is never
+   persisted; it is recomputed from `_pending` on every poll.
 4. `AgentStatusService.snapshot()` asks the ledger for today's aggregates
    and the store for the oldest open `created_at`, and adds `waits`.
 5. The firmware's agent-status parser reads `waits` optionally (all six
@@ -169,10 +198,18 @@ any motion. No frame here authorizes a flash.
 
 Regression tests must prove:
 
-- every ending path (panel answer, relay answer, computer fallback, expiry,
-  panic) produces exactly one ledger row with the right outcome, and a
-  store constructed fresh (the restart case) produces none for holds the
+- every ending path produces exactly one ledger row with the right
+  outcome: direct `approve` and `deny` → `panel`, direct `leave_it` and
+  relay `terminal` → `computer`, relay `approve`/`deny` → `panel`, expiry
+  → `expired`, panic → `panic`, other removal → `removed`; and a store
+  constructed fresh (the restart case) produces none for holds the
   previous process had open;
+- an open hold is counted live in `todayS`, its provider total and
+  `countToday`, and closing it does not step the total back;
+- a close followed by a clean shutdown before the writer ran is on disk
+  after the final flush; a close followed by a simulated crash inside the
+  writer window is absent after restart and the test names that as the
+  accepted bound;
 - a row's `durationS` comes from the monotonic pair and its days from
   `[endedAt - durationS, endedAt]`: a wall-clock jump of an hour during a
   hold changes neither the total nor the longest wait, and the day parts
