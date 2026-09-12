@@ -80,12 +80,17 @@ file in the tokenserver's state directory, `claude-statusline-quota.json`.
 file**, in the spirit of `docs/lessons.md`'s hostile-input entry:
 `used_percentage` must be a finite number (not a bool) in `[0, 100]`,
 `resets_at` a finite integer epoch that is in the future and no more
-than eight days ahead, `version` a short printable string; a window that
-fails any of it is treated as **absent from stdin** (the stored window
-survives untouched), and a payload whose every window fails is treated
-as a session-start run with no `rate_limits`. A lying value therefore
-never replaces a last-known-good one, and one bad window never
-invalidates the other.
+than eight days ahead, `version` a short printable string. Both windows
+are validated **before** anything is merged, and if any window that is
+present fails, the **whole payload is rejected**: nothing is written,
+the stored entry stays exactly as it was, and the chained command still
+runs. That is `docs/lessons.md`'s hostile-input rule as written — a
+snapshot with one lying window is not a snapshot to take half of, since
+merging its good-looking half would combine observations from different
+emissions. A window that is merely *absent* is still "no observation"
+(the session-start case above); only a present-and-malformed one
+condemns the payload. A lying value therefore never replaces a
+last-known-good one.
 **Per account, per window, not per invocation:** the file holds one
 entry per account fingerprint (an invocation without a fingerprint goes
 under `unknown`), and the bridge merges only into the entry of the
@@ -303,7 +308,21 @@ timestamp, not by which source it is:
    bridge-fed — is persisted under that identity, `latest` gains an
    identity argument the tokenserver always passes, records under
    another identity are never candidates, and `default-v1` is no longer
-   written for Claude.
+   written for Claude. **Legacy records get one migration, not silent
+   loss:** an existing installation carries still-valid Claude records
+   under the hashed `default-v1` identity, and an identity-filtered
+   lookup would leave them unreadable until the next successful probe —
+   during a failing probe or a persisted cooldown that is exactly when
+   the cache matters, bridge or no bridge. So on the first load under
+   this scheme the tokenserver re-keys each legacy Claude record to the
+   current fingerprint **when the local credential store is
+   unambiguous** (the same rule the cooldown restart uses: one
+   candidate, or Desktop equal to keychain), because such a record can
+   only have come from that account; with two differing tokens the
+   legacy records stay under `default-v1`, unreadable, and `GET /`
+   reports `quotaCache: legacy_records_unmigrated` so the one-time stale
+   card has a stated cause rather than looking like a regression. The
+   migration runs whether or not the bridge is installed.
 
 The heaviest-model weekly window keeps today's order: probe, then cache,
 under the same identity filter.
@@ -413,11 +432,14 @@ sample file too, and the merge treats it as "no observation", not zero.
   never overwrites a foreign `statusLine.command` without recording it.
   Setup records, beside the chained command, which fields it owned: whether
   the `statusLine` object existed at all, whether `type` and `command`
-  were present, and their previous values. Uninstall — **only if
-  `statusLine.command` still points at this installation's launcher** —
-  restores exactly those fields, field by field, never the object as a
-  unit: a `type` the installer added is removed, a `command` it replaced
-  is restored and one it added is removed, sibling keys that were there
+  were present, their previous values, **and the values it installed**.
+  Uninstall — only if `statusLine.command` still points at this
+  installation's launcher — restores those fields field by field, never
+  the object as a unit, and **each field only if its current value still
+  equals what setup installed**: a `type` the installer added is removed
+  only if it still reads `command`, a `command` it replaced is restored
+  and one it added is removed, a field the user edited after the install
+  is left as the user left it and reported as drift, sibling keys that were there
   before or were added since (`padding`, for instance) are left as they
   are, and the `statusLine` object itself is removed only if it is empty
   after that — so an object the installer created and the user later
@@ -478,6 +500,9 @@ Regression tests must prove:
   from an unambiguous local store: one candidate, or Desktop equal to
   keychain; with two differing tokens the account stays unknown and the
   bridge is not accepted until a probe succeeds;
+- legacy `default-v1` Claude records are re-keyed to the fingerprint on
+  first load when the local store is unambiguous and stay unreadable
+  (with `GET /` naming it) when it is not, bridge installed or not;
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
@@ -507,10 +532,12 @@ Regression tests must prove:
 - a bridge write is visible on the very next `/api/tokens` request without
   a probe cycle in between, and an unchanged file is not re-parsed;
 - the bridge rejects a non-object, oversized or non-UTF-8 stdin with exit 0
-  and no file written; a window with a boolean, non-finite, negative or
-  over-100 `used_percentage`, or a `resets_at` that is a bool, in the
-  past or more than eight days ahead, is treated as absent and leaves
-  the stored window untouched while the other window still merges;
+  and no file written; a payload in which any present window has a
+  boolean, non-finite, negative or over-100 `used_percentage`, or a
+  `resets_at` that is a bool, in the past or more than eight days ahead,
+  is rejected whole — the other, valid-looking window is not merged
+  either, the stored entry is byte-identical afterwards, and the chained
+  command still runs;
 - the bridge writes the account fingerprint from the session's config
   directory (`CLAUDE_CONFIG_DIR` honoured) and omits it when `.claude.json`
   is missing or has no `oauthAccount`; the sample file, `GET /` and the
@@ -566,7 +593,9 @@ Regression tests must prove:
   `padding` added after an install that created the object, which then
   leaves `{"padding": …}` behind — and removes the object only when
   nothing is left in it; it leaves a command the user changed afterwards
-  alone while reporting the drift;
+  alone while reporting the drift, and a `type` the user edited after
+  the install (with the command still the launcher) is likewise left
+  alone and reported, the other owned fields still restored;
 - the `/api/tokens` body-capacity test still passes (no new wire fields).
 
 ## Acceptance
@@ -575,7 +604,8 @@ On a Pro or Max account with the bridge installed, the panel's Claude
 session and weekly rings follow the statusLine within one panel poll of a
 Claude Code turn, the probe's 429 cooldowns no longer produce a stale
 Claude card while the bridge is fresh, the Fable/Opus ring behaves exactly
-as before, and a user who declines the bridge sees no change at all.
+as before, and a user who declines the bridge sees no change at all
+beyond the one-time cache re-keying that step 3 names.
 
 ## Open questions for the maintainer
 
