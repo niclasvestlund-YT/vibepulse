@@ -581,10 +581,13 @@ paid for in both; there is no key left to shorten.
    wall clock (`self._wall()`, already read there for the relay expiry).
 2. The interaction ends. In every place an ending passes through —
    `resolve`, `resolve_relay`, `panic`, the expiry sweep, computer
-   fallback removal, **and the direct timeout pop in
-   `InteractionStore.await_result()`**, which today removes an expired
-   hold itself without going through `_sweep_locked` and is the normal
-   ending while the panel is disconnected with the relay off — the
+   fallback removal, **and both direct pops in
+   `InteractionStore.await_result()`** — the timeout pop, which today
+   removes an expired hold itself without going through `_sweep_locked`
+   and is the normal ending while the panel is disconnected with the
+   relay off, and the abandoned pop a few lines above it, which removes
+   a hold whose waiter gave up (outcome `abandoned`, a new outcome
+   value beside the others) — the
    store calls `ledger.close(entry, outcome, now)` exactly once per
    hold: the close is issued by whichever path wins the pop under the
    store lock, and a path that finds the entry already gone issues
@@ -866,7 +869,8 @@ Regression tests must prove:
 - a hold that expires in `await_result()` with the panel disconnected
   and the relay off gets exactly one `timeout` row from that pop, the
   sweep that runs afterwards adds none, and the day's total counts its
-  seconds;
+  seconds; a hold removed by the abandoned pop gets exactly one
+  `abandoned` row the same way;
 - the persisted file and the payload carry no content fields (the
   denylist test above);
 - the `/api/agent-status` body stays inside the device budget with `waits`
