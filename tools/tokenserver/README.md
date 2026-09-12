@@ -503,6 +503,48 @@ The booleans `claudeWeekStale`, `claudeModelWeekStale` and `codexWeekStale`
 are optional additions to the v2 contract. If the percentage is missing
 the corresponding stale is always `false`.
 
+## Claude Code statusLine bridge
+
+`statusline_bridge.py` is a second, passive source for the Claude session
+and general week: Claude Code runs the `statusLine` command from
+`settings.json` on every assistant message and pipes it a JSON document
+whose `rate_limits.five_hour` / `seven_day` carry the same percentages and
+resets the OAuth probe fetches. `python3 tools/vibepulse_setup.py statusline
+install --yes-single-account` points that command at a generated launcher
+in the state directory; the bridge keeps only those two windows and the
+Claude Code version in `claude-statusline-quota.json`, then runs the status
+line the user had before with the same stdin and passes its output and
+exit status through. The bridge prints nothing itself and never lets its
+own failure take the status line down.
+
+Rules, shared with the doctor and smoke test:
+
+- Each window is arbitrated separately against the probe's reading, and
+  the week also against the cache: the later reset is the newer window;
+  within one window the higher figure is the later one, because usage only
+  accumulates. Ties keep the probe. A stored window is therefore a floor
+  until it resets, fresh or not: a lagging probe cannot pull the figure
+  down. A week window that wins while stale is served as that floor with
+  `claudeWeekStale: true` and is not recorded into the cache, Max Tracker
+  or the history as a new measurement -- the fresh sample already did
+  that. The session has no stale flag on the wire, so a stale session
+  floor yields to a live probe reading and is otherwise withheld (dashes,
+  as before the bridge). The model week has no statusLine
+  counterpart and is never touched.
+- Freshness (`seen` within 15 min, `STATUSLINE_FRESH_S`) is judged per
+  window and decides only the probe cadence: while a fresh sample covers
+  both windows, no older than the probe's own, and the probe is healthy
+  (`usage_http_200 + ok`), the probe runs every 1800 s
+  (`PROBE_WHEN_BRIDGED_S`) instead of 240 s. Every failure state keeps its
+  own ladder.
+- `GET /` shows `claudeStatusline: {status, ageS, claudeCodeVersion,
+  bridged, account: "assumed-single"}`; the log line
+  `claude-statusline: X -> Y` records status transitions once.
+- Single account only: the install command makes the operator assert that
+  Claude Code and the tokenserver use the same Claude account on this
+  computer. The account-binding machinery the spec describes is not
+  implemented; `statusline uninstall` restores the previous command.
+
 ## Local usage history
 
 The service saves the history atomically in

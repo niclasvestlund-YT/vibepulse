@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import secrets
 import selectors
+import shlex
 import signal
 import stat
 import subprocess
@@ -38,6 +39,7 @@ from tokenserver.vibepulse_config import (  # noqa: E402
     save_config,
 )
 from tokenserver.codex_command import resolve_codex_executable  # noqa: E402
+from tokenserver import statusline_bridge  # noqa: E402
 from tokenserver.tokenserver import _read_source_fingerprint  # noqa: E402
 
 
@@ -61,6 +63,15 @@ _RELAY_BLOCK_BEGIN = "/* VIBEPULSE INTERACTION RELAY BEGIN */"
 _RELAY_BLOCK_END = "/* VIBEPULSE INTERACTION RELAY END */"
 _MAILBOX_RE = re.compile(r"vp_[A-Za-z0-9_-]{16}\Z")
 _BEARER_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+
+STATUSLINE_LAUNCHER_PREFIX = "statusline-bridge-"
+STATUSLINE_LAUNCHER_MARKER = "# vibepulse-statusline-bridge"
+STATUSLINE_SETTINGS_MAX_BYTES = 256 * 1024
+STATUSLINE_COMMAND_MAX_CHARS = 4096
+_STATUSLINE_CONSENT = (
+    "Claude Code and the VibePulse tokenserver must use the SAME Claude "
+    "account on this computer: the bridge cannot tell accounts apart, so a "
+    "second account's status line would be shown as this one's quota.")
 
 _KNOWN_ABSENT = {
     ("plugin", "marketplace", "remove", "torget"): re.compile(
@@ -275,6 +286,24 @@ def _parser() -> argparse.ArgumentParser:
         "--keep-worker", action="store_false", dest="delete_worker",
         help="leave the Cloudflare Worker deployed")
     relay_uninstall.set_defaults(delete_worker=None)
+
+    statusline = commands.add_parser(
+        "statusline",
+        help="let Claude Code's statusLine feed the tokenserver its quota")
+    statusline_commands = statusline.add_subparsers(
+        dest="statusline_command", required=True)
+    statusline_install = statusline_commands.add_parser(
+        "install", help="point Claude Code's statusLine at the bridge, "
+                        "keeping the status line you have")
+    statusline_install.add_argument(
+        "--yes-single-account", action="store_true",
+        help="confirm that Claude Code and the tokenserver use the same "
+             "Claude account on this computer")
+    statusline_commands.add_parser(
+        "uninstall", help="restore the previous statusLine and forget "
+                          "the bridge")
+    statusline_commands.add_parser(
+        "status", help="show whether the bridge is installed and feeding")
     return parser
 
 
@@ -1511,6 +1540,8 @@ def _doctor(
         repo_root: Path, run: Callable[..., object],
         urlopen: Callable[..., object], stdout,
         codex_config_path: Path | None = None,
+        claude_config_dir: Path | None = None,
+        statusline_state_dir: Path | None = None,
         ) -> bool:
     fixes = False
 
@@ -1658,6 +1689,14 @@ def _doctor(
             if config.claude_interactions and not _doctor_claude_quota(
                     payload, stdout):
                 fixes = True
+    if not _statusline_report(_statusline_state(
+            config_dir=(statusline_bridge.claude_config_dir()
+                        if claude_config_dir is None else claude_config_dir),
+            state_dir=(statusline_bridge.state_dir()
+                       if statusline_state_dir is None
+                       else statusline_state_dir),
+            repo_root=repo_root), stdout):
+        fixes = True
     return not fixes
 
 
@@ -1783,6 +1822,575 @@ def _doctor_claude_quota(payload: dict, stdout) -> bool:
 
     print("FIX Claude quota credential: invalid diagnostics", file=stdout)
     return False
+
+
+# --- Claude Code statusLine bridge ------------------------------------------
+
+@dataclass(frozen=True)
+class _StatusLineState:
+    config_dir: Path
+    settings_path: Path
+    state_dir: Path
+    launcher: Path
+    record: dict | None          # our record for this config dir, if any
+    settings_command: str | None  # statusLine.command as saved, if a string
+    settings_error: str | None   # why settings.json could not be read
+    points_at_launcher: bool
+    launcher_present: bool
+    launcher_ours: bool
+    python: Path | None
+    python_present: bool
+    bridge: Path | None          # the script the launcher was pointed at
+    bridge_present: bool
+    bridge_is_this_checkout: bool
+    sample_status: str           # missing / unreadable / invalid / empty / stale / fresh
+    sample_age_s: int | None
+    claude_code_version: str | None
+
+    @property
+    def installed(self) -> bool:
+        return self.record is not None
+
+
+def _statusline_settings_path(config_dir: Path) -> Path:
+    return Path(config_dir) / "settings.json"
+
+
+def _statusline_launcher_path(state_dir: Path, config_dir: Path) -> Path:
+    """One launcher per Claude config directory: two ``CLAUDE_CONFIG_DIR``
+    installs sharing the state directory must each keep their own baked-in
+    interpreter and fallback status line."""
+    key = statusline_bridge.config_dir_key(config_dir)
+    return Path(state_dir) / f"{STATUSLINE_LAUNCHER_PREFIX}{key}.sh"
+
+
+def _statusline_recorded_launcher(record, fallback: Path) -> Path:
+    """The launcher this record installed (an earlier release wrote one
+    shared launcher), else the per-directory path."""
+    if isinstance(record, dict) and isinstance(record.get("launcher"), str):
+        return Path(record["launcher"])
+    return fallback
+
+
+def _statusline_read_settings(path: Path) -> dict:
+    """The whole settings document (``{}`` when absent).  Raises
+    ``ConfigError`` when the file exists but cannot be trusted."""
+    try:
+        raw = _read_small_regular(path, STATUSLINE_SETTINGS_MAX_BYTES)
+    except FileNotFoundError:
+        return {}
+    try:
+        document = json.loads(
+            raw.decode("utf-8"), parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_object)
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise ConfigError(f"{path} is not strict JSON") from exc
+    if not isinstance(document, dict):
+        raise ConfigError(f"{path} is not a JSON object")
+    return document
+
+
+def _statusline_write_settings(path: Path, document: dict) -> None:
+    """Replace settings.json atomically, keeping its mode (Claude Code
+    creates it world-readable; a fresh file is private)."""
+    path = Path(path)
+    try:
+        existing = os.lstat(path)
+    except FileNotFoundError:
+        mode = 0o600
+    else:
+        if stat.S_ISLNK(existing.st_mode):
+            raise ConfigError(f"{path} must not be a symlink")
+        mode = stat.S_IMODE(existing.st_mode)
+    payload = (json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+               ).encode("utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        statusline_bridge.atomic_write_private(path, payload)
+        if os.name == "posix":
+            os.chmod(path, mode)
+    except OSError as exc:
+        raise ConfigError(f"cannot save {path}") from exc
+
+
+def _statusline_read_record_file(path: Path) -> dict:
+    try:
+        raw = _read_small_regular(path, statusline_bridge.CONFIG_MAX_BYTES)
+    except FileNotFoundError:
+        return {"v": statusline_bridge.CONFIG_VERSION, "dirs": {}}
+    except ConfigError:
+        raise
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise ConfigError(f"{path} is not JSON") from exc
+    if (not isinstance(document, dict)
+            or document.get("v") != statusline_bridge.CONFIG_VERSION
+            or not isinstance(document.get("dirs"), dict)):
+        raise ConfigError(f"{path} is not the v1 bridge record")
+    return document
+
+
+def _statusline_write_record_file(path: Path, document: dict) -> None:
+    payload = json.dumps(document, indent=2, sort_keys=True).encode("utf-8")
+    _atomic_private_write(path, payload)
+
+
+def _statusline_launcher_is_ours(path: Path) -> bool:
+    try:
+        head = _read_small_regular(path, 4096).decode("utf-8", "replace")
+    except (FileNotFoundError, ConfigError):
+        return False
+    return STATUSLINE_LAUNCHER_MARKER in head
+
+
+def _statusline_command_path(command):
+    """The one program a statusLine.command names, as the shell would
+    split it, or ``None``.  Claude Code runs the command through a shell,
+    so a path with a space (``Application Support``) must be quoted and
+    the unquoted form names a program that does not exist."""
+    if not isinstance(command, str) or not command:
+        return None
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if len(words) != 1:
+        return None
+    return words[0]
+
+
+def _statusline_command_is_launcher(command, launcher: Path) -> bool:
+    """Is this statusLine.command ours -- the launcher path (quoted for the
+    shell, or the unquoted string an earlier install wrote), or another
+    path whose file carries the generated marker?"""
+    if not isinstance(command, str) or not command:
+        return False
+    if command == str(launcher):
+        return True
+    program = _statusline_command_path(command)
+    if program is None:
+        return False
+    if program == str(launcher):
+        return True
+    return _statusline_launcher_is_ours(Path(program))
+
+
+def _statusline_launcher_chained(path: Path) -> str | None:
+    """The previous status line a generated launcher bakes in (its
+    ``CHAINED=`` line), for a reinstall whose record is gone."""
+    try:
+        text = _read_small_regular(path, 64 * 1024).decode("utf-8", "replace")
+    except (FileNotFoundError, ConfigError):
+        return None
+    for line in text.splitlines():
+        if line.startswith("CHAINED="):
+            try:
+                words = shlex.split(line[len("CHAINED="):])
+            except ValueError:
+                return None
+            if len(words) == 1 and _statusline_valid_command(words[0]):
+                return words[0]
+            return None
+    return None
+
+
+def _statusline_command_runs_launcher(command, launcher: Path) -> bool:
+    """Would the shell actually start the launcher from this command?"""
+    return _statusline_command_path(command) == str(launcher)
+
+
+def _statusline_launcher_text(python: Path, bridge: Path, state_dir: Path,
+                              chained: str | None) -> str:
+    fallback = (f"exec /bin/sh -c {shlex.quote(chained)}" if chained
+                else "exit 0")
+    return (
+        "#!/bin/sh\n"
+        f"{STATUSLINE_LAUNCHER_MARKER} v1\n"
+        "# Generated by tools/vibepulse_setup.py statusline install.\n"
+        "# Claude Code runs this on every status-line trigger; the bridge\n"
+        "# records the rate-limit windows for the VibePulse tokenserver and\n"
+        "# then runs the status line you had before with the same stdin.\n"
+        f"PY={shlex.quote(str(python))}\n"
+        f"BRIDGE={shlex.quote(str(bridge))}\n"
+        f"STATE={shlex.quote(str(state_dir))}\n"
+        f"CHAINED={shlex.quote(chained or '')}\n"
+        'if [ -x "$PY" ] && [ -f "$BRIDGE" ]; then\n'
+        '  exec "$PY" "$BRIDGE" --state-dir "$STATE" --chained "$CHAINED"\n'
+        "fi\n"
+        "# The checkout or interpreter moved: keep the previous status line.\n"
+        f"{fallback}\n")
+
+
+def _statusline_bridge_script(repo_root: Path) -> Path:
+    return Path(repo_root) / "tools" / "tokenserver" / "statusline_bridge.py"
+
+
+def _statusline_valid_command(value) -> bool:
+    return (isinstance(value, str) and 0 < len(value)
+            <= STATUSLINE_COMMAND_MAX_CHARS and value.isprintable())
+
+
+def _statusline_state(*, config_dir: Path, state_dir: Path, repo_root: Path,
+                      now: int | None = None) -> _StatusLineState:
+    now = int(time.time()) if now is None else int(now)
+    config_dir = Path(config_dir)
+    settings_path = _statusline_settings_path(config_dir)
+    record = None
+    try:
+        dirs = _statusline_read_record_file(
+            statusline_bridge.config_path(state_dir))["dirs"]
+        candidate = dirs.get(statusline_bridge.config_dir_key(config_dir))
+        record = candidate if isinstance(candidate, dict) else None
+    except ConfigError:
+        record = None
+    launcher = _statusline_recorded_launcher(
+        record, _statusline_launcher_path(state_dir, config_dir))
+    settings_command = None
+    settings_error = None
+    try:
+        block = _statusline_read_settings(settings_path).get("statusLine")
+        if isinstance(block, dict) and isinstance(block.get("command"), str):
+            settings_command = block["command"]
+    except ConfigError as exc:
+        settings_error = str(exc)
+    launcher_present = launcher.is_file()
+    launcher_ours = launcher_present and _statusline_launcher_is_ours(launcher)
+    points_at_launcher = _statusline_command_runs_launcher(
+        settings_command, launcher)
+    python = None
+    if record is not None and isinstance(record.get("python"), str):
+        python = Path(record["python"])
+    python_present = python is not None and os.access(python, os.X_OK)
+    # The launcher invokes the script the INSTALL recorded, not whatever
+    # checkout the doctor happens to run from: judge that path.
+    bridge = None
+    if record is not None and isinstance(record.get("bridge"), str):
+        bridge = Path(record["bridge"])
+    bridge_present = bridge is not None and bridge.is_file()
+    this_checkout = _statusline_bridge_script(repo_root)
+    bridge_is_this_checkout = False
+    if bridge_present:
+        try:
+            bridge_is_this_checkout = (
+                bridge.resolve() == this_checkout.resolve())
+        except OSError:
+            bridge_is_this_checkout = False
+    sample_status, document = statusline_bridge.peek_sample(
+        statusline_bridge.sample_path(state_dir))
+    age = None
+    version = None
+    if sample_status == "ok":
+        summary = statusline_bridge.summarize_sample(document, now)
+        sample_status = summary["status"]
+        age = summary["ageS"]
+        version = summary["claudeCodeVersion"]
+    return _StatusLineState(
+        config_dir=config_dir, settings_path=settings_path,
+        state_dir=Path(state_dir), launcher=launcher, record=record,
+        settings_command=settings_command, settings_error=settings_error,
+        points_at_launcher=points_at_launcher,
+        launcher_present=launcher_present, launcher_ours=launcher_ours,
+        python=python, python_present=python_present,
+        bridge=bridge, bridge_present=bridge_present,
+        bridge_is_this_checkout=bridge_is_this_checkout,
+        sample_status=sample_status,
+        sample_age_s=age, claude_code_version=version)
+
+
+def _statusline_report(state: _StatusLineState, stdout) -> bool:
+    """Print the doctor/status lines; return False when something needs a
+    fix (an optional feature that is simply not installed is not one)."""
+    if not state.installed:
+        if _statusline_command_is_launcher(state.settings_command,
+                                           state.launcher):
+            print("FIX statusLine bridge: settings.json points at the "
+                  "launcher but the install record is gone; run "
+                  "`vibepulse_setup.py statusline install "
+                  "--yes-single-account` again or `statusline uninstall`",
+                  file=stdout)
+            return False
+        print("OFF statusLine bridge: not installed (optional; "
+              "`vibepulse_setup.py statusline install --yes-single-account` "
+              "lets Claude Code feed the tokenserver its own quota figures)",
+              file=stdout)
+        return True
+    ok = True
+    if state.settings_error is not None:
+        print(f"FIX statusLine bridge: cannot read {state.settings_path} "
+              f"({state.settings_error})", file=stdout)
+        ok = False
+    elif (not state.points_at_launcher and _statusline_command_is_launcher(
+            state.settings_command, state.launcher)):
+        print(f"FIX statusLine bridge: statusLine.command in "
+              f"{state.settings_path} names the launcher without shell "
+              "quoting, so the shell splits the path at its space and "
+              "nothing runs; run `vibepulse_setup.py statusline install "
+              "--yes-single-account` again to rewrite it", file=stdout)
+        ok = False
+    elif not state.points_at_launcher:
+        shown = (repr(state.settings_command[:60])
+                 if state.settings_command else "nothing")
+        print(f"FIX statusLine bridge: {state.settings_path} no longer "
+              f"points at the launcher (statusLine.command is {shown}); "
+              "run `vibepulse_setup.py statusline install "
+              "--yes-single-account` again, or `statusline uninstall` to "
+              "forget it", file=stdout)
+        ok = False
+    if not state.launcher_present:
+        print(f"FIX statusLine bridge: launcher missing at {state.launcher}; "
+              "run `vibepulse_setup.py statusline install "
+              "--yes-single-account` again", file=stdout)
+        ok = False
+    elif not state.launcher_ours:
+        print(f"FIX statusLine bridge: {state.launcher} is not the generated "
+              "launcher; run `vibepulse_setup.py statusline install "
+              "--yes-single-account` again", file=stdout)
+        ok = False
+    if not state.python_present:
+        print(f"FIX statusLine bridge: interpreter {state.python} is gone; "
+              "run `vibepulse_setup.py statusline install "
+              "--yes-single-account` again from a working Python",
+              file=stdout)
+        ok = False
+    if not state.bridge_present:
+        print(f"FIX statusLine bridge: the launcher points at {state.bridge} "
+              "and that script is gone (checkout moved or deleted); run "
+              "`vibepulse_setup.py statusline install --yes-single-account` "
+              "again from the durable checkout", file=stdout)
+        ok = False
+    elif not state.bridge_is_this_checkout:
+        print(f"VARN statusLine bridge: the launcher runs {state.bridge}, "
+              "another checkout than this one; that is fine as long as it "
+              "is the durable checkout the tokenserver also runs from",
+              file=stdout)
+    if not ok:
+        return False
+    version = (f", Claude Code {state.claude_code_version}"
+               if state.claude_code_version else "")
+    if state.sample_status == "fresh":
+        print(f"PASS statusLine bridge: fresh sample {state.sample_age_s} s "
+              f"ago{version}; account assumed single", file=stdout)
+    elif state.sample_status == "stale":
+        minutes = (state.sample_age_s or 0) // 60
+        print(f"VARN statusLine bridge: last sample {minutes} min "
+              f"ago{version}; its windows still hold as a floor until they "
+              "reset, and the probe runs at full cadence until Claude Code "
+              "speaks again", file=stdout)
+    elif state.sample_status in ("missing", "empty"):
+        print("WAIT statusLine bridge: installed, no sample yet; finish one "
+              "turn in a Claude Code session started after the install "
+              "(a running session keeps the statusLine it started with)",
+              file=stdout)
+    else:
+        print(f"VARN statusLine bridge: sample file is {state.sample_status}; "
+              "the bridge quarantines it on its next run", file=stdout)
+    return True
+
+
+def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
+                        python: Path | None, consent: bool, stdout,
+                        now: int | None = None,
+                        platform: str | None = None) -> bool:
+    platform = sys.platform if platform is None else platform
+    if platform == "win32":
+        print("FIX statusLine bridge: Windows is not supported yet (the "
+              "launcher is a POSIX shell script); see the open question in "
+              "docs/superpowers/specs/2026-09-10-vibepulse-statusline-"
+              "quota-source-design.md", file=stdout)
+        return False
+    if platform != "darwin":
+        # The single-account slice is validated on macOS only; Linux is
+        # not a supported host (AGENTS.md) and Claude Code's settings
+        # location there is unverified. Refuse rather than guess.
+        print(f"FIX statusLine bridge: {platform} is not a supported host "
+              "for the bridge; macOS only until the Linux gates in issue #2 "
+              "pass", file=stdout)
+        return False
+    if not consent:
+        print("FIX statusLine bridge: not installed; " + _STATUSLINE_CONSENT
+              + " Pass --yes-single-account to confirm.", file=stdout)
+        return False
+    if python is None or not os.access(python, os.X_OK):
+        print("FIX statusLine bridge: Python interpreter not found; run "
+              "this from the tokenserver's interpreter", file=stdout)
+        return False
+    bridge_script = _statusline_bridge_script(repo_root)
+    if not bridge_script.is_file():
+        print(f"FIX statusLine bridge: {bridge_script} is missing",
+              file=stdout)
+        return False
+    now = int(time.time()) if now is None else int(now)
+    config_dir = Path(config_dir)
+    state_dir = Path(state_dir)
+    settings_path = _statusline_settings_path(config_dir)
+    launcher = _statusline_launcher_path(state_dir, config_dir)
+    record_path = statusline_bridge.config_path(state_dir)
+
+    settings = _statusline_read_settings(settings_path)
+    document = _statusline_read_record_file(record_path)
+    key = statusline_bridge.config_dir_key(config_dir)
+    previous = document["dirs"].get(key)
+    previous = previous if isinstance(previous, dict) else None
+    previous_launcher = _statusline_recorded_launcher(previous, launcher)
+
+    block = settings.get("statusLine")
+    if block is None:
+        block = {}
+    elif not isinstance(block, dict):
+        raise ConfigError(f"{settings_path}: statusLine is not an object")
+    current = block.get("command")
+    block_type = block.get("type", "command")
+    if block_type != "command":
+        raise ConfigError(f"{settings_path}: statusLine.type {block_type!r} "
+                          "is not a command; not touching it")
+    chained = None
+    if current is None:
+        chained = None
+    elif (_statusline_command_is_launcher(current, launcher)
+          or _statusline_command_is_launcher(current, previous_launcher)):
+        # Reinstall: the previous status line lives in our record, not
+        # in settings.json (which points at us). Without a record (deleted
+        # by hand, status said to reinstall) the launcher still running
+        # carries it as its baked-in fallback: recover it from there
+        # rather than erase it.
+        chained = (previous.get("chained_command")
+                   if previous is not None else None)
+        if not _statusline_valid_command(chained):
+            chained = None
+        if chained is None and previous is None:
+            program = _statusline_command_path(current)
+            chained = (_statusline_launcher_chained(Path(program))
+                       if program else None)
+    elif _statusline_valid_command(current):
+        chained = current
+    else:
+        raise ConfigError(f"{settings_path}: statusLine.command is not a "
+                          "single printable line; not touching it")
+
+    launcher_text = _statusline_launcher_text(
+        python, bridge_script, state_dir, chained)
+    try:
+        statusline_bridge.atomic_write_private(
+            launcher, launcher_text.encode("utf-8"))
+        os.chmod(launcher, 0o700)
+    except OSError as exc:
+        raise ConfigError(f"cannot write {launcher}") from exc
+    document["dirs"][key] = {
+        "config_dir": str(config_dir),
+        "settings_path": str(settings_path),
+        "chained_command": chained,
+        "launcher": str(launcher),
+        "python": str(python),
+        "bridge": str(bridge_script),
+        "installed_at": now,
+    }
+    _statusline_write_record_file(record_path, document)
+    new_block = dict(block)
+    new_block["type"] = "command"
+    # Claude Code hands the command to a shell: quote the path, or the
+    # space in "Application Support" splits it and nothing runs.
+    new_block["command"] = shlex.quote(str(launcher))
+    settings = dict(settings)
+    settings["statusLine"] = new_block
+    _statusline_write_settings(settings_path, settings)
+    if previous_launcher != launcher and not any(
+            isinstance(other, dict) and other.get("launcher")
+            == str(previous_launcher) for other in document["dirs"].values()):
+        # An earlier release's shared launcher that no record uses now.
+        try:
+            previous_launcher.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ConfigError(f"cannot remove {previous_launcher}") from exc
+
+    kept = (f"; your previous status line ({chained[:60]!r}) still runs "
+            "after it" if chained else "; there was no status line before, "
+            "so Claude Code shows none")
+    print(f"PASS statusLine bridge: installed in {settings_path}{kept}",
+          file=stdout)
+    print("Claude Code binds the statusLine command when a session starts: "
+          "restart your Claude Code sessions, and the first sample appears "
+          "after the first assistant message in one of them.", file=stdout)
+    return True
+
+
+def _statusline_uninstall(*, config_dir: Path, state_dir: Path,
+                          stdout) -> bool:
+    config_dir = Path(config_dir)
+    state_dir = Path(state_dir)
+    settings_path = _statusline_settings_path(config_dir)
+    record_path = statusline_bridge.config_path(state_dir)
+    document = _statusline_read_record_file(record_path)
+    key = statusline_bridge.config_dir_key(config_dir)
+    record = document["dirs"].get(key)
+    record = record if isinstance(record, dict) else None
+    launcher = _statusline_recorded_launcher(
+        record, _statusline_launcher_path(state_dir, config_dir))
+
+    settings = _statusline_read_settings(settings_path)
+    block = settings.get("statusLine")
+    current = block.get("command") if isinstance(block, dict) else None
+    ours = _statusline_command_is_launcher(current, launcher)
+    if record is None and not ours:
+        print("OFF statusLine bridge: not installed for "
+              f"{config_dir}; nothing to do", file=stdout)
+        return True
+
+    chained = record.get("chained_command") if record else None
+    if ours and not _statusline_valid_command(chained):
+        # No record (deleted by hand): the launcher still carries the
+        # previous line as its baked-in fallback.
+        program = _statusline_command_path(current)
+        chained = (_statusline_launcher_chained(Path(program))
+                   if program else None)
+    if ours:
+        settings = dict(settings)
+        new_block = dict(block)
+        if _statusline_valid_command(chained):
+            new_block["command"] = chained
+            restored = f"restored {chained[:60]!r}"
+        else:
+            # Only what the install wrote goes; a sibling such as
+            # ``padding`` -- there before, or added since -- stays.
+            new_block.pop("command", None)
+            new_block.pop("type", None)
+            restored = "removed the command (there was none before)"
+        if new_block:
+            settings["statusLine"] = new_block
+        else:
+            settings.pop("statusLine", None)
+            restored += " and the empty statusLine entry"
+        _statusline_write_settings(settings_path, settings)
+    else:
+        shown = repr(current[:60]) if isinstance(current, str) else "nothing"
+        restored = (f"left {settings_path} alone: statusLine.command is "
+                    f"{shown}, not the launcher")
+
+    document["dirs"].pop(key, None)
+    doomed = []
+    if document["dirs"]:
+        _statusline_write_record_file(record_path, document)
+        removed = "; other config directories keep their own launchers"
+        if not any(isinstance(other, dict) and other.get("launcher")
+                   == str(launcher) for other in document["dirs"].values()):
+            doomed.append(launcher)
+    else:
+        removed = ""
+        doomed = [record_path, launcher,
+                  statusline_bridge.sample_path(state_dir),
+                  state_dir / statusline_bridge.LOCK_NAME]
+    for path in doomed:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ConfigError(f"cannot remove {path}") from exc
+    print(f"PASS statusLine bridge: uninstalled; {restored}{removed}",
+          file=stdout)
+    return True
 
 
 def _resolve_executables(python, codex):
@@ -2110,12 +2718,20 @@ def main(
         relay_token_path: Path | None = None,
         secrets_path: Path | None = None,
         interaction_relay_dir: Path | None = None,
-        token_urlsafe=secrets.token_urlsafe) -> int:
+        token_urlsafe=secrets.token_urlsafe,
+        claude_config_dir: Path | None = None,
+        statusline_state_dir: Path | None = None,
+        statusline_platform: str | None = None) -> int:
     """Run the strict CLI with injectable process and network boundaries."""
     args = _parser().parse_args(argv)
     output = sys.stdout if stdout is None else stdout
     path = default_config_path() if config_path is None else Path(config_path)
     python_path, codex_path = _resolve_executables(python, codex)
+    claude_dir = (statusline_bridge.claude_config_dir()
+                  if claude_config_dir is None else Path(claude_config_dir))
+    bridge_state = (statusline_bridge.state_dir()
+                    if statusline_state_dir is None
+                    else Path(statusline_state_dir))
     interactive = (sys.stdin.isatty() if stdin_isatty is None
                    else stdin_isatty)
     relay_token = (Path.home() / ".vibepulse-interaction-relay-token"
@@ -2180,6 +2796,26 @@ def main(
                 service_dir=relay_service, run=run,
                 stdout=output) else 1
 
+        if args.command == "statusline":
+            if args.statusline_command == "status":
+                return 0 if _statusline_report(_statusline_state(
+                    config_dir=claude_dir, state_dir=bridge_state,
+                    repo_root=Path(repo_root)), output) else 1
+            if args.statusline_command == "uninstall":
+                return 0 if _statusline_uninstall(
+                    config_dir=claude_dir, state_dir=bridge_state,
+                    stdout=output) else 1
+            consent = bool(args.yes_single_account)
+            if not consent and interactive:
+                consent = input_fn(
+                    _STATUSLINE_CONSENT + " Type YES to continue: "
+                ).strip() == "YES"
+            return 0 if _statusline_install(
+                config_dir=claude_dir, state_dir=bridge_state,
+                repo_root=Path(repo_root), python=python_path,
+                consent=consent, stdout=output,
+                platform=statusline_platform) else 1
+
         if args.command == "status":
             _print_status(load_config(path), output)
             return 0
@@ -2189,7 +2825,8 @@ def main(
             return 0 if _doctor(
                 config, python=python_path, codex=codex_path,
                 repo_root=Path(repo_root), run=run, urlopen=urlopen,
-                stdout=output) else 1
+                stdout=output, claude_config_dir=claude_dir,
+                statusline_state_dir=bridge_state) else 1
 
         if args.command == "disable":
             _disable(path, args.target)

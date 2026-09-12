@@ -2,8 +2,17 @@
 
 **Date:** 2026-09-10
 
-**Status:** Draft, for maintainer review. Nothing in this document is
-implemented, and it authorizes no code, setup change or flash.
+**Status:** Partly implemented (2026-09-12). The single-account slice
+shipped: the bridge (`tools/tokenserver/statusline_bridge.py`), the
+`statusline install|uninstall|status` setup command, the tokenserver
+arbitration and bridged probe cadence, and the doctor/smoke lines. The
+sample is keyed under one account entry, `single`, and the install command
+requires `--yes-single-account` -- the operator asserts that Claude Code
+and the tokenserver share one Claude account. The account binding this
+document describes (`oauth/profile`, the identity watcher, generations,
+per-identity cache/tracker/history) is **not implemented**; a two-account
+host must not install the bridge. Install is macOS-only: Windows is
+refused (open question 4) and Linux is not a supported host. The rest of this document is the design as reviewed.
 
 **Scope:** Tokenserver Claude quota sourcing, the setup command's
 `settings.json` edit, and the doctor/smoke/SessionStart classification of

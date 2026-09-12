@@ -231,6 +231,57 @@ future recovery risk. Start a new Claude Code CLI turn to refresh that saved
 fallback. The service notices locally within 15 seconds; it does not need a
 restart, call an undocumented refresh endpoint, or mutate the refresh token.
 
+### Optional: let Claude Code's statusLine feed the quota (recommended)
+
+Claude Code hands its `statusLine` command a JSON document on every
+assistant message, and that document carries the account's session (5 h)
+and weekly rate-limit windows -- the same two numbers the probe above
+fetches from the rate-limited OAuth endpoint. The bridge keeps only those
+windows and the Claude Code version, and runs the status line the user had
+before with the same stdin, so nothing visible changes in Claude Code.
+Design: [the statusLine spec](superpowers/specs/2026-09-10-vibepulse-statusline-quota-source-design.md);
+this is its single-account slice.
+
+Before installing, confirm with the user that **Claude Code and the
+tokenserver use the same Claude account on this computer** -- the bridge
+cannot tell accounts apart, so a second account's status line would be
+shown as this one's quota. The command refuses without that consent:
+
+```sh
+python3 tools/vibepulse_setup.py statusline install --yes-single-account
+```
+
+Run it from the same interpreter the tokenserver uses (the venv, where one
+exists): the generated launcher bakes that interpreter's path in. It edits
+`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) with
+strict JSON, keeps every other key and every sibling of `statusLine`, and
+records the previous command in `claude-statusline-bridge.json` in the
+state directory so `statusline uninstall` restores it. macOS only for now;
+on Windows and Linux the command refuses (open question 4 in the spec,
+and Linux is not a supported host).
+
+**Verify:**
+
+```sh
+python3 tools/vibepulse_setup.py statusline status
+```
+
+| Line | Meaning | What to do |
+|---|---|---|
+| `WAIT statusLine bridge: installed, no sample yet` | Nothing has spoken yet | Claude Code binds the statusLine command at session start, so a session that was already open never runs the bridge: restart Claude Code, then finish one turn. Until a payload carries `rate_limits`, the bridge leaves only `claude-statusline-quota.lock` in the state directory -- that file is the proof it ran |
+| `PASS statusLine bridge: fresh sample N s ago, Claude Code X.Y.Z` | Feeding | Nothing; `GET /` now shows `claudeStatusline.status: fresh` and, once both windows are covered, `bridged: true` with `claudeProbeIntervalS` at 1800 |
+| `VARN statusLine bridge: last sample N min ago` | No Claude Code session has spoken for over 15 minutes | Normal when idle; the stored windows still hold as a floor until they reset, and the probe runs at full cadence until one does |
+| `FIX statusLine bridge: … no longer points at the launcher` | Something else rewrote `statusLine.command` | `statusline install --yes-single-account` again, or `statusline uninstall` to forget the bridge |
+| `FIX statusLine bridge: launcher missing` / `interpreter … is gone` | The state directory or the venv was removed | `statusline install --yes-single-account` again |
+
+`doctor` prints the same line, and `smoke.py` mirrors it from `GET /`.
+The tokenserver arbitrates each window against the probe (the later reset
+wins; within one window the higher figure wins, because usage only
+accumulates, so a stored window is a floor until it resets), judges
+freshness per window, slows the probe only while both windows are fresh,
+and never touches the model week. The panel wire
+contract is unchanged.
+
 Plugin `0.1.7` also performs a read-only startup classification from fixed
 loopback endpoints. `PROVIDER DATA STALE` means investigate Claude/Codex;
 `DEVICE PATH STALE` means provider data is already fresh and the next checks

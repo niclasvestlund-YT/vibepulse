@@ -22,6 +22,17 @@ from unittest import mock
 from tools.tokenserver import codex_usage, tokenserver
 
 
+def setUpModule():
+    # A statusLine bridge installed on the developer's own machine must
+    # not feed these snapshots: point the reader at a file that is absent.
+    tokenserver._claude_statusline_path_override = (
+        Path(tempfile.gettempdir()) / "vibepulse-no-statusline-sample.json")
+
+
+def tearDownModule():
+    tokenserver._claude_statusline_path_override = None
+
+
 class ProviderGateTest(unittest.TestCase):
     """``_any_provider_dir``: either provider is enough."""
 
