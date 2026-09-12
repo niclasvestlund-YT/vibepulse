@@ -2083,7 +2083,8 @@ def _statusline_report(state: _StatusLineState, stdout) -> bool:
               "Claude Code speaks again", file=stdout)
     elif state.sample_status in ("missing", "empty"):
         print("WAIT statusLine bridge: installed, no sample yet; finish one "
-              "Claude Code turn and the panel picks it up within a minute",
+              "turn in a Claude Code session started after the install "
+              "(a running session keeps the statusLine it started with)",
               file=stdout)
     else:
         print(f"VARN statusLine bridge: sample file is {state.sample_status}; "
@@ -2182,9 +2183,9 @@ def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
             "so Claude Code shows none")
     print(f"PASS statusLine bridge: installed in {settings_path}{kept}",
           file=stdout)
-    print("The first sample appears after the next assistant message in "
-          "any Claude Code session (existing sessions pick the new "
-          "statusLine up on their next trigger).", file=stdout)
+    print("Claude Code binds the statusLine command when a session starts: "
+          "restart your Claude Code sessions, and the first sample appears "
+          "after the first assistant message in one of them.", file=stdout)
     return True
 
 

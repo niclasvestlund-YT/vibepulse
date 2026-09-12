@@ -267,7 +267,7 @@ python3 tools/vibepulse_setup.py statusline status
 
 | Line | Meaning | What to do |
 |---|---|---|
-| `WAIT statusLine bridge: installed, no sample yet` | Nothing has spoken yet | Finish one Claude Code turn (existing sessions pick the new command up on their next trigger) |
+| `WAIT statusLine bridge: installed, no sample yet` | Nothing has spoken yet | Claude Code binds the statusLine command at session start, so a session that was already open never runs the bridge: restart Claude Code, then finish one turn. Until a payload carries `rate_limits`, the bridge leaves only `claude-statusline-quota.lock` in the state directory -- that file is the proof it ran |
 | `PASS statusLine bridge: fresh sample N s ago, Claude Code X.Y.Z` | Feeding | Nothing; `GET /` now shows `claudeStatusline.status: fresh` and, once both windows are covered, `bridged: true` with `claudeProbeIntervalS` at 1800 |
 | `VARN statusLine bridge: last sample N min ago` | No Claude Code session has spoken for over 15 minutes | Normal when idle; the probe is the source again until one does |
 | `FIX statusLine bridge: … no longer points at the launcher` | Something else rewrote `statusLine.command` | `statusline install --yes-single-account` again, or `statusline uninstall` to forget the bridge |

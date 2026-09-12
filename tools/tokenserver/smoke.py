@@ -278,8 +278,9 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
                                   "source until one does"))
         elif state in ("missing", "empty"):
             results.append((WARN, "claude statusLine bridge: installed but "
-                                  "no sample yet — finish one Claude Code "
-                                  "turn"))
+                                  "no sample yet — finish one turn in a "
+                                  "Claude Code session started after the "
+                                  "install"))
         elif state in ("invalid", "unreadable"):
             results.append((WARN, f"claude statusLine bridge: sample file is "
                                   f"{state} — run `vibepulse_setup.py "
