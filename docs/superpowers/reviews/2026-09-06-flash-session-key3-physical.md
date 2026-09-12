@@ -344,8 +344,8 @@ unanswerable — as it is here.
 ## `.ota-device` points at the wrong address
 
 ```
-.ota-device:        192.168.1.135
-panel's actual IP:  192.168.1.5   (esp_netif_handlers, t=9.2 s)
+.ota-device:        192.168.x.A   (redacted; a stale lease)
+panel's actual IP:  192.168.x.B   (redacted; esp_netif_handlers, t=9.2 s)
 ```
 
 `tools/ota-flash.sh "$(cat .ota-device)"` would have sent to an address the

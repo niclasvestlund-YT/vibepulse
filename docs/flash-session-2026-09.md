@@ -245,6 +245,8 @@ network-off part is done once, not twice.
   timed: how long the press lasted in 1.2, how long the wait was before
   the setup window opened by itself in 2.7, and how soon after the
   takeover the short tap came in 3.3.
-- README's SETTINGS section still says no panel has been flashed with the
-  menu. Once §3 passes, that sentence changes; do it in the same commit
-  as the inventory update.
+- README now says SETTINGS is on the panel but its static review is unrun
+  (changed with the 2026-09-06 flash, PR #86). Once §3 passes, that becomes
+  a physical verification: update the SETTINGS evidence note, the release
+  status rows and AGENTS.md in the same commit as the inventory update, and
+  record the review under `docs/superpowers/reviews/`.

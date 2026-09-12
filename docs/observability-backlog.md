@@ -337,12 +337,15 @@ the LVGL lock while the panel redraws.
 | Client | Flag | Gate |
 |---|---|---|
 | Quota poll | `TK_TOKENS_URL` | `components/app_tokens/net.c:45` |
-| Max tracker | `TK_MAX_TRACKER_URL` | `components/app_tokens/net.c:170` |
+| Max tracker | `TK_MAX_TRACKER_URL` | `components/app_tokens/net.c:170` — since #98 the poller runs without it (discovery or relay); switch the tracker off in SETTINGS → LABS instead |
 | Agent status | `TK_AGENT_STATUS_URL` | `components/app_tokens/agent_net.c:32` |
 | Numbers relay | `TK_VIBEPULSE_RELAY_URL` | `components/app_tokens/app_tokens_config.h:22` |
 
-Together they account for most of the handshakes. If the lock failures survive
-that build, TLS is excluded and the rotation path becomes the prime suspect.
+Together they account for most of the handshakes, not all: the encrypted
+interaction relay and Solelkollen (next paragraph) keep their own HTTPS polls
+running. TLS is excluded only if the lock failures survive a build with those
+two off as well; then the rotation path becomes the prime suspect. With any
+TLS client left running, a surviving failure says nothing about TLS.
 
 Two clients cannot be disabled this way and are traps for anyone trying:
 `TK_VIBEPULSE_INTERACTION_RELAY_URL` is read by CMake directly out of
