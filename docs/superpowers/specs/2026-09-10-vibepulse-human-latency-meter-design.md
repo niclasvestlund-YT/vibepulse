@@ -254,7 +254,12 @@ and the retry path can re-upload the same aged bytes, which this spec
 changes: an envelope older than `STATUS_EXPIRY_S` (15 s) on the
 tokenserver's own monotonic clock is discarded and rebuilt with fresh
 `expires_at` and fresh `dayEndS` before it is sent, so a frame is at
-most 15 s old when the PUT *starts*. Second, the PUT itself takes time
+most 15 s old when the PUT *starts* — and an envelope is likewise
+discarded and rebuilt, whatever its age, when the ledger's `servedDay`
+has changed since it was built, because a block that still carries
+yesterday's totals and a `dayEndS` counting to a midnight that has
+already passed is not one the panel's transit debit can correct, and a
+subsequent outage would keep yesterday under `BLOCKED ON YOU · TODAY`. Second, the PUT itself takes time
 that the worker's clock does not see, and `index.ts` starts the mailbox
 TTL only once it has received and hashed the body — so the PUT gets a
 **true end-to-end deadline**, `RELAY_PUT_BOUND_MS` (proposed 7 000 ms),
@@ -425,13 +430,17 @@ both.
    renders it, or its stale form once `TK_WAITS_STALE_MS` has passed
    without a newer accepted block.
 6. `GET /` reports `waits: {rows, unsaved, open, oldestDay, saveOk,
-   dayHeld}` — rows on disk, rows closed but not yet written, open-hold
-   markers, the oldest retained day, the last save's outcome, and
-   whether the served day is currently held past a regressed clock —
+   dayHeld, dayReset}` — rows on disk, rows closed but not yet written,
+   open-hold markers, the oldest retained day, the last save's outcome,
+   whether the served day is currently held past a regressed clock, and
+   the wall-clock time of the last future-day release (`null` when none
+   has happened since the file was created; kept until the next release
+   overwrites it, so the doctor can tell a deliberate reset from an
+   unexpectedly empty ledger for as long as the question can arise) —
    the one schema the durability and day-policy sections refer to, for
    the doctor and the smoke test; a failing save uses the same FIX/VARN
-   language as `maxTrackerSaveOk`, and the smoke test asserts all six
-   keys are present.
+   language as `maxTrackerSaveOk`, and the smoke test asserts all seven
+   keys are present and `dayReset` is `null` or an epoch.
 
 ## Failure and privacy boundaries
 
@@ -584,7 +593,9 @@ Regression tests must prove:
   so does a frame that sat in the mailbox for its full `STATUS_TTL_MS`;
   the tokenserver never starts a PUT with an envelope older than
   `STATUS_EXPIRY_S` on its monotonic clock (a retry after the window
-  rebuilds it with a fresh `dayEndS`), and a PUT that ran to its full
+  rebuilds it with a fresh `dayEndS`), nor one built before the served
+  day changed (a retry that straddles midnight carries the new day's
+  block, asserted by advancing the clock between build and retry), and a PUT that ran to its full
   connect-plus-read timeout still lands inside the bound;
   `STATUS_EXPIRY_S * 1000 + RELAY_PUT_BOUND_MS + STATUS_TTL_MS ==
   RELAY_AGE_BOUND_MS` is asserted; a LAN block subtracts the measured
