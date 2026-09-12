@@ -121,6 +121,18 @@ mistake on the next Claude Code field; `docs/companion-features-brainstorm.md`
 lists two more measured shapes (`result` records, Codex `payload.info`)
 that code must not assume.
 
+## 2026-09-08 · New models outgrew the bundled price snapshot
+
+**What happened:** Value showed UNPRICED after usage moved to Fable 5.1 and
+GPT-6 Astra. **Root cause:** the loaded 2026-08-14 catalogue predates both
+model IDs; refreshing the generated snapshot restores coverage. The service
+caches prices and priced log records, so it must restart after a data update.
+**Guards:** `GeneratedTableTest` checks both model IDs and independently
+calculated cache-aware examples. Codex accounting/replay tests use a fixed
+rate fixture, so later market-price changes do not rewrite their arithmetic.
+**Watch for:** a catalogue refresh cannot price an unpublished model; leave
+unknown IDs unpriced, and verify the live payload rather than only the file.
+
 ---
 
 ## 2026-09-06 · The panel logged the credential it was told never to print
