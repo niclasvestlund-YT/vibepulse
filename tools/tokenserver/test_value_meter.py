@@ -9,6 +9,8 @@ cannot afford.
 
 import json
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from tools.tokenserver import value_meter
 
@@ -250,7 +252,8 @@ CODEX_USAGE = {
     "total_tokens": 110_000,            # context size, not a billing figure
 }
 
-# GPT-5.6 Sol lists at $5.00 input / $30.00 output, $0.50 cached input.
+# Fixed August fixture: $5.00 input / $30.00 output, $0.50 cached input.
+# Accounting tests keep these rates; GeneratedTableTest checks shipped prices.
 #   fresh input  (100000 - 80000) x  5.00 =   100 000
 #   cached input        80000     x  0.50 =    40 000
 #   cache write          5000 x 5.00x1.25 =    31 250
@@ -263,6 +266,13 @@ CODEX_USAGE_USD = 471_250.0 / 1_000_000.0
 
 class CodexPricingTest(unittest.TestCase):
     """Codex counts input differently; treating it like Anthropic overcharges."""
+
+    def setUp(self):
+        fixture = Path(__file__).resolve().parents[2] / "test/fixtures/codex-prices.json"
+        table = value_meter.PriceTable(json.loads(fixture.read_text()))
+        patcher = mock.patch.object(value_meter, "_default_table", table)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_prices_a_codex_turn(self):
         usd, unpriced = value_meter.price_usage(
@@ -418,8 +428,27 @@ class GeneratedTableTest(unittest.TestCase):
 
     def test_the_models_actually_in_use_are_priced(self):
         for model in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5",
-                      "claude-haiku-4-5", "gpt-5.6-sol", "gpt-5.1-codex"):
+                      "claude-fable-5-1", "claude-haiku-4-5", "gpt-6-astra",
+                      "gpt-5.6-sol", "gpt-5.1-codex"):
             self.assertTrue(self.table.knows(model), model)
+
+    def test_fable_5_1_uses_its_published_cache_discount(self):
+        # Official Fable 5.1 rates: $10 input, $50 output, $0.25 cache read.
+        # https://platform.claude.com/docs/en/models/fable-5-1/overview
+        usd, unpriced = self.table.price("claude-fable-5-1", {
+            "input_tokens": 1_000, "output_tokens": 100,
+            "cache_read_input_tokens": 1_000_000})
+        self.assertEqual(unpriced, 0)
+        self.assertAlmostEqual(usd, 0.265)  # .010 + .005 + .250
+
+    def test_astra_prices_cache_and_output_without_double_counting(self):
+        # Standard rates: $10 input, $1 cached, $12.50 write, $50 output.
+        # https://developers.openai.com/api/docs/models/gpt-6-astra
+        usd, unpriced = self.table.price("gpt-6-astra", {
+            "input_tokens": 100_000, "cached_input_tokens": 80_000,
+            "cache_write_input_tokens": 5_000, "output_tokens": 1_000})
+        self.assertEqual(unpriced, 0)
+        self.assertAlmostEqual(usd, 0.3925)  # .2 + .08 + .0625 + .05
 
     def test_every_model_prices_both_sides_of_the_bill(self):
         """Input-only would look ~5x too cheap; worse than being unpriced."""
