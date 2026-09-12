@@ -37,14 +37,16 @@ that needs no telemetry, adopt the span when it leaves beta.
 interaction ends, the store appends one row to a `WaitLedger`: provider
 (`claude`/`codex`), kind (`approval`/`question`), `startedAt` and `endedAt`
 as wall-clock epoch seconds, `durationS` measured on the monotonic clock,
-and `outcome` in `{panel, computer, expired, panic, removed}`. The mapping
+and `outcome` in `{panel, computer, expired, panic, removed, restart}`. The mapping
 is from the store's removal reason **and the verdict together**, because
 the reason alone cannot tell a panel answer from a hand-back: a direct-LAN
 `resolve` reports `resolved` for `approve`, `deny` and `leave_it` alike,
 and the relay path reports `terminal` for its LEAVE IT. So: `resolved` +
 `approve`/`deny` → `panel`; `resolved` + `leave_it` and `terminal` →
 `computer`; the expiry sweep → `expired`; `panic` → `panic`; any other
-removal (the computer answered first, the hook went away) → `removed`.
+removal (the computer answered first, the hook went away) → `removed`;
+a hold the previous process left open, closed by the new process from
+its marker (below) → `restart`.
 Two clocks on purpose:
 the store's existing `created_at` is monotonic (`InteractionStore._now`,
 `time.monotonic` by default), which is right for expiry and elapsed time
@@ -75,9 +77,12 @@ interaction, computed the same way as a closed row with `endedAt` taken
 as now, so the day's first wait is visible on the hero while it is
 happening and not only once it closes — a page saying `0` over a
 `BLOCKED RIGHT NOW` of several minutes would be the invented-zero the
-honesty rule forbids. The provider header names the providers of open
-holds as well. When an open hold closes, its row replaces its live
-contribution; the total never steps back at that moment. Closed rows
+honesty rule forbids. `longestTodayS` is the same: it is the largest
+in-day part over closed rows **and** open holds, so `LONGEST WAIT`
+can never read less than `BLOCKED RIGHT NOW` while the day's longest
+wait is the one still running. The provider header names the providers
+of open holds as well. When an open hold closes, its row replaces its
+live contribution; the total never steps back at that moment. Closed rows
 contribute only the part of their measured duration that falls in the
 day. The split is made on the interval
 `[endedAt - durationS, endedAt]`, not on `[startedAt, endedAt]`: the
@@ -90,7 +95,8 @@ not 3 610. `startedAt` is kept for the record and is not used in
 aggregation. A wait parked at 23:50 and answered at 00:10 puts ten
 minutes in yesterday and ten in today, in `todayS`, the provider totals
 and `countToday` alike (a split row counts once, in the day it ended).
-`longestTodayS` is the longest in-day part, not the longest whole row.
+`longestTodayS` is the longest in-day part, not the longest whole row,
+over open holds and closed rows alike.
 Day boundaries are local wall-clock midnights (`datetime.astimezone()`),
 so a DST day is 23 or 25 hours and the split follows it. The block is
 about 110 bytes;
@@ -122,12 +128,24 @@ on the reader.
 **What is counted, exactly.** Time between a hook parking an interaction
 and that interaction ending, whatever ended it. Not counted: time an agent
 sits idle at a prompt with nothing parked (unknown to the server), time
-spent by the agent itself, and holds that were open when the tokenserver
-restarted: `InteractionStore._pending` is memory-only, the ledger writes a
-row only when an interaction ends, so the new process has no way to know
-those holds existed and records nothing for them. No startup message
-claims otherwise; a durable open-hold marker is open question 4. An
-`expired` wait counts in full: the human was needed for the whole hold.
+spent by the agent itself. Holds that were open when the tokenserver
+restarted **are** counted, because they already counted live: the
+number the panel showed must not step back when the process comes up
+again. `InteractionStore._pending` is memory-only, so the ledger keeps a
+durable, privacy-safe **open-hold marker**: an `open` list in the same
+persisted file with one `{provider, kind, startedAt}` per parked
+interaction, rewritten (through the same writer) at every park and every
+ending. On load, the new process turns each marker into a row with
+outcome `restart`, `endedAt` = its own first wall-clock reading and
+`durationS` = `max(0, endedAt - startedAt)` — the one place a duration
+is wall-derived, because the monotonic clock did not survive — then
+clears the list. That row is never smaller than the live contribution
+the old process last showed (it ran until at least the moment it died),
+except after a backward wall-clock step, where the clamp to 0 is named
+in the row and on `GET /` rather than hidden. A marker written inside
+the writer window before a crash can be lost, the same bound as a row.
+An `expired` wait counts in full: the human was needed for the whole
+hold.
 
 **Same data across the relay.** The numbers relay carries `/api/tokens`
 and `/api/max-tracker`; `/api/agent-status` rides the encrypted status
@@ -153,22 +171,32 @@ relay-fed panel sees the same page. No new relay endpoint.
    window, and a total the panel already showed can then be lower after
    the restart; the spec accepts that bound rather than writing on the
    hook's thread, and `GET /` reports `waits.rows` so the doctor can show
-   the file's state. The open-hold live contribution above is never
-   persisted; it is recomputed from `_pending` on every poll.
+   the file's state. The open-hold live contribution above is recomputed
+   from `_pending` on every poll; what is persisted for an open hold is
+   only its marker (provider, kind, `startedAt`), rewritten by the same
+   writer at park and at ending, so a restart can close it as `restart`
+   rather than forget it.
 4. `AgentStatusService.snapshot()` calls one method,
-   `InteractionStore.wait_aggregates(now)`, which under the store's own
-   lock reads the ledger's in-memory rows **and** every entry in
-   `_pending` in the same critical section and returns the finished
-   `waits` block. `close` appends to the ledger under that same lock
-   before the pending entry is dropped, so a poll can never observe the
-   gap between "row not yet appended" and "hold no longer pending" and
-   report a lower total for one second. The open-hold half is a
-   privacy-limited view of *all* pending entries — provider, kind,
-   `started_wall` and monotonic elapsed, nothing else — not only the
-   oldest: with three agents parked at once, `todayS`, the provider
-   totals and `countToday` count all three, and `blockedNowS` is the
-   largest elapsed among them. No new public API and nothing leaves the
-   process; the method exists so the two sources are read together.
+   `InteractionStore.wait_aggregates(now)`, in two steps. Under the
+   store's own lock it takes one coherent **snapshot** — the ledger's
+   rows that can touch today and a privacy-limited view of *all* pending
+   entries (provider, kind, `started_wall` and monotonic elapsed, nothing
+   else) in the same critical section — and releases the lock. Rows are
+   kept in `endedAt` order and a row touches today only if its `endedAt`
+   is at or after today's local midnight, so that copy is a bisect plus a
+   slice of today's tail, not a walk of the eight-day file. The overlap
+   and local-calendar arithmetic then runs on the copy outside the lock,
+   so a park, a resolve, the expiry sweep or a concurrent relay snapshot
+   never queues behind the day arithmetic — the request-stalling shape
+   `docs/lessons.md` records. `close` appends to the ledger under that
+   same lock before the pending entry is dropped, so a snapshot can never
+   observe the gap between "row not yet appended" and "hold no longer
+   pending" and report a lower total for one second. Not only the oldest
+   open hold is seen: with three agents parked at once, `todayS`, the
+   provider totals, `countToday` and `longestTodayS` count all three,
+   and `blockedNowS` is the largest elapsed among them. No new public API
+   and nothing leaves the process; the method exists so the two sources
+   are read together.
 5. The firmware's agent-status parser reads `waits` optionally (all six
    fields numeric and non-negative, else the block is treated as absent),
    and the page renders it.
@@ -195,7 +223,9 @@ relay-fed panel sees the same page. No new relay endpoint.
 - The block is additive. The `/api/agent-status` `v` stays 2; the pending
   block, the digest binding and the relay encryption are untouched.
 - Clock regression on the host makes `blockedNowS` clamp at 0 and a
-  negative duration is dropped rather than written.
+  negative duration is dropped rather than written; the one exception is
+  a `restart` row, whose wall-derived duration clamps at 0 and is kept so
+  the marker is not silently lost.
 
 ## Visual gate
 
@@ -214,14 +244,26 @@ Regression tests must prove:
   outcome: direct `approve` and `deny` → `panel`, direct `leave_it` and
   relay `terminal` → `computer`, relay `approve`/`deny` → `panel`, expiry
   → `expired`, panic → `panic`, other removal → `removed`; and a store
-  constructed fresh (the restart case) produces none for holds the
-  previous process had open;
-- an open hold is counted live in `todayS`, its provider total and
-  `countToday`; three concurrent holds across both providers are all
-  counted and `blockedNowS` is the oldest; and closing one does not step
-  the total back — including a close that races the 1 s snapshot, which
-  a test drives by interleaving `close` between what would have been two
-  separate reads and asserting the block is monotone;
+  constructed fresh over a file whose `open` list has two markers (the
+  restart case) produces exactly two `restart` rows, each no shorter
+  than the live contribution the previous process last reported, clears
+  the list, and a backward wall step between the two processes yields a
+  0-duration row named on `GET /` rather than a dropped marker;
+- a park writes its marker within the writer window and an ending
+  removes it, so the persisted `open` list always mirrors `_pending`
+  after the writer has run;
+- an open hold is counted live in `todayS`, its provider total,
+  `countToday` and `longestTodayS` (the first hold of the day makes
+  `LONGEST WAIT` equal `BLOCKED RIGHT NOW`, never 0); three concurrent
+  holds across both providers are all counted and `blockedNowS` is the
+  oldest; and closing one does not step the total back — including a
+  close that races the 1 s snapshot, which a test drives by interleaving
+  `close` between what would have been two separate reads and asserting
+  the block is monotone;
+- `wait_aggregates` holds the store lock only for the snapshot copy: a
+  test with a large synthetic ledger asserts the lock is released before
+  the day arithmetic runs (a park issued from another thread during the
+  aggregation completes without waiting for it);
 - a close followed by a clean shutdown before the writer ran is on disk
   after the final flush; a close followed by a simulated crash inside the
   writer window is absent after restart and the test names that as the
@@ -265,7 +307,8 @@ page off.
 3. Adopt `claude_code.tool.blocked_on_user` when it leaves beta, or keep the
    hook-derived number as the single source to avoid two definitions of
    the same minute? The spec leans single source.
-4. Should the store persist a privacy-safe open-hold marker (count and
-   wall-clock start only, written at park and cleared at end) so a restart
-   can say "N holds were open and are not measured"? Today it cannot know;
-   the spec leaves that unmeasured rather than guessed.
+4. Should a `restart` row be shown apart from the others on the page one
+   day (its duration is wall-derived and ends at the new process's start,
+   not at the human's answer)? The spec counts it in the totals so the
+   number never steps back, and leaves any separate rendering to a later
+   design.
