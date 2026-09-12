@@ -173,8 +173,9 @@ The GitHub monitor has its own thread, timeout and at least ten minutes of
 error backoff. Its last good values are marked `stale`; errors never go
 through the token, agent or Max Tracker flow. Without `--github-repo` the
 endpoint explicitly answers `{"v": 1, "enabled": false}`. The screen's page
-and popup are then enabled independently in `secrets.h`; see
-`secrets.h.example`.
+and popup are then enabled independently on the panel in SETTINGS → LABS →
+MORE; the `secrets.h` macros (see `secrets.h.example`) only seed the defaults
+until a choice is saved.
 
 ## Agent status
 
@@ -403,8 +404,9 @@ powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.
   -CodexPlan pro -CodexPlanCostUsd "20"
 ```
 
-The GitHub page and the star notices additionally need their separate
-`TK_GITHUB_*_ENABLED` flags in the panel's gitignored `secrets.h`.
+The GitHub page and the star notices are additionally switched on in the
+panel's SETTINGS → LABS → MORE; the `TK_GITHUB_*_ENABLED` flags in the
+gitignored `secrets.h` only seed the defaults until a choice is saved.
 
 The script registers the service for the logged-in user, starts it at once
 and restarts it on failure. It does not bake Claude/Codex or detail choices
