@@ -73,7 +73,8 @@ launcher (`statusline_bridge.sh`, `.cmd` on Windows) that starts
 `tools/tokenserver/statusline_bridge.py` with the interpreter setup
 verified. The bridge reads stdin, keeps exactly `rate_limits.five_hour`
 and `rate_limits.seven_day` (each as `used_percentage` and `resets_at`)
-plus the Claude Code `version` string, and writes them atomically to one
+plus the Claude Code `version` string and an **account fingerprint**
+(below), and writes them atomically to one
 file in the tokenserver's state directory, `claude-statusline-quota.json`.
 **Per window, not per invocation:** each window in the file carries its
 own `at` (the bridge's wall-clock time when that window was last seen).
@@ -102,6 +103,34 @@ bytes kept for forensics) and the merge starts from empty; a file that
 exists but cannot be read (permissions, I/O) makes the bridge skip the
 write rather than replace what it could not read. It prints nothing of
 its own to stdout.
+
+**Bound to one account, or not merged.** The statusLine payload names
+no account, and the tokenserver's probe picks its own credential
+(Claude Desktop's injected process token, the keychain entry, or the
+credentials file), so nothing guarantees the two describe the same quota:
+a Desktop signed in as one account and a CLI session signed in as another
+would otherwise be arbitrated as one pool and put one account's figure on
+the other's rings, cache and Max Tracker. So each source carries a
+fingerprint and they are merged **only when the fingerprints match**. The
+bridge's is the first 16 hex characters of `sha256(oauthAccount.accountUuid)`
+read from the `.claude.json` of the session's config directory
+(`CLAUDE_CONFIG_DIR`, default the home directory) — the file the same
+`/login` writes beside the credential that session uses; absent when the
+file or field cannot be read. The tokenserver derives the probe's the same
+way, from the `.claude.json` beside the credential store the winning token
+came from: the keychain entry and the credentials file are written by
+that `/login`, so a probe served by either carries the home directory's
+fingerprint; Claude Desktop's injected token carries it only when it
+equals the keychain token (the candidates are already compared), and
+otherwise no fingerprint, because Desktop's account is not readable from
+outside its process. No fingerprint on either side, or two that differ,
+means **no merge**: the probe stays the panel's source exactly as today,
+the bridge sample stays in its file but is skipped by arbitration and by
+the interval rule, and the doctor says `VARN statusLine bridge: sample is
+from another Claude account` or `… account unknown (Claude Desktop
+token)`, so the bridge never silently does nothing. The fingerprint is a
+hash: neither the uuid nor the e-mail is written to the sample file, to
+`GET /` or to a log line.
 
 **The user's status line keeps working.** `settings.json` allows one
 `statusLine` object, `{"type": "command", "command": "…"}`; setup writes
@@ -132,8 +161,9 @@ window, newest honest observation wins — and "newest" is decided by
 timestamp, not by which source it is:
 
 1. Among the bridge window (when its own `at` is younger than
-   `STATUSLINE_FRESH_S`, proposed 15 minutes, and its `resets_at` has not
-   passed) and the probe's last successful observation of the same window
+   `STATUSLINE_FRESH_S`, proposed 15 minutes, its `resets_at` has not
+   passed, and its account fingerprint matches the probe's) and the
+   probe's last successful observation of the same window
    (when it succeeded within its own interval): if they describe
    different reset windows, the one with the later `resets_at` is the
    current window and wins; if they describe the **same** reset window,
@@ -158,7 +188,9 @@ The heaviest-model weekly window keeps today's order: probe, then cache.
 
 **The probe becomes a background verifier.** While **both** bridge windows
 are independently fresh (`five_hour` and `seven_day` each younger than
-`STATUSLINE_FRESH_S` and unexpired — a fresh session window beside a
+`STATUSLINE_FRESH_S` and unexpired, and the sample's fingerprint matches
+the probe's — a sample the arbitration will not use must not slow the
+probe either — a fresh session window beside a
 missing or stale weekly one does not count, because the probe is then the
 only source that can recover the week) *and the probe's last status was a
 completed probe*, the probe interval stretches to `PROBE_WHEN_BRIDGED_S`
@@ -192,7 +224,8 @@ sample file too, and the merge treats it as "no observation", not zero.
 2. Claude Code runs the launcher on its normal triggers. The bridge merges
    stdin into the existing file per window and writes
    `{"v": 1, "five_hour": {"pct": 23.5, "resets_at": 1738425600, "at":
-   <epoch s>}, "seven_day": {...}, "claude_code_version": "2.1.267"}`
+   <epoch s>}, "seven_day": {...}, "claude_code_version": "2.1.267",
+   "account": "3f9c0a7e1b2d4c65"}`
    through the existing atomic-write discipline (`state_files`), 0600, in
    well under 100 ms, then runs the chained command if any.
 3. The tokenserver reads the sample file **on the request path**, in the
@@ -211,9 +244,10 @@ sample file too, and the merge treats it as "no observation", not zero.
    `STATUSLINE_FRESH_S` the interval drops back to the ladder and an
    overdue verifier starts on the next request rather than at the end of
    a 30-minute schedule set while the bridge was fresh. `GET /`
-   reports `claudeStatusline: {status, ageS, claudeCodeVersion}` with
-   statuses `fresh`, `stale`, `missing`, `invalid`, `not_installed`, where
-   `ageS` is the age of the youngest window.
+   reports `claudeStatusline: {status, ageS, claudeCodeVersion, account}`
+   with statuses `fresh`, `stale`, `missing`, `invalid`, `not_installed`,
+   `other_account`, `account_unknown`, where `ageS` is the age of the
+   youngest window and `account` is `match`, `mismatch` or `unknown`.
 4. `/api/tokens` is byte-identical in shape. `claudeWeekStale` and
    `claudeSessionPct` come from whichever source won; `claudeModelWeekPct`
    keeps its probe-or-cache path. The Max Tracker records a bridge
@@ -232,8 +266,10 @@ sample file too, and the merge treats it as "no observation", not zero.
   also carries `cwd`, `transcript_path`, `session_id`, `model`, `cost`,
   `workspace.repo` and, on some builds, PR and worktree names. **None of it
   is written anywhere.** A test feeds a payload with every documented key
-  and asserts the sample file contains only the five allowed keys.
-- The bridge never contacts the network and never reads a credential.
+  and asserts the sample file contains only the six allowed keys.
+- The bridge never contacts the network and never reads a credential. The
+  one file it reads besides its own is `.claude.json`, for the single
+  `oauthAccount.accountUuid` field, and only its hash leaves the process.
 - A bridge crash or a full disk must not break the user's own status
   line: the chained command runs even when the sample write fails, and the
   bridge's own exceptions exit 0 silently (Claude Code treats status-line
@@ -246,19 +282,26 @@ sample file too, and the merge treats it as "no observation", not zero.
   the `statusLine` object existed at all, whether `type` and `command`
   were present, and their previous values. Uninstall — **only if
   `statusLine.command` still points at this installation's launcher** —
-  restores exactly those fields: an object that did not exist is removed
-  whole, a `type` the installer added is removed, a `command` it replaced
-  is restored, and sibling keys that were there before or were added
-  since (`padding`, for instance) are left as they are. If the user
+  restores exactly those fields, field by field, never the object as a
+  unit: a `type` the installer added is removed, a `command` it replaced
+  is restored and one it added is removed, sibling keys that were there
+  before or were added since (`padding`, for instance) are left as they
+  are, and the `statusLine` object itself is removed only if it is empty
+  after that — so an object the installer created and the user later
+  extended keeps the user's fields. If the user
   changed the command after installing, nothing is touched and the doctor
   reports the drift instead of replacing a newer edit with an older one. `settings.json` edits go
   through the same read-modify-write with backup that the hook
   installation already uses.
 - Two Claude Code sessions writing the file concurrently: the lock
-  serializes the read-merge-replace, and the per-window `at` comparison
-  means an older invocation that gets the lock second cannot overwrite a
-  newer percentage. Both samples are true; the file ends up holding the
-  newer `at` per window whichever order the two ran in.
+  serializes the read-merge-replace, and the per-window rule (newer
+  `resets_at`, else higher percentage for the same reset) means the
+  invocation that gets the lock second cannot overwrite a truer figure
+  with a staler one. Both samples are true; the file ends up holding, per
+  window, the winning observation **with its own `at`** whichever order
+  the two ran in — never the newest `at` stapled to a different
+  percentage, which would advance freshness for a value nobody observed
+  at that moment.
 - The sample file's `at` is the bridge's wall clock, compared against the
   tokenserver's wall clock on the same machine. Clock regression makes the
   sample stale by age, never fresh by mistake (`age_s < -60` rejects, as in
@@ -272,8 +315,8 @@ sample file too, and the merge treats it as "no observation", not zero.
 Regression tests must prove:
 
 - the bridge keeps exactly `five_hour` and `seven_day` `used_percentage`
-  and `resets_at` and the version, and drops every other documented stdin
-  key, including nested ones;
+  and `resets_at`, the version and the account fingerprint, and drops
+  every other documented stdin key, including nested ones;
 - a session-start invocation without `rate_limits` leaves both existing
   windows in the file untouched, an invocation with one window replaces
   that window only, a replay of the same window with the same or a lower
@@ -281,7 +324,9 @@ Regression tests must prove:
   `resets_at` replaces the window, and a window past its `resets_at` is
   dropped;
 - two bridges run concurrently against one file (a real second process,
-  not a mock) end with the newer `at` per window and no lost window; a
+  not a mock) end with, per window, the winning observation and the `at`
+  that belongs to it — a lower percentage with a newer `at` loses whole,
+  timestamp included — and no lost window, in either order; a
   bridge that cannot take the lock within the bound writes nothing and
   still runs the chained command;
 - a stored file that is corrupt is quarantined beside the original and
@@ -295,6 +340,15 @@ Regression tests must prove:
   a probe cycle in between, and an unchanged file is not re-parsed;
 - the bridge rejects a non-object, oversized or non-UTF-8 stdin with exit 0
   and no file written;
+- the bridge writes the account fingerprint from the session's config
+  directory (`CLAUDE_CONFIG_DIR` honoured) and omits it when `.claude.json`
+  is missing or has no `oauthAccount`; the sample file, `GET /` and the
+  log never contain the uuid or the e-mail; a sample whose fingerprint
+  differs from the probe's, or is missing on either side, is skipped by
+  the arbitration and the interval rule, the probe's figures reach the
+  panel unchanged, and `GET /` and the doctor report `other_account` /
+  `account_unknown`; a Desktop process token equal to the keychain token
+  carries the keychain's fingerprint and one that differs carries none;
 - for the same reset window the tokenserver serves the higher of the
   bridge and probe percentages whichever was observed later, so a probe
   seeing cross-device usage wins over a fresher bridge replay and a bridge
@@ -321,10 +375,12 @@ Regression tests must prove:
   command, and a second install over an existing launcher keeps the
   originally recorded chained command instead of recording the launcher
   (the recursion test); uninstall, when the command is still the
-  launcher, removes a `statusLine` object that did not exist before,
-  removes a `type` the installer added, restores a replaced `command`,
-  and keeps unrelated siblings in every case; it leaves a command the
-  user changed afterwards alone while reporting the drift;
+  launcher, removes a `type` the installer added, restores a replaced
+  `command`, keeps unrelated siblings in every case — including a
+  `padding` added after an install that created the object, which then
+  leaves `{"padding": …}` behind — and removes the object only when
+  nothing is left in it; it leaves a command the user changed afterwards
+  alone while reporting the drift;
 - the `/api/tokens` body-capacity test still passes (no new wire fields).
 
 ## Acceptance
@@ -343,7 +399,13 @@ as before, and a user who declines the bridge sees no change at all.
    a timer while idle)? It keeps the sample fresh across long idle periods
    at the cost of a process spawn every N seconds in every open session.
    The default in this spec is not to set it.
-3. Windows: `statusLine.command` runs through the user's shell; the
+3. Could the probe bind its account from the API response itself (an
+   organization id header) instead of the `.claude.json` beside the
+   credential, which would also cover Claude Desktop's injected token?
+   The spec does not rely on it because the header's value and its
+   relation to `oauthAccount` are unverified; if they match in practice,
+   it is a strict improvement on the `account_unknown` case.
+4. Windows: `statusLine.command` runs through the user's shell; the
    launcher is a `.cmd` there, invoking the verified `python.exe` path,
    and the doctor must check the registered command matches this
    checkout's launcher, the same drift check the tokenserver source
