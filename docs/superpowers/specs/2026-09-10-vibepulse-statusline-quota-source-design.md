@@ -193,8 +193,13 @@ and its source beside `cooldown_until`, `_load_probe_state` restores
 them, and when an older state file has none the tokenserver derives the
 fingerprint from the local credential store without any HTTP call
 (reading the candidates is local; only the request is what the cooldown
-rests) **only when that store is unambiguous**: one candidate, or a
-Desktop token equal to the keychain's. What is persisted is the **cache
+rests) **only when that store is unambiguous about the account**: a
+lone keychain or credentials-file candidate (both written by the
+`/login` that writes `oauthAccount`), or a Desktop token equal to the
+keychain's. A lone Desktop token is *not* unambiguous — its account is
+unknowable from outside its process, as above, and `.claude.json` may
+name a different CLI account — so it yields no account fingerprint,
+only the token-derived cache identity. What is persisted is the **cache
 identity** the probe last used — the account fingerprint when it had
 one, otherwise the credential fingerprint the cache rule below derives
 from the token — with its source, never the token itself, so a restart
@@ -544,9 +549,12 @@ Regression tests must prove:
   reports `other_account`; an unknown organization on either side skips
   the step; a matching-account plan-usage sample of 40 % with a borrowed
   reset equal to the retained window's leaves a retained 60 % in place;
-- a legacy probe state file during a cooldown yields a fingerprint only
-  from an unambiguous local store: one candidate, or Desktop equal to
-  keychain; with two differing tokens the account stays unknown and the
+- a legacy probe state file during a cooldown yields an account
+  fingerprint only from a lone keychain or credentials-file candidate,
+  or a Desktop token equal to the keychain's; a lone Desktop token
+  yields only the credential-fingerprint cache identity and the account
+  stays unknown even when `.claude.json` names an account; with two
+  differing tokens the account stays unknown too, and in both cases the
   bridge is not accepted until a probe succeeds;
 - legacy `default-v1` Claude records are never re-keyed: with a legacy
   record present and a fingerprint known, the lookup returns nothing for
