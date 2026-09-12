@@ -37,12 +37,15 @@ Both answers already exist, buried in a terminal you're not looking at.
 VibePulse moves them onto a screen you can't miss: one glance from across
 the room, no window to switch to, no menu bar to squint at.
 
-> **Status:** v1.0.0. The core shelf-screen loop is real and physically
+> **Status:** v1.1.0. The core shelf-screen loop is real and physically
 > exercised on macOS and Windows: see quota, see an agent waiting, and answer
-> a supported prompt on the glass. Windows core, physical answer loop, and
-> persistent sign-in/sleep/reboot lifecycle are verified. The project is still
-> active, optional integrations remain opt-in, and every platform claim stays
-> tied to its recorded evidence.
+> a supported prompt on the glass. The Windows core, physical answer loop and
+> persistent sign-in/sleep/reboot lifecycle were verified at the v1.0.0 host
+> runtime and are not re-claimed for a later one. v1.1.0 adds SETTINGS on
+> the glass, an honest warm-up, and crash evidence in the firmware; the
+> firmware side is CI-built and waits for the next flash session. Optional
+> integrations remain opt-in, and every platform claim stays tied to its
+> recorded evidence.
 
 ## Start here
 
@@ -62,39 +65,37 @@ Codex. You do not need to read this whole page:
    on-glass feature switches are specified but not built yet (see the spec
    in `docs/superpowers/specs/`). Sound has no verified backend yet.
 
-## Latest release: v1.0.0
+## Latest release: v1.1.0
 
-The first major release makes Windows a first-class VibePulse host and records
-the real physical proof: clean source, full tests, Task Scheduler plus
-watchdog, bounded logs, real Claude/Codex sources, Private-LAN reachability,
-recent panel polling, and a human **NEEDS YOU → APPROVE → Ja** round trip.
-The same panel can discover and fail over between advertising Mac and Windows
-hosts. The real Windows host also passed sign-out/sign-in, sleep/resume, and a
-full reboot without losing the scheduled service or leaving the panel stale.
-Silence and computer fallback are still never approval.
+The first release after 1.0 gives the panel a menu and a memory. A
+three-second **KEY3** hold opens **SETTINGS** on the glass (UPDATE, WIFI,
+ABOUT), so the maintenance window is chosen rather than guessed. The service
+answers the panel at once after a restart while the first history scan runs,
+labelling the volume counters as placeholders instead of letting the glass go
+STALE. A panic now leaves an ELF coredump in flash and a reboot ledger in
+NVS, every device poller backs off from a dead service, and the logging
+configuration is pinned by a configure-time guard. The host quarantines a
+corrupt state file instead of wiping it, says why the Claude probe is idle,
+names the keychain failure, typesets any model id, and the whole tokenserver
+directory now reads in English. Never a number it did not measure, still.
 
-### Windows v1 verification
+### v1.1.0 verification
 
 | Gate | Result |
 |---|---|
-| Clean host, complete tokenserver suite | **PASS** — 788 tests, 11 named skips, 0 failures/errors |
-| Task Scheduler, immediate start, exact-PID watchdog, bounded logs | **PASS** |
-| Real Claude/Codex sources, Private-only firewall, LAN and discovery | **PASS** |
-| Recent panel polling and **NEEDS YOU → APPROVE → Ja** | **PASS** |
-| Sign-out/sign-in, sleep/resume, full reboot | **PASS** |
-| Post-transition freshness | **PASS** — bounded convergence, then 12/12 fresh samples after sign-in and reboot |
-| Release/lifecycle PR CI and merged-main CI | **PASS** — 14/14 and 7/7 jobs |
+| Host gate (`./test/run.sh`), tokenserver suite on ubuntu, macOS and Windows, both Workers, snapshot tool | **PASS** on every merged PR and on merged `main` |
+| ESP32-S3 firmware build | **PASS** in CI — a build, not a flash |
+| SETTINGS, warm-up placeholders, coredump, reboot ledger, poller backoff on the physical panel | **NOT YET FLASHED** — `torget-home-01` runs `v1.0.0-25-g054db68`; the run sheet is [`docs/flash-session-2026-09.md`](docs/flash-session-2026-09.md) |
+| Windows v1 host claim (core, physical answer loop, lifecycle) | **Pinned to v1.0.0's runtime `bee5d8c`** — not re-run for this release |
 
-The tested host runtime was exact revision `bee5d8c`; tag `v1.0.0` resolves to
-`ab3ce92`, with documentation/tests only between them. The lifecycle evidence
-was merged to `main` at `4d1c47d`. This is exact-revision evidence: a future
-runtime change must pass the gate again.
+The coredump partition is new in the table, and OTA never writes the table:
+one USB `idf.py -p <port> partition-table-flash` is needed before a dump can
+land, and the boot log says so until then.
 
-[Read the v1.0.0 notes](docs/releases/2026-08-28-windows-joins-the-shelf.md)
-· [Full Windows evidence](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)
-· [Verified merged-main CI](https://github.com/niclasvestlund-YT/vibepulse/actions/runs/33214257872)
+[Read the v1.1.0 notes](docs/releases/2026-09-10-settings-and-evidence.md)
+· [Windows v1 evidence](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)
 · [Full changelog](CHANGELOG.md)
-· [Compare v0.7.1...v1.0.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v0.7.1...v1.0.0)
+· [Compare v1.0.0...v1.1.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.0.0...v1.1.0)
 
 Contributing or validating another host? Read
 [CONTRIBUTING.md](CONTRIBUTING.md), the
@@ -679,7 +680,7 @@ network once; every visit after that it joins by itself.
   &nbsp;
   <img src="docs/img/vibepulse-wifi-setup.png" width="31%" alt="VibePulse Wi-Fi setup screen with a large phone-scannable QR code and one Manual Setup control">
   &nbsp;
-  <img src="docs/img/vibepulse-wifi-signal.png" width="31%" alt="The shared launcher with a neutral three-bar Wi-Fi signal icon at the top right">
+  <img src="docs/img/vibepulse-wifi-signal.png" width="31%" alt="The shared launcher with the neutral Wi-Fi indicator at the top right">
 </p>
 <p align="center"><em>Real 480×480 frames from the shared LVGL firmware renderer: recovery, phone-first QR setup, and the global signal indicator.</em></p>
 
@@ -714,10 +715,10 @@ keychain (macOS asks you — that prompt is the consent), hands it to the panel
 over its temporary access point, and gives the Mac's Wi-Fi back. The phone
 flow remains the universal path and needs no computer or command line.
 
-The small neutral Wi-Fi symbol is global: zero bars plus a slash means the
-panel is disconnected; one to three bars describe only its connection to the
-local access point. It **does not mean internet** access, tokenserver reachability,
-or relay health. During setup the complete symbol means setup mode, not a
+The small neutral Wi-Fi symbol is global and two-state: a slashed fan means
+the panel is not joined to an access point, a complete fan means it is. It
+shows no signal strength, and it **does not mean internet** access,
+tokenserver reachability, or relay health. During setup the complete symbol means setup mode, not a
 successful destination join.
 
 The setup window opens on its own after 90 seconds without a network, or
@@ -791,12 +792,25 @@ Same code, same fonts, same pixels as the device — it builds the real
 platform and VibePulse against the real LVGL, and feeds it the recorded
 fixtures in `sim-fixtures/` through the same parsers the board runs. Every
 device screenshot in this README is an unmodified simulator frame (the
-banner just places three of them side by side), and the physical panel was
-reviewed against them ([review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)).
+banner just places three of them side by side). The
+[2026-08-13 physical review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)
+covered the quota pages, agent monitor states and Max Tracker pages in that
+build. It does not verify later screenshots or firmware: the v1.1.0 SETTINGS
+frames are simulator evidence only, and the firmware changes in this release
+remain CI-built and **not flashed** on `torget-home-01`, which still runs
+`v1.0.0-25-g054db68`.
 
 Keys: `[` / `]` change VibePulse page, `S` cycles agent status, `M` cycles
 Max Tracker fixtures, `T` re-feeds tokens, `G` simulates a new GitHub star,
-`L` opens the launcher.
+`N` moves to the next app, `L` opens the launcher, and `1`-`4` pick a
+Solelkollen fixture when that companion is checked out.
+
+`K` is KEY3 itself, polled raw rather than on an edge, so the bench drives
+the real time gesture: hold `K` for three seconds and SETTINGS opens, release
+before three and an open window closes instead. `U` and `W` press the UPDATE
+and WIFI rows in that menu, taking the same path a finger does. That makes
+the simulator the spec for the gesture — there is no other way to exercise it
+without the board.
 
 ## Privacy
 
@@ -870,7 +884,8 @@ need a reproducible Python:
 ```sh
 python3.12 -m venv .venv
 . .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt \
+  -r requirements-interaction-relay.txt
 ./test/run.sh
 ```
 

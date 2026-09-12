@@ -26,3 +26,8 @@ platform/fonts/src/
 .superpowers/
 .scratch-capture/
 .DS_Store
+
+# Konceptmockupernas SVG:er regenereras byte-identiskt av
+# tools/mockups/gen_concept_mockups.py och gen_needsyou_v2.py. Dokumenten
+# länkar alltid .png; SVG:erna var spårad utdata ingen läste.
+docs/img/mockups/*.svg

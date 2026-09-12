@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "net_log_target.h"
 #include "net_source_policy.h"
 #include "service_discovery.h"
 #include "vibepulse_recovery.h"
@@ -94,7 +95,25 @@ static bool http_get_timeout(const char *url, char *buf, size_t cap,
   };
 
   client = esp_http_client_init(&cfg);
-  if (!client) goto done;
+  if (!client) {
+    /* OBS-12: the one silent failure path in an otherwise well-logged
+     * function. No memory for a client is a real symptom worth a line;
+     * the target is redacted like every other line here. */
+    char target[TG_NET_LOG_TARGET_CAP];
+    tg_net_log_target(target, sizeof target, url, cloud);
+    ESP_LOGW(TAG, "kunde inte skapa HTTP-klient (%s)", target);
+    goto done;
+  }
+
+  /* This firmware understands usageTotals and never applies placeholder
+   * counters as measurements (tokens_parse.c / usage_screen.c), so the
+   * service may answer with them during its first history scan instead of
+   * the error form it gives older panels (issue #62). Content-free, so it
+   * is sent on every fetch, relay included; delivery never depends on it. */
+  if (esp_http_client_set_header(
+          client, "X-VibePulse-Accepts", "usage-totals") != ESP_OK) {
+    ESP_LOGW(TAG, "kunde inte sätta Accepts-headern");
+  }
 
   /* Content-free post-restart evidence for the local health endpoint. Never
    * send it to a public relay, and never make data delivery depend on this
@@ -108,16 +127,32 @@ static bool http_get_timeout(const char *url, char *buf, size_t cap,
   esp_err_t err = esp_http_client_perform(client);
   int status = esp_http_client_get_status_code(client);
 
-  if (err != ESP_OK) {
-    ESP_LOGW(TAG, "hämtning misslyckades: %s (%s)", esp_err_to_name(err), url);
-  } else if (status != 200) {
-    ESP_LOGW(TAG, "oväntad statuskod %d (%s)", status, url);
-  } else if (body.overflow) {
-    ESP_LOGW(TAG, "kroppen större än %u byte, avvisad (%s)", (unsigned)cap, url);
-  } else {
+  if (err == ESP_OK && status == 200 && !body.overflow) {
     buf[body.len] = '\0';
     if (len_out) *len_out = body.len;
     ok = true;
+  } else {
+    /* Adressen får ALDRIG loggas rå. Reläets sökväg, `/u/<hemlighet>`, är
+     * hela åtkomstkontrollen (docs/relay.md), och det som hamnar här läses
+     * ur en seriedump eller klistras in i en felsökningstråd. Schema, värd
+     * och vilken väg som provades räcker för att skilja fel hamn från fel
+     * värd från ett dött relä.
+     *
+     * `cloud` är vägordet: den är sann exakt när hämtningen gick till
+     * reläet (TG_NET_SOURCE_RELAY), och redigeringen är ändå ovillkorlig —
+     * en felställd flagga får kosta fel vägord, aldrig en läckt sökväg. */
+    char target[TG_NET_LOG_TARGET_CAP];
+    tg_net_log_target(target, sizeof target, url, cloud);
+
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "hämtning misslyckades: %s (%s)", esp_err_to_name(err),
+               target);
+    } else if (status != 200) {
+      ESP_LOGW(TAG, "oväntad statuskod %d (%s)", status, target);
+    } else {
+      ESP_LOGW(TAG, "kroppen större än %u byte, avvisad (%s)", (unsigned)cap,
+               target);
+    }
   }
 
 done:

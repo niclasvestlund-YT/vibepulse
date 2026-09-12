@@ -1,5 +1,9 @@
 Read `README.md` for the repository structure and build workflow.
 
+Follow `CONTRIBUTING.md` and `docs/maintaining-contributions.md` for contributions
+and merging. Maintainer changes also go through a PR with passing required
+checks. Documented local test omissions do not waive GitHub's merge requirements.
+
 Setting this repo up for someone (secrets, build, flash, tokenserver)? Follow
 `docs/agent-setup.md` — step-by-step, with verifications and a symptom→fix
 table. Never flash the board without the user explicitly asking you to.
@@ -17,9 +21,19 @@ never claim or imply a
 script can; the sender gates (newest-binary-at-send, version printed,
 -dirty refused) exist because a stale archived build once froze the panel —
 never bypass them with TG_OTA_ALLOW_DIRTY without the user saying so; and
-after editing `tools/tokenserver/`, restart the launchd service
-(`launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`) — the running
-process keeps old code and the panel honestly shows the gap.
+after editing `tools/tokenserver/`, restart the host service
+(macOS: `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`;
+Windows has no launchd — the service runs under Task Scheduler, so restart it
+with `Stop-ScheduledTask`, a wait until it has actually stopped, and only then
+`Start-ScheduledTask` on the task `VibePulse tokenserver`; the task is
+registered `-MultipleInstances IgnoreNew`, so an immediate start is silently
+discarded and the service stays down until the five-minute watchdog — the
+snippet is under "Restarting the scheduled task" in `docs/windows-setup.md`.
+Never restart it by rerunning `install-windows-task.ps1`, which
+rebuilds the task's command line from that invocation's arguments and so
+silently drops the `-PublishUrl`, `-GithubRepo` and plan/cost settings it was
+installed with) — the running process keeps old code and the panel honestly
+shows the gap.
 
 ## AMOLED visual work
 

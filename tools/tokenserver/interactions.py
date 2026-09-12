@@ -1339,7 +1339,7 @@ class InteractionStore:
         for request_id, reason in notifications:
             try:
                 listener.on_remove(request_id, reason)
-            except Exception:
+            except Exception:  # noqa: S110 - a listener's failure must not block removal
                 pass
 
     def _notify_relay_park(self, job: RelayPublishJob) -> None:
@@ -1349,7 +1349,7 @@ class InteractionStore:
             return
         try:
             listener.on_park(job)
-        except Exception:
+        except Exception:  # noqa: S110 - a listener's failure must not block parking
             pass
 
     def _log(self, action: str, entry: _Pending,
@@ -1367,8 +1367,8 @@ class InteractionStore:
                 "session": entry.session_key,
                 "verdict": verdict,
             })
-        except Exception:
-            pass  # the audit trail must never break the decision path
+        except Exception:  # noqa: S110 - the audit trail must never break the decision path
+            pass
 
 
 def read_device_key(repo_root: Optional[Any] = None) -> Optional[str]:

@@ -75,7 +75,10 @@ Nothing can write firmware to the screen without three independent factors:
   header, or the image is discarded.
 - **A/B slots**: the image lands in the *inactive* slot (`ota_0`/`ota_1`,
   5 MB each). Bootloader, partition table, NVS and the running slot are
-  never written. USB-C remains the rescue path.
+  never written. USB-C remains the rescue path. A feature that adds a
+  partition (the `coredump` row, 2026-09-10) therefore needs one USB
+  `idf.py -p <port> partition-table-flash` before it works; the firmware
+  says so at boot until then (`docs/observability.md`).
 - **Boot-health gate**: on the first boot of a new image
   (`PENDING_VERIFY`), display, UI, scheduler, NVS and memory proofs must
   land within 15 s or the bootloader rolls back to the previous slot on
@@ -139,8 +142,8 @@ The device IP is read from a git-ignored `.ota-device` file in the repo
 root (write it once: `echo 192.168.1.x > .ota-device`), or pass it as the
 first argument. For any agent session starting cold: the repo lives at
 `~/Torget` on this machine (the GitHub name is `vibepulse` — the local
-directory is not), the OTA work is on the `claude/ota-foundation` branch,
-and this file plus `docs/agent-setup.md` are the runbooks.
+directory is not), and this file plus `docs/agent-setup.md` are the
+runbooks.
 
 Hold KEY3 and pick **UPDATE** in SETTINGS (or, if the takeover is already
 on the glass, answer it with its UPDATE pill) when you're ready. The hold

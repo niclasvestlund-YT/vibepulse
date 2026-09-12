@@ -9,6 +9,7 @@
  * apptask sker under torget_ui_lock() — det är LVGL:s egen mutex, så det
  * behövs inte en till.
  */
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <string.h>
 
@@ -27,6 +28,11 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "nvs.h"
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include "esp_core_dump.h"
+#include "esp_partition.h"
+#endif
 
 #include "esp_heap_caps.h"
 
@@ -949,6 +955,107 @@ static const char *reset_reason_name(esp_reset_reason_t r) {
   }
 }
 
+/* OBS-03: omstartsliggaren. NVS initierades i månader utan att en enda
+ * nyckel skrevs, och "startade den om medan jag var borta?" gick inte att
+ * svara på — banderollen ovan säger bara varför DEN HÄR starten skedde.
+ * Fyra räknare i ett eget namnutrymme: antal boot sedan liggaren
+ * initierades (eller NVS senast raderades — inte sedan första flash: en
+ * panel som får det här via OTA börjar på 1) och hur många av dem som
+ * föregicks av panik, vakthund respektive brownout. En rad per boot,
+ * aldrig ett stopp: kan liggaren inte öppnas loggas det och starten
+ * fortsätter. Ett läs- eller skrivfel loggas i stället för en siffra:
+ * en räknare som inte bevisligen sparats är ingen räknare. */
+
+/* NOT_FOUND är en nollställd räknare; allt annat är ett fel. */
+static esp_err_t ledger_read(nvs_handle_t ledger, const char *key,
+                             uint32_t *out) {
+  *out = 0;
+  esp_err_t err = nvs_get_u32(ledger, key, out);
+  return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+}
+
+static void reboot_ledger_note(esp_reset_reason_t rr) {
+  nvs_handle_t ledger;
+  esp_err_t err = nvs_open("torget_boot", NVS_READWRITE, &ledger);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "omstartsliggaren gick inte att öppna (%s) — den här "
+                  "booten räknas inte", esp_err_to_name(err));
+    return;
+  }
+  const char *reason_key = NULL;
+  switch (rr) {
+  case ESP_RST_PANIC: reason_key = "panic"; break;
+  case ESP_RST_INT_WDT:
+  case ESP_RST_TASK_WDT:
+  case ESP_RST_WDT: reason_key = "wdt"; break;
+  case ESP_RST_BROWNOUT: reason_key = "brownout"; break;
+  default: break;
+  }
+  const char *failed = NULL; /* första operationen som gick fel */
+  uint32_t boots = 0, panics = 0, wdts = 0, brownouts = 0;
+  if (ledger_read(ledger, "boots", &boots) != ESP_OK) failed = "läsa boots";
+  if (!failed) {
+    /* Räknare backar aldrig: vid taket står de stilla i stället för att
+     * slå runt till noll (Codex-granskning av #109). */
+    if (boots < UINT32_MAX) boots++;
+    if (nvs_set_u32(ledger, "boots", boots) != ESP_OK) failed = "skriva boots";
+  }
+  if (!failed && reason_key != NULL) {
+    uint32_t count = 0;
+    if (ledger_read(ledger, reason_key, &count) != ESP_OK) {
+      failed = "läsa orsaksräknaren";
+    } else if (nvs_set_u32(ledger, reason_key,
+                           count < UINT32_MAX ? count + 1 : count) != ESP_OK) {
+      failed = "skriva orsaksräknaren";
+    }
+  }
+  if (!failed && nvs_commit(ledger) != ESP_OK) failed = "commit";
+  if (!failed && (ledger_read(ledger, "panic", &panics) != ESP_OK ||
+                  ledger_read(ledger, "wdt", &wdts) != ESP_OK ||
+                  ledger_read(ledger, "brownout", &brownouts) != ESP_OK)) {
+    failed = "läsa tillbaka";
+  }
+  nvs_close(ledger);
+  if (failed) {
+    ESP_LOGW(TAG, "omstartsliggaren kunde inte %s — inga räknare den här "
+                  "booten (NVS full, skadad eller nyckel med fel typ?)",
+             failed);
+    return;
+  }
+  ESP_LOGI(TAG, "omstartsliggare: boot #%" PRIu32 " sedan liggaren "
+                "initierades; efter PANIK %" PRIu32 ", vakthund %" PRIu32
+                ", BROWNOUT %" PRIu32,
+           boots, panics, wdts, brownouts);
+}
+
+/* OBS-02: säg till när flashen bär en coredump från en tidigare krasch.
+ * Dumpen ligger kvar tills nästa panik skriver över den; själva
+ * avläsningen sker från datorn (`idf.py coredump-info`), aldrig här. */
+static void coredump_note(void) {
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+  /* OTA skriver aldrig partitionstabellen (docs/ota.md): en panel som fått
+   * den här firmwaren över luften har fortfarande sin gamla tabell utan
+   * coredump-partition, och då kan skrivaren inte spara någon dump alls.
+   * Säg det på boot i stället för att tyst aldrig hitta något. */
+  if (esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                               ESP_PARTITION_SUBTYPE_DATA_COREDUMP,
+                               NULL) == NULL) {
+    ESP_LOGW(TAG, "coredump-partition saknas i enhetens partitionstabell — "
+                  "en panik lämnar ingen dump förrän tabellen flashats en "
+                  "gång via USB (`idf.py -p <port> partition-table-flash`, "
+                  "docs/observability.md)");
+    return;
+  }
+  size_t addr = 0, size = 0;
+  if (esp_core_dump_image_get(&addr, &size) == ESP_OK && size > 0) {
+    ESP_LOGW(TAG, "coredump i flash (%u byte) från en tidigare krasch — "
+                  "läs den med `idf.py coredump-info` innan nästa panik "
+                  "skriver över den",
+             (unsigned)size);
+  }
+#endif
+}
+
 void app_main(void) {
   /* Bootbanderollen svarar på två frågor loggen annars inte kan:
    * "kör kortet det jag just flashade?" (versionen är git describe via
@@ -977,6 +1084,8 @@ void app_main(void) {
     nvs = nvs_flash_init();
   }
   ESP_ERROR_CHECK(nvs);
+  reboot_ledger_note(rr);
+  coredump_note();
 
   /* OTA-hälsogrinden direkt efter NVS: är detta första boot på en ny
    * avbild börjar 8/15-sekundersklockan ticka HÄR, och bevisen markeras

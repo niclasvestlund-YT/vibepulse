@@ -105,78 +105,85 @@ it reaches the user-owned mailbox. Prefer `tools/vibepulse_setup.py`, which
 stores these choices without putting secrets or feature flags in a service
 command line.
 
-Serverar Claude- och Codex-användningen som platt JSON enligt glance-
-mönstret (kontrakt v2). Skärmen hämtar `/api/tokens` över LAN var 30:e
-sekund. Ren Python 3-stdlib — inget att installera. Tre källor:
+Serves Claude and Codex usage as flat JSON in the glance pattern
+(contract v2). The screen fetches `/api/tokens` over the LAN every 30
+seconds. Pure Python 3 stdlib -- nothing to install. Three sources:
 
-1. **Volymen** — `~/.claude/projects/**/*.jsonl` skannas inkrementellt:
-   dagens/månadens tokens, brinntakt, sessioner.
-2. **Claudes tak** (Clawdmeter-mönstret) — tjänsten läser Claude Desktops
-   aktiva, injicerade OAuth-token eller Claude Codes nyckelringsfallback
-   (på Windows i stället `%USERPROFILE%\.claude\.credentials.json`, samma
-   post — se [Windows](#windows) nedan) och gör en minimal API-förfrågan
-   (`max_tokens: 0` — prefill utan output, i praktiken gratis) var 240:e
-   sekund; rate-limit-headrarna i svaret bär usage-panelens tre fönster:
-   5-timmars, veckan och veckan för tyngsta modellen (Fable/Opus).
-   Tokenen lämnar aldrig datorn — skärmen får bara procenttal. Om de
-   tokenkopior tokenservern kan läsa har gått ut men den officiella Claude
-   Desktop-klienten fortfarande arbetar, används dess innehållsfria
-   `plan-usage-history.json` passivt för den generella veckan. Filen måste
-   vara högst 20 minuter gammal och en tidigare autentiserad cachepost måste
-   fortfarande bära poolens giltiga reset. Modellveckan gissas aldrig och
-   förblir därför stale tills OAuth-proben återhämtar sig.
-3. **Codex tak** — tjänsten frågar Codex lokala, skrivskyddade app-server via
-   `account/rateLimits/read`, alltså samma aktuella snapshot som Codex-panelen
-   visar. Om app-servern saknas används en passiv fallback: begränsad läsning
-   av de 20 nyaste `~/.codex/sessions/**/rollout-*.jsonl` (högst den sista MiB
-   per fil). Bara Codex faktiska `event_msg`/`token_count`-händelse med ett
-   direkt `payload.rate_limits` accepteras i fallbacken.
+1. **The volume** -- `~/.claude/projects/**/*.jsonl` is scanned
+   incrementally: today's/this month's tokens, burn rate, sessions.
+2. **Claude's ceilings** (the Clawdmeter pattern) -- the service reads Claude
+   Desktop's active, injected OAuth token or Claude Code's keychain fallback
+   (on Windows instead `%USERPROFILE%\.claude\.credentials.json`, the same
+   record -- see [Windows](#windows) below) and makes a minimal API request
+   (`max_tokens: 0` -- prefill without output, effectively free) every 240
+   seconds. The usage panel's three windows -- 5-hour, the week and the week
+   for the heaviest model (Fable/Opus) -- come primarily from the usage
+   endpoint (`usage_http_200 + ok`). The rate-limit headers are the
+   FALLBACK, which logs `ratelimit-header:` when the primary path gave
+   nothing mappable; seeing that line in a normal boot is a symptom, not a
+   healthy start (OBS-23).
+   The token never leaves the computer -- the screen only gets percentages.
+   If the token copies the tokenserver can read have expired while the
+   official Claude Desktop client is still working, its content-free
+   `plan-usage-history.json` is used passively for the general week. The
+   file must be at most 20 minutes old and an earlier authenticated cache
+   entry must still carry the pool's valid reset. The model week is never
+   guessed and therefore stays stale until the OAuth probe recovers.
+3. **Codex's ceilings** -- the service asks Codex's local, read-only app
+   server via `account/rateLimits/read`, i.e. the same current snapshot the
+   Codex panel shows. If the app server is missing a passive fallback is
+   used: bounded reading of the 20 newest
+   `~/.codex/sessions/**/rollout-*.jsonl` (at most the last MiB per file).
+   Only Codex's actual `event_msg`/`token_count` event with a direct
+   `payload.rate_limits` is accepted in the fallback.
 
-Generella veckotak hålls strikt åtskilda från namngivna modellkvoter. För
-Codex måste `limit_name` saknas, vara null eller vara en tom sträng och
-`window_minutes` vara exakt 10080 minuter. Ett 30-dagarsfönster (43200)
-publiceras inte under den nuvarande WEEKLY-kontraktet. Spark och andra
-namngivna kvoter kan därför aldrig ersätta WEEK. För Claude är exakt `7d` eller
-`week` den generella veckan; Fable, Opus, Sonnet och explicit `model` är
-modellveckan. Ett okänt namn som `7d_haiku` blir endast ett sanerat namn i
-rotendpointens diagnostik, aldrig ett kvotvärde.
+General weekly ceilings are kept strictly apart from named model quotas.
+For Codex, `limit_name` must be absent, null or an empty string and
+`window_minutes` must be exactly 10080 minutes. A 30-day window (43200) is
+not published under the current WEEKLY contract. Spark and other named
+quotas can therefore never replace WEEK. For Claude, exactly `7d` or `week`
+is the general week; Fable, Opus, Sonnet and an explicit `model` are the
+model week. An unknown name such as `7d_haiku` only becomes a sanitized
+name in the root endpoint's diagnostics, never a quota value.
 
-## Prova
+## Try it
 
 ```
 python3 tokenserver.py
 curl http://localhost:8737/api/tokens
 ```
 
-## Valfri GitHub-sida och stjärnhändelser
+## Optional GitHub page and star events
 
-Ett publikt repo kan övervakas utan token:
+A public repo can be monitored without a token:
 
 ```
 python3 tokenserver.py --github-repo owner/repository
 curl http://localhost:8737/api/github
 ```
 
-Miljövariabeln `VIBEPULSE_GITHUB_REPO=owner/repository` är likvärdig och
-passar launchd. Första lyckade pollen sätter bara utgångsvärdet; gamla
-stjärnor spelas inte upp som nya. Därefter pollas repo-metadata varannan
-minut. Vid en ökning hämtas senaste publika stargazer för namnet i popupen;
-om den läsningen misslyckas publiceras ändå det auktoritativa nya antalet
-med anonym aktör.
+The environment variable `VIBEPULSE_GITHUB_REPO=owner/repository` is
+equivalent and suits launchd. The first successful poll only sets the
+baseline; old stars are not replayed as new. After that the repo metadata
+is polled every other minute. On an increase the latest public stargazer is
+fetched for the name in the popup; if that read fails the authoritative new
+count is published anyway with an anonymous actor.
 
-GitHub-monitorn har egen tråd, timeout och minst tio minuters fel-backoff.
-Dess senaste goda värden markeras `stale`; fel går aldrig via token-, agent-
-eller Max Tracker-flödet. Utan `--github-repo` svarar endpointen explicit
-`{"v": 1, "enabled": false}`. Skärmens sida och popup slås sedan på
-oberoende i `secrets.h`; se `secrets.h.example`.
+The GitHub monitor has its own thread, timeout and at least ten minutes of
+error backoff. Its last good values are marked `stale`; errors never go
+through the token, agent or Max Tracker flow. Without `--github-repo` the
+endpoint explicitly answers `{"v": 1, "enabled": false}`. The screen's page
+and popup are then enabled independently in `secrets.h`; see
+`secrets.h.example`.
 
-## Agentstatus
+## Agent status
 
-`/api/agent-status` är ett separat v2-kontrakt för Claude Codes och Codex
-pågående aktivitet. En bakgrundstråd följer de senast aktiva JSONL-filerna
-inkrementellt var 0,5 sekund: Claude under `~/.claude/projects` och Codex
-under `~/.codex/sessions`. HTTP-tråden läser bara en låst minnesbild; den
-skannar eller öppnar aldrig sessionsfiler på begäran.
+`/api/agent-status` is a separate v2 contract for Claude Code's and Codex's
+ongoing activity. A background thread follows the most recently active
+JSONL files incrementally every 0.5 seconds: Claude under
+`~/.claude/projects` and Codex under `~/.codex/sessions`. The HTTP thread
+only reads a locked in-memory picture; it never scans or opens session files
+on request.
 
 ```json
 {
@@ -213,62 +220,68 @@ skannar eller öppnar aldrig sessionsfiler på begäran.
 }
 ```
 
-- Varje provider innehåller högst fyra prioriterade publika `jobs`, men
-  `active_count` räknar samtliga kända `working`, `waiting` och `error` även
-  när listan är full. Servern håller högst 16 metadatajobb per provider.
-- Jobb rangordnas `waiting`, `error`, `working`, `done`; nyare jobb går före
-  inom samma tillstånd. `seq` ökar när lagrad publik status ändras.
-- `task_id` är sessionsloggens opaka uppgiftsidentitet och `event_id` ett
-  stabilt hash-id för leverantör, uppgift, tillstånd och källhändelse.
-- `state` är `idle`, `working`, `waiting`, `done`, `error` eller `unknown`.
-  `activity` är en grov kategori som exempelvis `thinking`, `reading`,
+- Each provider holds at most four prioritized public `jobs`, but
+  `active_count` counts every known `working`, `waiting` and `error` even
+  when the list is full. The server keeps at most 16 metadata jobs per
+  provider.
+- Jobs are ranked `waiting`, `error`, `working`, `done`; newer jobs come
+  first within the same state. `seq` increases when the stored public
+  status changes.
+- `task_id` is the session log's opaque task identity and `event_id` a
+  stable hash id of provider, task, state and source event.
+- `state` is `idle`, `working`, `waiting`, `done`, `error` or `unknown`.
+  `activity` is a coarse category such as `thinking`, `reading`,
   `editing`, `searching`, `running`, `testing`, `building`,
-  `waiting_input` eller `waiting_approval`.
-- `project` är endast en kontrollteckenrensad basename på högst 16 UTF-8-byte;
-  `task_id` är ett opakt, kollisionssäkert id på högst 64 UTF-8-byte.
-  `updated_ms` är tiden sedan händelsens säkra tidsstämpel (filens mtime är
-  reserv när tidsstämpel saknas), inte tiden då servern råkade starta.
-- Ett `working`-jobb som inte uppdaterats på 120 sekunder faller ur den
-  publika listan som okänt. Det skrivs aldrig om till ett påhittat `done`,
-  och enbart läsning av status ökar inte `seq`.
+  `waiting_input` or `waiting_approval`.
+- `project` is only a control-character-stripped basename of at most 16
+  UTF-8 bytes; `task_id` is an opaque, collision-safe id of at most 64
+  UTF-8 bytes. `updated_ms` is the time since the event's safe timestamp
+  (the file's mtime is the fallback when a timestamp is missing), not the
+  time the server happened to start.
+- A `working` job not updated for 120 seconds drops out of the public list
+  as unknown. It is never rewritten into an invented `done`, and merely
+  reading the status does not increase `seq`.
 
-Integritetsgränsen är avsiktligt hård: klassificeraren kan lokalt titta på
-verktygsnamn och ett kommando för att skilja test, bygge och vanlig körning,
-men varken promptar, kommandon, meddelandetext, filinnehåll eller råa
-logghändelser sparas eller exponeras. Ofullständiga sista rader hålls lokalt
-till nästa append, men aldrig över 1 MiB. Giltiga JSONL-rader på högst 1 MiB
-klassificeras; större eller felaktigt UTF-8-kodade rader kastas till nästa
-radbrytning så att en senare giltig händelse fortfarande kan läsas. Läsningen
-sker i 64 KiB-block och tar högst 1 MiB eller 256 poster per fil och poll; stora
-historiska filer dräneras därför över flera pollar utan en obunden minnestopp.
+The privacy boundary is deliberately hard: the classifier may look locally
+at tool names and one command to tell tests, builds and ordinary runs
+apart, but neither prompts, commands, message text, file content nor raw
+log events are stored or exposed. Incomplete last lines are held locally
+until the next append, but never beyond 1 MiB. Valid JSONL lines of at most
+1 MiB are classified; larger or badly UTF-8-encoded lines are discarded up
+to the next line break so a later valid event can still be read. Reading
+happens in 64 KiB blocks and takes at most 1 MiB or 256 records per file
+and poll; large historical files are therefore drained over several polls
+without an unbounded memory peak.
 
-De tolv aktiva kandidatfilerna per leverantör kontrolleras var 0,5 sekund. Den
-rekursiva upptäckten av nya sessioner görs däremot högst var femte sekund, och
-återanvänder samma stat-resultat för urval och identitetsavstämning. Högst 48
-filidentiteter behålls; råa partialbuffertar och sökvägsalias för kalla filer
-släpps. Kort rotation eller tillfällig frånvaro kan ändå återanvända
-inode-bundet offset och digest utan historikreplay.
+The twelve active candidate files per provider are checked every 0.5
+seconds. The recursive discovery of new sessions, however, runs at most
+every five seconds, and reuses the same stat results for selection and
+identity reconciliation. At most 48 file identities are kept; raw partial
+buffers and path aliases for cold files are released. Short rotation or
+temporary absence can still reuse the inode-bound offset and digest without
+a history replay.
 
-Oförändrade snabba pollar öppnar inte filen. Append kontrollerar bara ett
-begränsat prefixprov, medan en ny full SHA-256-verifiering startar högst en gång
-per fem sekunder och läser högst 1 MiB per poll. Stora prefix verifieras alltså
-stegvis.
-Shrink, inodebyte och misstänkta signaturer hanteras omedelbart; en senare
-fullträff på en omskrivning återställer följaren och spelar ersättningen exakt
-en gång. Det ger eventual omskrivningsdetektering utan kvadratisk livstids-I/O,
-och inget färdigt radinnehåll sparas.
+Unchanged fast polls do not open the file. An append only checks a bounded
+prefix sample, while a new full SHA-256 verification starts at most once
+every five seconds and reads at most 1 MiB per poll. Large prefixes are
+therefore verified stepwise.
+Shrinks, inode changes and suspicious signatures are handled immediately; a
+later full match on a rewrite resets the follower and replays the
+replacement exactly once. That gives eventual rewrite detection without
+quadratic lifetime I/O, and no finished line content is stored.
 
-Varje befintlig fil som ses för första gången börjar som backfill, även om hela
-filen når EOF under första läsningen. Detsamma gäller efter en återställning,
-ett inodebyte på samma sökväg eller när en tidigare följd kall fil återupptäcks.
-Historiska mellanlägen publiceras inte under tiden. Endast den säkert senaste
-klassificerade metadatahändelsen per leverantör och sökväg hålls kompakt i minnet
-och appliceras högst en gång när backloggen är tömd; om slutstatus redan är
-publik ändras varken `seq` eller dess observationstid. Därefter behandlas nya
-kompletta append-poster åter normalt. Återupptäcktsmarkörerna är begränsade till
-96 sökvägar och innehåller inga råa loggposter.
+Every existing file seen for the first time starts as backfill, even if the
+whole file reaches EOF during the first read. The same applies after a
+reset, an inode change on the same path or when a previously followed cold
+file is rediscovered. Historical intermediate states are not published
+meanwhile. Only the safely latest classified metadata event per provider
+and path is kept compactly in memory and applied at most once when the
+backlog is drained; if the final status is already public neither `seq` nor
+its observation time changes. After that new complete append records are
+handled normally again. The rediscovery markers are limited to 96 paths and
+contain no raw log records.
 
-Lokalt röktest från repots rot, på en alternativ port:
+Local smoke test from the repo root, on an alternative port:
 
 ```
 python3 tools/tokenserver/tokenserver.py --port 8738
@@ -277,108 +290,111 @@ curl http://127.0.0.1:8738/api/agent-status
 
 ## Max Tracker
 
-`/api/max-tracker` serverar kontrakt v1 för de två heatmap-sidorna: dagens
-kvot-topp per leverantör de senaste 20 ISO-veckorna, plus STREAK/MAX WEEKS/
-AVG PEAK/MAX DAYS-aggregat. Flaggorna `--claude-plan {pro,max5x,max20x}` och
-`--codex-plan {plus,pro}` är frivilliga och renderar bara en muted badge
-("PRO", "MAX 5X", "MAX 20X", "PLUS") i sidans hörn — ogiltiga värden avvisas
-direkt av argparse (`SystemExit`), och etiketten påverkar aldrig någon
-procenträkning.
+`/api/max-tracker` serves contract v1 for the two heatmap pages: the day's
+quota peak per provider for the last 20 ISO weeks, plus the STREAK/MAX
+WEEKS/AVG PEAK/MAX DAYS aggregates. The flags `--claude-plan
+{pro,max5x,max20x}` and `--codex-plan {plus,pro}` are optional and only
+render a muted badge ("PRO", "MAX 5X", "MAX 20X", "PLUS") in the page's
+corner -- invalid values are rejected outright by argparse (`SystemExit`),
+and the label never affects any percentage calculation.
 
-Data kommer från två oberoende kanaler i `tools/tokenserver/max_tracker.py`
-(`MaxTrackerStore`):
+The data comes from two independent channels in
+`tools/tokenserver/max_tracker.py` (`MaxTrackerStore`):
 
-- **Backfill**: en bakgrundstråd kör `backfill_step()` var 0,5:e sekund
-  (samma kadens som agentstatusens poll), obundet i tiden — den fortsätter
-  ticka för evigt istället för att stänga av sig efter att ha hunnit ikapp,
-  eftersom ett tomt steg bara läser filsystemets stat-info och därför är
-  billigt nog att köra hur ofta som helst; det gör att en helt ny rollout-
-  eller sessionsfil upptäcks automatiskt utan omstart. Codex-kvoten
-  rekonstrueras ur `~/.codex/sessions/**/rollout-*.jsonl`; Claude-kvoten är
-  inte rekonstruerbar i efterhand, så historiska Claude-dagar får bara
-  aktivitet och volymnivå, aldrig procent.
-- **Löpande observation**: samma ställen som redan publicerar en färsk,
-  icke-cachad, icke-`stale`-procent till `/api/tokens` (Claude-proben var
-  240:e sekund, Codex läsning via app-servern eller rollout-fallbacken, och
-  den befintliga dagsvolym-uppräkningen) matar också dagens topp här —
-  aldrig ett `*Stale: true`-värde ur kvotcachen. Sessionsfönstret (5 h,
-  300 min) och det generella veckofönstret (10 080 min) hålls isär enligt
-  samma >600-minutersregel som redan används för Claude/Codex-kvoterna;
-  Codex bär sitt fönster i klartext i egen data, Claude klassas på samma
-  sätt som `/api/tokens` redan gör det.
+- **Backfill**: a background thread runs `backfill_step()` every 0.5
+  seconds (the same cadence as the agent-status poll), unbounded in time --
+  it keeps ticking forever instead of switching itself off once it has
+  caught up, because an empty step only reads the filesystem's stat info
+  and is therefore cheap enough to run however often; that lets a brand-new
+  rollout or session file be discovered automatically without a restart.
+  The Codex quota is reconstructed from
+  `~/.codex/sessions/**/rollout-*.jsonl`; the Claude quota cannot be
+  reconstructed after the fact, so historical Claude days only get activity
+  and a volume level, never a percentage.
+- **Live observation**: the same places that already publish a fresh,
+  non-cached, non-`stale` percentage to `/api/tokens` (the Claude probe
+  every 240 seconds, the Codex read via the app server or the rollout
+  fallback, and the existing day-volume tally) also feed the day's peak
+  here -- never a `*Stale: true` value from the quota cache. The session
+  window (5 h, 300 min) and the general week window (10 080 min) are kept
+  apart by the same >600-minute rule already used for the Claude/Codex
+  quotas; Codex carries its window in the clear in its own data, Claude is
+  classified the same way `/api/tokens` already does it.
 
-Toppnivåfältet `stale` speglar exakt samma regel som `claudeWeekStale`/
-`codexWeekStale` ovan (ingen ny klocka) — sant när servern inte lyckats
-uppdatera den generella veckokvoten på sistone.
+The top-level field `stale` mirrors exactly the same rule as
+`claudeWeekStale`/`codexWeekStale` above (no new clock) -- true when the
+server has not managed to update the general week quota lately.
 
-Persistens: `~/Library/Application Support/VibePulse/max-tracker.json`,
-atomisk skrivning i läge 0600, 400 dagars gles retention. Sparningen körs
-asynkront på en egen bakgrundstråd som töms tills ingen ändring väntar —
-samma mönster som kvotcachens skrivare, fast med en enda sammanslagen
-sparning istället för en post i taget.
+Persistence: `~/Library/Application Support/VibePulse/max-tracker.json`,
+atomic write in mode 0600, 400 days of sparse retention. Saving runs
+asynchronously on its own background thread that drains until no change is
+pending -- the same pattern as the quota cache's writer, but with a single
+merged save instead of one record at a time.
 
 ```
 curl http://127.0.0.1:8738/api/max-tracker
 ```
 
-När Claude Desktop körs används dess färska processtoken utan dialog. Vid
-fristående Claude Code kan första körningen fråga macOS om nyckelringsåtkomst
-("security vill använda ... Claude Code-credentials") — välj "Tillåt alltid"
-så tjänsten kan probea utan att fråga om. Startloggen skriver dessutom ut de exakta
-`anthropic-ratelimit-*`-headrarna vid första proben — facit om mappningen
-någonsin behöver justeras.
+When Claude Desktop is running its fresh process token is used without a
+dialog. With standalone Claude Code the first run may ask macOS for keychain
+access ("security wants to use ... Claude Code-credentials") -- choose
+"Always Allow" so the service can probe without asking again. The startup
+log also prints the exact `anthropic-ratelimit-*` headers at the first probe
+-- the answer key if the mapping ever needs adjusting.
 
 ### Windows
 
-Claude Code har ingen nyckelringsintegration på Windows: `claude login`
-skriver i stället exakt samma `{"claudeAiOauth": {...}}`-post till en vanlig
-fil, `%USERPROFILE%\.claude\.credentials.json`. Kör tjänsten på Windows och
-den läser den filen — ingen dialog, ingen konfiguration, samma
-förtroendegräns som nyckelringsläsningen på Macen. Nyckelringen och Claude
-Desktops processtoken frågas inte alls där; `security` och `pgrep` finns
-ändå inte.
+Claude Code has no keychain integration on Windows: `claude login` instead
+writes exactly the same `{"claudeAiOauth": {...}}` record to an ordinary
+file, `%USERPROFILE%\.claude\.credentials.json`. Run the service on Windows
+and it reads that file -- no dialog, no configuration, the same trust
+boundary as the keychain read on the Mac. The keychain and Claude Desktop's
+process token are not consulted at all there; `security` and `pgrep` do not
+exist anyway.
 
-Probelåset — maskinvida enprobe-garantin som håller 429-straffrutan borta —
-finns kvar på Windows: `fcntl` saknas där, så låset tas med
-`msvcrt.locking` i stället. Samma icke-blockerande grind, annat systemanrop.
+The probe lock -- the machine-wide single-probe guarantee that keeps the 429
+penalty box away -- remains on Windows: `fcntl` is missing there, so the
+lock is taken with `msvcrt.locking` instead. The same non-blocking gate,
+another system call.
 
-Codex-halvan fungerar också. Kvotläsningen startar `codex app-server` och
-läser dess stdout; det gjordes förut med `select.select`, som på Windows
-bara tar sockets — aldrig pipes. Läsningen sker nu i en läsartråd med kö,
-samma kod på alla plattformar.
+The Codex half works too. The quota read starts `codex app-server` and
+reads its stdout; that used to be done with `select.select`, which on
+Windows only takes sockets -- never pipes. The read now happens in a reader
+thread with a queue, the same code on every platform.
 
-Codex skrivbordsapp och Codex CLI är två olika installationsytor på Windows.
-Store-appens `codex`-alias kan synas för `Get-Command` men ändå nekas när en
-bakgrundsuppgift försöker starta det. Installera därför OpenAI:s fristående
-CLI en gång i PowerShell:
+The Codex desktop app and the Codex CLI are two different install surfaces
+on Windows. The Store app's `codex` alias may show up for `Get-Command` and
+still be refused when a background task tries to start it. Therefore install
+OpenAI's standalone CLI once in PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
 ```
 
-Öppna därefter ett nytt PowerShell-fönster och verifiera `codex --version`.
-VibePulse föredrar installerarens stabila användarsökväg
-`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe` framför `PATH` och
-ignorerar avsiktligt `WindowsApps`-alias. Kör
-`python tools\vibepulse_setup.py doctor` efter installationen; ett grönt
-`PASS Codex executable` betyder att samma körbara CLI kan användas av
-setupverktyget och tokenserverns app-serverläsning.
+Then open a new PowerShell window and verify `codex --version`. VibePulse
+prefers the installer's stable per-user path
+`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe` over `PATH` and
+deliberately ignores `WindowsApps` aliases. Run
+`python tools\vibepulse_setup.py doctor` after the install; a green
+`PASS Codex executable` means the same runnable CLI can be used by the setup
+tool and the tokenserver's app-server read.
 
-Tillståndsfilerna (lås, probestatus, kvotcache, historik, max-spårare) bor
-under `%LOCALAPPDATA%\VibePulse\` i stället för macOS
-`~/Library/Application Support/VibePulse`. Sökvägarna fungerade bokstavligt
-även förut — `Path.home()` löser ut — men lade ett `Library`-träd i
-användarprofilen som ingenting annat på maskinen känner igen.
+The state files (lock, probe status, quota cache, history, max tracker)
+live under `%LOCALAPPDATA%\VibePulse\` instead of macOS's
+`~/Library/Application Support/VibePulse`. The paths worked literally before
+too -- `Path.home()` resolves -- but put a `Library` tree in the user
+profile that nothing else on the machine recognizes.
 
-Autostart ingår via Task Scheduler. Kör från repots rot i PowerShell:
+Autostart is included via Task Scheduler. Run from the repo root in
+PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.ps1
 ```
 
-Valfria visningskällor måste anges till den schemalagda tjänsten precis som
-vid en manuell start. Repo-värdet är publikt; abonnemangskostnader gissas
-aldrig:
+Optional display sources must be given to the scheduled service just as at
+a manual start. The repo value is public; subscription costs are never
+guessed:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.ps1 `
@@ -387,25 +403,25 @@ powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.
   -CodexPlan pro -CodexPlanCostUsd "20"
 ```
 
-GitHub-sidan och stjärnnotiserna behöver dessutom sina separata
-`TK_GITHUB_*_ENABLED`-flaggor i panelens gitignorerade `secrets.h`.
+The GitHub page and the star notices additionally need their separate
+`TK_GITHUB_*_ENABLED` flags in the panel's gitignored `secrets.h`.
 
-Skriptet registrerar tjänsten för den inloggade användaren, startar den
-direkt och startar om den vid fel. Det bakar inte in Claude/Codex- eller
-detaljval i kommandoraden; samma sparade tokenserver-konfiguration används
-som vid manuell start. En dold PowerShell-wrapper kör den verifierade
-Python 3.11+-tolken och skriver stdout/stderr till
-`%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log`; loggen roteras vid
-cirka 5 MB med en `.old`-svans. Kontrollera hälsan med
-`curl http://localhost:8737/`. Kontrollera installeraren utan att röra
-Task Scheduler med `-ValidateOnly`. Avinstallera själva autostarten med:
+The script registers the service for the logged-in user, starts it at once
+and restarts it on failure. It does not bake Claude/Codex or detail choices
+into the command line; the same saved tokenserver configuration is used as
+at a manual start. A hidden PowerShell wrapper runs the verified Python
+3.11+ interpreter and writes stdout/stderr to
+`%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log`; the log is rotated
+at about 5 MB with a `.old` tail. Check the health with
+`curl http://localhost:8737/`. Check the installer without touching Task
+Scheduler with `-ValidateOnly`. Uninstall the autostart itself with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.ps1 -Uninstall
 ```
 
-Svar (kontraktet appen parsar, `components/app_tokens/tokens_parse.c`;
-null = ärlig frånvaro, skärmen visar streck):
+Response (the contract the app parses, `components/app_tokens/tokens_parse.c`;
+null = honest absence, the screen shows dashes):
 
 ```json
 {"v": 2, "dayTokens": 48231907, "dayTokensPerHour": 5120000,
@@ -433,70 +449,101 @@ null = ärlig frånvaro, skärmen visar streck):
  "codexForecastAt": null, "codexForecastOffsetMin": null}
 ```
 
-De nya delta- och prognosfälten är frivilliga för äldre skärmkod och `null`
-när underlaget saknas. Prognosen blir först aktiv efter minst tre punkter,
-90 minuters spann och en procents faktisk rörelse i samma resetcykel.
+The newer delta and forecast fields are optional for older screen code and
+`null` when the basis is missing. The forecast only becomes active after at
+least three points, a 90-minute span and one percent of actual movement in
+the same reset cycle.
 
-## Kvotcache och stale-kontrakt
+## Startup: placeholders until the first scan is done
 
-Senaste auktoritativa Claude- och Codex-värden för generell vecka och
-modellvecka sparas atomiskt i
-`~/Library/Application Support/VibePulse/quota-cache.json`. Identiteterna i
-filen är lokala SHA-256-värden; råa leverantörs-id:n, sessionssökvägar,
-projekt, chattar och innehåll sparas inte. Sessions-/5h-fönstret cachelagras
-inte.
+The first history scan can take minutes on a large `~/.claude`/`~/.codex`.
+It runs in the background; meanwhile `/api/tokens` answers at once, with
+the quota percentages live and the `usageTotals` block saying what the
+volume counters are: `{"state": "refreshing", "sinceS": N, "placeholder":
+true}` until the scan has completed, then `{"state": "ready", "ageS": N,
+"placeholder": false}`, and `"failing"` if the recompute crashes (frozen
+counters with `ageS`, or placeholders if no scan has succeeded yet;
+`usageComputeOk` on `GET /` has the detail). The same block is on `GET /`.
 
-- En lyckad aktuell observation har procent och absolut reset, skrivs till
-  cachen och serveras med `*Stale: false`.
-- När nästa schemalagda probe eller skanning har misslyckats (även när Codex
-  bara gav en namngiven modellkvot) får det förra minnesvärdet inte fortsätta
-  se live ut. En matchande, ännu ej utgången cachepost kan då serveras med
-  `*Stale: true`.
-- Vid exakt reset-tid är posten utgången. Då, eller utan cacheträff, är
-  procent, reset och eventuell etikett `null` och `*Stale` är `false`.
-- `ResetMin` räknas om från absolut reset vid varje svar, så ett cachevärdes
-  återstående minuter fortsätter minska. Stale-värden skrivs inte till
-  usagehistoriken och används inte för delta eller prognos.
+**Placeholders are served only to a client that has said it understands
+them.** A client sending `X-VibePulse-Accepts: usage-totals` gets the
+answer above with zeros and the block; everyone else gets `503 {"error":
+..., "usageTotals": {...}}`, the contract's error form, which the firmware
+rejects and keeps its last values on -- so an already flashed panel never
+learns zeros. Firmware from 2026-09-10 sends the header, reads
+`placeholder` and applies the quota but leaves the value page alone until
+the counters are measured. The relay publisher sends no placeholders, so a
+panel behind the relay keeps its last real values.
 
-Booleska `claudeWeekStale`, `claudeModelWeekStale` och `codexWeekStale` är
-frivilliga tillägg i v2-kontraktet. Om procenten saknas är motsvarande stale
-alltid `false`.
+## Quota cache and the stale contract
 
-## Lokal usagehistorik
+The latest authoritative Claude and Codex values for the general week and
+the model week are saved atomically in
+`~/Library/Application Support/VibePulse/quota-cache.json`. The identities
+in the file are local SHA-256 values; raw provider ids, session paths,
+projects, chats and content are not saved. The session/5 h window is not
+cached.
 
-Tjänsten sparar historiken atomiskt i
-`~/Library/Application Support/VibePulse/usage-history.json` på macOS och
-under `%LOCALAPPDATA%\VibePulse\` på Windows. Högst en punkt
-per leverantör, fönster och 15 minuter behålls, och allt äldre än åtta dagar
-rensas. Varje punkt har exakt fem värden: tid, `claude`/`codex`, quotafönster,
-procent och avrundad resetcykel. Promptar, svar, kommandon, projekt, filnamn,
-modeller och tokeninnehåll kan inte skrivas till filen.
+- A successful current observation has a percentage and an absolute reset,
+  is written to the cache and served with `*Stale: false`.
+- Once the next scheduled probe or scan has failed (even when Codex only
+  gave a named model quota) the previous in-memory value must not keep
+  looking live. A matching, not yet expired cache entry may then be served
+  with `*Stale: true`.
+- At exactly the reset time the entry is expired. Then, or without a cache
+  hit, the percentage, reset and any label are `null` and `*Stale` is
+  `false`.
+- `ResetMin` is recomputed from the absolute reset on every answer, so a
+  cached value's remaining minutes keep decreasing. Stale values are not
+  written to the usage history and are not used for deltas or forecasts.
 
-VECKOTAKT räknas med en utjämnad procentslope från högst de senaste 24
-timmarna i den aktuella veckocykeln. Resultatet är antingen `collecting`,
-`unavailable`, beräknad procent vid reset (`at_reset`) eller beräknad tid då
-quotan tar slut (`exhausts`).
+The booleans `claudeWeekStale`, `claudeModelWeekStale` and `codexWeekStale`
+are optional additions to the v2 contract. If the percentage is missing
+the corresponding stale is always `false`.
 
-Installera den valfria lokala upptäckten i samma Pythonmiljö som tjänsten:
+## Local usage history
+
+The service saves the history atomically in
+`~/Library/Application Support/VibePulse/usage-history.json` on macOS and
+under `%LOCALAPPDATA%\VibePulse\` on Windows. At most one point per
+provider, window and 15 minutes is kept, and everything older than eight
+days is pruned. Each point has exactly five values: time, `claude`/`codex`,
+quota window, percentage and rounded reset cycle. Prompts, answers,
+commands, projects, file names, models and token content cannot be written
+to the file.
+
+WEEK PACE is computed with a smoothed percentage slope from at most the
+last 24 hours in the current week cycle. The result is either `collecting`,
+`unavailable`, the projected percentage at reset (`at_reset`) or the
+projected time the quota runs out (`exhausts`).
+
+Install the optional local discovery in the same Python environment as the
+service:
 
 ```sh
 python3 -m pip install -r requirements-discovery.txt
 ```
 
-Tjänsten annonserar då `_vibepulse._tcp.local` utan kvoter, projektdata eller
-hemligheter. Aktuell firmware cachar en frisk Mac/PC och byter först efter ett
-begränsat fel. Utan paketet startar samma stdlib-tjänst och använder den
-kompilerade reservadressen exakt som tidigare.
+The service then advertises `_vibepulse._tcp.local` without quotas, project
+data or secrets. Current firmware caches a healthy Mac/PC and only switches
+after a bounded failure. Without the package the same stdlib service starts
+and uses the compiled-in fallback address exactly as before.
 
-Peka därför fortfarande skärmens fallback hit i reporotens `secrets.h`. På
-macOS är Bonjour-namnet bäst; på Windows används en DHCP-reserverad LAN-adress:
+So keep pointing the screen's fallback here in the repo root's `secrets.h`.
+On macOS the Bonjour name is best; on Windows a DHCP-reserved LAN address
+is used:
 
 ```c
-#define TK_TOKENS_URL "http://<datorns-host-eller-lan-ip>:8737/api/tokens"
+#define TK_VIBEPULSE_BASE_URL "http://<the-computer's-host-or-lan-ip>:8737"
 ```
 
-Macens Bonjour-namn: `scutil --get LocalHostName` (lägg till `.local`).
-Windows LAN-IP: `ipconfig`; reservera den valda IPv4-adressen i routern.
+It is the base address that is edited, not the individual endpoints:
+`secrets.h.example` derives `TK_TOKENS_URL`, `TK_AGENT_STATUS_URL` and
+`TK_MAX_TRACKER_URL` from it. Writing one of them by hand gets you either a
+redefinition or three endpoints left on `YOUR-MAC.local`.
+
+The Mac's Bonjour name: `scutil --get LocalHostName` (append `.local`).
+Windows LAN IP: `ipconfig`; reserve the chosen IPv4 address in the router.
 
 ## Autostart via launchd
 
@@ -526,61 +573,70 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/se.torget.tokenserver.plis
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/se.torget.tokenserver.plist
 ```
 
-Mallplisten antar att repot bor i `~/Torget`, att repots Python 3.11+-miljö finns
-i `.venv` och att användaren är `niclasvestlund` — redigera sökvägarna
-annars. Med krypterat interaktionsrelä aktiverat ska den miljön även ha
-`requirements-interaction-relay.txt` installerad. Loggen hamnar i
-`~/Library/Logs/torget-tokenserver.log` (syns i Konsol-appen, överlever
-omstart; servern roterar den själv vid start om den vuxit förbi ~5 MB, med
-svansen bevarad i `.old`). Raderna har tidsstämplar och loggar övergångar,
-inte tillstånd: en frisk vecka är några rader, inte tusen.
+The template plist assumes the repo lives in `~/Torget`, that the repo's
+Python 3.11+ environment is in `.venv` and that the user is
+`niclasvestlund` -- edit the paths otherwise. With the encrypted interaction
+relay enabled that environment must also have
+`requirements-interaction-relay.txt` installed. The log lands in
+`~/Library/Logs/torget-tokenserver.log` (visible in the Console app,
+survives a reboot; the server rotates it itself at start if it has grown
+past ~5 MB, with the tail preserved in `.old`). The lines carry timestamps
+and log transitions, not states: a healthy week is a few lines, not a
+thousand.
 
-Använd en ren, beständig checkout som inte ska raderas när en PR är klar.
-`ProgramArguments[0]` (Python) och `WorkingDirectory` måste peka på samma
-checkout. Om någon plist-rad ändras räcker inte `kickstart`: launchd behåller
-den redan inlästa konfigurationen. Kör `bootout` + `bootstrap` enligt ovan.
-Bevara privata argument och reläinställningar när bara sökvägen flyttas.
+Use a clean, durable checkout that will not be deleted when a PR is done.
+`ProgramArguments[0]` (Python) and `WorkingDirectory` must point at the same
+checkout. If any plist line changes, `kickstart` is not enough: launchd
+keeps the configuration it has already loaded. Run `bootout` + `bootstrap`
+as above. Preserve private arguments and relay settings when only the path
+moves.
 
-Efter installation eller flytt ska tre lager peka på samma källa:
+After an install or a move, three layers must point at the same source:
 
-1. `python3 tools/vibepulse_setup.py doctor` ska godkänna Codex-plugin, MCP
-   och tokenserver. Hook-trust granskas fortfarande manuellt i `/hooks`.
+1. `python3 tools/vibepulse_setup.py doctor` must approve the Codex plugin,
+   MCP and the tokenserver. Hook trust is still reviewed manually in
+   `/hooks`.
 2. `python3 tools/tokenserver/smoke.py --base-url http://127.0.0.1:8737`
-   ska rapportera den väntade `rev`, matchande källfingeravtryck och noll fel.
-   Ange den faktiskt konfigurerade porten om den inte är 8737.
-3. Starta en ny Codex-task efter att plugin/MCP har flyttats, så att den nya
-   processen verkligen laddas. Tystnad eller en gammal task är inte bevis.
+   must report the expected `rev`, a matching source fingerprint and zero
+   failures. Give the actually configured port if it is not 8737.
+3. Start a new Codex task after the plugin/MCP has moved, so the new process
+   really is loaded. Silence or an old task is not proof.
 
-En panel som startats om av den begränsade HTTP-stall-vakten skickar den fasta
-lokala headern `X-VibePulse-Recovery-Boot: http-stall-v1`. Efter två bekräftade
-LAN-pollar visar `GET /` endast booleanen
-`interactions.panel.httpStallRecoveryBoot`; ingen paneladress, firmwaretext,
-användare eller kvot följer med. Doctor och nästa Codex-start kan därför se en
-självläkning även på väggström utan seriell kabel. Markören är evidens om
-omstarten, inte ensam ett fysiskt PASS.
+A panel restarted by the bounded HTTP-stall watchdog sends the fixed local
+header `X-VibePulse-Recovery-Boot: http-stall-v1`. After two confirmed LAN
+polls `GET /` shows only the boolean
+`interactions.panel.httpStallRecoveryBoot`; no panel address, firmware text,
+user or quota comes along. Doctor and the next Codex start can therefore see
+a self-heal even on wall power without a serial cable. The marker is
+evidence of the restart, not on its own a physical PASS.
 
-Röktestets totalsiffror för tracebacks och starter omfattar bevarad historik.
-Efter en reparation ska även tidsstämplarna kontrolleras: exakt en ny start och
-inga nya traceback/error-rader efter omladdningen är det friska resultatet.
+The smoke test's totals for tracebacks and starts include preserved history.
+After a repair the timestamps must be checked too: exactly one new start and
+no new traceback/error lines after the reload is the healthy result.
 
-Snabbaste hälsokollen är röktestet — kamrutinens steg 1–4 som ett kommando:
+The quickest health check is the smoke test -- the comb routine's steps 1-4
+as one command:
 
 ```
 python3 tools/tokenserver/smoke.py
 ```
 
-## Ärlighetsnoter
+## Honesty notes
 
-- Tokens = in + ut + cacheskrivning + cacheläsning, dedupade på
-  message.id + requestId (återupptagna sessioner dubbelräknas inte).
-- `dayTokensPerHour` är senaste timmens faktiska förbrukning — 0 betyder
-  paus, och då låter skärmen bli att ticka. Inga hittade takter.
-- Codex-procenten kommer primärt från Codex egen aktuella
-  `account/rateLimits/read`-snapshot. Den generella `codex`-bucketen hålls
-  åtskild från namngivna modellkvoter som Spark. Rollout-loggar används bara
-  som fallback; ett passerat `resets_at` eller en fallbackskanning utan
-  generell observation räknas som källfel och följer stale-kontraktet ovan.
-  Claude-proben kostar en tom förfrågan var 240:e sekund — försumbart mot
-  fönstren den mäter.
-- Är datorn av visar skärmen streck efter två minuter (stale), inte gamla
-  siffror som låtsas vara färska. Det är rätt beteende, inte ett fel.
+- Tokens = in + out + cache write + cache read, deduplicated on
+  message.id + requestId (resumed sessions are not double-counted).
+- `dayTokensPerHour` is the last hour's actual consumption -- 0 means a
+  pause, and the screen then stops ticking. No invented rates.
+- The Codex percentage comes primarily from Codex's own current
+  `account/rateLimits/read` snapshot. The general `codex` bucket is kept
+  apart from named model quotas such as Spark. Rollout logs are only a
+  fallback; a passed `resets_at` or a fallback scan without a general
+  observation counts as a source failure and follows the stale contract
+  above. The Claude probe costs one empty request every 240 seconds --
+  negligible against the windows it measures.
+- If the computer is off the screen keeps the last valid figures and marks
+  them `CACHED` after two minutes -- they never pretend to be fresh
+  (`components/app_tokens/app.c` only sets the stale flag, `usage_screen.c`
+  swaps the label). Dashes appear in a different case: when the panel never
+  got data at all, since `stale` requires `has_data`. Both are correct
+  behaviour.

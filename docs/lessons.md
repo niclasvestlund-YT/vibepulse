@@ -21,6 +21,292 @@ point at the backlog item.
 
 ---
 
+## 2026-09-10 · A background scan still blocked every request through the lock
+
+**What happened:** after a restart on a Mac with a large Claude/Codex
+history, the light health endpoints answered but every `/api/tokens` request
+timed out for 211 s, and the panel went STALE two minutes into a restart of
+a perfectly healthy service (issue #62). **Root cause:** the first usage
+scan had been moved *off* the startup thread in August (lesson 2026-08-26),
+but `get_snapshot` still ran it inline, under `_cache_lock`, whenever no
+result existed yet. Every HTTP worker took the same lock to read the result
+and queued behind the one doing the scan. The warm-up thread did not help:
+it was just the first caller to take that lock. **The rule now:** a request
+handler never does the expensive thing under the lock that serves the
+cheap thing. If there is no result yet, say so in the response and let one
+background thread produce it; readers take the lock only to copy. And the
+"no result yet" state is *named* (`usageTotals.state`), so a placeholder
+never looks like a measurement to the doctor, the hook, the smoke test or
+the relay publisher. And a placeholder is only handed to a client that
+said it understands one (`X-VibePulse-Accepts: usage-totals`); the
+already-flashed firmware would have applied the zeros as fresh data, which
+a Codex review caught on the first draft, so everyone else gets the error
+form the old firmware already rejects. **Guards:** `StartupSnapshotTests`
+in `test_tokenserver.py` time the first request with the scan blocked,
+prove one scan for many requests, the cadence-bounded retry after a crash,
+that the block is captured under the lock with the counters it describes,
+and the header gate; `test_publisher.py` proves a placeholder is not sent;
+`test_tokens.c` proves the firmware flag; the doctor, hook and smoke suites
+each classify the state. **Watch for:** a new producer that computes under
+`_cache_lock`, and a new `/api/tokens` reader that forgets the header and
+mistakes the 503 for a dead service.
+## 2026-09-10 · A hand-written label map was a parser with six entries and a hundred inputs
+
+**What happened:** the agent rows on the panel typeset six model ids by
+hand (`MODEL_LABELS`) and let every other id in `prices.json` fall
+through as a raw lowercase string clipped at 24 bytes: `claude-fable-5-1`
+sat next to `OPUS 5`, and `claude-haiku-4-5-20251001` rendered as
+`claude-haiku-4-5-2025100` (OBS-30). **Root cause:** a lookup table is a
+parser whose grammar is "the cases someone remembered"; every new model
+was a silent miss with no test to fail. **The rule now:** derive the label
+from the id's own structure (family, version, variant; every snapshot
+date form dropped, including the compact `-0613` token before a variant)
+and keep the map for genuine exceptions only. **Guards:** a test walks
+every id in `prices.json` and every label fits the firmware column; the
+compact-snapshot forms are pinned after a Codex review found them.
+**Watch for:** an id shape neither grammar nor table knows — it lands
+uppercased, not clipped, but check it against Claude's own client before
+shipping a hand override.
+
+## 2026-09-10 · A store that starts over on a bad file destroys the evidence on its next save
+
+**What happened:** none of the three state files was ever corrupted in the
+field; this is an audit finding (OBS-11) made into a rule before it costs
+anyone 400 days of Max Tracker history. **Root cause:** each store handled
+"cannot read" the only way an unspecified case gets handled: return an
+empty state and carry on. The next `save()` then wrote the empty state over
+the corrupt bytes, which are usually 99 % intact. Recovery was impossible
+by design, and a non-UTF-8 `max-tracker.json` did not even reach that
+path: `read_text` raised out of the constructor and the service did not
+start. The parent-directory fsync (OBS-21) has the same shape: the quota
+cache had it, its two siblings did not, because each writer was written on
+its own day. **The rule now:** a state file that cannot be loaded is moved
+aside (`<name>.corrupt-<UTC stamp>`) with one WARNING naming file and
+reason, never contents, and only then does the store start empty; a
+parseable file that lacks the shape `save()` always writes counts as
+corrupt too, since a valid file cannot look like that. Durability and
+quarantine live in one helper (`state_files.py`) so a fourth store
+inherits both instead of re-deciding them. **Guards:** per-store tests for
+invalid JSON, non-UTF-8 bytes and wrong shape (`{}` included, after a
+Codex review caught that gap; a provider section that is a dict but not
+the `{v, days, weeks, backfill}` shape `save()` writes, after the next
+pass caught that one), and for the parent fsync after the rename. Two
+more rules from the same review: a file that exists but cannot be *read*
+(permissions, I/O) is not "empty" — the store starts empty but refuses to
+save, because a rename needs only the directory's permission and would
+have replaced the file on the first save; and when the replace has landed
+but the directory fsync fails, memory keeps the new state (disk and
+memory agree, only durability is unproven) instead of rolling back and
+letting the next save drop a sample that is on disk.
+**Watch for:** a new store that catches `OSError` broadly and returns
+empty, and a loader that accepts a partial shape "to be lenient".
+## 2026-09-10 · The parser read a field where the docs put it, not where the writer puts it
+
+**What happened:** `/api/agent-status` served `effort: null` for every
+Claude job since the field was added; the panel had a column for it and
+never a value. **Root cause:** `_claude_event` read `effort` inside the
+API `message` object, beside `model`. Claude Code writes it on the
+transcript *record*, beside `type` and `version`. Nobody had opened a real
+transcript and counted: measured on a live 2.1.267 session, 125 of 125
+assistant records carried `effort` at the top level and none nested, while
+`model` really does live inside `message`. **The rule now:** a new field
+in an upstream file is located by *measurement on a real file* (count the
+records, count where the key appears), never by analogy with a sibling
+field or by the API shape. Write the count into the commit. **Guards:**
+`test_claude_reads_effort_from_the_record_top_level` and its three
+siblings in `test_agent_status.py` (nested still wins, bounded, never from
+`tool_input`); the classifier reads the nested place first and falls back
+to the record, so either layout keeps working. **Watch for:** the same
+mistake on the next Claude Code field; `docs/companion-features-brainstorm.md`
+lists two more measured shapes (`result` records, Codex `payload.info`)
+that code must not assume.
+
+---
+
+## 2026-09-06 · The panel logged the credential it was told never to print
+
+**What happened:** all three failure paths in `torget_http.c` logged the
+address they had just failed on — `hämtning misslyckades: … (%s)`,
+`oväntad statuskod %d (%s)`, `kroppen större än … (%s)`. When the fetch had
+failed over to the numbers relay, that address was the cloud mailbox URL,
+whose path `/u/<secret>` *is* the access control: it reads the panel's
+figures and overwrites them. `docs/relay.md` has said "Never print the
+secret URL in logs or a shared transcript" since the relay shipped, so the
+code contradicted a written safety rule — and a relay outage is exactly the
+moment someone attaches a monitor and pastes the output into a thread.
+**Root cause:** the logs predate the relay. They were written when every
+address was a LAN address and a URL was just a URL; the relay added a
+credential-bearing address to the same helper and nobody revisited what the
+old lines print. Found by a Codex review on the #87 cleanup PR, on a file
+that PR did not touch.
+**The rule now:** a log may see scheme + host and which route was tried;
+the path never. The redaction is **unconditional** — it does not ask
+whether this particular address is the secret one — and it lives in the one
+helper every failure path already goes through, so a fourth path inherits
+it instead of having to remember it. The general shape: when a value
+becomes a credential, the code that *prints* it is as much a caller as the
+code that sends it.
+**Guards:** `components/torget_net/net_log_target.c` is pure string logic,
+host-tested by `test/test_net_log_target.c` (secret never survives, route
+survives truncation, short buffers neither overflow nor leak).
+`test/test_relay_boundary.py` parses every `ESP_LOG*` call in
+`torget_http.c` and fails if one names a raw address — it catches all three
+original lines. **Watch for:** ESP-IDF's own `HTTP_CLIENT` tag prints the
+full request line at `ESP_LOGD`. The inherited default log level compiles
+that out today; raising it reopens the leak (OBS-35, paired with OBS-28).
+
+---
+
+## 2026-09-06 · A photo of the panel carried the coordinates it was taken at
+
+**What happened:** `docs/img/github/glass-live.png` was an iPhone 15 Pro
+photograph committed straight off the camera — 3024 × 4032, 6.9 MB, a
+quarter of the whole repository in one file. Its EXIF held a full GPS IFD:
+a position fix precise to ten metres, with the altitude and the minute it
+was taken. That is a home address, published, in a repository whose
+`.gitignore` deliberately keeps `.ota-device` and `secrets.h` off the disk
+because a LAN address is considered too revealing to share. **Root cause:**
+the secrets discipline was built around *text* — passwords, keys, IP
+addresses in files someone would read. A binary nobody opens was never in
+scope, and a camera writes the location in by default. The size made it
+into the repository the same way: nobody looks at a photo's dimensions
+when the markdown renders it at 800 px. **The rule now:** a photograph
+entering `docs/img/` is resized to what the page actually renders and
+re-encoded through a fresh image with no `info` dict, so EXIF, XMP and the
+ICC profile are all dropped rather than trimmed. Check
+`Image.getexif().get_ifd(0x8825)` is empty before committing. **And do not
+write the values into the write-up.** The first version of this entry quoted
+the exact latitude, longitude, altitude and timestamp in plaintext — more
+searchable than the EXIF it was describing, and it would have outlived any
+scrub of the image. A review bot caught it. Describe what the metadata was,
+never what it said.
+**Guards:** none automated yet — `test_docs_frame_drift.py` deliberately
+skips `NOT_FRAMES`, which is where every photograph lives, so the class is
+unguarded by construction. Backlog item, not a claim of safety.
+**Watch for:** the original blob is still on `main` and on GitHub. Stripping
+the working copy does not unpublish it. The rewrite was built and verified
+but could NOT be delivered: a repository ruleset refuses a force-push to
+`main` ("GH013: Cannot force-push to this branch"). Scope is small — exactly
+one blob (`e5e6190b4bb1`) carries GPS, and only 2 of the repository's 37
+branches reach it, `main` and the cleanup branch. To finish it: lift the
+force-push rule for `main`, then swap that blob for the stripped file with
+`git filter-repo --blob-callback` and force-push both refs. Note the clone
+this ran in was SHALLOW; `git fetch --unshallow` first, or the rewrite
+truncates history to whatever the clone happened to hold —
+`tools/snapshot.sh` now refuses in exactly that state, and taking a snapshot
+first is the rule (AGENTS.md, Arbetsregler). **And `filter-repo` is the wrong
+tool on a PR branch**: `--refs <branch>` rewrites every commit that branch can
+reach, base commits included, so the branch silently detaches from `main` —
+GitHub then shows the PR as 401 commits and 408 files with no merge base. It
+cost two rebuilds here before the pattern was obvious. To scrub a string that
+only exists in your own commits, rebuild on the base with `cherry-pick` and
+fix the content on the way through; check `git merge-base HEAD origin/main`
+afterwards, and compare the final tree against the intended one.
+**Restoring from a snapshot:** `git clone <bundle> <dir>` covers branches and
+tags — and nothing else. `refs/notes/*`, any custom namespace, and the
+pseudo-refs `HEAD`, `ORIG_HEAD` and `worktrees/<name>/HEAD` (commits no
+branch reaches at all) are left behind. `git bundle list-heads`, or the
+`.refs` file beside the snapshot, says what is actually in there. To bring
+back everything, after the clone — note the `-C <dir>`, because `git clone`
+leaves you standing where you started and a bare `git fetch` here would update
+the repository you are in, not the one you just made:
+
+    git -C <dir> fetch <bundle> '+refs/*:refs/rescue/*' \
+      '+worktrees/*:refs/rescue-worktrees/*'
+
+    # then, for each bare pseudo-ref row `git bundle list-heads <bundle>`
+    # actually prints — HEAD, ORIG_HEAD, MERGE_HEAD, ...:
+    git -C <dir> fetch <bundle> '+<NAME>:refs/rescue-pseudo/<NAME>'
+
+Three shapes of name, and a wildcard over `refs/*` reaches only the first:
+named refs, `worktrees/<name>/...` from a linked worktree, and the bare
+pseudo-refs. Those live outside `refs/`, so each needs its own line; omit one
+and its commit comes back with no ref at all and goes away at the next
+`git gc --prune=now`. A wildcard refspec that matches nothing is harmless.
+A bare pseudo-ref refspec is not a wildcard, and that is why it goes on its
+own line, conditional on `list-heads`: an exact refspec that matches nothing
+aborts the whole fetch with `fatal: couldn't find remote ref HEAD`, and takes
+the ones that would have worked down with it. A bundle whose repository had
+no valid HEAD — only remote-tracking refs and tags, which is what a mirror
+looks like — is exactly that case, and `tools/snapshot.sh` called such a
+bundle corrupt until it started asking `list-heads` first.
+
+**`--all` is not everything.** `git bundle create --all` means `refs/*` plus
+`HEAD`. Every other pseudo-ref is outside both, and each can be the last thing
+holding a commit: `ORIG_HEAD` after a `git reset --hard`, a rebase or a merge;
+`MERGE_HEAD` during a conflicted merge, which can be all that still points at
+a deleted topic branch — and which can hold **several** lines, since a paused
+octopus merge lists every parent while `rev-parse` returns only the first; `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`,
+`BISECT_HEAD` the same way mid-operation. Two commits, reset to the first, run
+the tool: the verified bundle held one commit and the former tip could not be
+read out of it. `tools/snapshot.sh` now passes the whole list alongside
+`--all`, taking each one that resolves, and reading the extra lines out of a
+multi-parent `MERGE_HEAD` as well — fixing them one name at a time just buys
+one review round per name.
+
+A bundle can only *name* refs, and those extra parents have no ref name. Their
+objects still go into the pack (passing the OID as a rev is enough, verified),
+so they survive; but nothing reaches them, so the tool records each one in the
+`.refs` sidecar next to the bundle, and the verification probe creates a ref
+per OID — which makes the commit count honest and, more importantly, makes a
+missing object fail the snapshot instead of passing quietly. After restoring,
+`git -C <dir> branch rescue-N <oid>` before the next `gc` is what turns them
+back into something you can look at. An object in the file that nobody can
+find is not a rescue. One is deliberately left out: `AUTO_MERGE`
+points at a *tree*, the derived mid-conflict merge result nobody needs back.
+`FETCH_HEAD` was on that list too, excluded on the reasoning that its contents
+came from a remote you still have — which is simply false for a one-off
+`git fetch /some/path HEAD` whose source is then deleted, leaving `FETCH_HEAD`
+as the only name that commit has. It is included now, and the extra OIDs are
+filtered to those no ref reaches, so an ordinary `git fetch origin` (one
+FETCH_HEAD line per ref, all already under `refs/remotes/*`) adds nothing to
+the rescue list. Noise there would hide the few entries that are actually in
+danger.
+
+They are collected **per worktree** as well, because
+they are per-checkout: a rebase done in a linked worktree, which is
+exactly where you do risky things to avoid touching the main checkout, writes
+`worktrees/<id>/ORIG_HEAD` and the main worktree's `ORIG_HEAD` says nothing
+about it. (`worktrees/<id>/HEAD` needs no such handling: `--all` reads every
+worktree's HEAD already, just not the rest.) A linked worktree also has its
+own **refs**, not only its own pseudo-refs: `refs/worktree/*`, `refs/bisect/*`
+during a bisect and `refs/rewritten/*` during a `rebase --rebase-merges`, all
+under `.git/worktrees/<id>/refs/` and none of them reached by `--all`. A
+commit whose only reference was `refs/worktree/saved` in a linked worktree was
+missing from the clone of a snapshot that called itself verified. The main
+worktree's equivalents sit under `refs/` and were covered all along. The `+worktrees/*`
+refspec above restores them without change.
+
+Those ids come from listing `.git/worktrees/`, not from `git worktree list`.
+A worktree whose directory was deleted without `git worktree remove` is
+`prunable` and rightly drops out of that list — but its metadata, `ORIG_HEAD`
+included, survives until someone runs `git worktree prune`, and it can be the
+only reference a commit has left. Reading the directory is also what `--all`
+itself does: it picks up `worktrees/<id>/HEAD` from a prunable registration
+too. Live-ness matters for where you may write and whose dirty files to warn
+about; it does not decide what is worth saving. **The reflog itself still is not in
+there** and cannot be — a bundle has no way to carry one. Everything an
+earlier reset or rebase orphaned lives in `git reflog` in the original clone
+and nowhere else, which is worth knowing before deleting that clone.
+
+All three destinations are outside `refs/heads/*` on purpose, and that is the
+part that took three attempts to get right. Fetching into `refs/*` aborts with
+`refusing to fetch into branch ... checked out` the moment the clone has any
+branch checked out, which it always does. And a fixed destination under
+`refs/heads/` overwrites itself: restore once, snapshot the result, and the
+next restore force-updates the branch the previous one created. The two
+namespaces above cannot collide with each other or with anything a previous
+restore left, which was verified by snapshotting a restored repository and
+restoring that. `git bundle list-heads`
+(and the `.refs` file beside each snapshot) says which of them exist. No
+recipe is printed by the tool itself: eight review rounds found a new edge in
+those lines almost every time — lost tags and notes, a branch name containing
+`$(...)`, an unnamed detached HEAD, a rescue ref that collided with itself on
+the second restore — and a recovery command that is wrong in the moment you
+need it does more harm than no command at all.
+
+---
+
 ## 2026-09-05 · Pinning a screenshot's size did not pin its content
 
 **What happened:** the global Wi-Fi indicator was redrawn in `d5be82d`

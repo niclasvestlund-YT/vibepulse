@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
+try:
+    from .state_files import fsync_parent, quarantine_corrupt
+except ImportError:  # run as a script / from the directory itself
+    from state_files import fsync_parent, quarantine_corrupt
+
 
 _PROVIDERS = {"claude", "codex"}
 _SCOPES = {"general_session", "general_weekly", "model_weekly"}
@@ -108,11 +113,22 @@ class QuotaCache:
 
     def _load(self) -> Dict[Tuple[str, str, str], CachedQuota]:
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except UnicodeError:
+            quarantine_corrupt(self.path, "not UTF-8")
+            return {}
+        except OSError:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as error:
+            quarantine_corrupt(self.path, f"invalid JSON at byte {error.pos}")
             return {}
         if (not isinstance(payload, dict) or set(payload) != {"v", "records"}
                 or payload["v"] != 1 or not isinstance(payload["records"], list)):
+            quarantine_corrupt(self.path, "not a {v: 1, records: [...]} file")
             return {}
         current_time = self._now()
         prune_expired = _finite_number(current_time)
@@ -146,17 +162,9 @@ class QuotaCache:
         }
 
     def _fsync_parent(self) -> None:
-        # Windows does not expose POSIX directory descriptors/fsync. The
-        # temporary file itself is still flushed before os.replace; asking
-        # Windows to open the parent as a file makes every cache write fail.
-        if os.name == "nt":
-            return
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-        descriptor = os.open(self.path.parent, flags)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        # One implementation for all three state files (OBS-21); the
+        # Windows no-op and its reason live in state_files.fsync_parent.
+        fsync_parent(self.path)
 
     def _persist(self, snapshot: Tuple[CachedQuota, ...]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

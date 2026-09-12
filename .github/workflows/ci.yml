@@ -120,7 +120,13 @@ jobs:
       - name: Run setup integration tests on Windows
         if: runner.os == 'Windows'
         shell: powershell
-        run: python test/test_vibepulse_codex_plugin.py
+        run: |
+          # PowerShell does not stop on a native command's non-zero exit, and
+          # the runner only checks the LAST exit code — so the first failure
+          # would be masked without this guard.
+          python test/test_vibepulse_codex_plugin.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python test/test_vibepulse_setup_claude_only.py
       - name: Validate the Windows Task Scheduler installer without installing
         if: runner.os == 'Windows'
         shell: powershell
@@ -149,6 +155,55 @@ jobs:
             -CodexPlan pro -ClaudePlanCostUsd "100" `
             -CodexPlanCostUsd "20"
           .\test\windows-task-runner.ps1
+
+  snapshot-tool:
+    # tools/snapshot.sh är backupen AGENTS.md kräver före varje
+    # historikomskrivning, och den körs på maintainerns Mac. Tre av de fem
+    # defekter granskningen hittade i filen — awk med NUL som RS, `head -c -1`
+    # och `mktemp` utan mall — är OSYNLIGA på Linux: GNU:s verktyg gör precis
+    # vad skriptet ber om. Matrisen är därför inte lyx. Ubuntu ensamt fångar
+    # ingen av dem, och testets statiska vakter är en andra linje, inte en
+    # ersättning för att faktiskt köra filen mot BSD-verktygen.
+    #
+    # Eget jobb i stället för en gren i tokenserverjobbet: det kör också
+    # windows-latest, där ett bash-verktyg inte hör hemma, och installerar
+    # beroenden det här testet inte har — det klarar sig på stdlib och git.
+    name: Snapshot tool (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify the backup tool against synthetic repositories
+        shell: bash
+        run: python test/test_snapshot_tool.py
+      # Ett KOMPLEMENT, inte en ersättning: shellcheck flaggar varken
+      # RS="\0" eller en mktemp utan mall. Bara snapshot.sh, för hela
+      # tools/*.sh är rött idag av skäl som inte hör hit — flasha.sh är zsh
+      # (SC1071, shellcheck kan inte läsa den alls), och `CDPATH= cd` i
+      # install-local-skills.sh och preview-ui.sh ger SC1007 fast idiomet är
+      # rätt. Att städa det är sitt eget ärende.
+      #
+      # --severity=warning, inte standardnivån. Info-nivån skiljer sig mellan
+      # shellcheck-versioner: runnerns version ger SC2015 på
+      # `[ -n "$r" ] && [ -d "$r" ] || continue` medan 0.11.0 tiger, och just
+      # där är varningen fel — att `continue` körs när A är sant men B falskt
+      # ÄR meningen. En grind som blir röd av att runnerimagen bytt version
+      # säger inget om koden. Fel och varningar (parsefel, SC1007, SC1071)
+      # fångas fortfarande.
+      - name: Shellcheck the backup tool
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends shellcheck
+          fi
+          shellcheck --severity=warning tools/snapshot.sh
 
   firmware:
     name: ESP32-S3 firmware build

@@ -893,20 +893,20 @@ class ProviderStoreTests(unittest.TestCase):
 
     def test_valid_international_display_text_still_parks(self):
         event = question_event(
-            question="Vilken väg?",
+            question="Which way?",
             options=[
-                {"label": "Kör tester (Recommended)",
-                 "description": "Säker ändring"},
-                {"label": "Lämna oförändrat"},
+                {"label": "Run tests (Recommended)",
+                 "description": "Safe change"},
+                {"label": "Leave unchanged"},
             ])
 
         entry = self.store.park("question", event, 120)
 
         self.assertIsNotNone(entry)
         public = self.store.pending_public()
-        self.assertEqual(public["prompt"], "Vilken väg?")
-        self.assertEqual(public["title"], "Kör tester")
-        self.assertEqual(public["subtitle"], "Säker ändring")
+        self.assertEqual(public["prompt"], "Which way?")
+        self.assertEqual(public["title"], "Run tests")
+        self.assertEqual(public["subtitle"], "Safe change")
 
     def test_queue_is_bounded(self):
         parked = [self.store.park("approval", approval_event(), 300)
@@ -1159,13 +1159,15 @@ class RelayStoreListenerTests(unittest.TestCase):
             barrier = threading.Barrier(3)
             results = []
 
-            def direct():
+            def direct(entry=entry, stamp=stamp, direct_mac=direct_mac,
+                       barrier=barrier, results=results):
                 barrier.wait()
                 results.append(self.store.resolve(
                     entry.request_id, "deny", stamp, direct_mac,
                     provider="claude", view_sha256=entry.view_sha256))
 
-            def relayed():
+            def relayed(relay_result=relay_result, barrier=barrier,
+                        results=results):
                 barrier.wait()
                 results.append(self.store.resolve_relay(
                     relay_result, lambda _job, _result: True))

@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -13,6 +14,7 @@
 
 #include "agent_net_policy.h"
 #include "agent_status_parse.h"
+#include "poll_backoff_policy.h"
 #include "app_tokens.h"
 #include "secrets.h"
 #include "torget.h"
@@ -21,6 +23,10 @@
 static const char *TAG = "agent-net";
 
 #define AGENT_POLL_MS 1000
+/* OBS-13: a dead service used to get this poll every second, forever --
+ * 86 400 connect attempts a day. Consecutive misses now double the wait
+ * up to thirty seconds; one success resets it. */
+#define AGENT_POLL_CAP_MS 30000
 #define AGENT_LOG_EVERY_MS 30000
 /* A v2 Needs You item adds a 2 KiB snapshot plus the bounded 1 KiB
  * canonical-view buffer and SHA/cJSON call frames to the poll path. The old
@@ -113,7 +119,16 @@ static const tk_agent_http_io status_http_io = {
   .close = status_http_close,
 };
 
-static void log_rejection(esp_err_t err, bool parsed) {
+static const char *fetch_result_name(tk_agent_http_fetch_result fetch) {
+  switch (fetch) {
+  case TK_AGENT_HTTP_FETCH_OK: return "ok";
+  case TK_AGENT_HTTP_FETCH_IO_ERROR: return "IO-fel (öppna/läsa)";
+  case TK_AGENT_HTTP_FETCH_OVERFLOW: return "överflöde";
+  }
+  return "okänt";
+}
+
+static void log_rejection(tk_agent_http_fetch_result fetch, bool parsed) {
   static bool has_logged;
   static TickType_t last_log_tick;
   TickType_t now = xTaskGetTickCount();
@@ -127,9 +142,10 @@ static void log_rejection(esp_err_t err, bool parsed) {
   if (response.overflow) {
     ESP_LOGW(TAG, "agentstatus avvisad: svar större än %u byte",
              (unsigned)(TK_AGENT_HTTP_BODY_CAP - 1));
-  } else if (err != ESP_OK) {
-    ESP_LOGW(TAG, "agentstatus avvisad: transportfel %s",
-             esp_err_to_name(err));
+  } else if (fetch != TK_AGENT_HTTP_FETCH_OK) {
+    /* OBS-12: the real three-valued result, not a collapsed ESP_FAIL. */
+    ESP_LOGW(TAG, "agentstatus avvisad: transportfel, %s",
+             fetch_result_name(fetch));
   } else if (response.status != 200) {
     ESP_LOGW(TAG, "agentstatus avvisad: HTTP %d", response.status);
   } else if (!parsed) {
@@ -146,6 +162,8 @@ static void agent_net_task(void *arg) {
   esp_http_client_handle_t client = NULL;
   char client_url[160] = {0};
   tg_service_source client_source = TG_SERVICE_SOURCE_CONFIGURED;
+  tk_poll_backoff backoff;
+  tk_poll_backoff_init(&backoff, AGENT_POLL_MS, AGENT_POLL_CAP_MS);
 
   ESP_LOGI(TAG, "agentstatuspollning startad");
   for (;;) {
@@ -154,7 +172,12 @@ static void agent_net_task(void *arg) {
     if (!torget_service_endpoint_url(
             "/api/agent-status", TK_AGENT_STATUS_URL,
             selected_url, sizeof selected_url, &selected_source)) {
-      vTaskDelay(pdMS_TO_TICKS(AGENT_POLL_MS));
+      if (tk_poll_backoff_note(&backoff, false)) {
+        ESP_LOGW(TAG, "agentstatus: ingen adress att polla, %" PRIu32
+                      " fel i rad — provar var %" PRIu32 " ms",
+                 backoff.streak, tk_poll_backoff_delay_ms(&backoff));
+      }
+      vTaskDelay(pdMS_TO_TICKS(tk_poll_backoff_delay_ms(&backoff)));
       continue;
     }
     if (!client || strcmp(client_url, selected_url) != 0) {
@@ -173,18 +196,21 @@ static void agent_net_task(void *arg) {
       };
       client = esp_http_client_init(&cfg);
       if (!client) {
+        /* OBS-12: keep trying (a fresh client next pass), on the backoff
+         * ladder -- the task used to have nothing better than a fixed
+         * one-second retry here. */
         ESP_LOGW(TAG, "agentstatus kunde inte skapa HTTP-klient");
         client_url[0] = '\0';
-        vTaskDelay(pdMS_TO_TICKS(AGENT_POLL_MS));
+        (void)tk_poll_backoff_note(&backoff, false);
+        vTaskDelay(pdMS_TO_TICKS(tk_poll_backoff_delay_ms(&backoff)));
         continue;
       }
     }
     tk_agent_http_fetch_result fetch =
         tk_agent_http_fetch_bounded(client, &response, &status_http_io);
-    esp_err_t err = fetch == TK_AGENT_HTTP_FETCH_OK ? ESP_OK : ESP_FAIL;
 
     tk_agent_snapshot snapshot;
-    bool transport_ok = err == ESP_OK;
+    bool transport_ok = fetch == TK_AGENT_HTTP_FETCH_OK;
     bool parsed = false;
     if (transport_ok && response.status == 200 && !response.overflow) {
       parsed = tk_agent_status_parse(response.body, response.len, &snapshot);
@@ -200,7 +226,7 @@ static void agent_net_task(void *arg) {
       tokens_apply_agent_status(&snapshot);
       torget_ui_unlock();
     } else {
-      log_rejection(err, parsed);
+      log_rejection(fetch, parsed);
       if (client_source == TG_SERVICE_SOURCE_DISCOVERED && !host_ok) {
         esp_http_client_cleanup(client);
         client = NULL;
@@ -208,7 +234,24 @@ static void agent_net_task(void *arg) {
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(AGENT_POLL_MS));
+    /* Transitions only: the slowdown steps and the recovery, never every
+     * miss (the rejection log above is already throttled). The feed counts
+     * as a miss unless the response was APPLIED: a host that answers 200
+     * with a body the parser rejects is as useless to the screen as a dead
+     * one, and hammering it every second changes nothing (host_ok stays
+     * the service-discovery signal only). */
+    uint32_t streak_before = backoff.streak;
+    if (tk_poll_backoff_note(&backoff, accepted)) {
+      if (accepted) {
+        ESP_LOGI(TAG, "agentstatus svarar igen efter %" PRIu32 " missar",
+                 streak_before);
+      } else {
+        ESP_LOGW(TAG, "agentstatus: %" PRIu32 " missar i rad — pollar var "
+                      "%" PRIu32 " ms tills tjänsten svarar",
+                 backoff.streak, tk_poll_backoff_delay_ms(&backoff));
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(tk_poll_backoff_delay_ms(&backoff)));
   }
 }
 

@@ -5,25 +5,163 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
-### Fixed
+## v1.1.0 — 2026-09-10
 
-- **The OTA runbook told you the wrong gesture, on the terminal, while you
-  stood at the panel.** `tools/ota-flash.sh` said "håll KEY3 ~3 s tills
-  UPDATES ON-ringen syns" — in its header *and* in the line it prints while
-  waiting for the window. The hold has opened SETTINGS since #72; UPDATE in
-  the menu is what opens the window. Someone following it would have held
-  the button and waited for a ring that never came. `tools/wifi-here.sh`
-  had the same error twice — in its header and in the retry advice it
-  prints when the Mac cannot reach the panel's access point, which is
-  exactly when the operator is stuck and reading carefully. All corrected,
-  and `test/test_ota_gesture_docs.py` — which exists to catch this class and
-  did not — now reads the two runbooks, understands Swedish verb-first
-  phrasing ("Håll KEY3"), normalises whitespace so a line break inside a
-  sentence no longer hides it, joins what a shell script actually prints
-  across several `echo` lines, and guards the Wi-Fi setup window as well as
-  the update window.
+Release notes:
+[v1.1.0 — SETTINGS on the glass, evidence after a crash](docs/releases/2026-09-10-settings-and-evidence.md).
 
 ### Added
+
+- **A panic leaves evidence, and the panel counts its reboots (OBS-02,
+  OBS-03, OBS-28, OBS-35).** In source and CI-built, **not yet flashed or
+  physically verified**: a 128K `coredump` partition (appended after
+  `ota_1`; OTA never writes the table, so one USB
+  `idf.py partition-table-flash` is needed before a dump can land, and
+  the boot log says so until then) with ELF coredumps to flash on panic, a `coredump i flash … idf.py coredump-info` notice at the
+  next boot, and a reboot ledger in NVS (`omstartsliggare: boot #N sedan
+  liggaren initierades; efter PANIK a, vakthund b, BROWNOUT c`, counted
+  since the ledger was initialized or NVS last erased, never claimed as
+  "since first flash"; a read, write or commit failure logs which step and
+  no counts) right after the boot banner, so "did it reboot while I was
+  away?" is one serial line. `sdkconfig.defaults` now
+  pins the log level (INFO, maximum equals default, which compiles
+  `ESP_LOGD` and with it the `HTTP_CLIENT` request-line leak out
+  structurally), panic print-and-reboot, the task watchdog, and LVGL's own
+  log at WARN, each with its reason. Because defaults never migrate an
+  existing generated `sdkconfig` (the 2026-08-19 lesson), the root CMake
+  now refuses to configure when the effective config has lost the coredump
+  writer, the ELF format, the panic-then-reboot choice, the INFO default
+  or the log ceiling, the task watchdog (or has its panic option on: the
+  watchdog is warn-only, pinned off in the defaults) or the LVGL log with
+  its printf sink and WARN level (`cmake/torget_diagnostics_guard.cmake`,
+  naming the missing values and the `idf.py reconfigure` fix). The ledger
+  counters saturate at their ceiling instead of wrapping to zero. `test/test_firmware_diagnostics.py`
+  holds the pins and exercises the guard both ways; `docs/observability.md`
+  has the retrieval steps, and its signature table now points a panic at
+  the dump and the ledger instead of calling the banner the only witness;
+  a `Task watchdog got triggered` warning is transient serial evidence
+  only (warn-only, so no reboot, dump or ledger count), and a
+  chip-attributed watchdog reset counts in the ledger but has a dump only
+  when the separate `coredump i flash` notice follows the banner.
+
+- **The panel backs off from a dead service instead of hammering it
+  (OBS-13, OBS-12).** In source and CI-built, **not yet flashed**: every
+  device poller ran at a fixed cadence no matter what, so a stopped
+  tokenserver got a connect attempt every second from the agent-status
+  poller alone, all day. A small pure policy (`poll_backoff_policy.c`,
+  host-tested) now lets the first miss through at the normal cadence, then
+  doubles the wait per consecutive miss up to a cap (agent status 1 s to
+  30 s, tokens 30 s to 300 s, Max Tracker 5 to 30 min, the optional GitHub
+  feed 30 s to 300 s) and resets on the first success, logging only the
+  transitions. A miss is a response the screen could not apply, not merely
+  a dead host: a service answering 200 with a body the parser rejects
+  backs off the same way. The tokens poller's recovery notification still
+  cuts a long wait short. `docs/observability.md` maps the new log lines. Two diagnostic holes
+  closed on the way: the agent poller names the real fetch outcome
+  (`IO-fel` vs `överflöde`) instead of a collapsed `ESP_FAIL`, and the HTTP
+  helper's one silent failure path (no memory for a client) now logs, with
+  the target redacted like every other line there.
+
+- **A linter, at last (OBS-25).** `ruff` is pinned in `requirements-dev.txt`
+  (and `pyproject.toml` carries the same pin as `required-version`, so a
+  venv with another release is refused instead of linting differently from
+  CI), configured in `pyproject.toml` with bug-shaped rules only (pyflakes, bare
+  `except`, bugbear, `try/except/pass`, pylint errors, `global` declared for
+  a name never assigned) and runs first in `test/run.sh`, so CI's host gate
+  runs it too. The first sweep found 43 things across ~10 k lines. Every
+  remaining `try/except/pass` is now a named boundary (`# noqa: S110 -
+  <why>`) rather than an unexplained swallow, and the one that mattered is
+  fixed: the Max Tracker backfill loop caught every exception and dropped
+  it, so a bad session file could stop the heatmap's history from ever
+  filling in with nothing in the log; it now logs one line per ten minutes.
+  Sixteen closures over loop variables in tests are bound explicitly, three
+  `zip()` calls state `strict=True`, three dead imports and one dead
+  variable are gone, and `_probe_limits` no longer declares `global` for
+  three names it only reads. Catching `Exception` (74 sites, all
+  deliberate) and the `global` statement itself are not enabled; the config
+  says why.
+
+- **The Claude probe says why it is idle, and never half a status (OBS-18,
+  OBS-20).** `GET /` now carries the probe's backoff beside `claudeProbe`:
+  `claudeProbeStreak`, `claudeProbeIntervalS`, `claudeProbeCooldownLeftS`
+  and `claudeProbeAgeS` (the cadence is 240 s, doubling per miss to
+  960 s), so dashes on the screen can be told apart as "failing every
+  four minutes" versus "resting after a 429"; the smoke test prints them
+  next to a non-ok status. The status string is assembled per cycle and
+  published once, together with the streak and timestamp, under the lock
+  the HTTP threads read with, where it used to grow with `+=` on the probe
+  thread and could be served half-built; a 429's rest is published in that
+  same section as the status that explains it; `GET /` copies status,
+  backoff, rest, credential and header evidence in one locked read, and
+  header evidence (`ratelimitHeaders`, `unknownRateLimitBuckets`) is now
+  the current cycle's only — a cycle that never reached the fallback, was
+  held by another instance or crashed publishes it empty — never
+  hours-old names beside a fresh failure. On macOS the keychain read no
+  longer folds every failure into one shrug: `no_claude_oauth_token`
+  carries `keychain_denied_or_locked (exit N)` (Deny on the prompt, or a
+  locked keychain), `keychain_no_entry`, `keychain_timeout`,
+  `keychain_security_missing`, `keychain_malformed` or
+  `keychain_entry_without_token`, the same word sits in
+  `claudeCredential.reason`, `docs/agent-setup.md` maps each to its fix,
+  and `claude-keychain: X -> Y` logs the transitions.
+
+- **`tools/snapshot.sh`** — one verified bundle of every ref, plus the
+  pseudo-refs `--all` does not cover (`ORIG_HEAD`, `MERGE_HEAD`, `FETCH_HEAD`
+  and the rest, per worktree, including the extra parents a multi-line one
+  holds), to run before anything that rewrites history. It refuses on a shallow clone, which is
+  the trap that nearly cost 433 commits during the work above:
+  `git rev-parse --is-shallow-repository` answers `true` when the clone *is*
+  truncated, and a bundle taken from it restores a fraction of the history
+  without complaining. It also refuses a destination inside the repository,
+  verifies what it wrote by reading it back, and deletes the file if
+  verification fails. Now a work rule in `AGENTS.md`. Written for BSD
+  userland as well as GNU: the first draft parsed worktrees with awk's
+  `RS="\0"`, trimmed with `head -c -1` and called `mktemp` without a
+  template — three things that work on Linux and none of which work on
+  macOS, the very machine where the rule makes the tool mandatory.
+
+- **`/repo-cleanup`** — a two-phase cleanup command. Phase one only produces
+  an evidence table with a keep-list and an uncertainty list; phase two
+  executes the approved subset, one commit per category with `./test/run.sh`
+  between. It encodes the traps that make this repository different: the
+  docs are load-bearing and asserted by tests, C symbols reach the build
+  through CMake and Kconfig rather than callers, and the committed fonts are
+  generated on purpose.
+
+- **The OTA rules now reach Codex.** `AGENTS.md` and `CLAUDE.md` are the same
+  rules for two different agents, and the section saying the maintenance
+  window opens only from the device, that the sender gates exist because a
+  stale build once froze the panel, and that the launchd service must be
+  restarted, was in only one of them.
+
+- **`tools/snapshot.sh` has host tests, on macOS as well as Linux.** The
+  backup `AGENTS.md` makes mandatory before any history rewrite had no
+  coverage at all: no entry in `test/run.sh`, no test file, no shellcheck.
+  Three consecutive review rounds each found a real defect in that one file,
+  and every one was found by a reviewer building a repository shape by hand.
+  `test/test_snapshot_tool.py` now runs the tool against ten synthetic
+  repositories and asserts both the exit code and the published artifacts: an
+  ordinary repository publishes a `.bundle` plus its `.refs` sidecar at mode
+  0600 and clones back; a bare repository and a repository whose bundle
+  advertises no HEAD both exit 0; a shallow clone is refused with
+  `--unshallow` named; a destination inside a checkout is refused directly,
+  via `..`, via a linked worktree, and via a worktree whose path contains a
+  newline; a `prunable` registration neither refuses nor crashes; a run from a
+  linked worktree lands beside the **main** checkout; and a byte flipped in
+  the pack is caught — by the tool's own fetch into a temp bare repository,
+  because `git bundle verify` reads the header only and calls a corrupted
+  pack "okay".
+
+  The portability half is not decoration. Three of the five defects — `awk`
+  with NUL as `RS`, `head -c -1`, `mktemp` without a template — are invisible
+  on Linux, where GNU's tools do exactly what the script asks; they only bite
+  on the maintainer's own machine. A new `Snapshot tool` CI job therefore runs
+  the same file on `ubuntu-latest` **and** `macos-latest`, and the test carries
+  static guards for that class so a reintroduced GNU-ism goes red on ubuntu
+  the minute it is written. `shellcheck tools/snapshot.sh` runs alongside as a
+  complement, not a substitute: it flags neither `RS="\0"` nor a missing
+  `mktemp` template. Each of the five defects was reverted one at a time and
+  the test watched go red before this landed.
 
 - **The screenshots in `docs/img/` are checked against the simulator.**
   `test/test_docs_frame_drift.py` compares every checked-in 480 × 480 frame
@@ -39,6 +177,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   indicator box is simply blank, which proves nothing either way and had
   been passing silently. Re-capturing them is a separate, deliberate
   documentation change.
+
 - **`doctor` and Codex startup health now name a saved Codex mode that
   silently prevents approvals from reaching the panel.** This is the failure
   that looks exactly like a broken panel: the bridge is green, the panel
@@ -63,8 +202,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   the way `main.c` does, and injects the events the button does not control
   (the setup window opening itself, the notice arriving, windows expiring)
   where they really occur. It also asserts no world state is a dead end.
+
 - **`docs/manual-test-key3.md`** — the short list of things only the panel
   can settle, deliberately excluding everything already automated.
+
 - **Every permanent overlay now reports what it costs, on every boot.** The
   three top-layer overlays — Wi-Fi setup, SETTINGS and the OTA ring — are
   built once at start and kept for the whole run, and the AMOLED rule
@@ -108,6 +249,19 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Changed
 
+- **The tokenserver directory speaks English (issue #12).** Every module,
+  test, the smoke test, the README, the launchd plist and the Windows
+  installer under `tools/tokenserver/` are translated: comments,
+  docstrings, CLI help, console output and log lines. The log signatures
+  the runbook names move with it (`starting: rev`, `first scan …`,
+  `serving http://…`, `500 on /api/…`, `usage recompute crashed` /
+  `healthy again`, `found neither … — is Claude Code or Codex on this
+  machine?`), as do the smoke test's tags (`[WARN]`, summary line
+  `smoke test: N ok, N warnings, N failures`) and the SessionStart hook's
+  advice. Runtime keys, persisted file formats, API fields and exit codes
+  are byte-identical; a handful of test fixtures keep non-ASCII text on
+  purpose because they exist to prove UTF-8 handling.
+
 - KEY3's arbitration — which of the glass's owners gets the button on a given
   tick — moved out of `main/main.c` into a pure `tg_button_arbitrate()` in
   `platform/`, shared byte-identically by the panel and the simulator. It was
@@ -129,6 +283,217 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- **A healthy service restart showed STALE on the glass for minutes.** The
+  tokenserver's first history scan ran *under the cache lock* inside
+  `get_snapshot`, so every `/api/tokens` request queued behind it. On a Mac
+  with a large Claude/Codex history the scan took 211 s, the panel's polls
+  timed out one after another, and the glass went STALE two minutes into
+  every restart of a service whose credentials, discovery and relay were
+  all fine (issue #62). The first request now answers at once: the scan
+  runs in the background, and the response carries live quota percentages
+  plus a new additive block `usageTotals` that says what the four volume
+  counters are: `refreshing` (placeholder zeros, `placeholder: true`,
+  `sinceS` since start), `ready` (`ageS` old) or `failing` (the recompute
+  is crashing, OBS-08: frozen with `ageS`, or still placeholders if no
+  scan ever completed). The block is captured under the same lock and from
+  the same read as the counters, so it can never describe a different
+  snapshot than the one it rides on. The completed scan is swapped in
+  atomically; a scan that crashes is retried on the normal thirty-second
+  cadence, never per request. **Placeholders never reach a client that
+  would apply them:** the service serves them only to a request carrying
+  `X-VibePulse-Accepts: usage-totals`, and answers everyone else with the
+  contract's error form (HTTP 503, `usageTotals` beside it), which the
+  already-flashed firmware rejects by design and keeps its last good
+  values, going honestly STALE two minutes later exactly as before. New
+  firmware sends the header, parses `usageTotals.placeholder`, applies the
+  live quota rings but leaves the value page and the keep-awake burn rate
+  untouched during a warm-up: never invented zeros, counters never go
+  backwards. The firmware fetch log and the simulator say "volym ej
+  uppmätt än" for such a sample instead of printing `0.00 Mtok idag`.
+  When the block says `failing` the recompute is crashing and the
+  measurement is not coming, whether the counters are placeholders or
+  frozen at the last good scan: the firmware then shows dashes on the
+  value page instead of carrying an old figure that would look fresh poll
+  after poll, keeps the panel asleep rather than waking on a frozen burn
+  rate, and logs a warning (fixture `tokens-volume-failing.json`). The same block is on `GET /`, the numbers publisher does not
+  send a placeholder to the relay, the SessionStart hook reports `SERVICE
+  WARMING UP` (and `VOLUME RECOMPUTE FAILING`) as their own classes, the
+  setup doctor prints `WAIT` for a warm-up and `FIX` for a failing
+  recompute, and the smoke test warns instead of failing. A full disk is
+  visible too: `GET /` carries `maxTrackerSaveOk` /
+  `maxTrackerSaveFailingForS` while the state file cannot be written (the
+  observations stay in memory and retry, as OBS-10 already arranged), the
+  doctor and smoke test name it, and a test proves one `ENOSPC` on the
+  atomic write leaves both the previous file and memory intact. Firmware
+  side built in CI, not flashed: an OTA to this build is what turns the
+  post-restart STALE into a live panel; until then the old behaviour holds.
+
+- **Unmapped models reached the panel as raw ids (OBS-30).** The agent
+  rows typeset six model ids by hand (`OPUS 5`, `GPT-5.6 SOL`, ...) and let
+  the other hundred-odd in `prices.json` fall through as raw lowercase,
+  clipped at 24 bytes mid-string: `claude-haiku-4-5-20251001` rendered as
+  `claude-haiku-4-5-2025100` next to its typeset siblings. The label is now
+  derived from the id (family, version and variant uppercased, the dated
+  suffix dropped: `HAIKU 4.5`, `OPUS 4.8`, `SONNET 3.7`, `GPT-5.4 MINI`,
+  `O4 MINI`, `MYTHOS PREVIEW`), so a model the agent picks tomorrow is
+  typeset on arrival. The hand map stays for exceptions only, and a test
+  proves every priced model derives an uppercase label that fits the
+  panel's column.
+
+- **A corrupt state file was wiped, silently, by the next save (OBS-11).**
+  All three stores (`max-tracker.json` with up to 400 days of history,
+  `quota-cache.json`, `usage-history.json`) answered unreadable bytes by
+  starting empty with no message, and the next save overwrote the evidence.
+  Each now moves the file aside as `<name>.corrupt-<UTC stamp>` beside the
+  original and logs one WARNING naming the file and the reason (never the
+  contents), then starts empty. The bytes are usually 99 % intact, so the
+  option to look or hand-repair is kept. Wrong-shape JSON counts too, and
+  a non-UTF-8 `max-tracker.json`, which used to raise out of the
+  constructor and stop the service from starting, is quarantined the same
+  way. One helper (`state_files.py`) holds the rule for all three, and the
+  quarantine rename gets the same directory fsync as a save, so the kept
+  copy is durable before the warning says it is. Two more edges from the
+  review: a file that exists but cannot be read (permissions, I/O) makes
+  the store start empty *and refuse to save*, since a rename needs only
+  the directory's permission and would have overwritten it; and a
+  provider section that is a dict but not the `{v, days, weeks,
+  backfill}` shape `save()` writes is quarantined rather than skimmed.
+  The usage history keeps its new state in memory when the replace has
+  landed but the directory fsync failed (disk and memory agree), instead
+  of rolling back and dropping that sample on the next save.
+
+- **Two of three state writers stopped one fsync short of durable
+  (OBS-21).** `quota-cache.json` always did the full atomic dance: file
+  fsync, rename, parent-directory fsync. `max-tracker.json` and
+  `usage-history.json` stopped at the file fsync, so a power cut right
+  after the rename could bring back the previous file or none; the one
+  with 400 days in it was the least protected. Both now fsync the parent
+  through the same shared helper (a no-op on Windows, which has no
+  directory descriptors, exactly as the quota cache already handled it).
+
+- **`effort` was null for every Claude job.** `agent_status.py` read it
+  from inside the API `message`, beside `model`. Claude Code writes it on
+  the transcript *record*, beside `type` and `version`: measured on a live
+  2.1.267 transcript, 125 of 125 assistant records carried `effort` at the
+  top level and none nested, while `model` really does live inside
+  `message`. `/api/agent-status` therefore served `effort: null` for every
+  Claude job since the field was added. The classifier now falls back to the
+  record's own `effort` when the nested one is absent, through the same
+  12-byte control-free bound; `tool_input` is still never a source. Found
+  by the companion-features audit (`docs/companion-features-brainstorm.md`,
+  "Fix first").
+
+- **Five SessionStart tests inherited the developer's own Codex settings.**
+  `session_start.py` reads the saved `approval_policy`, `approvals_reviewer`
+  and `sandbox_mode` from `$CODEX_HOME/config.toml`, else
+  `~/.codex/config.toml`, *before* it checks service health, on purpose: a
+  saved `never` is the failure that looks exactly like a broken panel. Run
+  on a machine whose real config says `never`, that same rule turned five
+  service-health tests red on an unchanged checkout (issue #93). The test
+  harness now hands every script an empty `CODEX_HOME` unless a test
+  supplies its own; the explicit permission-mode tests still pass theirs
+  and still prove the production check. A new test poisons the fallback
+  home directory and asserts the isolation wins.
+
+- **The host gate could not go green anywhere but Europe.** Every Max
+  Tracker test stamped its synthetic records at a fixed UTC hour such as
+  `T10:00:00Z` and expected the store to file them under that same calendar
+  date. The store deliberately owns a record by its *local* day
+  (`max_tracker.py`: "dygnsgränsen är Macens, inte UTC:s"), so west of
+  UTC-10 the record was the previous evening and at UTC+12 a noon stamp was
+  already the next morning. Issue #66 reported the seeded ownership test
+  from Los Angeles; the same class took down thirteen more tests in
+  Pacific/Pago_Pago and one in Auckland, and one in `test_tokenserver.py`.
+  A `_local_stamp(day, hour)` helper now builds every stamp from local
+  wall-clock time and converts it to UTC, so expectation and store apply
+  one rule. The seeded test records ground truth against the local owning
+  day of the stamp it actually wrote. Verified green in seven zones from
+  UTC-11 to UTC+14. No user-facing data was ever affected: the store was
+  right, the expectations were not.
+
+- **The `secrets.h` check in the setup runbook failed every correct setup.**
+  Step 1 of `docs/agent-setup.md` verified the host placeholder with an
+  unanchored `grep -q 'DIN-MAC' secrets.h`. `secrets.h.example` says
+  `DIN-MAC` twice: in the `TK_VIBEPULSE_BASE_URL` define and in the comment
+  telling you to replace it. Following the runbook replaces the define and
+  keeps the comment, so the check printed `PLACEHOLDER STILL THERE` on every
+  correct file. This is the guard for the mistake that once cost an evening
+  of network debugging (`docs/lessons.md`, 2026-08-17); a guard that always
+  fires teaches the reader to ignore it. The match is now anchored to the
+  URL (`://DIN-MAC`) rather than to `#define`, because the define spans two
+  lines, and the runbook says why. Reported in issue #64.
+
+- **The panel printed the relay's secret URL every time a cloud fetch
+  failed.** All three failure paths in `components/torget_net/torget_http.c`
+  logged the address they had just failed on. When the fetch had failed over
+  to the numbers relay that address was the cloud mailbox URL, and its path
+  `/u/<secret>` *is* the access control — anyone handed a serial capture or a
+  pasted observability log after a relay outage could read the panel's
+  figures and overwrite them. `docs/relay.md` has said "Never print the
+  secret URL in logs or a shared transcript" since the relay shipped; the
+  code had simply never been revisited after a credential-bearing address
+  started flowing through the same helper. Failure lines now name a redacted
+  target — `<scheme>://<host> via LAN` or `… via relä` — which still
+  separates a wrong hostname from a wrong port from a dead relay, and drops
+  the path, query, fragment and any userinfo. The redaction is unconditional
+  rather than relay-only, so a fourth failure path inherits it instead of
+  having to remember it, and it lives in one pure helper
+  (`net_log_target.c`) that `test/test_net_log_target.c` host-tests directly.
+  `test/test_relay_boundary.py` now parses every `ESP_LOG*` call in the fetch
+  client and fails if one names a raw address.
+
+- **A photo in `docs/img/` carried the coordinates it was taken at.**
+  `docs/img/github/glass-live.png` was an iPhone photograph committed
+  straight off the camera, and its EXIF held a full GPS IFD — latitude,
+  longitude, altitude, a ten-metre error estimate and the timestamp. This
+  repository gitignores `.ota-device` precisely because a LAN address is too
+  revealing to share; the secrets discipline was built around text, and a
+  camera writes the location into a binary nobody opens. Re-encoded through
+  a fresh image with no metadata, and resized from 3024 × 4032 and 6.9 MB —
+  a quarter of the whole repository — to 1050 × 1400 and 1.0 MB, which is
+  still twice what the page renders. The other 58 tracked images were swept:
+  three carry benign EXIF with no GPS. **The original blob is still in
+  `main`'s history and on GitHub.** Removing it needs a force-push that the
+  repository ruleset refuses; the rewrite is built and documented in
+  `docs/lessons.md`, waiting for that rule to be lifted.
+
+- **Nine documented claims that the code contradicted.** The host-gate recipe
+  in `README.md`, `README.sv.md` and `docs/agent-setup.md` installed only
+  `requirements-dev.txt` while `test/run.sh` exits 1 without `cryptography`
+  — and run.sh's own error pointed the reader back at the recipe that failed
+  them. `docs/agent-setup.md` said the Claude probe fires every 120 s
+  (it is 240). README and `docs/wifi.md` described a one-to-three-bar Wi-Fi
+  indicator; the firmware draws two states and its own comment says why.
+  `docs/ota.md` sent agents to a branch that does not exist. The tokenserver
+  README said stale numbers become dashes (they stay, relabelled `CACHED`),
+  told you to define `TK_TOKENS_URL` by hand (it derives from
+  `TK_VIBEPULSE_BASE_URL`), and presented the rate-limit headers as the
+  primary usage source when they are the fallback (OBS-23). Three key lists
+  described the simulator and none named `K`, `U` or `W` — the keys that
+  drive the KEY3 gesture, which `docs/lessons.md` calls the simulator's
+  reason for being the spec.
+
+- **`tools/mockups/gen_concept_mockups.py` wrote to one machine's checkout.**
+  A hardcoded absolute output path — the repository's only one — so the
+  script regenerated nothing anywhere else. Its sibling already resolved the
+  path from `__file__`.
+
+- **The OTA runbook told you the wrong gesture, on the terminal, while you
+  stood at the panel.** `tools/ota-flash.sh` said "håll KEY3 ~3 s tills
+  UPDATES ON-ringen syns" — in its header *and* in the line it prints while
+  waiting for the window. The hold has opened SETTINGS since #72; UPDATE in
+  the menu is what opens the window. Someone following it would have held
+  the button and waited for a ring that never came. `tools/wifi-here.sh`
+  had the same error twice — in its header and in the retry advice it
+  prints when the Mac cannot reach the panel's access point, which is
+  exactly when the operator is stuck and reading carefully. All corrected,
+  and `test/test_ota_gesture_docs.py` — which exists to catch this class and
+  did not — now reads the two runbooks, understands Swedish verb-first
+  phrasing ("Håll KEY3"), normalises whitespace so a line break inside a
+  sentence no longer hides it, joins what a shell script actually prints
+  across several `echo` lines, and guards the Wi-Fi setup window as well as
+  the update window.
+
 - The WiFi setup QR no longer survives the window it belongs to. Only the
   OPEN branch of `torget_wifi_ui_set()` ever managed the canvas, and only
   `HIDDEN` ever cleared it, so every hop from OPEN to another *visible* state
@@ -143,6 +508,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   `wifi-open-to-searching`, which the existing `wifi-searching` frame could
   not catch — that one is taken before any OPEN state, so the canvas has
   never been populated at that point.
+
 - `test_mcp_recovers_after_absolute_drip_deadline` no longer flakes on the
   Windows CI runner. It bounded wall clock taken around `run_mcp()`, which
   spawns a Python subprocess, so interpreter startup counted against a budget
@@ -152,6 +518,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   did. The bound is tighter than before, not looser: the two request/response
   cycles run in ~0.13 s and the assertion trips at 0.4 s, so a lengthened or
   removed drip deadline still turns it red.
+
 - The same file's `run_script()` no longer times a Codex plugin script out
   after 4 seconds on a loaded CI runner. The budget is a hang guard, not a
   speed assertion — nothing overrides it and no test asserts that it fires —
@@ -159,6 +526,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   windows-latest it did not: `test_unicode_decision_is_emitted_as_utf8` timed
   out and passed on a second run of the same commit. It is now a named
   `SCRIPT_HANG_TIMEOUT_SECONDS = 30`, still verified to catch a wedged script.
+
 - `test_production_process_timeout_kills_reaps_and_recovers` no longer bounds a
   Windows-only subprocess spawn it never budgeted for. A sweep of every timed
   assertion CI runs on windows-latest found it: `_terminate_process_tree()`
@@ -170,6 +538,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   still turns red at 5.1 s if the deadline is lengthened. The sweep found
   nothing else: the other three process tests are POSIX-only, and every timed
   bound in the tokenserver modules is in-process.
+
 - `/api/tokens` no longer reports a Codex-only computer's Claude counters as
   measured zeros. A new additive `claudeSourcePresent` flag says when the
   Claude directory is absent, so the zeros are not mistaken for a day with no
@@ -177,6 +546,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   percentages already came over as `null` and rendered as dashes; this closes
   the same invariant at the API and log boundaries. Flashed panels are
   unaffected: unknown keys are skipped, and an absent flag means present.
+
 - The usage service now starts on a computer that has Codex but not Claude
   Code. Its readiness check waited — before binding the HTTP port — until
   `~/.claude/projects` existed, so on a Codex-only machine the port never
@@ -184,6 +554,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   it could not poll. Codex usage is read from `~/.codex/sessions` and does not
   need that directory at all. Either provider is now enough to start, and the
   service waits only when neither is present.
+
 - The tokenserver now drains an unread request body before an early
   rejection, so a real Windows hook client sees the `403`/`415`/`404` it was
   sent instead of a connection abort. Rejections on the headers alone (a
@@ -200,11 +571,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   drained only up to the cap, so an early rejection of an over-cap body can
   still abort on Windows. Draining without a bound would hand any peer a
   denial-of-service lever, so the residue is accepted rather than chased.
+
 - A successfully parsed ESP32 quota response now clears the transport-level
   `STALE` state synchronously, rather than waiting for a later LVGL timer tick.
   The refresh is deliberately unconditional so display and app bookkeeping
   self-heal if they drift apart. Sanitized serial logs now include the Claude,
   Fable, Codex, and Max Tracker stale bits carried by each accepted payload.
+
 - The wall-powered ESP32 now disables Wi-Fi modem sleep and carries a bounded
   VibePulse transport watchdog. After at least one good quota response, a
   still-associated panel with a configured numbers relay now recycles Wi-Fi at
@@ -213,6 +586,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   disarmed until a real success, preventing restart loops during upstream
   outages. Reusable encrypted relay clients are reset on every failure exit
   instead of retaining a half-open transport.
+
 - The VibePulse Codex plugin advances to `0.1.7`. Its bounded SessionStart
   check now classifies the local server, plugin/server source drift, provider
   freshness, saved Claude credential risk, and direct panel contact as
@@ -229,6 +603,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   troubleshooting flow now distinguishes the original credential incident
   from a fresh-source/ping-alive panel HTTP stall and describes the staged
   firmware recovery without claiming it has passed before physical proof.
+
 - The local VibePulse MCP bridge now accepts the bounded `_meta` request field
   emitted by current Codex clients during tool discovery and invocation, so
   the physical `APPROVE` question remains available instead of failing MCP
@@ -238,14 +613,25 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   recognized private runtime configuration without printing it, and performs
   a real `bootout` + `bootstrap` so launchd cannot retain an old worktree. A
   failed bootstrap restores and reloads the previous service configuration.
+
 - The LaunchAgent installer now retries only the short, observed post-`bootout`
   bootstrap race before rolling back; permanent failures remain fail-closed.
+
 - The ESP-IDF dependency lock now records the exact resolver result used by the
   verified ESP32-S3 build, keeping flash candidates reproducible and clean.
+
 - Windows Task Scheduler installations can now persist the optional public
   GitHub source, named Claude/Codex plan labels, and explicit per-provider
   subscription costs. The background service no longer drops the GitHub Stars
   or API-versus-subscription inputs that work in a foreground launch.
+
+### Removed
+
+- **Eighteen concept-mockup SVGs** under `docs/img/mockups/`. Tracked output
+  nothing referenced — the documents link the `.png` beside each one — and
+  the two generators reproduce all eighteen byte-identically, verified by
+  running them and getting a clean `git status`. Now gitignored, the way
+  `platform/fonts/src/` is.
 
 ## v1.0.0 — 2026-08-28
 

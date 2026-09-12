@@ -45,6 +45,20 @@ then
   exit 1
 fi
 
+# Lint first: bug-shaped rules only (pyproject.toml explains each). ruff is
+# pinned in requirements-dev.txt, so a missing binary is a stale venv, and
+# the gate says so instead of silently skipping the lint (OBS-25). A venv
+# with another ruff release is refused by ruff itself: pyproject.toml's
+# `required-version` carries the same pin.
+if ! "$PYTHON_BIN" -m ruff --version >/dev/null 2>&1; then
+  printf '%s\n' \
+    'ERROR: ruff saknas i Python-miljön (pinnad i requirements-dev.txt).' \
+    '  .venv/bin/python -m pip install -r requirements-dev.txt' >&2
+  exit 1
+fi
+(cd .. && "$PYTHON_BIN" -m ruff check .)
+echo "OK: ruff hittade inget"
+
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_fmt/fmt_sv.c \
   ../components/torget_ticker/ticker.c \
@@ -199,6 +213,12 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-tokens-net-recovery-policy-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/poll_backoff_policy.c \
+  test_poll_backoff_policy.c \
+  -o /tmp/torget-poll-backoff-policy-test
+/tmp/torget-poll-backoff-policy-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/agent_status_source_policy.c \
   test_agent_status_source_policy.c \
   -o /tmp/torget-agent-status-source-policy-test
@@ -264,6 +284,14 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -o /tmp/torget-service-discovery-policy-test
 /tmp/torget-service-discovery-policy-test
 
+# Reläets adress ÄR nyckeln. Redigeringen som håller den ur loggarna är ren
+# stränglogik och testas som sådan — inte bara som ett anrop i torget_http.c.
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/torget_net/net_log_target.c \
+  test_net_log_target.c \
+  -o /tmp/torget-net-log-target-test
+/tmp/torget-net-log-target-test
+
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_wifi/wifi_slots.c \
   test_wifi_slots.c \
@@ -305,8 +333,15 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_vibepulse_layout_wiring.py
 "$PYTHON_BIN" test_preview_ui.py
 "$PYTHON_BIN" test_ota_partition.py
+"$PYTHON_BIN" test_firmware_diagnostics.py
 "$PYTHON_BIN" test_ota_reopen_wiring.py
 "$PYTHON_BIN" test_ota_sender_gates.py
+# Backupen AGENTS.md kräver före varje historikomskrivning. Testet bygger
+# syntetiska repon med git och kör verktyget mot dem på riktigt. Halva
+# svaret ligger dock i CI: tre av de fem defekter granskningen hittade i
+# snapshot.sh är osynliga på Linux, så jobbet "Snapshot tool" kör samma
+# fil även på macOS.
+"$PYTHON_BIN" test_snapshot_tool.py
 "$PYTHON_BIN" test_ota_gesture_docs.py
 "$PYTHON_BIN" test_wifi_setup_wiring.py
 "$PYTHON_BIN" test_settings_design.py
@@ -319,6 +354,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_interaction_relay_build.py
 "$PYTHON_BIN" test_interaction_relay_net_source.py
 "$PYTHON_BIN" test_vibepulse_codex_plugin.py
+"$PYTHON_BIN" test_vibepulse_setup_claude_only.py
 
 cd ..
 "$PYTHON_BIN" -m unittest tools.agent_assets.test_build_agent_images -v

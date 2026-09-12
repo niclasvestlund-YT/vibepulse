@@ -403,7 +403,7 @@ MOCKUPS = {
 }
 
 if __name__ == "__main__":
-    out = pathlib.Path("/home/user/vibepulse/docs/img/mockups")
+    out = pathlib.Path(__file__).resolve().parents[2] / "docs" / "img" / "mockups"
     out.mkdir(parents=True, exist_ok=True)
     for name, fn in MOCKUPS.items():
         svg = fn()

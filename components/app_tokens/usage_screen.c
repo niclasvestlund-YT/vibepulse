@@ -438,6 +438,11 @@ static void apply_github_page(const tk_github_status *status) {
 }
 #endif
 
+/* Varje vy måste rymmas i `ui.tiles`. Det var precis det som inte gällde när
+ * GitHub-sidan var bortvald, och det kostade en skrivning utanför arrayen. */
+_Static_assert(VIEW_VALUE < TK_USAGE_SCREEN_VIEWS,
+               "VIEW_VALUE ligger utanför ui.tiles — indexen är inte täta");
+
 static lv_obj_t *new_tile(int index) {
   lv_dir_t direction = index == 0 ? LV_DIR_RIGHT :
                        index == TK_USAGE_SCREEN_VIEWS - 1 ? LV_DIR_LEFT :
@@ -1036,13 +1041,38 @@ void usage_screen_create(lv_obj_t *root) {
 
 void usage_screen_apply_tokens(const tk_tokens *tokens) {
   if (!tokens) return;
-  ui.last_tokens = *tokens;
-  for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], tokens);
+  /* Platshållare (issue #62): kvoten är live och appliceras; värdesidan
+   * bygger på volymräknarna, som då är nollor som inte är mätningar, så
+   * den lämnas som den var — senast uppmätta värdet, eller startläget om
+   * inget mätts än. Ärlighetsinvarianten: aldrig påhittade nollor, och
+   * räknare backar aldrig. */
+  tk_tokens merged = *tokens;
+  if (tokens->volume_placeholder) {
+    merged.day_tokens = ui.last_tokens.day_tokens;
+    merged.day_tokens_per_hour = ui.last_tokens.day_tokens_per_hour;
+    merged.day_sessions = ui.last_tokens.day_sessions;
+    merged.month_tokens = ui.last_tokens.month_tokens;
+    merged.value = ui.last_tokens.value;
+  }
+  if (tokens->volume_failing) {
+    /* Omräkningen på datorn kraschar (`usageTotals.state: failing`) —
+     * med platshållare om ingen skanning lyckats, eller med FRYSTA
+     * siffror från den senaste lyckade (då är placeholder false).
+     * Mätningen kommer inte av sig självt, och ett gammalt värde som
+     * står kvar poll efter poll ser färskt ut fast ingen mätt det på
+     * länge. Streck är det ärliga svaret — samma "vet inte" som när
+     * blocket saknas helt. Räknarna står kvar (de ritas inte). */
+    memset(&merged.value, 0, sizeof merged.value);
+    merged.value.state = TK_VALUE_UNAVAILABLE;
+  }
+  ui.last_tokens = merged;
+  for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], &merged);
   usage_forecast_page_view forecasts = {0};
-  usage_presenter_build_forecasts(tokens, &forecasts);
+  usage_presenter_build_forecasts(&merged, &forecasts);
   for (int i = 0; i < 2; i++)
     apply_forecast_row(&ui.forecast_rows[i], &forecasts.rows[i]);
-  apply_value(tokens);
+  if (!tokens->volume_placeholder || tokens->volume_failing)
+    apply_value(&merged);
 }
 
 void usage_screen_apply_max_tracker(const tk_max_tracker *t) {
@@ -1127,6 +1157,7 @@ void usage_screen_show_view(int index) {
 int usage_screen_current_view(void) {
   lv_obj_t *active = lv_tileview_get_tile_active(ui.tileview);
   for (int i = 0; i < TK_USAGE_SCREEN_VIEWS; i++) {
+    if (!ui.tiles[i]) continue;   /* bortvald sida: inget index att matcha */
     if (ui.tiles[i] == active) return i;
   }
   return VIEW_CLAUDE_FABLE;

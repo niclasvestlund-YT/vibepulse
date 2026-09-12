@@ -24,7 +24,7 @@ Designsystemet: **spec/ui-spec.md**. Hårdvarusanningen routas under
 `Hardware-aware work` nedan; läs den kanoniska femfilslistan där före
 hårdvaruarbete.
 
-## Status (2026-08-28, v1.0.0)
+## Status (2026-09-10, v1.1.0)
 
 Plattformen bröts ut ur underhållarens tidigare solcells-firmware (den
 historiken ligger i ett privat repo och är inget du behöver) och stöptes om
@@ -48,6 +48,15 @@ verklig sign-out/sign-in, sleep/resume och reboot. Release-taggen `v1.0.0`
 pekar på `ab3ce92`; de åtta filerna mellan hostrevisionen och taggen är endast
 dokumentation/test, inte runtime. Se den fullständiga sanerade rapporten och
 ärv aldrig denna PASS till en senare runtime-revision utan en ny körning.
+
+`v1.1.0` (2026-09-10) lade till SETTINGS-menyn på KEY3-hållet, ärlig
+uppvärmning (`usageTotals`-platshållare i stället för STALE efter omstart),
+coredump till flash, omstartsliggare i NVS, backoff i panelens pollers,
+karantän av korrupta tillståndsfiler och en engelsk tokenserver-katalog.
+Firmwaredelen är CI-byggd men **inte flashad**: `torget-home-01` kör
+fortfarande `v1.0.0-25-g054db68`, körschemat är `docs/flash-session-2026-09.md`,
+och coredump-partitionen kräver en engångs `partition-table-flash` över USB.
+Windows-PASS:et ovan förblir bundet till `bee5d8c` och ärvs inte av v1.1.0.
 
 Solelkollen och Vibbe/Buddy är egna produkter i egna repon och dras in som
 companion-inputs när de finns utcheckade — `TORGET_SOLELKOLLEN_DIR`
@@ -81,6 +90,49 @@ AMOLED-skillen och mäts på panelen.
   Tokenmätaren, blev andra användaren — det är mallen).
 - **Ärlighetsinvarianten:** aldrig påhittade nollor — utan data visas
   streck; räknare backar aldrig; copyn säger vad siffran faktiskt mäter.
+- **Bidrag och merge:** följ `CONTRIBUTING.md` och
+  `docs/maintaining-contributions.md`. Även egna ändringar går via PR med
+  gröna obligatoriska kontroller. Dokumenterade testundantag ersätter inte
+  GitHubs mergekrav.
+- **Snapshot före allt som skriver om historik.** `tools/snapshot.sh` före
+  rebase, filter-repo eller force-push. Den vägrar på en shallow klon, av
+  skäl som står i `docs/lessons.md`. Push till GitHub är backup för det
+  spårade innehållet; en omskriven historik är det ingen räddar.
+
+## Over-the-air-uppdateringar
+
+Vardagsfirmware går över luften: `idf.py build && tools/ota-flash.sh`
+(enhetens IP i den git-ignorerade `.ota-device`). Hela loopen, samtyckes-
+modellen och felsökningen bor i `docs/ota.md` — läs den innan du rör något
+OTA. Icke förhandlingsbart, och skälen står i filen:
+
+- **Underhållsfönstret öppnas ENDAST från enheten.** Ett 3 s KEY3-håll öppnar
+  SETTINGS, där UPDATE öppnar fönstret (grått utan adress — ett fönster utan
+  adress kan inte ta emot något), WIFI öppnar setup-fönstret (`docs/wifi.md`),
+  eller UPDATE-pillret på takeovern. Påstå aldrig, och antyd aldrig, att ett
+  skript kan öppna det.
+- **Sändargrindarna finns för att ett gammalt arkiverat bygge en gång frös
+  panelen**: nyaste binären vid sändning, versionen utskriven, `-dirty` nekas.
+  Kringgå dem aldrig med `TG_OTA_ALLOW_DIRTY` utan att användaren sagt det.
+- **Efter ändringar i `tools/tokenserver/` måste tjänsten startas om.** Den
+  körande processen behåller annars gammal kod och panelen visar ärligt
+  glappet — du validerar då kod som inte kör. På macOS:
+  `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`. På Windows
+  finns ingen launchd; tjänsten körs av Task Scheduler och startas om med
+  `Stop-ScheduledTask`, en VÄNTAN på att den faktiskt stannat, och först
+  därefter `Start-ScheduledTask` på uppgiften `VibePulse tokenserver`.
+  Väntan är inte artighet: uppgiften är registrerad med
+  `-MultipleInstances IgnoreNew`, så en start medan den gamla instansen
+  fortfarande stänger ner kastas TYST — tjänsten ligger nere tills
+  femminuters-watchdoggen tar den, och det du validerar under tiden pratar
+  med ingenting. Färdig snutt under "Restarting the scheduled task" i
+  `docs/windows-setup.md`. Starta INTE om genom att köra
+  `install-windows-task.ps1`: `Register-ScheduledTask -Force` bygger om
+  uppgiftens kommandorad ur de argument just den körningen fick, så en
+  argumentlös omstart tar tyst bort `-PublishUrl`, `-GithubRepo` och
+  plan-/kostnadsvalen uppgiften installerades med — reläpubliceringen,
+  GitHub-bevakningen och värdesiffrorna försvinner ur den körande tjänsten.
+  Installeraren är för installation och omkonfiguration, inte för omstart.
 
 ## Releaser och utåtriktad dokumentation
 
