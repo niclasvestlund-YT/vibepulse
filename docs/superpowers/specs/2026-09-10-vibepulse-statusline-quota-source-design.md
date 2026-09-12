@@ -76,6 +76,16 @@ and `rate_limits.seven_day` (each as `used_percentage` and `resets_at`)
 plus the Claude Code `version` string and an **account fingerprint**
 (below), and writes them atomically to one
 file in the tokenserver's state directory, `claude-statusline-quota.json`.
+**Every retained field is validated strictly before it can touch the
+file**, in the spirit of `docs/lessons.md`'s hostile-input entry:
+`used_percentage` must be a finite number (not a bool) in `[0, 100]`,
+`resets_at` a finite integer epoch that is in the future and no more
+than eight days ahead, `version` a short printable string; a window that
+fails any of it is treated as **absent from stdin** (the stored window
+survives untouched), and a payload whose every window fails is treated
+as a session-start run with no `rate_limits`. A lying value therefore
+never replaces a last-known-good one, and one bad window never
+invalidates the other.
 **Per account, per window, not per invocation:** the file holds one
 entry per account fingerprint (an invocation without a fingerprint goes
 under `unknown`), and the bridge merges only into the entry of the
@@ -220,9 +230,16 @@ timestamp, not by which source it is:
    bridge's stored value takes part as long as *its* `resets_at` has not
    passed, whether or not a status-line trigger has fired within
    `STATUSLINE_FRESH_S` — the tokenserver keeps both as a per-window
-   monotonic floor (the quota cache already stores exactly that record
-   for the week, and the session window gets the same treatment in
-   memory). Otherwise a probe that saw 60 % and then hit a 429 would drop
+   monotonic floor, **and the floor survives a restart**: the quota cache
+   already persists the weekly record under the identity, the session
+   window is persisted the same way under its own scope
+   (`general_session` exists in `_SCOPES` today), and the identity-matched
+   cache record for a window takes part in the same-reset
+   higher-percentage comparison as a third participant rather than only
+   as the step-3 fallback. A tokenserver restarted during a 429 after
+   the probe saw 60 % therefore still serves 60 % against a bridge
+   replaying 40 % for the same reset, on both rings, because the record
+   it wrote before the restart is in the comparison. Otherwise a probe that saw 60 % and then hit a 429 would drop
    out while a status-line trigger keeps replaying a cached 40 %, or a
    bridge that saw 60 % and then went quiet for 15 minutes would drop
    out while an unexpired probe observation of 40 % remains, and either
@@ -230,8 +247,13 @@ timestamp, not by which source it is:
    a timer. What freshness still governs is liveness and scheduling,
    and liveness is a property of the **window**, not of the winning
    value: a window is live when *either* the probe succeeded within its
-   own interval *or* a matching-account bridge window has `seen` younger
-   than `STATUSLINE_FRESH_S` (proposed 15 minutes) and is unexpired.
+   own interval and its observation is of the selected reset *or* a
+   matching-account bridge window has `seen` younger than
+   `STATUSLINE_FRESH_S` (proposed 15 minutes), is unexpired **and is the
+   reset the arbitration selected** — a bridge still reporting an older
+   reset while the probe has moved to a newer one is not watching the
+   window the ring shows, so it cannot keep that window live, exactly as
+   it cannot stretch the probe interval.
    `claudeWeekStale` is the weekly window's liveness inverted, so in the
    probe-60 / bridge-40 case the card stays *not stale* through the
    probe's 429 cooldown as long as the bridge keeps reporting, even
@@ -485,7 +507,10 @@ Regression tests must prove:
 - a bridge write is visible on the very next `/api/tokens` request without
   a probe cycle in between, and an unchanged file is not re-parsed;
 - the bridge rejects a non-object, oversized or non-UTF-8 stdin with exit 0
-  and no file written;
+  and no file written; a window with a boolean, non-finite, negative or
+  over-100 `used_percentage`, or a `resets_at` that is a bool, in the
+  past or more than eight days ahead, is treated as absent and leaves
+  the stored window untouched while the other window still merges;
 - the bridge writes the account fingerprint from the session's config
   directory (`CLAUDE_CONFIG_DIR` honoured) and omits it when `.claude.json`
   is missing or has no `oauthAccount`; the sample file, `GET /` and the
@@ -502,9 +527,13 @@ Regression tests must prove:
   never records a lower figure for a window it already holds; a probe
   observation of 60 % followed by a 429 and a fresh bridge replay of
   40 % for the same reset keeps both rings at 60 % until the window
-  resets and `claudeWeekStale` stays false for as long as the bridge
-  keeps reporting, going true only once both the probe is past its
-  interval and the bridge's `seen` is past `STATUSLINE_FRESH_S`; for
+  resets — also across a tokenserver restart during the cooldown, for
+  the session ring as well as the weekly one, because the persisted
+  identity-matched record is in the comparison — and `claudeWeekStale`
+  stays false for as long as the bridge keeps reporting the selected
+  reset, going true once both the probe is past its interval and the
+  bridge's `seen` is past `STATUSLINE_FRESH_S`, and also when the
+  bridge's only fresh window is an older reset than the probe's; for
   different windows the later `resets_at` wins; it prefers both over an
   older plan-usage sample, uses the probe alone only when the bridge
   window is absent, expired or from another account (never merely
