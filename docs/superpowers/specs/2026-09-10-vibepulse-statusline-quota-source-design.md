@@ -68,13 +68,22 @@ failure modes reach the glass.
 ## Chosen behavior
 
 **A bridge, not a poller.** The setup command, with the user's explicit
-consent, configures Claude Code's `statusLine.command` to run
-`tools/tokenserver/statusline_bridge.py`. The bridge reads stdin, keeps
-exactly `rate_limits.five_hour` and `rate_limits.seven_day` (each as
-`used_percentage` and `resets_at`) plus the Claude Code `version` string,
-and writes them atomically to one file in the tokenserver's state
-directory, `claude-statusline-quota.json`, stamped with the bridge's own
-wall-clock time. It prints nothing of its own to stdout.
+consent, configures Claude Code's `statusLine.command` to run a small
+launcher (`statusline_bridge.sh`, `.cmd` on Windows) that starts
+`tools/tokenserver/statusline_bridge.py` with the interpreter setup
+verified. The bridge reads stdin, keeps exactly `rate_limits.five_hour`
+and `rate_limits.seven_day` (each as `used_percentage` and `resets_at`)
+plus the Claude Code `version` string, and writes them atomically to one
+file in the tokenserver's state directory, `claude-statusline-quota.json`.
+**Per window, not per invocation:** each window in the file carries its
+own `at` (the bridge's wall-clock time when that window was last seen).
+The bridge reads the existing file first; a window absent from stdin keeps
+its previous entry, a window present is replaced, and a window whose
+`resets_at` has passed is dropped. That matters because the statusLine
+runs at session start *before* the session's first API response, with no
+`rate_limits` at all: an invocation like that must not erase the fresh
+sample another open session wrote seconds earlier. It prints nothing of
+its own to stdout.
 
 **The user's status line keeps working.** `settings.json` allows one
 `statusLine.command`. If one already exists, setup records it inside the
@@ -82,16 +91,21 @@ bridge's own configuration (the bridge never rewrites `settings.json`
 itself) and the bridge executes it with the same stdin, passing its stdout
 and exit status through unchanged. If none exists, the bridge exits 0 with
 empty output, which Claude Code renders as no status line, the same as
-before. Setup refuses to install the bridge when the existing command
-cannot be represented (a non-string, a command containing a newline) and
-says so, rather than guessing.
+before. The launcher exists for the one failure the bridge cannot survive
+on its own: if the recorded interpreter no longer resolves (a moved or
+deleted venv, Python gone from `PATH`), the launcher runs the chained
+command directly, so the user's own line survives a broken bridge, and the
+doctor reports `FIX statusLine bridge: interpreter not found`. Setup
+refuses to install the bridge when the existing command cannot be
+represented (a non-string, a command containing a newline) and says so,
+rather than guessing.
 
 **Source order in the tokenserver**, for the general weekly and the session
 window, newest honest observation wins:
 
-1. The bridge file, when its sample is younger than
-   `STATUSLINE_FRESH_S` (proposed 15 minutes) and its `resets_at` has not
-   passed.
+1. The bridge file, per window: a window whose own `at` is younger than
+   `STATUSLINE_FRESH_S` (proposed 15 minutes) and whose `resets_at` has
+   not passed.
 2. The OAuth probe, when it succeeded within its own interval.
 3. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
@@ -122,16 +136,25 @@ sample file too, and the merge treats it as "no observation", not zero.
    stores any previous command in the bridge configuration file beside the
    sample file. On no, nothing changes and the doctor reports `OFF
    statusLine bridge: not installed`.
-2. Claude Code runs the bridge on its normal triggers. The bridge writes
-   `{"v": 1, "at": <epoch s>, "five_hour": {"pct": 23.5, "resets_at":
-   1738425600}, "seven_day": {...}, "claude_code_version": "2.1.267"}`
+2. Claude Code runs the launcher on its normal triggers. The bridge merges
+   stdin into the existing file per window and writes
+   `{"v": 1, "five_hour": {"pct": 23.5, "resets_at": 1738425600, "at":
+   <epoch s>}, "seven_day": {...}, "claude_code_version": "2.1.267"}`
    through the existing atomic-write discipline (`state_files`), 0600, in
    well under 100 ms, then runs the chained command if any.
-3. The tokenserver's `_refresh_limits` reads the sample file (size-bounded,
-   fail-closed validation like `_read_claude_plan_usage`) and builds the
-   Claude quota view from the source order above. `GET /` reports
-   `claudeStatusline: {status, ageS, claudeCodeVersion}` with statuses
-   `fresh`, `stale`, `missing`, `invalid`, `not_installed`.
+3. The tokenserver reads the sample file **on the request path**, in the
+   same place `_merge_claude_plan_usage` already folds the plan-usage file
+   into the Claude view, so a statusLine write reaches the panel on its
+   next poll. The read is size-bounded and fail-closed like
+   `_read_claude_plan_usage`, and cached by `(mtime, size)` so an unchanged
+   file costs one `stat` per request. It is deliberately *not* tied to
+   `_refresh_limits`: `get_limits()` starts that only when the probe
+   interval expires, and with the bridged interval at 30 minutes a sample
+   read there would sit invisible for up to that long. `_refresh_limits`
+   consults the file's freshness only to pick the probe interval. `GET /`
+   reports `claudeStatusline: {status, ageS, claudeCodeVersion}` with
+   statuses `fresh`, `stale`, `missing`, `invalid`, `not_installed`, where
+   `ageS` is the age of the youngest window.
 4. `/api/tokens` is byte-identical in shape. `claudeWeekStale` and
    `claudeSessionPct` come from whichever source won; `claudeModelWeekPct`
    keeps its probe-or-cache path. The Max Tracker records a bridge
@@ -152,17 +175,27 @@ sample file too, and the merge treats it as "no observation", not zero.
   is written anywhere.** A test feeds a payload with every documented key
   and asserts the sample file contains only the five allowed keys.
 - The bridge never contacts the network and never reads a credential.
-- A bridge crash, a missing Python, or a full disk must not break the
-  user's own status line: the chained command runs even when the sample
-  write fails, and the bridge's own exceptions exit 0 silently (Claude Code
-  treats status-line noise as output). The doctor is where failures show.
-- Setup never installs the bridge without the user's explicit yes, never
-  overwrites a foreign `statusLine.command` without recording it, and
-  uninstall restores the recorded command or removes the key if none was
-  recorded. `settings.json` edits go through the same read-modify-write
-  with backup that the hook installation already uses.
-- Two Claude Code sessions writing the file concurrently is last-writer-wins
-  through `os.replace`; both samples are true, and the merge uses `at`.
+- A bridge crash or a full disk must not break the user's own status
+  line: the chained command runs even when the sample write fails, and the
+  bridge's own exceptions exit 0 silently (Claude Code treats status-line
+  noise as output). A missing interpreter is the launcher's job, above;
+  without the launcher that failure would not be transparent, and the spec
+  does not claim it is. The doctor is where failures show.
+- Setup never installs the bridge without the user's explicit yes and
+  never overwrites a foreign `statusLine.command` without recording it.
+  Uninstall restores the recorded command (or removes the key if none was
+  recorded) **only if `statusLine.command` still points at this
+  installation's launcher**; if the user changed it after installing, the
+  current value is left untouched and the doctor reports the drift instead
+  of replacing a newer edit with an older one. `settings.json` edits go
+  through the same read-modify-write with backup that the hook
+  installation already uses.
+- Two Claude Code sessions writing the file concurrently: each invocation
+  reads, merges per window and replaces atomically through `os.replace`,
+  so the loser of a race can at worst lose the other's write of the same
+  window, never a different window, and never replace a populated window
+  with an absent one. Both samples are true; the merge keeps the newer
+  `at` per window.
 - The sample file's `at` is the bridge's wall clock, compared against the
   tokenserver's wall clock on the same machine. Clock regression makes the
   sample stale by age, never fresh by mistake (`age_s < -60` rejects, as in
@@ -178,8 +211,15 @@ Regression tests must prove:
 - the bridge keeps exactly `five_hour` and `seven_day` `used_percentage`
   and `resets_at` and the version, and drops every other documented stdin
   key, including nested ones;
+- a session-start invocation without `rate_limits` leaves both existing
+  windows in the file untouched, an invocation with one window replaces
+  that window only, and a window past its `resets_at` is dropped;
 - the bridge passes a chained command's stdout and exit status through
-  unchanged and still runs it when the sample write raises;
+  unchanged and still runs it when the sample write raises; the launcher
+  runs the chained command when the recorded interpreter path does not
+  resolve;
+- a bridge write is visible on the very next `/api/tokens` request without
+  a probe cycle in between, and an unchanged file is not re-parsed;
 - the bridge rejects a non-object, oversized or non-UTF-8 stdin with exit 0
   and no file written;
 - the tokenserver prefers a fresh bridge sample over an older probe result
@@ -193,7 +233,9 @@ Regression tests must prove:
 - `GET /` reports the five bridge statuses; the doctor and smoke test map
   them as specified; the SessionStart context stays within its byte bound;
 - setup shows the diff, refuses an unrepresentable existing command,
-  records a chained command, and uninstall restores it;
+  records a chained command, uninstall restores it when the command is
+  still the launcher, and leaves a command the user changed afterwards
+  alone while reporting the drift;
 - the `/api/tokens` body-capacity test still passes (no new wire fields).
 
 ## Acceptance
@@ -212,7 +254,8 @@ as before, and a user who declines the bridge sees no change at all.
    a timer while idle)? It keeps the sample fresh across long idle periods
    at the cost of a process spawn every N seconds in every open session.
    The default in this spec is not to set it.
-3. Windows: `statusLine.command` runs through the user's shell; the bridge
-   must be invoked as `python <path>` there and the doctor must check the
-   registered command matches this checkout, the same drift check the
-   tokenserver source fingerprint does today.
+3. Windows: `statusLine.command` runs through the user's shell; the
+   launcher is a `.cmd` there, invoking the verified `python.exe` path,
+   and the doctor must check the registered command matches this
+   checkout's launcher, the same drift check the tokenserver source
+   fingerprint does today.
