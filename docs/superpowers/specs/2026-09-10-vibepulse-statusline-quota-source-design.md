@@ -78,11 +78,25 @@ file in the tokenserver's state directory, `claude-statusline-quota.json`.
 **Per window, not per invocation:** each window in the file carries its
 own `at` (the bridge's wall-clock time when that window was last seen).
 The bridge reads the existing file first; a window absent from stdin keeps
-its previous entry, a window present is replaced, and a window whose
-`resets_at` has passed is dropped. That matters because the statusLine
-runs at session start *before* the session's first API response, with no
+its previous entry, a window present replaces the stored one only if its
+`at` is not older than the stored `at`, and a window whose `resets_at`
+has passed is dropped. That matters because the statusLine runs at
+session start *before* the session's first API response, with no
 `rate_limits` at all: an invocation like that must not erase the fresh
-sample another open session wrote seconds earlier. It prints nothing of
+sample another open session wrote seconds earlier. The whole
+read-merge-replace runs under an interprocess lock on a sibling lock file
+(`flock` on macOS/Linux, `msvcrt.locking` on Windows — the same gate
+`_hold_probe_lock` uses), non-blocking with a short bounded wait, because
+`os.replace` makes only the rename atomic: two bridges that read the same
+old file and rename in turn would let the loser put back a stale copy of
+a window the winner had just updated. A bridge that cannot take the lock
+within the bound skips the write, runs the chained command, and exits 0;
+the next trigger is seconds away. A stored file that is not UTF-8, not
+JSON or not the `{v: 1, …}` shape is moved aside through
+`state_files.quarantine_corrupt` (same rule as the three state stores,
+bytes kept for forensics) and the merge starts from empty; a file that
+exists but cannot be read (permissions, I/O) makes the bridge skip the
+write rather than replace what it could not read. It prints nothing of
 its own to stdout.
 
 **The user's status line keeps working.** `settings.json` allows one
@@ -101,28 +115,42 @@ represented (a non-string, a command containing a newline) and says so,
 rather than guessing.
 
 **Source order in the tokenserver**, for the general weekly and the session
-window, newest honest observation wins:
+window, newest honest observation wins — and "newest" is decided by
+timestamp, not by which source it is:
 
-1. The bridge file, per window: a window whose own `at` is younger than
-   `STATUSLINE_FRESH_S` (proposed 15 minutes) and whose `resets_at` has
-   not passed.
-2. The OAuth probe, when it succeeded within its own interval.
-3. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
+1. Among the bridge window (when its own `at` is younger than
+   `STATUSLINE_FRESH_S`, proposed 15 minutes, and its `resets_at` has not
+   passed) and the probe's last successful observation of the same window
+   (when it succeeded within its own interval), the one observed later
+   wins. A probe that completes after a bridge sample therefore corrects
+   cross-device drift at once — quota burned on a laptop shows on the
+   shelf on the next probe, not fifteen minutes later — and a bridge
+   sample written after a probe overrides it the same way. Two
+   observations of the same reset window never move the ring backward
+   through source priority alone; only a newer observation can.
+2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
    record).
-4. The quota cache, marked stale, as today.
+3. The quota cache, marked stale, as today.
 
 The heaviest-model weekly window keeps today's order: probe, then cache.
 
-**The probe becomes a background verifier.** While the bridge file is fresh,
-the probe interval stretches to `PROBE_WHEN_BRIDGED_S` (proposed 30
-minutes, up from 240 s), because its only unique contribution is the model
-pool and cross-device drift, neither of which moves fast. On a 429 the
-probe rests exactly as it does today; the glass no longer notices. When the
-bridge file is missing or stale (no Claude Code turn on this computer for
-a while), the probe returns to its current cadence automatically. No
-probe code is deleted in this change; the interval rule is the whole
-difference.
+**The probe becomes a background verifier.** While the bridge file is fresh
+*and the probe's last status was a completed probe*, the probe interval
+stretches to `PROBE_WHEN_BRIDGED_S` (proposed 30 minutes, up from 240 s),
+because its only unique contribution is the model pool and cross-device
+drift, neither of which moves fast. The existing auth-recovery exception
+in `_probe_interval_s()` keeps precedence: after `no_claude_oauth_token`,
+`token_expired_…` or `token_dead_awaiting_refresh` the probe keeps
+re-checking the local credential every `AUTH_RECOVERY_EVERY_S` (15 s),
+bridge or no bridge, because the Claude Code turn that writes a fresh
+bridge sample is the same turn that renews the credential, and the model
+pool the bridge cannot supply would otherwise stay stale for up to half
+an hour after a sign-in. On a 429 the probe rests exactly as it does
+today; the glass no longer notices. When the bridge file is missing or
+stale (no Claude Code turn on this computer for a while), the probe
+returns to its current cadence automatically. No probe code is deleted in
+this change; the interval rule is the whole difference.
 
 **Nothing is inferred.** A window absent from the bridge sample (the free
 tier, an API-key session, a window past its reset) is absent from the
@@ -190,12 +218,11 @@ sample file too, and the merge treats it as "no observation", not zero.
   of replacing a newer edit with an older one. `settings.json` edits go
   through the same read-modify-write with backup that the hook
   installation already uses.
-- Two Claude Code sessions writing the file concurrently: each invocation
-  reads, merges per window and replaces atomically through `os.replace`,
-  so the loser of a race can at worst lose the other's write of the same
-  window, never a different window, and never replace a populated window
-  with an absent one. Both samples are true; the merge keeps the newer
-  `at` per window.
+- Two Claude Code sessions writing the file concurrently: the lock
+  serializes the read-merge-replace, and the per-window `at` comparison
+  means an older invocation that gets the lock second cannot overwrite a
+  newer percentage. Both samples are true; the file ends up holding the
+  newer `at` per window whichever order the two ran in.
 - The sample file's `at` is the bridge's wall clock, compared against the
   tokenserver's wall clock on the same machine. Clock regression makes the
   sample stale by age, never fresh by mistake (`age_s < -60` rejects, as in
@@ -213,7 +240,15 @@ Regression tests must prove:
   key, including nested ones;
 - a session-start invocation without `rate_limits` leaves both existing
   windows in the file untouched, an invocation with one window replaces
-  that window only, and a window past its `resets_at` is dropped;
+  that window only, an invocation whose window is older than the stored
+  one leaves the stored one, and a window past its `resets_at` is dropped;
+- two bridges run concurrently against one file (a real second process,
+  not a mock) end with the newer `at` per window and no lost window; a
+  bridge that cannot take the lock within the bound writes nothing and
+  still runs the chained command;
+- a stored file that is corrupt is quarantined beside the original and
+  the next sample starts from empty; a stored file that cannot be read is
+  left untouched and no write happens;
 - the bridge passes a chained command's stdout and exit status through
   unchanged and still runs it when the sample write raises; the launcher
   runs the chained command when the recorded interpreter path does not
@@ -222,12 +257,16 @@ Regression tests must prove:
   a probe cycle in between, and an unchanged file is not re-parsed;
 - the bridge rejects a non-object, oversized or non-UTF-8 stdin with exit 0
   and no file written;
-- the tokenserver prefers a fresh bridge sample over an older probe result
-  and an older plan-usage sample, falls back to the probe when the sample
-  is stale or its reset has passed, and never invents a model-pool
-  percentage from the bridge;
+- the tokenserver serves whichever of the bridge window and the probe
+  observation was observed later: a probe completing after a fresh bridge
+  sample wins, a bridge sample written after a probe wins, and neither
+  moves the ring backward; it prefers both over an older plan-usage
+  sample, falls back to the probe when the sample is stale or its reset
+  has passed, and never invents a model-pool percentage from the bridge;
 - the probe interval is `PROBE_WHEN_BRIDGED_S` only while the sample is
-  fresh and returns to the current ladder otherwise;
+  fresh and the last status was a completed probe; the auth-recovery
+  statuses keep `AUTH_RECOVERY_EVERY_S` with a fresh bridge sample
+  present, and the ladder returns otherwise;
 - a bridge observation reaches the Max Tracker only through the existing
   live gate;
 - `GET /` reports the five bridge statuses; the doctor and smoke test map
