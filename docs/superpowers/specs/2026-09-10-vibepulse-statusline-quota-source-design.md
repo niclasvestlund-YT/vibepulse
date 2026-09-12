@@ -216,11 +216,26 @@ credential. A login is a new grant, so it always writes a new token
 into the store *and* rewrites `.claude.json`; therefore, if since the
 previous observation the store's credential fingerprint changed **and**
 `.claude.json`'s modification time changed — whatever both read now —
-the tokenserver treats the interval as an **uncertain transition**: the
-old mark is discarded, and once the pair reads consistent a new one is
-recorded at the later of the two modification times, so a session
+the tokenserver treats the interval as an **uncertain transition**,
+and an uncertain transition is handled exactly like an observed one:
+the old mark is discarded, and once the pair reads consistent a new one
+is recorded at the later of the two modification times, so a session
 started anywhere inside that interval stays `unknown` (its transcript
-predates the new mark). A token refresh alone (store rewritten, file
+predates the new mark); **and every binding made under the old mark is
+invalidated**, because a session bound to A before the interval may be
+the one that ran the `/login` to B and still holds B's credential after
+another process returned the files to A. The mark therefore carries a
+**generation** number, incremented on every observed and every
+uncertain transition; a per-session binding records the generation it
+was made under, and a binding whose generation is not the mark's
+current one sends its session to `unknown` for the rest of its
+lifetime, as the transition rule below says. The false positive — a
+token refresh and a `.claude.json` rewrite that merely coincide inside
+one interval, as they can at a session start — costs the sessions
+bound under the old generation their bindings and hands their quota
+back to the probe until sessions started after the new mark bind; that
+is the same accepted price as never crossing accounts, and a shorter
+`ACCOUNT_WATCH_S` narrows it without changing the rule. A token refresh alone (store rewritten, file
 untouched) and a `.claude.json` rewrite alone (file touched, token
 unchanged — Claude Code rewrites it for many reasons) retain the mark,
 because neither can be a completed login; an unresolved token (during
@@ -254,11 +269,14 @@ bound session never re-reads the file to *re-bind*: later proving
 payloads keep the binding made at the first one. But a binding is not
 permanent either: an in-session `/login` changes the account behind an
 already-bound session, and the bridge cannot tell which session ran it,
-so **an observed account transition in a config directory invalidates
-every binding made under the previous value in that directory** — those
+so **an account transition in a config directory — observed, or
+uncertain as defined above — invalidates every binding made under the
+previous generation of that directory's mark** — those
 sessions go to `unknown` for the rest of their lifetime, their later
 increases and rollovers land in the `unknown` entry rather than in A's,
-and a switch back never revives the old binding. The tokenserver derives the probe's fingerprint
+and a switch back never revives the old binding (the mark's generation
+only ever grows, so a binding made under generation 3 is dead under
+generation 5 even when both read A). The tokenserver derives the probe's fingerprint
 **from the token itself**, not from a file beside it. `/login` writes
 the credential store and `.claude.json` as two separate files, and no
 read of the two — however stable across the request — proves that the
@@ -733,10 +751,15 @@ Regression tests must prove:
   move neither the mark nor a binding, while a round trip to another
   account and back completed inside one watch interval (both files
   rewritten, the token string different, the account the same) discards
-  the mark and records a new one at the later modification time, so a
-  session started during the excursion stays `unknown` — and the same
-  holds for a round trip completed while the tokenserver was down,
-  judged against its persisted last observation; a fresh install seeds the mark so the first
+  the mark, bumps its generation and records a new one at the later
+  modification time, so a session started during the excursion stays
+  `unknown` **and a session bound to A before the excursion, whose next
+  proving payload shows B's usage, lands in `unknown` rather than in
+  A's entry** — and the same holds for a round trip completed while the
+  tokenserver was down, judged against its persisted last observation;
+  a binding records the mark generation it was made under and any
+  binding from an older generation is dead even when the account value
+  reads the same; a fresh install seeds the mark so the first
   post-install session binds; two concurrent sessions in different
   `CLAUDE_CONFIG_DIR`s keep two independent marks and both bind, while a
   login in a non-default directory followed directly by a session leaves
