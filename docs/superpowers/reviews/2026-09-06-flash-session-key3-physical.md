@@ -70,12 +70,12 @@ Companion: Solelkollen
                  is no .git anywhere in the chain up to /
   Contents:      8 files, 48 KB, modified 2026-08-12..13
   sha256:        0b14f6bfea1390b7b7550384424d656aef2e6a4ec27e249a1ba16d75d6418869
-  In spec/hardware-sources.yaml: no
+  In spec/hardware-sources.yaml: yes, since this PR
 ```
 
 The user authorized the flash with this component included and unversioned,
-recorded here by path and content hash. `spec/hardware-sources.yaml` lists only
-Buddy (lines 87–90) and should gain a Solelkollen entry.
+recorded here by path and content hash, and in `spec/hardware-sources.yaml` as
+the `torget-main-e51b79f-flash-2026-09-06` source's companion revision.
 
 ## §2 — boot log
 
@@ -177,7 +177,7 @@ were removed with user approval. Removing that tree also permanently retired the
 stale-binary hazard the sheet warns about in §1 — it is no longer merely outside
 the `build*` glob, it is gone.
 
-## FINDING: the panel runs below its own freeze threshold
+## FINDING: the heap low-water dips below what a flush needs
 
 Discovered from the serial log before the §1 gesture tests had produced a
 single result. The firmware carries its own guard for this and it has been
@@ -195,8 +195,12 @@ Counts over ~20 minutes of uptime on `v1.0.0-67-ge51b79f`:
 | `LÅGT DMA-block … nära fryströskeln` | **76** — essentially every 10 s sample since t=23 s |
 | `esp_lv_adapter_lock: Failed to acquire LVGL lock` | **10**, clustered at t≈317–335 s, t≈819–827 s, t=1188 s |
 
-The decisive number is the lowest-ever largest DMA block, which the periodic
-`heap:` line tracks separately from the sampled value:
+The decisive number is `lägsta någonsin`, which the periodic `heap:` line
+tracks separately from the sampled value. Precisely: it is
+`heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)` (`main/main.c:650`), the
+lowest **total** free internal heap since boot — not a DMA-block size. The only
+block figure on that line is the sampled `DMA största`. The first draft of this
+finding called it a DMA-block low-water; it is not.
 
 ```
 t=13 s   lägsta 44199
@@ -207,11 +211,15 @@ t=843 s  lägsta 11191
 t=935 s  lägsta 11143     <-- flush needs 11520
 ```
 
-**11 143 < 11 520.** At some point around t=843–935 s the largest contiguous
-DMA-capable block fell 377 bytes below what a display flush requires. The panel
-did not freeze — it is still rendering, and the sampled block recovers to
-19 456–23 552 — but the margin against the freeze this repo has history with is
-gone, and was already gone before any manual test ran.
+**11 143 < 11 520.** At some point around t=843–935 s total free internal
+heap was 11 143 B. A contiguous block cannot exceed the total, so a flush
+allocation made at that instant could not have found the 11 520 B it needs;
+whether one is ever made at such an instant is not measured. The panel did not
+freeze — it is still rendering, and the sampled block recovers to
+19 456–23 552 — but the margin against the freeze this repo has history with
+was gone at that instant, and that was before any manual test ran. (The
+`LÅGT DMA-block` guard itself fires below twice the flush size, 23 040 B, so
+the 19 456 B it reports is not a block that is too small.)
 
 The 10 s `heap:` sampling never observes anything below 19 456; every dip below
 that is invisible to it and only shows up in `lägsta någonsin`. Any soak that
@@ -219,7 +227,7 @@ watches the sampled figure alone will report "steady" through exactly this
 condition.
 
 This connects directly to the relay finding above. The old image did zero TLS
-and held a 40 960 B block with a 76 435 B low-water mark. The new image runs a
+and held a 40 960 B block with a 76 435 B internal-free low-water. The new image runs a
 TLS handshake every 2.5 s, and mbedTLS session buffers are internal and
 DMA-capable — the churn fragments precisely the pool the display flush allocates
 from. The LVGL lock failures cluster near the low-water drops, which is
@@ -263,8 +271,9 @@ t=605 s   18451
 t=625 s   18371
 ```
 
-Eight downward steps over roughly 45 minutes, ending 1 897 B below the 11 520 B
-a display flush requires. No trigger is identified for any single step. The
+Eight downward steps over roughly 45 minutes, ending at 9 623 B of total
+internal free — 1 897 B less than the 11 520 B contiguous block a display flush
+needs, so at that instant no such block could have existed. No trigger is identified for any single step. The
 sampled `heap:` figure never went below 16 384 across the whole session, so none
 of this is visible in the number a soak would normally watch. This is the open
 question OBS-37 carries forward.

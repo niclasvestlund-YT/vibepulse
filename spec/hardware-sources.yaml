@@ -75,6 +75,24 @@ sources:
     accessed: "2026-08-10"
     note: Legacy stable ID; dependencies.lock pins 2.0.0.
 
+  - id: torget-main-e51b79f-flash-2026-09-06
+    kind: source-code
+    rank: 3
+    title: Torget firmware build inputs for the 2026-09-06 USB flash of torget-home-01
+    publisher: Torget
+    locator: .
+    revision: e51b79f
+    accessed: "2026-09-06"
+    companion_revisions:
+      - repository: Solelkollen
+        locator: ~/Solelkollen/components/app_solelkollen
+        revision: unversioned; sha256=0b14f6bfea1390b7b7550384424d656aef2e6a4ec27e249a1ba16d75d6418869 (8 files, 48 KB, modified 2026-08-12..13)
+    note: >-
+      The image running on torget-home-01 as v1.0.0-67-ge51b79f was built with
+      TORGET_SOLELKOLLEN_DIR pointing at this directory, which is not a git
+      checkout; the content hash is the only exact identifier. Recorded in
+      docs/superpowers/reviews/2026-09-06-flash-session-key3-physical.md.
+
   - id: torget-main-1fad449
     kind: source-code
     rank: 3

@@ -85,7 +85,8 @@ directory now reads in English. Never a number it did not measure, still.
 |---|---|
 | Host gate (`./test/run.sh`), tokenserver suite on ubuntu, macOS and Windows, both Workers, snapshot tool | **PASS** on every merged PR and on merged `main` |
 | ESP32-S3 firmware build | **PASS** in CI — a build, not a flash |
-| SETTINGS, warm-up placeholders, coredump, reboot ledger, poller backoff on the physical panel | **NOT YET FLASHED** — `torget-home-01` runs `v1.0.0-25-g054db68`; the run sheet is [`docs/flash-session-2026-09.md`](docs/flash-session-2026-09.md) |
+| SETTINGS on the physical panel | **FLASHED, NOT REVIEWED** — `torget-home-01` runs `v1.0.0-67-ge51b79f` (USB, 2026-09-06), which carries the menu; the static on-panel review, §3 of [`docs/manual-test-key3.md`](docs/manual-test-key3.md), has not been run |
+| Warm-up placeholders, coredump, reboot ledger, poller backoff on the physical panel | **NOT YET FLASHED** — all landed after `e51b79f`; the run sheet is [`docs/flash-session-2026-09.md`](docs/flash-session-2026-09.md) |
 | Windows v1 host claim (core, physical answer loop, lifecycle) | **Pinned to v1.0.0's runtime `bee5d8c`** — not re-run for this release |
 
 The coredump partition is new in the table, and OTA never writes the table:
@@ -621,9 +622,11 @@ first. Three rows that work beat five where two are promises the screen
 cannot keep.
 
 > **Evidence, honestly:** the frames above come from the shared LVGL
-> renderer in the simulator, and the behaviour is covered by host tests. No
-> panel has been flashed with SETTINGS yet, so nothing here is a physical
-> verification — the static on-panel review is the next gate.
+> renderer in the simulator, and the behaviour is covered by host tests.
+> `torget-home-01` has carried SETTINGS since the 2026-09-06 USB flash
+> (`v1.0.0-67-ge51b79f`), but the static on-panel review — §3 of the manual
+> test — has not been run, so nothing here is a physical verification; that
+> review is the next gate.
 
 ## Over-the-air updates
 
@@ -796,9 +799,10 @@ banner just places three of them side by side). The
 [2026-08-13 physical review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)
 covered the quota pages, agent monitor states and Max Tracker pages in that
 build. It does not verify later screenshots or firmware: the v1.1.0 SETTINGS
-frames are simulator evidence only, and the firmware changes in this release
-remain CI-built and **not flashed** on `torget-home-01`, which still runs
-`v1.0.0-25-g054db68`.
+frames are simulator evidence only (SETTINGS is on `torget-home-01` since the
+`v1.0.0-67-ge51b79f` flash of 2026-09-06, but its static on-panel review has
+not been run), and the rest of this release's firmware changes landed after
+that build and remain CI-built and **not flashed**.
 
 Keys: `[` / `]` change VibePulse page, `S` cycles agent status, `M` cycles
 Max Tracker fixtures, `T` re-feeds tokens, `G` simulates a new GitHub star,

@@ -260,7 +260,7 @@ Physical dedicated-power acceptance remains separate evidence.
 
 ---
 
-### OBS-37 · The panel runs below its own freeze threshold, and the 10 s sample cannot see it
+### OBS-37 · The heap low-water dips below what a flush needs, and the 10 s sample cannot see it
 `firmware · M · open` — on `v1.0.0-67-ge51b79f`, physically observed
 2026-09-06 over ~30 minutes of uptime on `torget-home-01`. Two distinct
 signals, which should not be conflated:
@@ -272,13 +272,22 @@ from t=23 s onward — 76 occurrences and counting:
 W (307120) torget: LÅGT DMA-block: 19456 byte (flush behöver 11520) — nära fryströskeln
 ```
 
-The sampled largest DMA block stays in a **19 456–31 744 B** band, but the
-separately tracked lowest-ever figure fell to **11 143 B**, which is **377
-bytes below the 11 520 B a display flush requires**. The dips happen between
-samples and are invisible to the periodic `heap:` line, which never observed
-anything under 19 456. **Any soak watching the sampled figure alone will report
-"steady" straight through this condition** — that is the part that makes this
-P1: the evidence lies. The low-water progression was
+The sampled largest DMA block stays in a **19 456–31 744 B** band (the guard
+fires below twice the flush size, 23 040 B, so it fires on that band without any
+block being too small). The separately tracked `lägsta någonsin` figure fell to
+**11 143 B**. **What that figure is, precisely:** `main/main.c:650` prints
+`heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)` — the lowest **total**
+free internal heap since boot — not a DMA-block size; the only block figure on
+the line is the sampled `DMA största`. So this is not a measured DMA block below
+11 520 B, and the first version of this entry said it was. What it does say: at
+that instant total internal free was 11 143 B, and no contiguous block can
+exceed the total, so a flush allocation made at that instant could not have
+found the 11 520 B it needs. Whether one is ever made at such an instant is
+unmeasured. The dips happen between samples and are invisible to the periodic
+`heap:` line, which never observed anything under 19 456. **Any soak watching
+the sampled figure alone will report "steady" straight through this condition**
+— that is the part that makes this P1: the evidence lies. The low-water
+progression was
 `44199 → 19167 (t=33 s) → 18451 (t=605 s) → 11191 (t=843 s) → 11143 (t=935 s)`,
 then flat; it did not continue to fall.
 
@@ -295,7 +304,7 @@ wrong turn in the investigation.
 
 **Comparison against the previous image.** The panel previously ran
 `v1.0.0-33-g51e8d0e-dirty`, which showed a 40 960 B block with a 76 435 B
-low-water mark and no warnings at all. The difference is not the new overlays —
+internal-free low-water and no warnings at all. The difference is not the new overlays —
 all three report `internt +0 B`, and opening and closing SETTINGS twelve times
 inside two minutes did **not** move the lowest-ever figure off 11 143. The
 difference is that the old image **did no TLS at all**: zero
@@ -370,10 +379,11 @@ conflating them was the second wrong turn in this investigation.
 watch `lägsta någonsin`, close it, repeat. If the drop reproduces per open, the
 listener's allocation is the target and TLS is a bystander.
 
-Note the operational consequence: the block is pushed to its lowest observed
-value **precisely while the update window is open** — the moment the panel is
-drawing progress UI and is about to receive a firmware image. Lowest observed so
-far is 10 179 B against a flush requirement of 11 520 B.
+Note the operational consequence: the internal-free low-water is pushed to its
+lowest observed value **precisely while the update window is open** — the
+moment the panel is drawing progress UI and is about to receive a firmware
+image. Lowest observed so far is 10 179 B of total internal free, less than the
+11 520 B contiguous block a flush allocation would need at that instant.
 
 **SECOND UPDATE, same session — the listener is a constant cost, not the
 cause.** The claim above was made on two coincidences. Three measured
@@ -401,7 +411,7 @@ coincide with an open window, not a consequence of opening one. A prediction of
 
 So the honest state of this item, after three wrong turns:
 
-1. The DMA-block figure and the LVGL lock failures were first treated as one
+1. The heap low-water figure and the LVGL lock failures were first treated as one
    problem. They are two: one is memory, the other is a mutex timeout.
 2. TLS was blamed next. The interval analysis refutes it — the handshakes
    precede everything because they happen every 2.5 s.
@@ -439,15 +449,17 @@ Three results, and the first changes how serious this item is:
    (9 391 -> 9 355), against **34 576 bytes in the first 45 minutes**
    (44 199 -> 9 623). It settled at 9 355 by hour 4 and did not move again. The
    descent was a warm-up and settling phenomenon, not ongoing degradation, and
-   nothing is heading toward zero. The panel still sits 2 165 B below the
-   11 520 B a flush requires at its worst-ever moment, but that floor is stable.
+   nothing is heading toward zero. At its worst-ever moment total internal free
+   was 9 355 B — 2 165 B less than the 11 520 B contiguous block a flush needs,
+   so no such block could have existed then — but that floor is stable.
 
 2. **Lock failures track interaction, not uptime.** 14 in hour 1 — which still
    contained the tail of the interactive session — then 4, 0, 0, 1, 0. Nineteen
    in six hours, effectively none once the panel was left alone. This supports
-   the rotation outlier noted above and points the LVGL-lock question at UI
-   activity rather than at any network client. Whatever the cause, it is not a
-   background process.
+   the rotation outlier noted above and points the LVGL-lock question first at
+   UI activity. It does not clear the background tasks: five failures (4 in
+   hour 2, 1 in hour 5) happened with nobody at the panel, so the network
+   clients and the other periodic tasks stay in scope for those.
 
 3. **The block range never moved.** 19 456–31 744 for six hours, one hour
    touching 18 432. Stable oscillation, no drift.
@@ -464,7 +476,11 @@ on 43 % of samples is close to being ignorable, and it fired identically during
 the hours when nothing at all was wrong.
 
 Not yet investigated: whether the flush allocation actually fails when the
-block dips under 11 520, or whether it retries and hides it.
+block dips under 11 520, or whether it retries and hides it. And the DMA
+block's own minimum is not tracked at all — `lägsta någonsin` is a total, per
+`main/main.c:650`. The instrumentation this item asks for starts with a
+`heap_caps_get_largest_free_block(MALLOC_CAP_DMA)` low-water of its own, so the
+next session measures the block instead of inferring it.
 
 ---
 
