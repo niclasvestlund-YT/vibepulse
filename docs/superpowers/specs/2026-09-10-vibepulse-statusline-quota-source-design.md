@@ -400,17 +400,22 @@ the account partition below is a property of the bridge-enabled path,
 and installing the bridge later is what starts writing under
 fingerprints and opens the legacy window step 3 names. **Uninstalling
 the bridge does not switch back to `default-v1`.** A tokenserver that
-has ever resolved an identity keeps the **last verified identity** as
-its cache, tracker and history identity after the bridge is removed:
-the profile call stops, the resolved pairs stay persisted, and the
-probe reads and writes under that identity, so the fingerprint-keyed
-cache records, tracker peaks and history samples the bridge era
-accumulated stay readable and a probe failure right after uninstall
-still finds its cache, with nothing disappearing or moving backward.
-`GET /` reports `quotaIdentity: retained_after_uninstall`. Only an
-installation that never had the bridge uses `default-v1`; a later
-reinstall resumes profile resolution and, if the account turns out to
-have changed since, the ordinary transition rules apply. The profile call follows
+has ever resolved an identity keeps **identity resolution** after the
+bridge is removed: the resolved pairs stay persisted, the probe keeps
+reading and writing under the account fingerprint, and it keeps making
+the profile call under exactly the once-per-credential-fingerprint rule
+above — that is, only when the token string changes — so a `/login` to
+another account after uninstall resolves to that account's fingerprint
+and the ordinary transition rules apply, the old account's records
+staying under the old identity and the new account's quota, tracker
+peaks and history never landing under it. What uninstall stops is the
+bridge, never the resolution that keeps the partition honest; the
+fingerprint-keyed cache records, tracker peaks and history samples the
+bridge era accumulated stay readable and a probe failure right after
+uninstall still finds its cache, with nothing disappearing or moving
+backward. `GET /` reports `quotaIdentity: retained_after_uninstall`.
+Only an installation that never had the bridge — and so never resolved
+anything — uses `default-v1` and makes no profile call. The profile call follows
 the probe's rules: it is never made during a cooldown, a 429 on it
 starts the same cooldown a usage 429 does and skips the usage call, and
 it is made *before* the usage call so a token that cannot be resolved
@@ -1093,12 +1098,15 @@ Regression tests must prove:
   `default-v1`, and the plan-usage step is ungated so a fresh matching
   plan-usage sample during a stale probe keeps the week live exactly as
   today;
-- uninstalling the bridge after an identity was resolved keeps that
-  identity for the cache, tracker and history: a probe failure right
-  after uninstall serves the fingerprint-keyed cache record, the
-  tracker and forecast values are unchanged, `GET /` reports
-  `retained_after_uninstall`, and a reinstall resumes resolution under
-  the same identity;
+- uninstalling the bridge after an identity was resolved keeps
+  resolution and that identity for the cache, tracker and history: a
+  probe failure right after uninstall serves the fingerprint-keyed
+  cache record, the tracker and forecast values are unchanged, `GET /`
+  reports `retained_after_uninstall`, a token refresh with the account
+  unchanged costs one profile call and moves nothing, and a `/login`
+  to account B after uninstall resolves B's fingerprint on the next
+  cycle so B's quota, peaks and samples land under B while A's records
+  stay under A;
 - a login whose credential write lands before its `.claude.json`
   write: a proving payload from a session started in the pause, sent
   while the credential store's modification time differs from the
