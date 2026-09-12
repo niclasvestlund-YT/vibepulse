@@ -51,7 +51,18 @@ before the session and add a check for anything new:
   listed as pending in `CHANGELOG.md` and the KEY3 manual test has no LABS
   checks; check: open SETTINGS → LABS, flip each choice, restart, and compare
   the glass against the frames in
-  `docs/superpowers/reviews/2026-09-09-labs-static-simulator.md`. **One of those needs USB even
+  `docs/superpowers/reviews/2026-09-09-labs-static-simulator.md`.
+
+That command lists committed inputs only. `secrets.h` and `sdkconfig` are
+git-ignored inputs that change the image without changing its revision — the
+2026-09-06 image lost OTA receiving exactly that way, with `TG_OTA_TOKEN`
+undefined — so before building also record, names only and never values:
+which `TK_*` defines `secrets.h` sets (`grep -oE '^#define TK_[A-Z0-9_]+'
+secrets.h`), which `CONFIG_TK_*` switches `sdkconfig` has on
+(`grep '^CONFIG_TK_' sdkconfig`), and that `TG_OTA_TOKEN` is defined
+(`grep -c '^#define TG_OTA_TOKEN' secrets.h` prints 1). Put that list in the
+session review next to the banner, so the next inventory can compare
+configuration as well as commits. **One of those needs USB even
 though the app goes over the air:** the coredump partition is new in the
 partition table, and OTA never writes the table, so before the first dump can
 land the operator runs a one-time `idf.py -p <port> partition-table-flash`
