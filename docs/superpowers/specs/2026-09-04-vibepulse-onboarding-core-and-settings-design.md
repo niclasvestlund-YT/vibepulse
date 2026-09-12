@@ -746,6 +746,15 @@ image alone, exactly as today.
 
 ## Repository structure: core and add-ons
 
+**2026-09-08 update:** the [Vibe Labs catalogue](../../labs/README.md) now
+records current installation behaviour, intended defaults, activation paths
+and display experiments. The catalogue portion of step 8 is complete; the
+runtime selector is now implemented as SETTINGS → LABS with five persisted
+choices that take effect after restart. New sample configurations seed the
+lean base; old configurations retain their analytics and GitHub defaults.
+The selector's physical memory/touch review remains pending. This implements
+the display-choice slice, not the complete onboarding specification.
+
 - **Firmware:** existing components stay where they are. New optional
   features live under `components/labs_*`; new optional host code under
   `tools/labs/`.
@@ -803,8 +812,9 @@ reverted alone.
 7. Runtime provisioning for the device key and the relay settings through
    the PAIR window; relay clients compiled into the release image and gated
    at runtime. Only after this does one binary serve every rung.
-8. Later and separately: leaner defaults for fresh installs; `docs/labs/`
-   index; Home Assistant as an add-on; and, if it proves worth a second
+8. The `docs/labs/` index is documented as of 2026-09-08. Later and separately:
+   leaner defaults for fresh installs; Home Assistant as an add-on; and, if it
+   proves worth a second
    authenticated path into the panel, routing a boot proof back to an
    updater that is not the panel's service host (see *The paired upload
    never sends the token*, which today reports an honest **delivered**

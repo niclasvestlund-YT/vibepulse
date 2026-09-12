@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from tools.tokenserver import codex_usage
+from tools.tokenserver import codex_usage, value_meter
 
 
 def turn_context(model="gpt-5.6-sol", stamp=None):
@@ -57,7 +57,7 @@ def token_count(last, total=None, stamp=None):
     }) + "\n"
 
 
-# 1M fresh input on GPT-5.6 Sol at $5.00/M.
+# 1M fresh input at the fixed fixture's $5.00/M rate.
 ONE_MILLION_FRESH = {"input_tokens": 1_000_000, "cached_input_tokens": 0,
                      "cache_write_input_tokens": 0, "output_tokens": 0,
                      "reasoning_output_tokens": 0, "total_tokens": 1_000_000}
@@ -109,7 +109,7 @@ REAL_USAGE = [
      "cache_write_input_tokens": 0, "output_tokens": 225,
      "reasoning_output_tokens": 102, "total_tokens": 60854},
 ]
-# Priced once through the shipped table (gpt-5.6-sol: $5 in / $30 out /
+# Priced once through the fixed August fixture (gpt-5.6-sol: $5 in / $30 out /
 # $0.50 cache-read, cache_included_input). The cache-read rate matters: at full
 # input price these same rows cost $1.20, 2.75x more -- so this also guards the
 # cached discount. Tokens counted = sum(input + output + cache_write).
@@ -134,6 +134,11 @@ class CodexUsageScanTest(unittest.TestCase):
 
     def setUp(self):
         codex_usage.reset_cache()
+        fixture = Path(__file__).resolve().parents[2] / "test/fixtures/codex-prices.json"
+        table = value_meter.PriceTable(json.loads(fixture.read_text()))
+        patcher = mock.patch.object(value_meter, "_default_table", table)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
 

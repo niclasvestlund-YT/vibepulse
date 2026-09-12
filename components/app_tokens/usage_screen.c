@@ -162,9 +162,7 @@ static struct {
   quota_page quotas[3];
   forecast_row forecast_rows[2];
   tracker_page trackers[2];
-#if TK_GITHUB_SCREEN_ENABLED
   github_page github;
-#endif
   value_page value;
   tk_tokens last_tokens;
   tk_agent_snapshot agent_snapshot;
@@ -324,13 +322,14 @@ static void create_analytics_header(lv_obj_t *tile, const char *title,
 #define PAGER_DOT 6
 #define PAGER_DOT_ACTIVE 18
 #define PAGER_GAP 5
-#define PAGER_W ((TK_USAGE_SCREEN_VIEWS - 1) * (PAGER_DOT + PAGER_GAP) + \
+#define PAGER_W ((tk_labs_view_count() - 1) * (PAGER_DOT + PAGER_GAP) + \
                  PAGER_DOT_ACTIVE)
 #define PAGER_X ((VP_SCREEN_W - PAGER_W) / 2)
 
 static void create_pager(lv_obj_t *tile, int active) {
+  active = tk_labs_view_position(active);
   int x = PAGER_X;
-  for (int i = 0; i < TK_USAGE_SCREEN_VIEWS; i++) {
+  for (int i = 0; i < tk_labs_view_count(); i++) {
     int width = i == active ? PAGER_DOT_ACTIVE : PAGER_DOT;
     lv_obj_t *dot = bare(tile);
     lv_obj_set_pos(dot, x, PAGER_Y);
@@ -342,7 +341,6 @@ static void create_pager(lv_obj_t *tile, int active) {
   }
 }
 
-#if TK_GITHUB_SCREEN_ENABLED
 static lv_obj_t *new_tile(int index);
 
 static void compact_count(int32_t value, char *out, size_t cap) {
@@ -436,7 +434,6 @@ static void apply_github_page(const tk_github_status *status) {
   lv_label_set_text(page->forks, forks);
   page->has_data = true;
 }
-#endif
 
 /* Varje vy måste rymmas i `ui.tiles`. Det var precis det som inte gällde när
  * GitHub-sidan var bortvald, och det kostade en skrivning utanför arrayen. */
@@ -444,10 +441,11 @@ _Static_assert(VIEW_VALUE < TK_USAGE_SCREEN_VIEWS,
                "VIEW_VALUE ligger utanför ui.tiles — indexen är inte täta");
 
 static lv_obj_t *new_tile(int index) {
-  lv_dir_t direction = index == 0 ? LV_DIR_RIGHT :
-                       index == TK_USAGE_SCREEN_VIEWS - 1 ? LV_DIR_LEFT :
+  int position = tk_labs_view_position(index);
+  lv_dir_t direction = position == 0 ? LV_DIR_RIGHT :
+                       position == tk_labs_view_count() - 1 ? LV_DIR_LEFT :
                                                            LV_DIR_HOR;
-  lv_obj_t *tile = lv_tileview_add_tile(ui.tileview, index, 0, direction);
+  lv_obj_t *tile = lv_tileview_add_tile(ui.tileview, position, 0, direction);
   lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(tile, COL_BLACK, 0);
@@ -783,6 +781,7 @@ static void refresh_header(quota_page *page, int64_t now_us) {
 }
 
 static void refresh_tracker_header(tracker_page *page, int64_t now_us) {
+  if (!page->tile) return;
   bool stale = ui.stale || page->quota_stale;
   refresh_live_header(page->halo, page->context, &page->halo_initialized,
                       &page->halo_visible, &page->context_initialized,
@@ -1024,18 +1023,18 @@ void usage_screen_create(lv_obj_t *root) {
                     USAGE_QUOTA_CLAUDE_ALL, USAGE_PROVIDER_CLAUDE);
   create_quota_page(&ui.quotas[2], VIEW_CODEX_WEEKLY,
                     USAGE_QUOTA_CODEX_WEEK, USAGE_PROVIDER_CODEX);
-  create_burn_rate_page();
-  create_tracker_page(&ui.trackers[0], VIEW_TRACKER_CLAUDE, false);
-  create_tracker_page(&ui.trackers[1], VIEW_TRACKER_CODEX, true);
-#if TK_GITHUB_SCREEN_ENABLED
-  create_github_page();
-#endif
-  create_value_page();
-#if TK_GITHUB_NOTIFICATIONS_ENABLED
-  /* Created before the agent monitor: NEEDS YOU/ERROR/DONE always retain
-   * transient priority over a project star. */
-  tk_project_star_popup_create(root);
-#endif
+  if (tk_labs_active(TK_LABS_BURN_RATE)) create_burn_rate_page();
+  if (tk_labs_active(TK_LABS_TRACKER)) {
+    create_tracker_page(&ui.trackers[0], VIEW_TRACKER_CLAUDE, false);
+    create_tracker_page(&ui.trackers[1], VIEW_TRACKER_CODEX, true);
+  }
+  if (tk_labs_active(TK_LABS_GITHUB)) create_github_page();
+  if (tk_labs_active(TK_LABS_VALUE)) create_value_page();
+  if (tk_labs_active(TK_LABS_STAR_POPUP)) {
+    /* Created before the agent monitor: NEEDS YOU/ERROR/DONE always retain
+     * transient priority over a project star. */
+    tk_project_star_popup_create(root);
+  }
   tk_agent_monitor_create(root);
 }
 
@@ -1067,26 +1066,25 @@ void usage_screen_apply_tokens(const tk_tokens *tokens) {
   }
   ui.last_tokens = merged;
   for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], &merged);
-  usage_forecast_page_view forecasts = {0};
-  usage_presenter_build_forecasts(&merged, &forecasts);
-  for (int i = 0; i < 2; i++)
-    apply_forecast_row(&ui.forecast_rows[i], &forecasts.rows[i]);
-  if (!tokens->volume_placeholder || tokens->volume_failing)
+  if (tk_labs_active(TK_LABS_BURN_RATE)) {
+    usage_forecast_page_view forecasts = {0};
+    usage_presenter_build_forecasts(&merged, &forecasts);
+    for (int i = 0; i < 2; i++)
+      apply_forecast_row(&ui.forecast_rows[i], &forecasts.rows[i]);
+  }
+  if (ui.value.tile && (!tokens->volume_placeholder || tokens->volume_failing))
     apply_value(&merged);
 }
 
 void usage_screen_apply_max_tracker(const tk_max_tracker *t) {
-  if (!t) return;
+  if (!t || !tk_labs_active(TK_LABS_TRACKER)) return;
   for (int i = 0; i < 2; i++) apply_tracker_page(&ui.trackers[i], t);
 }
 
 void usage_screen_apply_github(const tk_github_status *status) {
   if (!status || !status->enabled) return;
-#if TK_GITHUB_SCREEN_ENABLED
-  apply_github_page(status);
-#endif
-#if TK_GITHUB_NOTIFICATIONS_ENABLED
-  if (status->has_event && !status->stale) {
+  if (ui.github.tile) apply_github_page(status);
+  if (tk_labs_active(TK_LABS_STAR_POPUP) && status->has_event && !status->stale) {
     tk_project_star_event event = {0};
     snprintf(event.id, sizeof event.id, "%s", status->event_id);
     snprintf(event.source, sizeof event.source, "GITHUB");
@@ -1101,7 +1099,6 @@ void usage_screen_apply_github(const tk_github_status *status) {
       (void)tk_project_star_chime_request();
     }
   }
-#endif
 }
 
 void usage_screen_apply_agent(const tk_agent_snapshot *snapshot,
@@ -1135,9 +1132,7 @@ void usage_screen_tick(int64_t now_us) {
   for (int i = 0; i < 3; i++) refresh_header(&ui.quotas[i], now_us);
   for (int i = 0; i < 2; i++) refresh_tracker_header(&ui.trackers[i], now_us);
   tk_agent_monitor_tick(now_us);
-#if TK_GITHUB_NOTIFICATIONS_ENABLED
-  tk_project_star_popup_tick(now_us);
-#endif
+  if (tk_labs_active(TK_LABS_STAR_POPUP)) tk_project_star_popup_tick(now_us);
 }
 
 void usage_screen_set_stale(bool stale) {
@@ -1149,9 +1144,9 @@ void usage_screen_set_stale(bool stale) {
 }
 
 void usage_screen_show_view(int index) {
-  if (index < 0) index = 0;
-  if (index >= TK_USAGE_SCREEN_VIEWS) index = TK_USAGE_SCREEN_VIEWS - 1;
-  lv_obj_set_tile_id(ui.tileview, index, 0, LV_ANIM_OFF);
+  int position = tk_labs_view_position(index);
+  if (position < 0) return; /* disabled semantic IDs never address another page */
+  lv_obj_set_tile_id(ui.tileview, position, 0, LV_ANIM_OFF);
 }
 
 int usage_screen_current_view(void) {

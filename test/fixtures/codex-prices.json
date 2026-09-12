@@ -1,0 +1,29 @@
+{
+  "_note": "Fixed August 2026 rates for accounting and replay arithmetic tests; not a current price list. GeneratedTableTest separately checks the shipped catalogue.",
+  "providers": {
+    "openai": {
+      "accounting": "cache_included_input",
+      "cache_write_5m_multiplier": 1.25,
+      "cache_write_1h_multiplier": 2.0,
+      "cache_read_multiplier": 0.1,
+      "tier_multipliers": {
+        "standard": 1.0,
+        "batch": 0.5
+      },
+      "models": {
+        "gpt-5.6-sol": {
+          "input": 5.0,
+          "output": 30.0,
+          "cache_read": 0.5,
+          "cache_write_5m": 6.25
+        },
+        "gpt-5.6-luna": {
+          "input": 0.2,
+          "output": 1.2,
+          "cache_read": 0.02,
+          "cache_write_5m": 0.25
+        }
+      }
+    }
+  }
+}
