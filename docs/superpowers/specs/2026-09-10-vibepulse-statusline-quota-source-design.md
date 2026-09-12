@@ -100,11 +100,20 @@ write rather than replace what it could not read. It prints nothing of
 its own to stdout.
 
 **The user's status line keeps working.** `settings.json` allows one
-`statusLine.command`. If one already exists, setup records it inside the
-bridge's own configuration (the bridge never rewrites `settings.json`
-itself) and the bridge executes it with the same stdin, passing its stdout
-and exit status through unchanged. If none exists, the bridge exits 0 with
-empty output, which Claude Code renders as no status line, the same as
+`statusLine` object, `{"type": "command", "command": "…"}`; setup writes
+the whole object (`type` included, since a `command` without it is not a
+status line Claude Code runs) and preserves any other supported sibling
+keys such as `padding`. If a command already exists, setup records it
+inside the bridge's own configuration (the bridge never rewrites
+`settings.json` itself) and the bridge executes it with the same stdin,
+passing its stdout and exit status through unchanged. **Install is
+idempotent:** if the existing command is this checkout's launcher, or any
+earlier VibePulse launcher (recognised by a fixed marker in the launcher
+file it points at, not by path), setup keeps the chained command it
+already recorded and rewrites only the launcher path; recording the
+launcher as the chained command would make every status-line run start a
+second bridge, recursively. If none exists, the bridge exits 0 with empty
+output, which Claude Code renders as no status line, the same as
 before. The launcher exists for the one failure the bridge cannot survive
 on its own: if the recorded interpreter no longer resolves (a moved or
 deleted venv, Python gone from `PATH`), the launcher runs the chained
@@ -135,9 +144,13 @@ timestamp, not by which source it is:
 
 The heaviest-model weekly window keeps today's order: probe, then cache.
 
-**The probe becomes a background verifier.** While the bridge file is fresh
-*and the probe's last status was a completed probe*, the probe interval
-stretches to `PROBE_WHEN_BRIDGED_S` (proposed 30 minutes, up from 240 s),
+**The probe becomes a background verifier.** While **both** bridge windows
+are independently fresh (`five_hour` and `seven_day` each younger than
+`STATUSLINE_FRESH_S` and unexpired — a fresh session window beside a
+missing or stale weekly one does not count, because the probe is then the
+only source that can recover the week) *and the probe's last status was a
+completed probe*, the probe interval stretches to `PROBE_WHEN_BRIDGED_S`
+(proposed 30 minutes, up from 240 s),
 because its only unique contribution is the model pool and cross-device
 drift, neither of which moves fast. The existing auth-recovery exception
 in `_probe_interval_s()` keeps precedence: after `no_claude_oauth_token`,
@@ -263,18 +276,23 @@ Regression tests must prove:
   moves the ring backward; it prefers both over an older plan-usage
   sample, falls back to the probe when the sample is stale or its reset
   has passed, and never invents a model-pool percentage from the bridge;
-- the probe interval is `PROBE_WHEN_BRIDGED_S` only while the sample is
-  fresh and the last status was a completed probe; the auth-recovery
-  statuses keep `AUTH_RECOVERY_EVERY_S` with a fresh bridge sample
-  present, and the ladder returns otherwise;
+- the probe interval is `PROBE_WHEN_BRIDGED_S` only while both windows
+  are fresh and the last status was a completed probe; one fresh window
+  beside a missing or stale one keeps the current ladder, the
+  auth-recovery statuses keep `AUTH_RECOVERY_EVERY_S` with a fresh bridge
+  sample present, and the ladder returns otherwise;
 - a bridge observation reaches the Max Tracker only through the existing
   live gate;
 - `GET /` reports the five bridge statuses; the doctor and smoke test map
   them as specified; the SessionStart context stays within its byte bound;
-- setup shows the diff, refuses an unrepresentable existing command,
-  records a chained command, uninstall restores it when the command is
-  still the launcher, and leaves a command the user changed afterwards
-  alone while reporting the drift;
+- setup writes a complete `{"type": "command", "command": …}` object
+  when none existed and preserves sibling keys when one did, shows the
+  diff, refuses an unrepresentable existing command, records a chained
+  command, and a second install over an existing launcher keeps the
+  originally recorded chained command instead of recording the launcher
+  (the recursion test); uninstall restores the recorded command when the
+  command is still the launcher, and leaves a command the user changed
+  afterwards alone while reporting the drift;
 - the `/api/tokens` body-capacity test still passes (no new wire fields).
 
 ## Acceptance
