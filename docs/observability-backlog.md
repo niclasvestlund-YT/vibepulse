@@ -260,7 +260,7 @@ Physical dedicated-power acceptance remains separate evidence.
 
 ---
 
-### OBS-37 · The heap low-water cannot answer the flush question, and the 10 s sample cannot see the dips
+### OBS-37 · The heap low-water cannot answer the flush question, and nothing tracks the DMA block between samples
 `firmware · M · open` — on `v1.0.0-67-ge51b79f`, physically observed
 2026-09-06 over ~30 minutes of uptime on `torget-home-01`. Two distinct
 signals, which should not be conflated:
@@ -290,10 +290,7 @@ below 11 520 B, which the first version of this entry said, and it does not
 prove a moment at which an 11 520 B allocation was impossible, which the second
 version claimed. What it does say: the internal regions were, each at its own
 worst moment, squeezed to a combined 11 143 B, and the 10 s `heap:` line never
-saw any of it. Whether a flush allocation ever fails is unmeasured. The dips happen between samples and are invisible to the periodic
-`heap:` line, which never observed anything under 19 456. **Any soak watching
-the sampled figure alone will report "steady" straight through this condition**
-— that is the part that makes this P1: the evidence lies. The low-water
+saw any of it. Whether a flush allocation ever fails is unmeasured. The `heap:` line does print that summed minimum — it is how the progression below was reconstructed — so the probe does not miss the minima advancing. What it cannot show is the instant, or the largest DMA block at that instant: nothing tracks the block's own minimum between samples, and the sampled block never read below 16 384. **A soak that watches only the sampled block will report "steady" while the summed minimum advances, and neither figure answers whether a flush allocation ever failed** — that is what makes this P1: the evidence cannot answer the question. The low-water
 progression was
 `44199 → 19167 (t=33 s) → 18451 (t=605 s) → 11191 (t=843 s) → 11143 (t=935 s)`,
 then flat; it did not continue to fall.
