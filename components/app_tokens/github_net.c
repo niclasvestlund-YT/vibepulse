@@ -27,6 +27,9 @@ static const char *TAG = "github-net";
 
 #ifndef TK_GITHUB_URL
 #define TK_GITHUB_URL NULL
+#define TK_GITHUB_URL_CONFIGURED 0
+#else
+#define TK_GITHUB_URL_CONFIGURED 1
 #endif
 
 static void github_net_task(void *arg) {
@@ -38,6 +41,14 @@ static void github_net_task(void *arg) {
   tk_poll_backoff_init(&backoff, GITHUB_FETCH_EVERY_MS, GITHUB_FETCH_MAX_MS);
 
   torget_net_wait();
+  /* LABS can switch this feed on without a rebuild, so a secrets.h that
+   * never had TK_GITHUB_URL is a normal state now, not a misconfiguration:
+   * the feed then lives on the advertised tokenserver alone. Said once, so
+   * an empty page has a reason in the log. */
+#if !TK_GITHUB_URL_CONFIGURED
+  ESP_LOGI(TAG, "TK_GITHUB_URL saknas i secrets.h — GitHub-flödet hämtas "
+                "bara från en annonserad tokenserver");
+#endif
   /* Separate this request from quotas (10 s), Max Tracker (15 s) and the
    * one-second agent feed. GitHub can wait; it must never contend with them. */
   vTaskDelay(pdMS_TO_TICKS(20000));

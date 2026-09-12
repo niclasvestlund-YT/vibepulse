@@ -23,6 +23,12 @@ assert "failed_now_locked" in discovery
 assert "TG_SERVICE_SOURCE_CONFIGURED" in discovery
 assert "torget_http_get_failover(configured_url, relay_url" in http
 assert "torget_service_note_result" in http
+# A feed switched on in LABS may have no compiled-in URL at all: discovery
+# must still run, and the fallback is consulted only when it exists.
+assert "!path || !configured_url" not in discovery
+assert "return configured_url && bounded_copy(url, cap, configured_url);" in discovery
+assert "(configured_url && strcmp(discovered, configured_url) == 0)" in http
+assert "(!configured_url || strcmp(alternate, configured_url) != 0)" in http
 
 assert "DiscoveryAdvertiser(log)" in tokenserver
 assert "discovery.start(args.port)" in tokenserver

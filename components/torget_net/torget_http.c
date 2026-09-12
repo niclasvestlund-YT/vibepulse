@@ -219,7 +219,7 @@ bool torget_http_get_service(const char *path, const char *configured_url,
     return false;
   }
   if (source == TG_SERVICE_SOURCE_CONFIGURED ||
-      strcmp(discovered, configured_url) == 0) {
+      (configured_url && strcmp(discovered, configured_url) == 0)) {
     return torget_http_get_failover(configured_url, relay_url,
                                     buf, cap, len_out);
   }
@@ -237,7 +237,7 @@ bool torget_http_get_service(const char *path, const char *configured_url,
                                   sizeof alternate, &alternate_source) &&
       alternate_source == TG_SERVICE_SOURCE_DISCOVERED &&
       strcmp(alternate, discovered) != 0 &&
-      strcmp(alternate, configured_url) != 0) {
+      (!configured_url || strcmp(alternate, configured_url) != 0)) {
     ok = http_get_timeout(alternate, buf, cap, len_out,
                           TG_NET_REPROBE_TIMEOUT_MS, false);
     torget_service_note_result(alternate_source, alternate, ok);
