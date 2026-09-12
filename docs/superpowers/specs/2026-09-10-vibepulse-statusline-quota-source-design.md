@@ -144,9 +144,14 @@ otherwise fresh bridge for the rest of the cooldown — the opposite of
 what the bridge is for. So `_save_probe_state` persists the fingerprint
 and its source beside `cooldown_until`, `_load_probe_state` restores
 them, and when an older state file has none the tokenserver derives the
-fingerprint once from the local credential store without any HTTP call
+fingerprint from the local credential store without any HTTP call
 (reading the candidates is local; only the request is what the cooldown
-rests). No fingerprint on either side, or two that differ,
+rests) **only when that store is unambiguous**: one candidate, or a
+Desktop token equal to the keychain's. A legacy file cannot say which
+of two differing tokens took the 429, so with a Desktop token that
+differs from the keychain's the account stays unknown until a probe
+succeeds, rather than attributing the cooldown — and the bridge's
+acceptance — to whichever account happens to be readable. No fingerprint on either side, or two that differ,
 means **no merge**: the probe stays the panel's source exactly as today,
 the bridge sample stays in its file but is skipped by arbitration and by
 the interval rule, and the doctor says `VARN statusLine bridge: sample is
@@ -240,7 +245,13 @@ timestamp, not by which source it is:
    decides the direction.
 2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
-   record) **plus the same account gate**: the file names its organization
+   record) **plus the same-window monotonic rule and the same account
+   gate**. `_merge_claude_plan_usage` today lets a newer timestamp win;
+   under this spec a plan-usage sample whose borrowed reset matches the
+   window bridge and probe already hold takes part in the same
+   higher-percentage-wins comparison, so a fresh Desktop sample of 40 %
+   cannot replace a retained 60 % for the same weekly reset, and it wins
+   outright only for a later reset. The account gate: the file names its organization
    (`org`, which `_read_claude_plan_usage` validates and today discards),
    and Desktop can be signed into a different account than the probe and
    bridge. So the reader keeps `org` as a hash, the fingerprint side
@@ -277,7 +288,10 @@ under the same identity filter.
 
 **The probe becomes a background verifier.** While **both** bridge windows
 are independently fresh (`five_hour` and `seven_day` each with `seen`
-younger than `STATUSLINE_FRESH_S` and unexpired, and the entry's fingerprint matches
+younger than `STATUSLINE_FRESH_S`, unexpired, **and the window the
+arbitration selected** — a bridge window whose `resets_at` is older than
+the probe's observation of the same window is ineligible for arbitration
+and must not count as live for scheduling either — and the entry's fingerprint matches
 the probe's — a sample the arbitration will not use must not slow the
 probe either — a fresh session window beside a
 missing or stale weekly one does not count, because the probe is then the
@@ -436,7 +450,12 @@ Regression tests must prove:
   the one beside the probe's fingerprint: Desktop signed into account A
   beside a probe and bridge on B leaves B's figures untouched and `GET /`
   reports `other_account`; an unknown organization on either side skips
-  the step;
+  the step; a matching-account plan-usage sample of 40 % with a borrowed
+  reset equal to the retained window's leaves a retained 60 % in place;
+- a legacy probe state file during a cooldown yields a fingerprint only
+  from an unambiguous local store: one candidate, or Desktop equal to
+  keychain; with two differing tokens the account stays unknown and the
+  bridge is not accepted until a probe succeeds;
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
@@ -492,7 +511,9 @@ Regression tests must prove:
   because `seen` aged out), and never invents a model-pool percentage
   from the bridge;
 - the probe interval is `PROBE_WHEN_BRIDGED_S` only while both windows
-  are fresh and the last status was a completed probe; one fresh window
+  are fresh, are the selected reset windows, and the last status was a
+  completed probe; a fresh bridge window from an older reset than the
+  probe's keeps the ladder; one fresh window
   beside a missing or stale one keeps the current ladder, the
   auth-recovery statuses keep `AUTH_RECOVERY_EVERY_S` with a fresh bridge
   sample present, the ladder returns otherwise, and a bridge that goes
