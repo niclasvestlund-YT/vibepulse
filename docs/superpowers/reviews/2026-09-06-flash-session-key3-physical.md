@@ -4,9 +4,9 @@
 
 **DRAFT, FOR REVIEW. USB FLASH TO `v1.0.0-67-ge51b79f` PASSED AND THE `settings`
 INTERNAL-RAM QUESTION IS SETTLED AT `+0 B`. §2 BOOT-LOG EVIDENCE IS COMPLETE. A
-MEASUREMENT GAP WAS FOUND: THE INTERNAL-HEAP LOW-WATER DIPS BELOW WHAT A FLUSH
-NEEDS, THE DMA BLOCK ITSELF IS NOT TRACKED, AND THE 10 S SAMPLE CANNOT SEE
-THE DIPS (OBS-37). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
+MEASUREMENT GAP WAS FOUND: THE INTERNAL-HEAP LOW-WATER IS A SUM OF PER-REGION
+MINIMA THAT CANNOT ANSWER THE FLUSH QUESTION, THE DMA BLOCK ITSELF IS NOT
+TRACKED, AND THE 10 S SAMPLE CANNOT SEE THE DIPS (OBS-37). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
 ALL NOT EXERCISED. A SIX-HOUR UNATTENDED PASSIVE OBSERVATION COMPLETED WITH NO
 ALARM; IT IS NOT THE RUN SHEET'S §5. §3.5 CODEX AND MANUAL-TEST 4.4/4.5 ARE NOT
 EXERCISED.**
@@ -179,7 +179,7 @@ were removed with user approval. Removing that tree also permanently retired the
 stale-binary hazard the sheet warns about in §1 — it is no longer merely outside
 the `build*` glob, it is gone.
 
-## FINDING: the heap low-water dips below what a flush needs
+## FINDING: the heap low-water cannot answer the flush question
 
 Discovered from the serial log before the §1 gesture tests had produced a
 single result. The firmware carries its own guard for this and it has been
@@ -199,10 +199,13 @@ Counts over ~20 minutes of uptime on `v1.0.0-67-ge51b79f`:
 
 The decisive number is `lägsta någonsin`, which the periodic `heap:` line
 tracks separately from the sampled value. Precisely: it is
-`heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)` (`main/main.c:650`), the
-lowest **total** free internal heap since boot — not a DMA-block size. The only
-block figure on that line is the sampled `DMA största`. The first draft of this
-finding called it a DMA-block low-water; it is not.
+`heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)` (`main/main.c:650`),
+which ESP-IDF computes by summing each internal heap region's own lifetime
+minimum. It is neither a DMA-block size nor a snapshot of one instant — the
+regions' minima can come from different moments. The only block figure on that
+line is the sampled `DMA största`. The first draft of this finding called it a
+DMA-block low-water; the second called it the total free at one instant; it is
+neither.
 
 ```
 t=13 s   lägsta 44199
@@ -213,13 +216,15 @@ t=843 s  lägsta 11191
 t=935 s  lägsta 11143     <-- flush needs 11520
 ```
 
-**11 143 < 11 520.** At some point around t=843–935 s total free internal
-heap was 11 143 B. A contiguous block cannot exceed the total, so a flush
-allocation made at that instant could not have found the 11 520 B it needs;
-whether one is ever made at such an instant is not measured. The panel did not
+**11 143 < 11 520.** Around t=843–935 s the summed low-water reached 11 143 B.
+Because it is a sum of per-region minima taken at possibly different moments,
+it does not establish an instant at which an 11 520 B allocation was
+impossible, and it says nothing about the DMA block; it establishes only that
+the regions were squeezed harder than the sampled line ever showed. Whether a
+flush allocation ever fails is not measured. The panel did not
 freeze — it is still rendering, and the sampled block recovers to
 19 456–23 552 — but the margin against the freeze this repo has history with
-was gone at that instant, and that was before any manual test ran. (The
+may have been gone at some instant, and that was before any manual test ran. (The
 `LÅGT DMA-block` guard itself fires below twice the flush size, 23 040 B, so
 the 19 456 B it reports is not a block that is too small.)
 
@@ -279,9 +284,9 @@ t=605 s   18451
 t=625 s   18371
 ```
 
-Eight downward steps over roughly 45 minutes, ending at 9 623 B of total
-internal free — 1 897 B less than the 11 520 B contiguous block a display flush
-needs, so at that instant no such block could have existed. No trigger is identified for any single step. The
+Eight downward steps over roughly 45 minutes, ending at a summed low-water of
+9 623 B, under the 11 520 B a display flush needs — a comparison that, per the
+note above, is not a statement about any single instant. No trigger is identified for any single step. The
 sampled `heap:` figure never went below 16 384 across the whole session, so none
 of this is visible in the number a soak would normally watch. This is the open
 question OBS-37 carries forward.
