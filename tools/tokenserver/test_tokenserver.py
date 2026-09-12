@@ -201,17 +201,14 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
         saved = (tokenserver._claude_statusline_status,
                  tokenserver._claude_statusline_logged,
                  tokenserver._claude_statusline_view,
-                 tokenserver._claude_statusline_bridged,
-                 tokenserver._claude_statusline_cache)
+                 tokenserver._claude_statusline_bridged)
 
         def restore():
             (tokenserver._claude_statusline_status,
              tokenserver._claude_statusline_logged,
              tokenserver._claude_statusline_view,
-             tokenserver._claude_statusline_bridged,
-             tokenserver._claude_statusline_cache) = saved
+             tokenserver._claude_statusline_bridged) = saved
         self.addCleanup(restore)
-        tokenserver._claude_statusline_cache = (None, None)
         tokenserver._claude_statusline_logged = None
         tokenserver._claude_statusline_bridged = False
 
@@ -285,15 +282,6 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
             "start -> not_installed", "not_installed -> missing",
             "missing -> invalid", "invalid -> fresh", "fresh -> stale",
             "stale -> empty"])
-
-    def test_unchanged_file_is_not_reparsed(self):
-        self.write(five=(42.0, self.NOW + 3600))
-        tokenserver._read_claude_statusline(self.path, now_ts=self.NOW)
-        with mock.patch.object(tokenserver.statusline_bridge, "peek_sample",
-                               side_effect=AssertionError("reparsed")):
-            summary = tokenserver._read_claude_statusline(
-                self.path, now_ts=self.NOW + 1)
-        self.assertEqual(summary["windows"]["five_hour"]["pct"], 42.0)
 
     # -- arbitration -----------------------------------------------------
 

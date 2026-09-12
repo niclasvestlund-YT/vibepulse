@@ -157,14 +157,15 @@ _IS_WINDOWS = sys.platform == "win32"
 _claude_plan_usage_status = "not_checked"
 # The statusLine bridge sample: content-free status word for GET / and
 # the transition log (not_installed / missing / unreadable / invalid /
-# empty / stale / fresh), the last summary served, and a (mtime, size)
-# keyed parse cache so the 30 s polls do not reparse an unchanged file.
+# empty / stale / fresh) and the last summary served. The file is under
+# 64 KiB and read once per 30 s poll, so it is parsed every time: a
+# parse cache keyed on (mtime, size) missed a rewrite on Windows CI, where
+# two writes in one tick shared both.
 _claude_statusline_status = "not_checked"
 _claude_statusline_logged = None
 _claude_statusline_view = {"status": "not_checked", "ageS": None,
                            "claudeCodeVersion": None}
 _claude_statusline_bridged = False
-_claude_statusline_cache = (None, None)
 _claude_statusline_lock = threading.Lock()
 # Tests point this at a file that does not exist so a bridge installed on
 # the developer's own machine never leaks into snapshot assertions.
@@ -281,33 +282,18 @@ def _read_claude_statusline(path=None, now_ts=None):
     """The bridge's validated windows, or ``None`` when there is nothing
     usable.  Sets the status word and logs its transitions once."""
     global _claude_statusline_status, _claude_statusline_logged, \
-        _claude_statusline_view, _claude_statusline_cache
+        _claude_statusline_view
     sample_path = _claude_statusline_path() if path is None else Path(path)
     current_ts = time.time() if now_ts is None else now_ts
     with _claude_statusline_lock:
-        try:
-            info = sample_path.stat()
-            key = (info.st_mtime_ns, info.st_size)
-        except FileNotFoundError:
-            key = None
-            installed = statusline_bridge.config_path(
-                sample_path.parent).exists()
-            status, document = ("missing" if installed
-                                else "not_installed"), None
-        except OSError:
-            key, status, document = None, "unreadable", None
-        else:
-            if key == _claude_statusline_cache[0]:
-                status, document = "ok", _claude_statusline_cache[1]
-            else:
-                status, document = statusline_bridge.peek_sample(sample_path)
+        status, document = statusline_bridge.peek_sample(sample_path)
+        if status == "missing" and not statusline_bridge.config_path(
+                sample_path.parent).exists():
+            status = "not_installed"
         summary = None
         if status == "ok":
-            _claude_statusline_cache = (key, document)
             summary = statusline_bridge.summarize_sample(document, current_ts)
             status = summary["status"]
-        else:
-            _claude_statusline_cache = (None, None)
         view = {"status": status,
                 "ageS": summary["ageS"] if summary else None,
                 "claudeCodeVersion":
