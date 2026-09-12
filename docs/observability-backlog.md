@@ -325,10 +325,12 @@ the interval back to the nearest preceding handshake was `min 178 ms, max
 would cluster these near zero; a uniform distribution would mean ~1230 ms. The
 observed spread is broader than uniform, so `Certificate validated` precedes
 the failures only because it precedes everything. **The TLS hypothesis is
-unsupported by this data.** One outlier has a plausible mechanism and deserves
-a look before TLS does: `t=826595` is preceded not by a handshake but by a
-display rotation (`rotation: roterade till läge 0`, `MADCTL 0xA0`), which holds
-the LVGL lock while the panel redraws.
+unsupported by this data.** One outlier was noted and turned out to carry no mechanism: `t=826595` is
+preceded not by a handshake but by a display rotation (`rotation: roterade
+till läge 0`, `MADCTL 0xA0`). But `main/rotation.c` releases the adapter lock
+before it emits that line and only schedules the redraw, so the ordering does
+not identify rotation as the lock holder; it stays an observation, not a lead,
+and does not by itself rank UI activity above the other periodic tasks.
 
 **Cheapest bisection, if one is run.** Three clients are plain `#ifdef` gates
 in `secrets.h` and can be removed in a single rebuild; the fourth, Max
@@ -489,7 +491,8 @@ Three results, and the first changes how serious this item is:
    period before the soak (17 failures across the roughly half hour of uptime
    the interval analysis covers, 10 of them inside its first 20 minutes)
    against hours 2–6. Nineteen in six hours, declining after hour 2.
-   This supports the rotation outlier noted above and points the LVGL-lock
+   This is consistent with UI-linked activity in general (the rotation line
+   noted above supplies no mechanism of its own) and points the LVGL-lock
    question first at UI activity. It does not clear the background tasks: five failures (4 in
    hour 2, 1 in hour 5) happened with nobody at the panel, so the network
    clients and the other periodic tasks stay in scope for those.
