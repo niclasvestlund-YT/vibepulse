@@ -1804,6 +1804,8 @@ class PluginPackageTests(unittest.TestCase):
                 "reboot ledger", "Poller backoff", "pinned logging",
                 "CI-built", "not yet flashed or physically verified",
                 "torget-home-01", "v1.0.0-25-g054db68", "partition-table-flash",
+                "Correction, 2026-09-12", "v1.0.0-67-ge51b79f",
+                "static on-panel review has not been run",
                 "bee5d8c", "not inherited", "Simulator captures",
                 "source-only", "Do not attach `torget.bin`",
                 "v1.0.0...v1.1.0", "docs/observability.md",
@@ -1813,7 +1815,8 @@ class PluginPackageTests(unittest.TestCase):
         # The evidence boundary precedes every feature and screenshot.
         opening = release.split("\n## ", 1)[0]
         for boundary in ("CI-built", "not yet flashed or physically verified",
-                         "v1.0.0-25-g054db68", "bee5d8c", "not inherited"):
+                         "v1.0.0-25-g054db68", "bee5d8c", "not inherited",
+                         "v1.0.0-67-ge51b79f", "remain **not yet flashed**"):
             self.assertIn(boundary, opening)
         for image in (
                 "vibepulse-settings-menu.png",

@@ -1029,7 +1029,7 @@ class RepositoryRegistryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout,
-            "OK: 30 capabilities, 12 sources, 1 units\n",
+            "OK: 30 capabilities, 13 sources, 1 units\n",
         )
 
     def test_repository_registry_loads(self):
@@ -1119,6 +1119,7 @@ class RepositoryRegistryTests(unittest.TestCase):
                 "source-code", 3, "2.0.0",
             ),
             "espressif-mdns-1.11.3": ("source-code", 3, "1.11.3"),
+            "torget-main-e51b79f-flash-2026-09-06": ("source-code", 3, "e51b79f"),
             "torget-main-1fad449": ("source-code", 3, "1fad449"),
             "waveshare-board-docs-2026-08-10": (
                 "vendor-doc", 4, "accessed-2026-08-10",
@@ -1198,7 +1199,7 @@ class RepositoryRegistryTests(unittest.TestCase):
             "battery": "not_fitted",
             "microsd": "unknown",
             "antenna": "onboard",
-            "installed_firmware": "v1.0.0-25-g054db68",
-            "last_physical_verification": "2026-08-30",
+            "installed_firmware": "v1.0.0-67-ge51b79f",
+            "last_physical_verification": "2026-09-06",
             "secrets": False,
         })

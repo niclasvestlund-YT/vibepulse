@@ -8,13 +8,79 @@ this list. Nothing here authorizes a flash by itself — the user says
 
 ## Why this session exists
 
-`spec/device-units.yaml` says `torget-home-01` runs `v1.0.0-25-g054db68`
-(flashed 2026-08-30). `main` is roughly 40 commits past that. What the
-panel has never seen:
+When this sheet was written, `spec/device-units.yaml` said `torget-home-01`
+ran `v1.0.0-25-g054db68` (flashed 2026-08-30) and `main` was roughly 40
+commits past that. **Since 2026-09-06 the panel runs `v1.0.0-67-ge51b79f`**,
+flashed over USB (the session is in
+`docs/superpowers/reviews/2026-09-06-flash-session-key3-physical.md`); every
+firmware row below is on the glass since then, unverified (the last row is
+host-side behaviour, not panel image), and the starting state for §1 is an
+image that *has* the SETTINGS menu. What is still missing from the
+glass is every firmware commit after `e51b79f` — the list below is
+`git log e51b79f..main -- main components platform third_party
+partitions.csv sdkconfig.defaults CMakeLists.txt cmake dependencies.lock`
+as of 2026-09-12 (every path the root `CMakeLists.txt` and ESP-IDF read
+into the image, the vendored `third_party/` tree and the managed-component
+lock included — the same six commits as `main components` alone at that
+date); regenerate it
+before the session and add a check for anything new:
+
+- `f01210f` (#109) coredump to flash, reboot ledger, pinned logging — check:
+  the `omstartsliggare` line after the banner; for the dump, note that the
+  `coredump i flash` notice appears only when a dump exists, so after the
+  one-time partition-table flash below either reboot and confirm the boot log no longer carries the
+  missing-coredump-partition notice, or read the table back from the device
+  (`esptool.py -p <port> read_flash 0x8000 0xc00 table.bin`, then
+  `gen_esp32part.py table.bin` lists `coredump`; `idf.py partition-table`
+  only prints the checkout's table and proves nothing about the device) or, only if the user
+  authorizes it in the session, trigger the controlled panic described in
+  OBS-02 and read the notice on the next boot.
+- `5bc2792` (#110) poller backoff — check: stop the tokenserver, watch the
+  transitions log, restart it, watch the recovery line.
+- `29e1d64` (#104) warm-up placeholders — check: restart the service with a
+  large history and watch the quota rings refresh while the volume counters
+  keep their last values instead of showing zeros.
+- `ae01fed` (#92) the optional GitHub tile left a hole and Value indexed past
+  the end — check: with the GitHub page off, swipe through every page and
+  confirm Value is reachable as the last tile with no blank tile before it.
+- `add41fd` (#88) relay-URL log redaction — on the installed image a failed
+  numbers-relay fetch still logs the credential-bearing relay URL, so **serial
+  logs from `e51b79f` are not safe to share unredacted** until the next flash;
+  check: force one failed fetch and read the line.
+- `8d53c69` (#98) SETTINGS → LABS — its physical selector review is still
+  listed as pending in `CHANGELOG.md` and the KEY3 manual test has no LABS
+  checks; check: open SETTINGS → LABS, flip each choice, restart, and compare
+  the glass against the frames in
+  `docs/superpowers/reviews/2026-09-09-labs-static-simulator.md`.
+
+That command lists committed inputs only. `secrets.h` and `sdkconfig` are
+git-ignored inputs that change the image without changing its revision — the
+2026-09-06 image lost OTA receiving exactly that way, with `TG_OTA_TOKEN`
+undefined — so before building also record, names only and never values:
+which `TK_*` defines `secrets.h` sets (`grep -oE '^#define TK_[A-Z0-9_]+'
+secrets.h`), which `CONFIG_TK_*` switches `sdkconfig` has on
+(`grep '^CONFIG_TK_' sdkconfig`), and that `TG_OTA_TOKEN` is defined
+(`grep -c '^#define TG_OTA_TOKEN' secrets.h` prints 1). Put that list in the
+session review next to the banner, so the next inventory can compare
+configuration as well as commits. **One of those needs USB even
+though the app goes over the air:** the coredump partition is new in the
+partition table, and OTA never writes the table, so before the first dump can
+land the operator runs a one-time `idf.py -p <port> partition-table-flash`
+over USB, separately and explicitly authorized like any USB flash (README,
+"Latest release"); until then the boot log says so on every boot and the
+delivered firmware runs without usable crash dumps. Do it in the same session
+as the §1 delivery, after the boot-log read in §2 confirms the new image.
+**And before the uploader starts:** `.ota-device` held a stale lease on
+2026-09-06 (the session review, "Host state"), so in §0 compare its contents
+with the panel's current address — SETTINGS → ABOUT on the glass, or the
+`esp_netif_handlers` line in the boot log — and rewrite the file if they
+differ; otherwise the window opens on the panel while `tools/ota-flash.sh`
+polls the wrong host until it gives up.
+What the panel had never seen when this sheet was written:
 
 | Change | Where it landed | What only the glass can prove |
 |---|---|---|
-| SETTINGS menu on a 3 s KEY3 hold (UPDATE / WIFI / ABOUT) | #72, #73 | timing, z-order against NO NETWORK, the takeover hand-off. The flashed image predates the menu: its hold opens the update window directly, which is how the first delivery in §1 goes |
+| SETTINGS menu on a 3 s KEY3 hold (UPDATE / WIFI / ABOUT) | #72, #73 | timing, z-order against NO NETWORK, the takeover hand-off. On the glass since 2026-09-06; the first delivery in §1 now goes through the menu |
 | Overlay cost lines at boot (`overlaykostnad …`) | #77 | the actual `settings` internal-RAM figure — the FEATURES row waits on it |
 | Setup QR no longer outlives its window | #76 | no leftover QR over `NO NETWORK` |
 | KEY3 arbitration moved to pure platform code | #73 | no behaviour change — a regression here would be a bug |
@@ -43,9 +109,14 @@ panel has never seen:
    launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver
    ```
 
-   Then `python3 tools/vibepulse_setup.py doctor` — it now names a saved
+   Use the checkout's `.venv/bin/python` for every tool below: on this Mac
+   bare `python3` is 3.9.6 and the doctor crashes on it before it can run
+   (found 2026-09-06; the venv recipe is in README under "Hardware
+   knowledge").
+
+   Then `.venv/bin/python tools/vibepulse_setup.py doctor` — it now names a saved
    Codex mode that would silently hide permission cards (#82) — **and**
-   `python3 tools/tokenserver/smoke.py`, which compares the live service's
+   `.venv/bin/python tools/tokenserver/smoke.py`, which compares the live service's
    `rev` and `srcFingerprint` against *this* checkout. That second check
    is not optional: `kickstart` restarts whatever checkout the plist
    already points at, and a service running from an older worktree
@@ -53,7 +124,7 @@ panel has never seen:
    read `build*/torget.bin` from *that* tree, so the staged build in §3
    would never be advertised and 3.4 could not fire. If smoke reports a
    rev or fingerprint mismatch, re-point the service with
-   `python3 tools/vibepulse_macos_service.py install` from this checkout
+   `.venv/bin/python tools/vibepulse_macos_service.py install` from this checkout
    (it does a real `bootout` + `bootstrap`; `kickstart` cannot move it),
    then run smoke again before going on.
 4. **Power and serial at the same time.** The panel must run from its
@@ -103,7 +174,14 @@ Buddy carries a DMA configuration that has frozen the glass before. So,
 from a fresh configure: read the build's own status lines — `Solelkollen
 saknas` / `~/Buddy saknas` mean not included; otherwise record each
 companion's `git describe --tags --always --dirty` from its own checkout
-in the review, refuse a `-dirty` companion the same way the uploader
+in the review — and for a companion that is not a git checkout, which
+Solelkollen is on this Mac, its deterministic fingerprint instead:
+`cd ~/Solelkollen/components/app_solelkollen && find . -type f | LC_ALL=C sort
+| xargs shasum -a 256 | shasum -a 256`, recorded in the review and in the
+`spec/hardware-sources.yaml` companion record together with that command,
+so the next session can tell whether the tree changed (the 2026-09-06 digest
+was computed with an unrecorded method and cannot be compared; this run
+replaces it), refuse a `-dirty` companion the same way the uploader
 refuses a dirty platform, and compare against
 `spec/hardware-sources.yaml`. Buddy stays **OFF** unless the user asks
 for it in this session.
@@ -113,20 +191,20 @@ takes the newest `build*/torget.bin` by mtime, and it makes that choice
 only after the window opens — too late for you to see it. A stale
 `build-stage/` from an earlier session would win and be sent.
 
-**The first delivery lands on the old image, and the old image has no
-SETTINGS menu.** On `v1.0.0-25-g054db68` the menu does not exist yet; it
-arrives with this build. What that image *does* have is the UPDATE READY
-takeover, and the tokenserver advertises the new `build/torget.bin`
-within about 30 s of `idf.py build` — so by the time you reach the panel
-the takeover has most likely already taken the glass. Two cases, and the
-first is the normal one:
+**The first delivery lands on `v1.0.0-67-ge51b79f`, which has the SETTINGS
+menu.** (The first version of this sheet assumed `v1.0.0-25-g054db68`, whose
+hold opened the window directly; that image has been gone since 2026-09-06.)
+The installed image also has the UPDATE READY takeover, and the tokenserver
+advertises the new `build/torget.bin` within about 30 s of `idf.py build` —
+so by the time you reach the panel the takeover has most likely already taken
+the glass. Two cases, and the first is the normal one:
 
 - **UPDATE READY is showing.** Tap its **UPDATE** pill. A KEY3 hold does
   nothing while the takeover owns the glass — deliberately — so holding
   here leaves the uploader waiting forever.
-- **It has not appeared yet.** Hold KEY3 a full 3 s. There is no
-  SETTINGS on this old image for the hold to reach, so it opens the
-  update window directly and the ring appears.
+- **It has not appeared yet.** Hold KEY3 a full 3 s to open SETTINGS, then
+  tap **UPDATE**; the ring appears. The hold alone only opens the menu —
+  without the tap the window never opens and the uploader waits forever.
 
 Either way the uploader (already polling) sends. Expect RECEIVING →
 VERIFYING → RESTARTING, then the boot-health gate. The script exits after
@@ -238,6 +316,8 @@ network-off part is done once, not twice.
   timed: how long the press lasted in 1.2, how long the wait was before
   the setup window opened by itself in 2.7, and how soon after the
   takeover the short tap came in 3.3.
-- README's SETTINGS section still says no panel has been flashed with the
-  menu. Once §3 passes, that sentence changes; do it in the same commit
-  as the inventory update.
+- README now says SETTINGS is on the panel but its static review is unrun
+  (changed with the 2026-09-06 flash, PR #86). Once §3 passes, that becomes
+  a physical verification: update the SETTINGS evidence note, the release
+  status rows and AGENTS.md in the same commit as the inventory update, and
+  record the review under `docs/superpowers/reviews/`.
