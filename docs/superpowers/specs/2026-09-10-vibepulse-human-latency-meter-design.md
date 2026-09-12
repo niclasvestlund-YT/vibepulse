@@ -93,7 +93,8 @@ below, so a colliding ledger cannot pass as a continuation.
 
 One optional key, `r`, names a discontinuity: `1` while the served
 day is the day of a persisted `dayReset` (the clock-correction release
-below), `2` while it is the day of a persisted `ledgerReset` (a
+below, or a forward jump that advanced the served day without raising
+`endS`, below), `2` while it is the day of a persisted `ledgerReset` (a
 quarantined file, below); absent otherwise. The panel treats absent as
 0 and any value other than 0, 1 or 2 as a malformed block.
 
@@ -157,7 +158,18 @@ re-anchored alone would leave the next snapshot placing the hold in
 the future and the close recreating the very row the release removed
 — counts the drops and the re-anchors in the discontinuity log line,
 and persists the drops, the re-anchoring and the reset `servedDay` in
-one write; and retention prunes on both sides of the window in
+one write **that lands before any of it is shown**: exactly like the
+day advance, the release is queued to the writer, and the in-memory
+state — the dropped rows, the re-anchored markers and their
+`_Pending.started_wall`, `servedDay` and the `dayReset` epoch — changes
+only under the store lock once that write is acknowledged, so until
+then every snapshot keeps serving the future-dated day the page was
+already showing, for at most one writer window. Without the gate a
+snapshot built between the re-anchor and the write would count the
+hold's checkpoint in the real day while the file still held the
+future-dated marker; a crash there would have the startup path turn
+that marker into a future-dated `restart` row, which the next prune
+deletes — seconds the glass had shown, gone; and retention prunes on both sides of the window in
 general — rows older than the cutoff and rows *anchored* more than one
 day after the **current day**, the later of the wall date and
 `servedDay` at the moment of the prune, never `servedDay` alone: the
@@ -401,8 +413,30 @@ monotonic as the totals), so a same-`l` block whose `n`, `m` or any
 total is lower than the retained block's, while its `endS` shows the same
 served day (no rollover: `endS` has not risen above the retained
 countdown) and it carries no `r`, is **not** a continuation whatever
-its `l` says — it is handled exactly as another `l`, refused inside
-the age bound and admitted under `NEW LEDGER` past it. An `l` collision
+its `l` says — it is refused inside the age bound exactly as another
+`l` is, and past the bound, when the retained block is already dashed
+as stale, it replaces the retained block as an ordinary same-ledger
+block, **not** under `NEW LEDGER`, which names a changed `l`: the
+common cause is a rollover the page could not witness, and dashes
+giving way to a smaller total is no retreat. The refusal inside the
+bound is exact, not a heuristic: the retained countdown is the block's
+`endS` less the page's own elapsed time since accept, so with a
+continuous host clock the previous day's countdown never exceeds that
+day's remaining seconds while the new day's `endS` starts near 86 400,
+and a served day cannot advance without `endS` rising above it. The
+one way the date can advance without `endS` rising — a forward clock
+correction that also advances the time of day — is a discontinuity the
+ledger detects and names: it keeps the wall and monotonic times of the
+last snapshot it built, and a snapshot whose wall advance exceeds its
+monotonic advance by more than `WAIT_CLOCK_JUMP_S` (proposed 60) while
+the served day advanced in the same step records `dayReset` and serves
+`r` 1 for the rest of that day, the marker a backward correction's
+release gets, with the release's row rules applied unchanged (no row is
+future-dated, open holds are re-anchored from their live monotonic
+age), so the block carries the explicit rollover signal and the rule
+admits it. A restart across such a jump has no last snapshot to
+compare with; its first blocks are refused for at most the age bound
+and then admitted by the past-the-bound path above. An `l` collision
 therefore cannot show a smaller total as an ordinary retreat; the only
 thing it can still do is admit a colliding ledger's *larger* total by
 the same-ledger path, which the next frames from the original ledger
@@ -469,8 +503,19 @@ the OS send buffer before a stall can reach Cloudflare and be stored
 after the tokenserver has closed the socket at 7 s, so no timeout of
 the sender's can prove when the worker received the frame. The bound
 is therefore **enforced at the receiver, in the worker's own clock**.
-The tokenserver learns the worker's clock from every status response
-(`workerNowMs`, the worker's `Date.now()` at the moment it answers),
+The tokenserver learns the worker's clock from a response header the
+worker sets on **every** response it sends — `X-Worker-Now-Ms`, the
+worker's `Date.now()` at the moment it answers, on every route, every
+status code and every empty body (a `204`, a `404`, a refused PUT
+included), which is why it is a header and not a body field: the
+routes the tokenserver can reach answer `204` when empty. The status
+GET is the **panel's** route, authenticated with `PANEL_TOKEN` and
+answering the Mac bearer with `404`, so it is never the source; the
+tokenserver's first offset comes from the verdict-list GET the same
+relay polls with the Mac bearer from the moment it starts (every
+`POLL_INTERVAL_S`, 0.5 s), and the status publisher does not PUT
+before an offset exists — at most one poll round after start, and
+never a probe of its own. The estimate is
 anchored **at response receipt** on its monotonic clock so the estimate
 of the worker's current time can only run *behind* the truth, never
 ahead, and stamps each status PUT's plaintext wrapper with
@@ -490,9 +535,9 @@ to the *remaining* budget (`_default_transport` today applies separate
 connect and read timeouts, which DNS, TLS, a trickling body and the
 response can each stretch past their sum), stays as the client's wait
 bound and as the term the 42 s budget reserves for transit, but it no
-longer carries the proof; the worker does. A first PUT after start has
-no offset yet, so the tokenserver takes one from a status GET before
-it, and a stale offset is refreshed by every response. Third, the mailbox serves a frame for at most
+longer carries the proof; the worker does. A stale offset is refreshed
+by every response that carries the header, the status PUT's own
+included. Third, the mailbox serves a frame for at most
 `STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) on the worker's clock,
 counted **from the moment the worker received the request**, not from
 the later `Date.now()` `putStatus` passes today after authorisation,
@@ -863,7 +908,11 @@ Regression tests must prove:
   ends at midnight closes into the preceding day with no count in the
   next) and its in-memory `started_wall` moves with its marker so the
   next snapshot places it in the real day and its eventual close writes
-  a real-day row; with the panel disconnected for three days and the
+  a real-day row, and none of that is visible before it is on disk (a
+  test blocks the file lock during the release and asserts that no
+  snapshot counts the re-anchored hold in the real day while the reset
+  write is pending, and that a crash while it is blocked followed by a
+  restart serves the totals the last snapshot did); with the panel disconnected for three days and the
   relay off, waits closed by hooks on the second and third day are
   anchored after the stale `servedDay` plus one day and survive every
   prune, reappearing in full when the panel returns; and advancing the clock to
@@ -915,8 +964,14 @@ Regression tests must prove:
 - the status PUT wrapper carries `builtAtWorkerMs` from an offset
   learned at response receipt (a test with a worker clock 1 000 s ahead
   and a 3 s response transit stamps a build instant at least 3 s behind
-  the worker's truth), a tokenserver without an offset takes one from a
-  status GET before its first PUT, and the worker's refusal and expiry
+  the worker's truth), a tokenserver without an offset makes no status
+  PUT until the verdict-list poll's first response has supplied one (a
+  fake worker that answers the verdict list with an empty `204` still
+  yields a first PUT, stamped, within one poll round; one that answers
+  the status GET with `404` to the Mac bearer, as the real worker does,
+  is never asked for the clock there), the worker tests assert
+  `X-Worker-Now-Ms` on every route and status code including `204` and
+  `404`, and the worker's refusal and expiry
   rules above are asserted by the worker tests;
 - the persisted file and the payload carry no content fields (the
   denylist test above);
@@ -991,10 +1046,15 @@ Regression tests must prove:
   with `g` 500 000 001 behind is older; a same-`l` frame with a newer
   `g` whose `n` — or `m`, or any total — is lower than the retained
   block's, the same served day
-  by `endS` and no `r`, is refused inside the bound and admitted under
-  `NEW LEDGER` past it, while one whose `endS` rose above the retained
+  by `endS` and no `r`, is refused inside the bound and past it, with
+  the retained block dashed, replaces it as an ordinary block with no
+  `NEW LEDGER` marker, while one whose `endS` rose above the retained
   countdown (a rollover) or that carries `r` is a continuation and
-  replaces it; the ledger's reservation crossing 10⁹ continues from 0
+  replaces it inside the bound; a forward correction of a day and an
+  hour between two snapshots serves the new day with `r` 1 and
+  `waits.dayReset`, a correction of the same size that does not cross
+  the served day's end, and a legitimate midnight, serve no `r`; the
+  ledger's reservation crossing 10⁹ continues from 0
   and the served `g` follows;
   a block with another `l` and a larger `g` arriving inside the bound
   leaves the retained block, and past the bound replaces it under `NEW
