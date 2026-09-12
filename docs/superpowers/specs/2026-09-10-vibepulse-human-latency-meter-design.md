@@ -463,19 +463,36 @@ has changed since it was built, because a block that still carries
 yesterday's totals and a `endS` counting to a midnight that has
 already passed is not one the panel's transit debit can correct, and a
 subsequent outage would keep yesterday under `BLOCKED ON YOU · TODAY`. Second, the PUT itself takes time
-that the worker's clock does not see, and `index.ts` starts the mailbox
-TTL only once it has received and hashed the body — so the PUT gets a
-**true end-to-end deadline**, `RELAY_PUT_BOUND_MS` (proposed 7 000 ms),
-enforced on the tokenserver's monotonic clock rather than assumed from
-socket timeouts: `_default_transport` today applies separate connect
-and read timeouts, which DNS, TLS, a trickling request body and the
-response can each stretch past their sum, so this spec has the status
-PUT set every socket operation's timeout to the *remaining* budget and
-abandon the attempt (close the connection, count a failure) the moment
-the deadline passes. A frame the worker stored was therefore received
-within the deadline — a store that happens before the client's abandon
-is still inside it — and one the worker did not store carries no age
-at all. Third, the mailbox serves a frame for at most
+that the worker's clock does not see, and a client-side deadline
+bounds only the client's wait, never remote receipt: bytes that entered
+the OS send buffer before a stall can reach Cloudflare and be stored
+after the tokenserver has closed the socket at 7 s, so no timeout of
+the sender's can prove when the worker received the frame. The bound
+is therefore **enforced at the receiver, in the worker's own clock**.
+The tokenserver learns the worker's clock from every status response
+(`workerNowMs`, the worker's `Date.now()` at the moment it answers),
+anchored **at response receipt** on its monotonic clock so the estimate
+of the worker's current time can only run *behind* the truth, never
+ahead, and stamps each status PUT's plaintext wrapper with
+`builtAtWorkerMs`, the envelope's build instant translated into that
+clock (a number, outside the ciphertext, revealing nothing). The worker
+refuses a PUT that carries no stamp, whose stamp lies more than
+`WORKER_CLOCK_SLACK_MS` (proposed 2 000) in its own future, or whose
+stamp is already `RELAY_AGE_BOUND_MS` or more in its past, and stores
+an accepted frame with
+`expires_at_ms = min(receivedAt + STATUS_TTL_MS, builtAtWorkerMs +
+RELAY_AGE_BOUND_MS)`: a frame's serve life ends at most 42 s after its
+build on the worker's clock however late the bytes arrived, and because
+the stamp is conservative the true life is shorter still. The
+tokenserver's own PUT deadline, `RELAY_PUT_BOUND_MS` (proposed 7 000
+ms) on its monotonic clock with every socket operation's timeout set
+to the *remaining* budget (`_default_transport` today applies separate
+connect and read timeouts, which DNS, TLS, a trickling body and the
+response can each stretch past their sum), stays as the client's wait
+bound and as the term the 42 s budget reserves for transit, but it no
+longer carries the proof; the worker does. A first PUT after start has
+no offset yet, so the tokenserver takes one from a status GET before
+it, and a stale offset is refreshed by every response. Third, the mailbox serves a frame for at most
 `STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) on the worker's clock,
 counted **from the moment the worker received the request**, not from
 the later `Date.now()` `putStatus` passes today after authorisation,
@@ -484,8 +501,11 @@ nothing that happens inside the worker after the body arrived, so this
 spec has the handler take `receivedAt` before its first `await` and
 hand that to `mailbox.putStatus` as the TTL start, and any worker-side
 delay after receipt then eats into the 20 s rather than extending the
-frame's life. A worker test pins it (a handler stalled for 5 s after
-receipt stores a frame that expires 20 s after receipt, not 25). An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
+frame's life. Worker tests pin both (a handler stalled for 5 s after
+receipt stores a frame that expires 20 s after receipt, not 25; a PUT
+received 30 s after its stamped build expires 12 s after receipt, not
+20; one received 42 s after it is refused; a stamp 5 s in the worker's
+future is refused; a PUT without a stamp is refused). An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
 the moment the panel's fetch completes, plus the fetch itself, which
 the panel measures on its monotonic clock. The countdown starts at
 `endS - RELAY_AGE_BOUND_MS/1000 - request duration` with
@@ -533,8 +553,18 @@ a second row, or land after the last save. So `main` first calls
 closing — every later `park`, `resolve`, `resolve_relay`, `panic` and
 sweep returns "shutting down" without touching `_pending` — converts
 every pending entry to its `restart` row in that same critical section,
-and drops the entries; only then does the ledger's final flush run, and
-`server_close()` after it. After an **unclean** stop the new
+queues a relay removal for every entry that had been published to the
+encrypted relay (`_queue_relay_remove_locked(entry, "shutdown")`, the
+same removal every other ending queues — without it the mailbox would
+keep serving the dead prompt for its 120 s request TTL, across a quick
+restart), and drops the entries; only then does the ledger's final
+flush run, then the relay adapter is stopped **after draining** those
+removals — `InteractionRelay.stop()` today sets its stop event without
+draining newly queued work, so it gains a bounded drain of at most
+`RELAY_SHUTDOWN_DRAIN_S` (proposed 10 s) that sends every queued
+removal under the usual per-request deadline before the stop event is
+set, logging any it could not deliver (the request TTL stays the
+backstop) — and `server_close()` after that. After an **unclean** stop the new
 process closes each surviving marker as a `restart` row with
 `durationS` = the marker's `elapsedS` and `endedAt` = `startedAt +
 elapsedS`, then clears the list: the row stops at the last durable
@@ -588,7 +618,10 @@ paid for in both; there is no key left to shorten.
    relay off, and the abandoned pop a few lines above it, which removes
    a hold whose waiter gave up — both recorded with the outcomes the
    schema above already declares, the timeout pop as `expired` and the
-   abandoned pop as `removed`, no new outcome value — the
+   abandoned pop as `removed`, no new outcome value — **and the
+   provider-mismatch pop in `InteractionStore.await_verdict()`**, the
+   defensive branch that reaps a Codex entry handed to the Claude-only
+   wrapper, recorded as `removed` — the
    store calls `ledger.close(entry, outcome, now)` exactly once per
    hold: the close is issued by whichever path wins the pop under the
    store lock, and a path that finds the entry already gone issues
@@ -871,7 +904,20 @@ Regression tests must prove:
   and the relay off gets exactly one `expired` row from that pop, the
   sweep that runs afterwards adds none, and the day's total counts its
   seconds; a hold removed by the abandoned pop gets exactly one
-  `removed` row the same way;
+  `removed` row the same way, and so does a Codex entry reaped by
+  `await_verdict()`'s provider-mismatch branch;
+- a clean shutdown with a hold that had been published to the relay
+  queues its removal in `begin_shutdown()` and the adapter delivers it
+  before its stop event is set (a worker-side test sees the request
+  gone before the process exits; a removal the worker cannot take
+  within `RELAY_SHUTDOWN_DRAIN_S` is logged and the request TTL
+  remains the backstop);
+- the status PUT wrapper carries `builtAtWorkerMs` from an offset
+  learned at response receipt (a test with a worker clock 1 000 s ahead
+  and a 3 s response transit stamps a build instant at least 3 s behind
+  the worker's truth), a tokenserver without an offset takes one from a
+  status GET before its first PUT, and the worker's refusal and expiry
+  rules above are asserted by the worker tests;
 - the persisted file and the payload carry no content fields (the
   denylist test above);
 - the `/api/agent-status` body stays inside the device budget with `waits`
