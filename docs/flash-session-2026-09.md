@@ -16,8 +16,15 @@ flashed over USB (the session is in
 row below is on the glass since then, unverified, and the starting state for
 §1 is an image that *has* the SETTINGS menu. What is still missing from the
 glass is everything that landed after `e51b79f`: coredump, the reboot ledger,
-poller backoff and the warm-up placeholders. What the panel had never seen
-when this sheet was written:
+poller backoff and the warm-up placeholders. **One of those needs USB even
+though the app goes over the air:** the coredump partition is new in the
+partition table, and OTA never writes the table, so before the first dump can
+land the operator runs a one-time `idf.py -p <port> partition-table-flash`
+over USB, separately and explicitly authorized like any USB flash (README,
+"Latest release"); until then the boot log says so on every boot and the
+delivered firmware runs without usable crash dumps. Do it in the same session
+as the §1 delivery, after the boot-log read in §2 confirms the new image.
+What the panel had never seen when this sheet was written:
 
 | Change | Where it landed | What only the glass can prove |
 |---|---|---|

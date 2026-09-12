@@ -289,8 +289,8 @@ than the total that was ever free at once. So this is not a measured DMA block
 below 11 520 B, which the first version of this entry said, and it does not
 prove a moment at which an 11 520 B allocation was impossible, which the second
 version claimed. What it does say: the internal regions were, each at its own
-worst moment, squeezed to a combined 11 143 B, and the 10 s `heap:` line never
-saw any of it. Whether a flush allocation ever fails is unmeasured. The `heap:` line does print that summed minimum — it is how the progression below was reconstructed — so the probe does not miss the minima advancing. What it cannot show is the instant, or the largest DMA block at that instant: nothing tracks the block's own minimum between samples, and the sampled block never read below 16 384. **A soak that watches only the sampled block will report "steady" while the summed minimum advances, and neither figure answers whether a flush allocation ever failed** — that is what makes this P1: the evidence cannot answer the question. The low-water
+worst moment, squeezed to a combined 11 143 B by t=935 s. Whether a flush
+allocation ever fails is unmeasured. The `heap:` line does print that summed minimum — it is how the progression below was reconstructed — so the probe does not miss the minima advancing. What it cannot show is the instant, or the largest DMA block at that instant: nothing tracks the block's own minimum between samples, and the sampled block never read below 16 384. **A soak that watches only the sampled block will report "steady" while the summed minimum advances, and neither figure answers whether a flush allocation ever failed** — that is what makes this P1: the evidence cannot answer the question. The low-water
 progression was
 `44199 → 19167 (t=33 s) → 18451 (t=605 s) → 11191 (t=843 s) → 11143 (t=935 s)`
 over the first ~16 minutes. It did not stop there: the later updates below

@@ -121,8 +121,10 @@ down — OBS-37 identified no trigger for the drop.
 | lowest ever | 76 435 | 19 167 |
 
 It is not a leak: the figure is flat from t=33 s onward and recovers to 59 027 by
-t=95 s. Comparing the relay and transport lines in the two boot logs explains the
-level, and the explanation is decisive:
+t=95 s. Comparing the relay and transport lines in the two boot logs is what
+the initial reading rested on — the reading marked discarded below, since
+OBS-37 found the TLS correlation unsupported and identified no trigger. The
+comparison itself stands:
 
 | | old `v1.0.0-33` | new `v1.0.0-67` |
 |---|---|---|
