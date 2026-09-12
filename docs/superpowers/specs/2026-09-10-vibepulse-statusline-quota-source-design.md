@@ -175,7 +175,28 @@ process may predate the bridge install, a login, or a lost record), so
 the bridge writes it to the `unknown` entry and binds the session to
 the current fingerprint only at its first *proving* payload — a later
 `resets_at` or a higher same-reset percentage — after which replays
-keep that binding. The tokenserver derives the probe's the same
+keep that binding. **And the binding is to the credential the session
+started with, not to whatever the account file says after the
+response:** a proof of a request is not a proof of *which* credential
+made it, because another process can complete a login to B between A's
+response and the bridge run, and the file the bridge reads is shared
+and mutable. A session's credential is fixed when the session starts,
+so the bridge binds a session only when the account value it reads has
+demonstrably been in place since before that session began: it keeps,
+in its state, `accountSeenSince` — the earliest time it has observed the
+current `accountUuid` value continuously, reset to now whenever the
+value it reads differs from the last one it recorded — and it takes the
+session's start time from the creation time of the `transcript_path`
+the payload names (a `stat`, never a read; `st_birthtime` on macOS,
+creation time on Windows), a file Claude Code creates when the session
+starts. The binding is made only if the session started **after**
+`accountSeenSince`; otherwise the session stays `unknown` for its
+lifetime, because the account file changed during it or before the
+bridge could witness it — the racing-login case, an in-session
+`/login`, and a session that predates the bridge install all land
+there, by design, rather than under a fingerprint nobody proved. A
+bound session never re-reads the file: later proving payloads keep the
+binding made at the first one. The tokenserver derives the probe's the same
 way, from the `.claude.json` beside the credential store the winning token
 came from: the keychain entry and the credentials file are written by
 that `/login`, so a probe served by either carries the home directory's
@@ -474,7 +495,9 @@ sample file too, and the merge treats it as "no observation", not zero.
   `claude_code_version`, per window `pct`, `resets_at`, `at` and `seen`.
 - The bridge never contacts the network and never reads a credential. The
   one file it reads besides its own is `.claude.json`, for the single
-  `oauthAccount.accountUuid` field, and only its hash leaves the process.
+  `oauthAccount.accountUuid` field, and only its hash leaves the
+  process; it `stat`s the session transcript for its creation time and
+  never opens it.
 - A bridge crash or a full disk must not break the user's own status
   line: the chained command runs even when the sample write fails, and the
   bridge's own exceptions exit 0 silently (Claude Code treats status-line
@@ -572,8 +595,14 @@ Regression tests must prove:
   lowered a value keeps the old binding (the reset-trigger case), every
   first observation of a session goes to `unknown` whether or not its
   values are unique and the session is bound at its first proving
-  payload, and the per-session record contains a hash, never the
-  session id;
+  payload only if its transcript's creation time is later than
+  `accountSeenSince` — a login to another account completed between the
+  session's response and the bridge run resets `accountSeenSince` and
+  leaves that session `unknown` for its lifetime, as does a session that
+  predates the bridge install, and a bound session keeps its binding
+  when the file later names another account — the bridge only ever
+  `stat`s the transcript and never opens it, and the per-session record
+  contains a hash, never the session id;
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
