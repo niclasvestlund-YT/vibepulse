@@ -125,6 +125,62 @@ int main(void) {
         && t.has_ota_available_version
         && strcmp(t.ota_available_version, "v0.2.1-36-g911b2bf") == 0);
 
+  /* Platshållare (issue #62): tjänstens första skanning pågår, räknarna
+   * är nollor som INTE är mätningar och kvoten är live. Flaggan sätts
+   * bara av en riktig boolean true i usageTotals; allt annat är
+   * mätningar, och inget av det avvisar svaret. */
+  json = read_file(FIXTURES_DIR "/tokens-warming-up.json", &len);
+  if (json) {
+    memset(&t, 0, sizeof t);
+    check("uppvärmningsfixturen parsar", tk_tokens_parse(json, len, &t));
+    check("platshållarflaggan sätts", t.volume_placeholder == 1);
+    check("kvoten är live trots platshållare",
+          t.claude_week.has_pct && t.claude_week.pct == 47.0);
+    check("platshållarens räknare är noll", t.day_tokens == 0);
+    check("pågående skanning är inte 'failing'", t.volume_failing == 0);
+    free(json);
+  }
+  json = read_file(FIXTURES_DIR "/tokens-volume-failing.json", &len);
+  if (json) {
+    memset(&t, 0, sizeof t);
+    check("failing-fixturen parsar", tk_tokens_parse(json, len, &t));
+    check("failing sätter både platshållare och failing",
+          t.volume_placeholder == 1 && t.volume_failing == 1);
+    check("kvoten är live trots kraschande omräkning",
+          t.claude_week.has_pct && t.claude_week.pct == 47.0);
+    free(json);
+  }
+  json = read_file(FIXTURES_DIR "/tokens.json", &len);
+  if (json) {
+    memset(&t, 0, sizeof t);
+    check("riktiga fixturen är ingen platshållare",
+          tk_tokens_parse(json, len, &t) && t.volume_placeholder == 0);
+    free(json);
+  }
+  memset(&t, 0, sizeof t);
+  check("usageTotals.placeholder false = mätningar",
+        PARSE("{\"v\":2,\"dayTokens\":5,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":5," BASE_NULLS
+              ",\"usageTotals\":{\"state\":\"ready\",\"ageS\":2,"
+              "\"placeholder\":false}}", &t) && t.volume_placeholder == 0);
+  memset(&t, 0, sizeof t);
+  check("failing utan platshållare (frysta räknare) sätter bara failing",
+        PARSE("{\"v\":2,\"dayTokens\":5,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":5," BASE_NULLS
+              ",\"usageTotals\":{\"state\":\"failing\",\"ageS\":900,"
+              "\"placeholder\":false}}", &t) &&
+        t.volume_placeholder == 0 && t.volume_failing == 1);
+  check("usageTotals som sträng avvisar inte och är ingen platshållare",
+        PARSE("{\"v\":2,\"dayTokens\":5,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":5," BASE_NULLS
+              ",\"usageTotals\":\"refreshing\"}", &t) &&
+        t.volume_placeholder == 0);
+  check("placeholder som sträng \"true\" är ingen platshållare",
+        PARSE("{\"v\":2,\"dayTokens\":5,\"dayTokensPerHour\":0,"
+              "\"daySessions\":1,\"monthTokens\":5," BASE_NULLS
+              ",\"usageTotals\":{\"placeholder\":\"true\"}}", &t) &&
+        t.volume_placeholder == 0);
+
   /* En vilande dag med alla limits null är giltig: nollor och streck är
    * ärliga när inget brunnit och inga källor svarar. */
   check("nollor + null ok",

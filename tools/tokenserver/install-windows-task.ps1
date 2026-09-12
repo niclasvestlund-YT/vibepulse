@@ -1,33 +1,32 @@
 <#
-Registrera tokenservern som en schemalagd uppgift på Windows, så den
-överlever utloggning och omstart — luckan i issue #3: tjänsten fanns men
-dog med terminalfönstret.
+Register the tokenserver as a scheduled task on Windows, so it survives
+logout and reboot -- the gap in issue #3: the service existed but died with
+the terminal window.
 
-Körs i PowerShell från repots rot:
+Run in PowerShell from the repo root:
 
   powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.ps1 `
-      -PublishUrl "https://<din-brevlåda>/u/<hemlighet>"
+      -PublishUrl "https://<your-mailbox>/u/<secret>"
 
-  # utan relä (bara LAN-servering):
+  # without a relay (LAN serving only):
   powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.ps1
 
-  # valfria GitHub- och värdesidor (ange bara planer du faktiskt betalar):
+  # optional GitHub and value pages (only name plans you actually pay for):
   powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.ps1 `
       -GithubRepo "owner/repository" -ClaudePlan max5x `
       -ClaudePlanCostUsd "100" -CodexPlan pro -CodexPlanCostUsd "20"
 
-  # avinstallera:
+  # uninstall:
   powershell -ExecutionPolicy Bypass -File tools\tokenserver\install-windows-task.ps1 -Uninstall
 
-Designval, i linje med resten av repot:
+Design choices, in line with the rest of the repo:
 
-- Uppgiften kör som DEN INLOGGADE ANVÄNDAREN, inte SYSTEM. Tokenservern
-  läser %USERPROFILE%\.claude\.credentials.json — en SYSTEM-tjänst hade
-  läst fel profil och dessutom gett processen mer rättigheter än den
-  behöver.
-- En dold PowerShell-wrapper kör python.exe och skriver en begränsad logg till
-  %LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log. En enda .old-fil
-  håller omstarter och lång drift från att växa utan gräns.
+- The task runs as THE LOGGED-IN USER, not SYSTEM. The tokenserver reads
+  %USERPROFILE%\.claude\.credentials.json -- a SYSTEM service would have
+  read the wrong profile and given the process more rights than it needs.
+- A hidden PowerShell wrapper runs python.exe and writes a bounded log to
+  %LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log. A single .old file
+  keeps restarts and long runs from growing without bound.
 - Interaction providers and detail are read from the tokenserver's saved config.
   Keep those choices out of the scheduled command so setup changes cannot go
   stale here. The optional publish arguments below are numbers-relay settings,
@@ -35,11 +34,12 @@ Designval, i linje med resten av repot:
 - GitHub monitoring and subscription costs are host-display inputs, not
   interaction permissions. The installer carries those explicit, non-secret
   choices to the background process so Windows matches a foreground launch.
-- Ingen hemlighet i den registrerade kommandoraden utom relä-URL:en, som
-  användaren själv valt att ge — samma exponeringsnivå som secrets.h.
-- En logon-trigger startar tjänsten och en femminuters-watchdog startar den
-  igen om processen har dött. `IgnoreNew` gör watchdoggen ofarlig när den
-  redan kör — en hyllservice ska resa sig själv, precis som launchd-plisten.
+- No secret in the registered command line except the relay URL, which
+  the user chose to give -- the same exposure level as secrets.h.
+- A logon trigger starts the service and a five-minute watchdog starts it
+  again if the process has died. `IgnoreNew` makes the watchdog harmless
+  while it is already running -- a shelf service must get back up by
+  itself, just like the launchd plist.
 #>
 param(
     [string]$PublishUrl = "",
@@ -174,19 +174,19 @@ function New-VibePulseTaskSettings {
 
 if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Host "Uppgiften '$TaskName' borttagen. Processen som redan kör påverkas inte;"
-    Write-Host "stoppa den via porten:  Get-NetTCPConnection -LocalPort 8737 -State Listen |"
+    Write-Host "Task '$TaskName' removed. The process already running is not affected;"
+    Write-Host "stop it via the port:  Get-NetTCPConnection -LocalPort 8737 -State Listen |"
     Write-Host "  Select -Expand OwningProcess | ForEach-Object { Stop-Process -Id `$_ }"
     exit 0
 }
 
-# Repots rot är två steg upp från det här skriptet — uppgiften ska
-# överleva att den registreras från vilken katalog som helst.
+# The repo root is two steps up from this script -- the task must survive
+# being registered from any directory whatsoever.
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Server = Join-Path $RepoRoot "tools\tokenserver\tokenserver.py"
-if (-not (Test-Path $Server)) { throw "hittar inte $Server" }
+if (-not (Test-Path $Server)) { throw "cannot find $Server" }
 $Runner = Join-Path $RepoRoot "tools\tokenserver\run-windows-task.ps1"
-if (-not (Test-Path $Runner)) { throw "hittar inte $Runner" }
+if (-not (Test-Path $Runner)) { throw "cannot find $Runner" }
 
 $PythonConsole = Resolve-VibePulsePython
 $CodexBinDir = Resolve-VibePulseCodexBinDir
@@ -268,13 +268,13 @@ Register-ScheduledTask -TaskName $TaskName -Action $Action `
     -Settings $Settings -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
-Write-Host "Uppgiften '$TaskName' registrerad och startad."
+Write-Host "Task '$TaskName' registered and started."
 Write-Host "  server:  $Server"
-if ($PublishUrl) { Write-Host "  relä:    $PublishUrl" }
+if ($PublishUrl) { Write-Host "  relay:   $PublishUrl" }
 if ($GithubRepo) { Write-Host "  GitHub:  configured" }
 if ($ClaudePlanCostUsd -or $CodexPlanCostUsd) {
     Write-Host "  plans:   configured"
 }
 Write-Host "  state:   $env:LOCALAPPDATA\VibePulse\"
-Write-Host "  logg:    $env:LOCALAPPDATA\VibePulse\Logs\torget-tokenserver.log"
-Write-Host "Verifiera:  curl http://localhost:8737/  (claudeProbe ska visa ok)"
+Write-Host "  log:     $env:LOCALAPPDATA\VibePulse\Logs\torget-tokenserver.log"
+Write-Host "Verify:  curl http://localhost:8737/  (claudeProbe should show ok)"

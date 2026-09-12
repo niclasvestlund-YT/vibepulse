@@ -181,7 +181,7 @@ class GitHubMonitor:
                 except Exception as exc:
                     # The count is still authoritative. A missing actor must
                     # never make the whole GitHub feed stale or retry-storm.
-                    log.warning("kunde inte läsa senaste stargazer för %s: %s",
+                    log.warning("could not read the latest stargazer for %s: %s",
                                 self.repo, exc)
                 event = {
                     "eventId": starred_at or f"count:{stars}",
@@ -205,7 +205,7 @@ class GitHubMonitor:
             with self._lock:
                 self._last_error = f"{type(exc).__name__}: {exc}"
                 self._next_poll_at = now + delay
-            log.warning("GitHub-pollning misslyckades för %s; ny chans om %ds: %s",
+            log.warning("GitHub poll failed for %s; next attempt in %ds: %s",
                         self.repo, int(delay), exc)
             return False
 

@@ -85,7 +85,7 @@ def main():
                 "\n").encode("utf-8")
             sys.stdout.buffer.write(encoded)
             sys.stdout.buffer.flush()
-    except Exception:
+    except Exception:  # noqa: S110 - a hook must exit 0 quietly; Codex treats any noise as a failure
         pass
     return 0
 

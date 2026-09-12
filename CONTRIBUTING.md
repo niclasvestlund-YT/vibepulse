@@ -28,6 +28,10 @@ python -m pip install -r requirements-dev.txt \
 ./test/run.sh
 ```
 
+The gate starts with `ruff check .` (bug-shaped rules only; `pyproject.toml`
+explains each). A `try/except/pass` that must stay needs a
+`# noqa: S110 - <why>` naming the boundary it protects.
+
 CI also builds the ESP32-S3 firmware and runs the tokenserver suite on Ubuntu,
 macOS, and Windows. A green platform runner is automated portability evidence,
 not by itself a real-host or physical-panel validation.
