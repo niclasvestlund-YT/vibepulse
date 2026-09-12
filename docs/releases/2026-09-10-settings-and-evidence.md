@@ -2,6 +2,8 @@ VibePulse v1.1.0 adds on-screen settings, keeps live quotas available while usag
 
 > **Verification status:** The new firmware is CI-built, **not yet flashed or physically verified**. `torget-home-01` still runs `v1.0.0-25-g054db68`. The Windows v1 host claim — core service, physical answer loop, and sign-in/sleep/reboot lifecycle — remains pinned to the v1.0.0 runtime `bee5d8c` and is **not inherited** by v1.1.0.
 
+> **Correction, 2026-09-12:** the inventory this note was cut from was stale. `torget-home-01` had been flashed over USB on 2026-09-06 with `v1.0.0-67-ge51b79f`, a pre-release build that carries SETTINGS; its static on-panel review has not been run, so SETTINGS is on the glass but unverified. Coredump, the reboot ledger, poller backoff and the warm-up placeholders landed after that build and remain **not yet flashed**. Because that image has the menu, an operator delivering this release over the air holds KEY3 for three seconds to open SETTINGS and then taps UPDATE — the hold alone only opens the menu; the run sheet linked below is the release-era copy, and the corrected one lives on `main`.
+
 ## Settings from the panel
 
 Hold **KEY3** for three seconds to open **SETTINGS**:
