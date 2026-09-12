@@ -152,11 +152,16 @@ fingerprint. The bridge therefore keeps, in its own state beside the
 sample file, a small per-session record — `sha256(session_id)[:16]`
 (never the id), the last `rate_limits` values seen for that session, and
 the fingerprint bound to them — and attaches the current `.claude.json`
-fingerprint to a payload **only when its `rate_limits` differ from that
-session's last-seen values**, which is what proves a fresh API response
-made with the session's current credential; a payload identical to the
-last-seen one is a replay and carries the fingerprint bound when those
-values were first seen. The record lives **as long as the session can
+fingerprint to a payload **only when a window in it shows what a replay
+cannot produce**: a `resets_at` later than the session's last-seen one
+for that window, or a higher percentage for the same reset. Only usage
+accumulating or a window rolling over proves a fresh API response made
+with the session's current credential. A payload that merely *differs*
+is not proof — the documented reset trigger drops an expired window
+from the cached `rate_limits` without any request, so a window
+disappearing, or a lower value, is treated as a replay and carries the
+fingerprint bound when the surviving values were first seen (or goes to
+`unknown` for a first observation). The record lives **as long as the session can
 still replay**: it is pruned only when the session has not run the
 bridge for `STATUSLINE_SESSION_TTL_S` (proposed 7 days, longer than any
 `seven_day` window it could still be replaying) and never merely on age
@@ -187,7 +192,13 @@ them, and when an older state file has none the tokenserver derives the
 fingerprint from the local credential store without any HTTP call
 (reading the candidates is local; only the request is what the cooldown
 rests) **only when that store is unambiguous**: one candidate, or a
-Desktop token equal to the keychain's. A legacy file cannot say which
+Desktop token equal to the keychain's. What is persisted is the **cache
+identity** the probe last used — the account fingerprint when it had
+one, otherwise the credential fingerprint the cache rule below derives
+from the token — with its source, never the token itself, so a restart
+during a cooldown with a Desktop token that differs from the keychain's
+still finds the persisted session and weekly floors under the identity
+they were written to. A legacy file cannot say which
 of two differing tokens took the 429, so with a Desktop token that
 differs from the keychain's the account stays unknown until a probe
 succeeds, rather than attributing the cooldown — and the bridge's
@@ -543,11 +554,13 @@ Regression tests must prove:
 - a session whose `rate_limits` are unchanged since its last run keeps
   the fingerprint bound then even if `.claude.json` now names another
   account — including after 36 idle hours, the record surviving until
-  `STATUSLINE_SESSION_TTL_S` of bridge silence — a changed `rate_limits`
-  payload takes the current fingerprint, a first observation whose
-  values equal a window stored under another account's entry is written
-  to `unknown`, and the per-session record contains a hash, never the
-  session id;
+  `STATUSLINE_SESSION_TTL_S` of bridge silence — a payload with a later
+  `resets_at` or a higher same-reset percentage takes the current
+  fingerprint, a payload that only dropped an expired window or lowered
+  a value keeps the old binding (the reset-trigger case), a first
+  observation whose values equal a window stored under another account's
+  entry is written to `unknown`, and the per-session record contains a
+  hash, never the session id;
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
@@ -557,10 +570,13 @@ Regression tests must prove:
   first's record; and the persisted cache never contains a token or
   `default-v1` for Claude;
 - a tokenserver restarted during a persisted 429 cooldown restores the
-  fingerprint from the probe state file (or derives it locally without
-  an HTTP call when the file predates the field) and accepts a matching
-  fresh bridge sample for the rest of the cooldown, so the card is not
-  stale while the bridge is fresh;
+  cache identity from the probe state file (or derives it locally
+  without an HTTP call when the file predates the field) and accepts a
+  matching fresh bridge sample for the rest of the cooldown, so the card
+  is not stale while the bridge is fresh; with a Desktop token differing
+  from the keychain's the restored identity is the credential
+  fingerprint and the persisted session and weekly floors are found
+  under it; the state file never contains a token;
 - two bridges run concurrently against one file (a real second process,
   not a mock) end with, per window, the winning observation and the `at`
   that belongs to it — a lower percentage with a newer `at` loses whole,
