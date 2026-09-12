@@ -365,9 +365,11 @@ leaves the block, its totals and its accept stamp untouched whichever
 transport brought it (the frame's agent rows still follow the source
 policy). **Continuity** is what one ledger's consecutive blocks always
 satisfy and another ledger's block need not: within one served day the
-cumulative fields `d`, `n`, `clS` and `cxS` never decrease (the
-persisted-checkpoint rule), so a same-`l` block whose `n` or any total
-is lower than the retained block's, while its `endS` shows the same
+cumulative fields `d`, `n`, `clS`, `cxS` and `m` never decrease (the
+persisted-checkpoint rule: a checkpoint only grows and a close replaces
+it with a duration at least as long, so the longest in-day part is as
+monotonic as the totals), so a same-`l` block whose `n`, `m` or any
+total is lower than the retained block's, while its `endS` shows the same
 served day (no rollover: `endS` has not risen above the retained
 countdown) and it carries no `r`, is **not** a continuation whatever
 its `l` says — it is handled exactly as another `l`, refused inside
@@ -621,8 +623,12 @@ paid for in both; there is no key left to shorten.
 5. The firmware's agent-status parser reads `waits` optionally (all
    nine fields, `g` and `l` included, numeric and non-negative, `r`
    absent, 0, 1 or 2, else the block is treated as absent), lets it
-   replace the retained block only when its `l` matches and its `g` is
-   greater, or the retained block was accepted more than
+   replace the retained block only when its `l` matches, it is
+   continuous with the retained block (no cumulative field, `m`
+   included, lower on the same served day without `r`) and its `g` is
+   newer by the serial rule (`(g_in − g_ret) mod 10⁹` in 1…5 × 10⁸, so
+   `g` 5 replaces a retained 999 999 990), or the retained block was
+   accepted more than
    `RELAY_AGE_BOUND_MS` plus this incoming request's duration ago
    (another `l` past that bound renders under `NEW LEDGER`), stamps the
    accepted block with the monotonic clock,
@@ -858,7 +864,8 @@ Regression tests must prove:
   a retained `g` of 999 999 990 followed by a same-`l` frame with `g` 5
   is newer (the wrap) and replaces it inside the bound, a same-`l` frame
   with `g` 500 000 001 behind is older; a same-`l` frame with a newer
-  `g` whose `n` is lower than the retained block's, the same served day
+  `g` whose `n` — or `m`, or any total — is lower than the retained
+  block's, the same served day
   by `endS` and no `r`, is refused inside the bound and admitted under
   `NEW LEDGER` past it, while one whose `endS` rose above the retained
   countdown (a rollover) or that carries `r` is a continuation and
