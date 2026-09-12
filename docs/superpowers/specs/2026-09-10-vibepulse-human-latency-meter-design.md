@@ -83,12 +83,13 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 the oldest still-parked interaction, `clS` and `cxS` the provider
 totals, `n` the number of waits, `endS` the seconds to the host's next
 local midnight, `g` the ledger's build generation and `l` the ledger's
-identity (both below): `l` is the low 24 bits of a random id the ledger
-draws when it creates its file and persists in it, so two tokenservers
-on one network, or a quarantined file's successor, never share one by
-construction — two of a user's ledgers collide with probability 2⁻²⁴,
-and a collision only demotes the cross-ledger case below to the
-same-ledger ordering.
+identity (both below): `l` is a random integer below 10⁹ (nine digits,
+close to 30 bits) the ledger draws from `secrets` when it creates its
+file and persists in it, so two tokenservers on one network, or a
+quarantined file's successor, do not share one — two of a user's
+ledgers collide with probability 10⁻⁹ — and the same-ledger path is
+never taken on `l` alone: it also requires **continuity**, defined
+below, so a colliding ledger cannot pass as a continuation.
 
 One optional key, `r`, names a discontinuity: `1` while the served
 day is the day of a persisted `dayReset` (the clock-correction release
@@ -345,12 +346,37 @@ that write landed re-serves the last `g` — a duplicate the page refuses
 as not newer, never a step back — until it has. The first post-restart
 `g` is therefore above anything the previous process could have
 served, whatever the build rate, and a crash costs at most the unused
-part of one reservation. The page keeps the `l` and `g` of its
-retained block. A frame whose block carries the **same `l`** is from
-the same ledger and is ordered by `g`: it replaces the retained block
-only when its `g` is greater, and a smaller or equal `g` leaves the
-block, its totals and its accept stamp untouched whichever transport
-brought it (the frame's agent rows still follow the source policy). A
+part of one reservation. `g` never saturates: it and `gReserved` live
+modulo 10⁹ — a reservation that would cross 10⁹ continues from 0 —
+and the page compares generations with **serial arithmetic**: an
+incoming block is newer than the retained one when
+`(g_in − g_ret) mod 10⁹` lies between 1 and 5 × 10⁸ inclusive, older
+otherwise. The half-space is larger than any distance two frames the
+page compares can be apart, because a retained block older than the
+age bound below is replaced regardless of `g`, so a wrap is invisible
+on the glass; without this a ledger at the clamp would serve equal
+generations that the page refused as duplicates and a LAN-fed page
+would fall `STALE` between healthy one-second polls. The page keeps
+the `l` and `g` of its retained block. A frame whose block carries the
+**same `l` and is continuous with the retained block** is from the
+same ledger and is ordered by `g`: it replaces the retained block only
+when its `g` is newer by the serial rule, and an older or equal `g`
+leaves the block, its totals and its accept stamp untouched whichever
+transport brought it (the frame's agent rows still follow the source
+policy). **Continuity** is what one ledger's consecutive blocks always
+satisfy and another ledger's block need not: within one served day the
+cumulative fields `d`, `n`, `clS` and `cxS` never decrease (the
+persisted-checkpoint rule), so a same-`l` block whose `n` or any total
+is lower than the retained block's, while its `endS` shows the same
+served day (no rollover: `endS` has not risen above the retained
+countdown) and it carries no `r`, is **not** a continuation whatever
+its `l` says — it is handled exactly as another `l`, refused inside
+the age bound and admitted under `NEW LEDGER` past it. An `l` collision
+therefore cannot show a smaller total as an ordinary retreat; the only
+thing it can still do is admit a colliding ledger's *larger* total by
+the same-ledger path, which the next frames from the original ledger
+then overturn as another ledger past the bound — a 10⁻⁹ event that
+moves the number up, never a step back. A
 frame whose block carries **another `l`** is from another ledger — a
 second tokenserver the panel failed over to through discovery
 (`agent_net.c` switches the polled URL; the README allows several
@@ -503,16 +529,15 @@ payload over `MAX_STATUS_BYTES` (2560) outright, and the field-wise full
 agent snapshot already measures 2 394 bytes, so the block is serialized
 as **bounded integers**: every seconds field is a whole number of
 seconds (floored) clamped to 999 999, `n` is clamped to 9 999,
-`endS` to 90 000, `g` to 999 999 999 (nine digits; a wrap needs a
-billion builds and reservations together — at one build a second and
-100 000 per restart, decades — and is covered by the age-bound rule
-below), `l` to 16 777 215, never a float, never
+`endS` to 90 000, `g` and `l` below 10⁹ (nine digits each; `g` never
+saturates — it and its reservation wrap modulo 10⁹ and are compared
+with serial arithmetic, below), never a float, never
 scientific notation. The
-worst-case block, `r`, `g` and `l` included, is then 118 bytes in the
-relay's compact encoding and the worst-case relay payload 2521 bytes,
-39 under the frame; on the direct path the worst-case snapshot plus
-pending item plus this block encodes to 3270 bytes with the capacity
-test's default separators, 6 under its 80 % headroom gate — the keys
+worst-case block, `r`, `g` and `l` included, is then 119 bytes in the
+relay's compact encoding and the worst-case relay payload 2 522 bytes,
+38 under the frame; on the direct path the worst-case snapshot plus
+pending item plus this block encodes to 3 271 bytes with the capacity
+test's default separators, 5 under its 80 % headroom gate — the keys
 were shortened twice (`clS`, `cxS`, `endS`, then `d`, `m`, `n`, `r`)
 to pay for `g` and `l`. Both tests prove it rather
 than the spec assuming it (below), and any further field must first be
@@ -830,6 +855,15 @@ Regression tests must prove:
   a frame with `g` 990 arriving 25 s after the block's accept is refused
   although the LAN block is already `STALE`, and one with `g` 3 arriving
   `RELAY_AGE_BOUND_MS` plus its own fetch after the accept replaces it;
+  a retained `g` of 999 999 990 followed by a same-`l` frame with `g` 5
+  is newer (the wrap) and replaces it inside the bound, a same-`l` frame
+  with `g` 500 000 001 behind is older; a same-`l` frame with a newer
+  `g` whose `n` is lower than the retained block's, the same served day
+  by `endS` and no `r`, is refused inside the bound and admitted under
+  `NEW LEDGER` past it, while one whose `endS` rose above the retained
+  countdown (a rollover) or that carries `r` is a continuation and
+  replaces it; the ledger's reservation crossing 10⁹ continues from 0
+  and the served `g` follows;
   a block with another `l` and a larger `g` arriving inside the bound
   leaves the retained block, and past the bound replaces it under `NEW
   LEDGER` until its own countdown ends; a 0.1 s LAN accept followed
