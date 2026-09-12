@@ -175,23 +175,34 @@ timestamp, not by which source it is:
 1. Among the bridge window (when its `seen` is younger than
    `STATUSLINE_FRESH_S`, proposed 15 minutes, its `resets_at` has not
    passed, and its entry's account fingerprint is the probe's) and the
-   probe's last successful observation of the same window
-   (when it succeeded within its own interval): if they describe
-   different reset windows, the one with the later `resets_at` is the
-   current window and wins; if they describe the **same** reset window,
-   the **higher percentage** wins, whatever the timestamps say. Usage
-   inside one window only accumulates, so the higher figure is the truer
-   one and the ring never moves backward within a window — not through
-   source priority, and not through a stale replay either: the statusLine
-   also runs on permission-mode, vim-mode and timer triggers that make no
-   API request and re-emit Claude Code's cached `rate_limits`, so a
-   bridge write can carry a *newer* `at` with an *older* percentage than
-   what the probe just saw on another device. A probe that observes more
-   usage than the bridge therefore corrects cross-device drift at once,
-   and a bridge sample that observes more than the probe overrides it the
-   same way. `seen` decides freshness, `resets_at` the window, `at` is
-   the record of when the winning value was observed; none of them
-   decides the direction.
+   probe's last successful observation of the same window: if they
+   describe different reset windows, the one with the later `resets_at`
+   is the current window and wins; if they describe the **same** reset
+   window, the **higher percentage** wins, whatever the timestamps say.
+   Usage inside one window only accumulates, so the higher figure is the
+   truer one and the ring never moves backward within a window — not
+   through source priority, and not through a stale replay either: the
+   statusLine also runs on permission-mode, vim-mode and timer triggers
+   that make no API request and re-emit Claude Code's cached
+   `rate_limits`, so a bridge write can carry a *newer* `at` with an
+   *older* percentage than what the probe just saw on another device. A
+   probe that observes more usage than the bridge therefore corrects
+   cross-device drift at once, and a bridge sample that observes more
+   than the probe overrides it the same way. **The higher observation
+   stays eligible until its reset, not until its source goes quiet:**
+   the probe's last successful observation takes part in this comparison
+   as long as its `resets_at` has not passed, whether or not the probe
+   has succeeded within its interval since — the tokenserver keeps it as
+   a per-window monotonic floor (the quota cache already stores exactly
+   that record, and the session window gets the same treatment in
+   memory). Otherwise a probe that saw 60 % and then hit a 429 would drop
+   out of the comparison while a status-line trigger keeps replaying a
+   cached 40 %, and both rings would walk backward inside one reset
+   window on nothing but a cooldown. What the probe's freshness still
+   governs is the `claudeWeekStale` flag and the probe interval, never
+   which value is served. `seen` decides freshness, `resets_at` the
+   window, `at` is the record of when the winning value was observed;
+   none of them decides the direction.
 2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
    record).
@@ -379,7 +390,10 @@ Regression tests must prove:
   bridge and probe percentages whichever was observed later, so a probe
   seeing cross-device usage wins over a fresher bridge replay and a bridge
   seeing more wins over an older probe, and the persisted quota cache
-  never records a lower figure for a window it already holds; for
+  never records a lower figure for a window it already holds; a probe
+  observation of 60 % followed by a 429 and a fresh bridge replay of
+  40 % for the same reset keeps both rings at 60 % (and `claudeWeekStale`
+  reflects the probe's age) until the window resets; for
   different windows the later `resets_at` wins; it prefers both over an
   older plan-usage sample, falls back to the probe when the sample is
   stale or its reset has passed, and never invents a model-pool
