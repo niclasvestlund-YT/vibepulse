@@ -289,8 +289,9 @@ While open, internal free sits at ~47 965 in all three cycles, within ten
 bytes, regardless of how long the window is open and whatever the pre-open
 figure was; the pre-open figure oscillates by ~10 kB on its own, so the cost is
 not a fixed delta ("~7 kB" is cycle 1's difference only). Free returned to the
-pre-open band after cycles 1 and 2; cycle 3 has no post-close reading. It does
-not lower the low-water mark per open.
+pre-open band after cycles 1 and 2; cycle 3 has no post-close reading. A fixed per-open cost is disproved
+(cycles 2 and 3 moved the low-water by zero); cycle 1's 10 179 -> 9 623 drop
+leaves an intermittent or timing-dependent effect unproven, not refuted.
 
 ## The low-water walk, unexplained
 

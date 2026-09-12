@@ -478,7 +478,8 @@ Three results, and the first changes how serious this item is:
    the six hourly readings the movement is **36 bytes** (9 391 -> 9 355).
    Either figure stands against **34 576 bytes in the first 45 minutes**
    (44 199 -> 9 623). It settled at 9 355 by hour 4 and did not move again. The
-   descent was a warm-up and settling phenomenon, not ongoing degradation, and
+   descent was confined to the first 45 minutes and then plateaued; why it
+   happened is not established — no trigger was identified for any step — and
    nothing is heading toward zero. The summed low-water settled at 9 355 B,
    under the 11 520 B a flush needs — which, as above, is not a statement about
    any single instant — and that floor is stable.

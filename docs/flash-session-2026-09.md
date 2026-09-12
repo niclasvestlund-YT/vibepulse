@@ -21,8 +21,12 @@ glass is every firmware commit after `e51b79f` — the list below is
 before the session and add a check for anything new:
 
 - `f01210f` (#109) coredump to flash, reboot ledger, pinned logging — check:
-  the `omstartsliggare` line after the banner, and the dump notice after the
-  one-time partition-table flash below.
+  the `omstartsliggare` line after the banner; for the dump, note that the
+  `coredump i flash` notice appears only when a dump exists, so after the
+  one-time partition-table flash below either read the table back
+  (`idf.py -p <port> partition-table` shows `coredump`) or, only if the user
+  authorizes it in the session, trigger the controlled panic described in
+  OBS-02 and read the notice on the next boot.
 - `5bc2792` (#110) poller backoff — check: stop the tokenserver, watch the
   transitions log, restart it, watch the recovery line.
 - `29e1d64` (#104) warm-up placeholders — check: restart the service with a
