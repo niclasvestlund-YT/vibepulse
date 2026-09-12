@@ -145,7 +145,8 @@ it must stay inside the device's
 ignores unknown root keys, so already-flashed panels are unaffected.
 
 **One optional page, "Blocked on you".** Chosen through SETTINGS → LABS
-(the mechanism PR #98 introduces; this page is not built until that lands)
+(the optional-display mechanism PR #98 landed on main on 2026-09-12; this
+page is one more entry in that list)
 and off by default. Layout after the concept image
 `docs/img/mockups/latency-meter.png` — concept art from the brainstorm
 document, not a Studio capture and not an approved design; the approved
