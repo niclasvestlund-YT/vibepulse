@@ -273,8 +273,16 @@ the deadline passes. A frame the worker stored was therefore received
 within the deadline — a store that happens before the client's abandon
 is still inside it — and one the worker did not store carries no age
 at all. Third, the mailbox serves a frame for at most
-`STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) after that on the worker's
-clock. An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
+`STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) on the worker's clock,
+counted **from the moment the worker received the request**, not from
+the later `Date.now()` `putStatus` passes today after authorisation,
+body parsing and hashing (`index.ts`): the client's deadline bounds
+nothing that happens inside the worker after the body arrived, so this
+spec has the handler take `receivedAt` before its first `await` and
+hand that to `mailbox.putStatus` as the TTL start, and any worker-side
+delay after receipt then eats into the 20 s rather than extending the
+frame's life. A worker test pins it (a handler stalled for 5 s after
+receipt stores a frame that expires 20 s after receipt, not 25). An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
 the moment the panel's fetch completes, plus the fetch itself, which
 the panel measures on its monotonic clock. The countdown starts at
 `dayEndS - RELAY_AGE_BOUND_MS/1000 - request duration` with
@@ -501,8 +509,10 @@ Regression tests must prove:
   process's start, so a simulated three-hour outage adds nothing — and
   clears the list; a clean shutdown with a hold open writes its
   `restart` row with the exact monotonic elapsed and no marker; and a
-  wall step between the two processes changes only the row's day
-  placement;
+  wall step between the two processes changes nothing about the row —
+  its placement derives from the persisted `startedAt` and the
+  checkpoint, never from the new process's clock — while the served
+  logical day may differ;
 - a park writes its marker within the writer window, an ending removes
   it, and an open hold's checkpoint advances at least every
   `WAIT_MARKER_CHECKPOINT_S`, so the persisted `open` list mirrors
