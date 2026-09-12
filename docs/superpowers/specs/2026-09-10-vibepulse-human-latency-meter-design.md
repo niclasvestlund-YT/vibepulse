@@ -75,15 +75,21 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 `pending`; it gains `waits`:
 
 ```json
-"waits": {"todayS": 2040, "longestTodayS": 660, "blockedNowS": 252,
-          "claudeTodayS": 1500, "codexTodayS": 540, "countToday": 7,
-          "dayEndsInS": 30540}
+"waits": {"todayS": 2040, "longestS": 660, "nowS": 252,
+          "claudeS": 1500, "codexS": 540, "count": 7, "dayEndS": 30540}
 ```
 
-`blockedNowS` is the age of the oldest still-parked interaction, or 0.
+The keys are short on purpose: the direct-LAN capacity gate
+(`test/test_agent_status_body_capacity.py`) encodes the worst-case
+snapshot with Python's default JSON separators and requires it to stay
+under 80 % of the firmware's 4 096-byte envelope (3 276 bytes); with the
+longer names this block would have pushed that fixture to 3 287 bytes,
+so the contract is sized to the gate rather than the gate loosened.
+
+`nowS` is the age of the oldest still-parked interaction, or 0.
 "Today" is the host's local calendar day, the same rule the Max Tracker
 uses. **Open holds count too, but only what is on disk:** `todayS`, the
-provider totals and `countToday` include, for every still-parked
+provider totals and `count` include, for every still-parked
 interaction, the in-day part of its **last persisted checkpoint**
 (`elapsedS` in the open-hold marker, below), computed the same way as a
 closed row with `endedAt` taken as the checkpoint's moment — so the
@@ -93,20 +99,20 @@ several minutes would be the invented-zero the honesty rule forbids),
 and so the cumulative total never contains a second that a crash could
 take back: the hero advances in steps of at most
 `WAIT_MARKER_CHECKPOINT_S` and can trail the live age by that much,
-which the spec prefers to a number that moves backward. `blockedNowS`
-alone is the live age. `longestTodayS` follows the same rule: the
+which the spec prefers to a number that moves backward. `nowS`
+alone is the live age. `longestS` follows the same rule: the
 largest in-day part over closed rows **and** open holds' checkpoints, so
 `LONGEST WAIT` can never read less than the **checkpointed in-day part**
 of the current hold. It can legitimately read less than `BLOCKED RIGHT
 NOW`, which is the hold's whole live age, for two reasons the page
 accepts: the checkpoint lag, and midnight — at 00:10 a hold parked at
-23:50 shows `blockedNowS` 1200 and contributes at most 600 to
-`longestTodayS`, because the other 600 belong to yesterday. The provider
+23:50 shows `nowS` 1200 and contributes at most 600 to
+`longestS`, because the other 600 belong to yesterday. The provider
 header is derived from the provider totals alone — the block carries no
 presence flags and the encrypted relay strips `pending`, so a relay-fed
 panel has nothing else to read — and so a freshly parked hold, whose
-first checkpoint is near zero, can leave `countToday` at 1 and
-`blockedNowS` running while both provider totals still read 0 until the
+first checkpoint is near zero, can leave `count` at 1 and
+`nowS` running while both provider totals still read 0 until the
 next checkpoint; in that state the header reads the neutral `AGENTS`
 rather than guessing a name, and it becomes `CLAUDE`, `CODEX` or
 `CLAUDE + CODEX` as soon as a total is non-zero. When an open hold
@@ -133,8 +139,8 @@ What a correction can do is date a hold by a clock that was later found
 wrong; the spec accepts that as the honest reading of the clock at the
 time. A wait parked at 23:50 and answered at 00:10 puts ten
 minutes in yesterday and ten in today, in `todayS`, the provider totals
-and `countToday` alike (a split row counts once, in the day it ended).
-`longestTodayS` is the longest in-day part, not the longest whole row,
+and `count` alike (a split row counts once, in the day it ended).
+`longestS` is the longest in-day part, not the longest whole row,
 over open holds and closed rows alike.
 Day boundaries are local wall-clock midnights (`datetime.astimezone()`),
 so a DST day is 23 or 25 hours and the split follows it. The block is
@@ -161,7 +167,7 @@ provider's name over a combined total — and the split bar carries the
 per-provider share. Then
 the label `BLOCKED ON YOU · TODAY`, one dominant number in whole minutes
 (floored) — except that a total under 60 seconds while something is
-counted (`countToday > 0`) reads `<1 MIN` and never `0`. `countToday`
+counted (`count > 0`) reads `<1 MIN` and never `0`. `count`
 counts a hold only once its marker is on disk, so for the writer window
 after a park (at most `WAIT_LEDGER_FLUSH_S`) the hero shows dashes while
 `BLOCKED RIGHT NOW` already runs: that is "no durable data yet", which
@@ -169,16 +175,16 @@ dashes mean, and a crash in that window makes the restart show the same
 dashes rather than take back a `<1 MIN` the file never held. That covers 1 to 59 seconds, which a short
 completed wait or the first checkpoint of a live one produces, **and**
 the wire's own 0: a wait that ended in under a second has a positive
-monotonic `durationS`, counts once in `countToday`, and floors to 0 on
-the wire, so the presentation keys on `countToday`, not on the seconds.
-`LONGEST WAIT` follows suit: `<1s` when `countToday > 0` and
-`longestTodayS` is 0. A zero the measurement did not contain is the
+monotonic `durationS`, counts once in `count`, and floors to 0 on
+the wire, so the presentation keys on `count`, not on the seconds.
+`LONGEST WAIT` follows suit: `<1s` when `count > 0` and
+`longestS` is 0. A zero the measurement did not contain is the
 invented zero this spec forbids, and dashes are reserved for no durable
-data (`countToday` 0, whether or not something is blocked) —
+data (`count` 0, whether or not something is blocked) —
 the bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
-(live, from `blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
+(live, from `nowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
 block is absent
-(older server) or `countToday` is 0 and nothing is blocked now.
+(older server) or `count` is 0 and nothing is blocked now.
 **Stale is shown, never guessed.** The agent-status client keeps the last
 accepted snapshot when a poll fails (`agent_net.c`, by design), so
 without a rule a wait that closed while the service was unreachable
@@ -199,16 +205,16 @@ and on the LAN at `TK_WAITS_STALE_MS` minus the measured request
 duration — otherwise a frame accepted just before its 15 s expiry could
 keep `BLOCKED RIGHT NOW` live for roughly 35 s after the snapshot was
 built, well past the boundary the rule promises. **Yesterday is never shown as
-today:** the block carries `dayEndsInS`, the whole seconds until the
+today:** the block carries `dayEndS`, the whole seconds until the
 host's next local midnight (DST-correct, at most 90 000), because the
 panel cannot infer the host's calendar boundary from its own clock,
-least of all over the relay. `dayEndsInS` is relative to the moment the
+least of all over the relay. `dayEndS` is relative to the moment the
 server built the block, so the page first subtracts the block's **age at
 accept** and only then counts down on its monotonic clock. On the LAN
 that age is the poll's own request duration, which the direct poller
 allows up to its 2 500 ms HTTP timeout (`agent_net.c`), so the page
 records the request on its monotonic clock from send to accept and
-starts the countdown at `dayEndsInS` minus that whole duration, rounded
+starts the countdown at `dayEndS` minus that whole duration, rounded
 up to a whole second — the server's floor and the round-up both err
 early, never late. Over the relay a frame can be up to `STATUS_EXPIRY_S` (15 s)
 old when it is accepted — `decode_status_snapshot` takes any unexpired
@@ -217,7 +223,7 @@ own `time(NULL)` without establishing that the two clocks agree, so an
 age *estimated* from `expires_at` would be wrong by the host–panel skew
 and a lagging panel would keep yesterday on the glass. The page
 therefore subtracts no estimate but the **whole lifetime**: the
-countdown starts at `dayEndsInS - STATUS_EXPIRY_S`, which needs no
+countdown starts at `dayEndS - STATUS_EXPIRY_S`, which needs no
 clock but the panel's monotonic one and can only end early, never late
 — at worst the page shows `DAY ENDED` 15 s before the host's midnight,
 and the next accepted block (the relay publishes every second or so)
@@ -257,7 +263,7 @@ nothing of the outage (the hook connection ended at the crash, and so
 did the wait). And because the live aggregate above counts open holds
 by the same checkpoint, a crash between checkpoints takes back nothing
 the panel had already added to `todayS`: the total after the restart
-equals the total before it, with only `blockedNowS` gone. A stale marker left by a close that
+equals the total before it, with only `nowS` gone. A stale marker left by a close that
 happened inside the writer window before a crash resolves the same way:
 its checkpoint is at most the hold's true length, so a short completed
 wait can be recorded short or absent, never long. No wall-clock
@@ -272,12 +278,15 @@ frame is the tighter budget: `_prepare_status` rejects a canonical
 payload over `MAX_STATUS_BYTES` (2560) outright, and the field-wise full
 agent snapshot already measures 2 394 bytes, so the block is serialized
 as **bounded integers**: every seconds field is a whole number of
-seconds (floored) clamped to 999 999, `countToday` is clamped to 9 999,
-`dayEndsInS` to 90 000, never a float, never scientific notation. The
-worst-case block is then 151 bytes and the worst-case relay payload
-2 545 bytes, 15 bytes under the frame; the fixed-frame test proves it
-rather than the spec assuming it (below), and any further field must
-first be paid for there.
+seconds (floored) clamped to 999 999, `count` is clamped to 9 999,
+`dayEndS` to 90 000, never a float, never scientific notation. The
+worst-case block is then 121 bytes in the relay's compact encoding and
+the worst-case relay payload 2 515 bytes, 45 under the frame; on the
+direct path the worst-case snapshot plus pending item plus this block
+encodes to 3 257 bytes with the capacity test's default separators, 19
+under its 80 % headroom gate. Both tests prove it rather than the spec
+assuming it (below), and any further field must first be paid for in
+both.
 
 ## Data flow
 
@@ -304,7 +313,7 @@ first be paid for there.
    has happened (`close` records the row as *unsaved* and the aggregate
    counts it by its last checkpoint until the writer reports the save),
    so the on-disk state is never behind the glass by more than
-   `blockedNowS`. `GET /` reports `waits.rows` and `waits.unsaved` so
+   `nowS`. `GET /` reports `waits.rows` and `waits.unsaved` so
    the doctor can show the file's state. What is persisted for an open
    hold is only its marker (provider, kind, `startedAt`, checkpointed
    `elapsedS`), rewritten by the same writer at park, at ending and on
@@ -313,7 +322,7 @@ first be paid for there.
    observation rather than forgetting it or extending it to the next
    boot. The aggregate counts each open or unsaved hold by that persisted
    checkpoint (the store keeps the value the writer last wrote beside
-   the entry) and only `blockedNowS` by its live age.
+   the entry) and only `nowS` by its live age.
 4. `AgentStatusService.snapshot()` calls one method,
    `InteractionStore.wait_aggregates(now)`, in two steps. Under the
    store's own lock it takes one coherent **snapshot** — the ledger's
@@ -332,8 +341,8 @@ first be paid for there.
    observe the gap between "row not yet appended" and "hold no longer
    pending" and report a lower total for one second. Not only the oldest
    open hold is seen: with three agents parked at once, `todayS`, the
-   provider totals, `countToday` and `longestTodayS` count all three,
-   and `blockedNowS` is the largest elapsed among them. No new public API
+   provider totals, `count` and `longestS` count all three,
+   and `nowS` is the largest elapsed among them. No new public API
    and nothing leaves the process; the method exists so the two sources
    are read together.
 5. The firmware's agent-status parser reads `waits` optionally (all seven
@@ -366,7 +375,7 @@ first be paid for there.
   approval. The ledger observes endings; it does not cause them.
 - The block is additive. The `/api/agent-status` `v` stays 2; the pending
   block, the digest binding and the relay encryption are untouched.
-- Clock regression on the host makes `blockedNowS` clamp at 0 and a
+- Clock regression on the host makes `nowS` clamp at 0 and a
   negative duration is dropped rather than written; a `restart` row's
   duration is the checkpoint, monotonic-derived like every other, so a
   wall step between two processes moves only where its seconds land.
@@ -382,7 +391,7 @@ stale state (totals with the `STALE` marker, `BLOCKED RIGHT NOW` as
 dashes), the day-ended state (every total dashed under the wider `DAY
 ENDED` marker, a different layout from stale that must be seen to fit
 before it ships), the broad-number state (every seconds field at the
-wire maximum of 999 999 and `countToday` at 9 999, so the hero reads a
+wire maximum of 999 999 and `count` at 9 999, so the hero reads a
 five-digit minute count and `LONGEST WAIT` and `BLOCKED RIGHT NOW` read
 `16666:39` — the skill's broad-number check, without which a capture
 set can pass while clipping a valid measurement), and the Labs off
@@ -409,15 +418,15 @@ Regression tests must prove:
   it, and an open hold's checkpoint advances at least every
   `WAIT_MARKER_CHECKPOINT_S`, so the persisted `open` list mirrors
   `_pending`; a simulated crash between two checkpoints leaves `todayS`,
-  the provider totals, `countToday` and `longestTodayS` exactly where the
-  panel last saw them (only `blockedNowS` drops to 0);
-- an open hold is counted in `todayS`, its provider total, `countToday`
-  and `longestTodayS` by its checkpoint: after the first checkpoint the
+  the provider totals, `count` and `longestS` exactly where the
+  panel last saw them (only `nowS` drops to 0);
+- an open hold is counted in `todayS`, its provider total, `count`
+  and `longestS` by its checkpoint: after the first checkpoint the
   day's first hold makes `LONGEST WAIT` equal the checkpointed part of
   `BLOCKED RIGHT NOW` and never 0, the hero never exceeds what the
   marker file holds, and at 00:10 a hold parked at 23:50 makes
-  `blockedNowS` 1200 and `longestTodayS` at most 600; three concurrent
-  holds across both providers are all counted and `blockedNowS` is the
+  `nowS` 1200 and `longestS` at most 600; three concurrent
+  holds across both providers are all counted and `nowS` is the
   oldest; and closing one does not step the total back — including a
   close that races the 1 s snapshot, which a test drives by interleaving
   `close` between what would have been two separate reads and asserting
@@ -432,7 +441,7 @@ Regression tests must prove:
   after the final flush; a close followed by a simulated crash inside the
   writer window leaves the row absent but the marker present, the next
   start closes the marker as a `restart` row worth its checkpoint, and
-  `todayS`, the provider totals and `longestTodayS` after the restart
+  `todayS`, the provider totals and `longestS` after the restart
   equal what the aggregate published before the crash;
 - a row's `durationS` comes from the monotonic pair and its days from
   `[startedAt, startedAt + durationS]`: a wall-clock jump of an hour
@@ -445,17 +454,19 @@ Regression tests must prove:
 - aggregates roll over at local midnight, a wait spanning midnight is
   split by overlap into both days, a wait spanning a DST change is placed
   by local wall-clock boundaries, and the 8-day retention prunes;
-- `blockedNowS` follows the oldest open interaction and drops to 0 on
+- `nowS` follows the oldest open interaction and drops to 0 on
   close;
 - the persisted file and the payload carry no content fields (the
   denylist test above);
 - the `/api/agent-status` body stays inside the device budget with `waits`
   plus a full pending block and agent list, and
-  `test_encrypted_status_strips_pending_and_fits_fixed_frame` gains the
-  worst-case `waits` block (every seconds field 999 999, `countToday`
-  9 999, `dayEndsInS` 90 000) beside the field-wise full agent snapshot and still fits
-  `MAX_STATUS_BYTES`; a float or an over-clamp value never reaches the
-  wire;
+  `test_worst_case_snapshot_plus_pending_fits_the_device` and
+  `test_encrypted_status_strips_pending_and_fits_fixed_frame` both gain
+  the worst-case `waits` block (every seconds field 999 999, `count`
+  9 999, `dayEndS` 90 000) beside the field-wise full agent snapshot and
+  still pass their own bounds — the 80 % headroom gate on the direct
+  path and `MAX_STATUS_BYTES` on the relay; a float or an over-clamp
+  value never reaches the wire;
 - a corrupt ledger is quarantined and a failing save shows on `GET /`;
 - the firmware parser accepts the block, rejects a malformed one as absent
   without dropping the rest of the payload, and older payloads without it
@@ -467,24 +478,24 @@ Regression tests must prove:
   duration earlier, so no live label outlives 20 s from the snapshot's
   build — a newer accepted block
   clears it, a snapshot that was never accepted shows the absent state,
-  not stale, and a retained block whose `dayEndsInS` has counted down to
+  not stale, and a retained block whose `dayEndS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
-  arrives; the header reads `AGENTS` for a block with `countToday` 1 and
+  arrives; the header reads `AGENTS` for a block with `count` 1 and
   both provider totals 0; the hero reads `<1 MIN` for `todayS` 1 to 59,
   dashes for 0 with nothing blocked, and whole floored minutes above;
-- the day countdown over the relay starts at `dayEndsInS -
+- the day countdown over the relay starts at `dayEndS -
   STATUS_EXPIRY_S` with no wall clock involved: a relay frame built one
   second before the host's midnight and accepted five seconds later
   renders day-ended on arrival, and so does one accepted with the panel
   clock set 30 s behind the host's; a LAN block subtracts the measured
   request duration rounded up (a 2 400 ms poll of a block with
-  `dayEndsInS` 2 renders day-ended on arrival); a block with `dayEndsInS`
+  `dayEndS` 2 renders day-ended on arrival); a block with `dayEndS`
   10 over the relay is day-ended on arrival and at most 15 s early;
 - the hero reads `<1 MIN` and `LONGEST WAIT` reads `<1s` for a block
-  with `countToday` 1 and every seconds field 0 (a sub-second wait
-  floored on the wire), and dashes for `countToday` 0 even while
-  `blockedNowS` runs (the writer window after a park), never `0`;
-- `dayEndsInS` is the whole seconds to the host's next local midnight,
+  with `count` 1 and every seconds field 0 (a sub-second wait
+  floored on the wire), and dashes for `count` 0 even while
+  `nowS` runs (the writer window after a park), never `0`;
+- `dayEndS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
 - the page's landmark captures match the nine frames above, the
   broad-number frame shows every glyph inside its box with no overlap
