@@ -1926,14 +1926,41 @@ def _statusline_launcher_is_ours(path: Path) -> bool:
     return STATUSLINE_LAUNCHER_MARKER in head
 
 
+def _statusline_command_path(command):
+    """The one program a statusLine.command names, as the shell would
+    split it, or ``None``.  Claude Code runs the command through a shell,
+    so a path with a space (``Application Support``) must be quoted and
+    the unquoted form names a program that does not exist."""
+    if not isinstance(command, str) or not command:
+        return None
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if len(words) != 1:
+        return None
+    return words[0]
+
+
 def _statusline_command_is_launcher(command, launcher: Path) -> bool:
-    """Is this statusLine.command ours -- the recorded launcher path, or
-    another path whose file carries the generated marker?"""
+    """Is this statusLine.command ours -- the launcher path (quoted for the
+    shell, or the unquoted string an earlier install wrote), or another
+    path whose file carries the generated marker?"""
     if not isinstance(command, str) or not command:
         return False
     if command == str(launcher):
         return True
-    return _statusline_launcher_is_ours(Path(command))
+    program = _statusline_command_path(command)
+    if program is None:
+        return False
+    if program == str(launcher):
+        return True
+    return _statusline_launcher_is_ours(Path(program))
+
+
+def _statusline_command_runs_launcher(command, launcher: Path) -> bool:
+    """Would the shell actually start the launcher from this command?"""
+    return _statusline_command_path(command) == str(launcher)
 
 
 def _statusline_launcher_text(python: Path, bridge: Path, state_dir: Path,
@@ -1990,7 +2017,8 @@ def _statusline_state(*, config_dir: Path, state_dir: Path, repo_root: Path,
         settings_error = str(exc)
     launcher_present = launcher.is_file()
     launcher_ours = launcher_present and _statusline_launcher_is_ours(launcher)
-    points_at_launcher = settings_command == str(launcher)
+    points_at_launcher = _statusline_command_runs_launcher(
+        settings_command, launcher)
     python = None
     if record is not None and isinstance(record.get("python"), str):
         python = Path(record["python"])
@@ -2037,6 +2065,14 @@ def _statusline_report(state: _StatusLineState, stdout) -> bool:
     if state.settings_error is not None:
         print(f"FIX statusLine bridge: cannot read {state.settings_path} "
               f"({state.settings_error})", file=stdout)
+        ok = False
+    elif (not state.points_at_launcher and _statusline_command_is_launcher(
+            state.settings_command, state.launcher)):
+        print(f"FIX statusLine bridge: statusLine.command in "
+              f"{state.settings_path} names the launcher without shell "
+              "quoting, so the shell splits the path at its space and "
+              "nothing runs; run `vibepulse_setup.py statusline install "
+              "--yes-single-account` again to rewrite it", file=stdout)
         ok = False
     elif not state.points_at_launcher:
         shown = (repr(state.settings_command[:60])
@@ -2173,7 +2209,9 @@ def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
     _statusline_write_record_file(record_path, document)
     new_block = dict(block)
     new_block["type"] = "command"
-    new_block["command"] = str(launcher)
+    # Claude Code hands the command to a shell: quote the path, or the
+    # space in "Application Support" splits it and nothing runs.
+    new_block["command"] = shlex.quote(str(launcher))
     settings = dict(settings)
     settings["statusLine"] = new_block
     _statusline_write_settings(settings_path, settings)

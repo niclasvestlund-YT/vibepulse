@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import signal
 import socket
 import stat
@@ -4457,10 +4458,13 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.config_dir = root / "claude"
         self.config_dir.mkdir()
         self.settings = self.config_dir / "settings.json"
-        self.state = root / "state"
+        # A space, as in macOS's "Application Support": Claude Code hands
+        # the command to a shell, and an unquoted path split there.
+        self.state = root / "Application Support" / "VibePulse"
         self.config = root / "config.json"
         self.setup = load_setup()
         self.launcher = self.state / self.setup.STATUSLINE_LAUNCHER_NAME
+        self.command = shlex.quote(str(self.launcher))
 
     def run_setup(self, *argv, interactive=False, input_fn=None):
         output = io.StringIO()
@@ -4519,7 +4523,8 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         saved = self.read_settings()
         self.assertEqual(saved["permissions"], {"allow": ["Bash(ls:*)"]})
         self.assertEqual(saved["statusLine"], {
-            "type": "command", "command": str(self.launcher), "padding": 0})
+            "type": "command", "command": self.command, "padding": 0})
+        self.assertNotEqual(self.command, str(self.launcher))
         record = self.record()
         self.assertEqual(record["chained_command"], "my-status --x")
         self.assertEqual(record["python"], sys.executable)
@@ -4537,7 +4542,7 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertIn("no status line before", text)
         self.assertEqual(self.read_settings(), {"statusLine": {
-            "type": "command", "command": str(self.launcher)}})
+            "type": "command", "command": self.command}})
         self.assertIsNone(self.record()["chained_command"])
         self.assertIn("exit 0\n", self.launcher.read_text(encoding="utf-8"))
 
@@ -4554,8 +4559,10 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
                               int(time.time()) + 3600},
                 "seven_day": {"used_percentage": 7, "resets_at":
                               int(time.time()) + 86400}}}).encode()
+        # Exactly as Claude Code runs it: the saved command through a shell.
         completed = subprocess.run(
-            [str(self.launcher)], input=payload, capture_output=True,
+            ["/bin/sh", "-c", self.read_settings()["statusLine"]["command"]],
+            input=payload, capture_output=True,
             timeout=30, env={**os.environ,
                              "CLAUDE_CONFIG_DIR": str(self.config_dir),
                              "HOME": self.tmp.name})
@@ -4577,7 +4584,7 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertEqual(self.record()["chained_command"], "my-status")
         self.assertEqual(self.read_settings()["statusLine"]["command"],
-                         str(self.launcher))
+                         self.command)
         self.assertIn("exec /bin/sh -c my-status", self.launcher.read_text())
 
     def test_install_refuses_untrusted_settings_and_commands(self):
@@ -4701,7 +4708,7 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.assertIn("'their-new-line'", text)
 
         self.write_settings({"statusLine": {"type": "command",
-                                            "command": str(self.launcher)}})
+                                            "command": self.command}})
         self.launcher.unlink()
         code, text = self.run_setup("statusline", "status")
         self.assertEqual(code, 1)
@@ -4727,6 +4734,37 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
             claude_config_dir=self.config_dir, statusline_state_dir=self.state)
         self.assertEqual(code, 1)
         self.assertIn("FIX statusLine bridge: interpreter", output.getvalue())
+
+    def test_unquoted_launcher_path_is_named_and_repaired(self):
+        # The first release wrote the bare path; with the space in
+        # "Application Support" the shell ran nothing, forever WAIT.
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status"}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": str(self.launcher)}})
+        completed = subprocess.run(
+            ["/bin/sh", "-c", str(self.launcher)], input=b"{}",
+            capture_output=True, timeout=30)
+        self.assertEqual(completed.returncode, 127)
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 1)
+        self.assertIn("without shell quoting", text)
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         self.command)
+        self.assertEqual(self.record()["chained_command"], "my-status")
+        code, text = self.run_setup("statusline", "status")
+        self.assertIn("WAIT statusLine bridge", text)
+        # Uninstall recognizes the bare form too and restores the old line.
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": str(self.launcher)}})
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         "my-status")
 
     def test_settings_points_at_launcher_without_a_record_is_a_fix(self):
         self.run_setup("statusline", "install", "--yes-single-account")
