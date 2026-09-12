@@ -413,12 +413,14 @@ monotonic as the totals), so a same-`l` block whose `n`, `m` or any
 total is lower than the retained block's, while its `endS` shows the same
 served day (no rollover: `endS` has not risen above the retained
 countdown) and it carries no `r`, is **not** a continuation whatever
-its `l` says — it is refused inside the age bound exactly as another
-`l` is, and past the bound, when the retained block is already dashed
-as stale, it replaces the retained block as an ordinary same-ledger
-block, **not** under `NEW LEDGER`, which names a changed `l`: the
-common cause is a rollover the page could not witness, and dashes
-giving way to a smaller total is no retreat. The refusal inside the
+its `l` says — it is handled exactly as another `l`, refused inside
+the age bound and admitted under `NEW LEDGER` past it. That label is
+honest because the ledger marks every discontinuity it can see, below,
+so a same-`l` block the page cannot reconcile with the one it holds
+*is* another ledger as far as the page can know — a `STALE` block
+still shows its totals (only `BLOCKED RIGHT NOW` is dashed), so the
+replacement must be named, never slipped in as an ordinary block. The
+refusal inside the
 bound is exact, not a heuristic: the retained countdown is the block's
 `endS` less the page's own elapsed time since accept, so with a
 continuous host clock the previous day's countdown never exceeds that
@@ -435,8 +437,21 @@ release gets, with the release's row rules applied unchanged (no row is
 future-dated, open holds are re-anchored from their live monotonic
 age), so the block carries the explicit rollover signal and the rule
 admits it. A restart across such a jump has no last snapshot to
-compare with; its first blocks are refused for at most the age bound
-and then admitted by the past-the-bound path above. An `l` collision
+compare with, so the ledger persists its **clock anchor** — `wall −
+monotonic` at every write and at the clean-shutdown flush (the
+monotonic clock counts from boot on macOS, Windows and Linux alike, so
+the anchor is constant across process restarts on one boot unless the
+wall was corrected) — and compares it at startup with the current one:
+an anchor moved by more than `WAIT_CLOCK_JUMP_S` means the wall was
+corrected during the downtime, or the machine rebooted, which the
+ledger cannot tell apart and treats the same, and if the first
+snapshot then advances the served day that advance is served with
+`r` 1 and `dayReset` exactly as an in-process jump is. After a reboot
+the ledger cannot vouch for the day's continuity, and a marker the
+reader may not have needed costs less than a retreat the reader was
+not warned of; a restart on the same boot with an unmoved anchor is
+continuous, and a served-day advance across it is one the page
+witnesses through `endS` as usual, unmarked. An `l` collision
 therefore cannot show a smaller total as an ordinary retreat; the only
 thing it can still do is admit a colliding ledger's *larger* total by
 the same-ledger path, which the next frames from the original ledger
@@ -521,14 +536,22 @@ of the worker's current time can only run *behind* the truth, never
 ahead, and stamps each status PUT's plaintext wrapper with
 `builtAtWorkerMs`, the envelope's build instant translated into that
 clock (a number, outside the ciphertext, revealing nothing). The worker
-refuses a PUT that carries no stamp, whose stamp lies more than
-`WORKER_CLOCK_SLACK_MS` (proposed 2 000) in its own future, or whose
-stamp is already `RELAY_AGE_BOUND_MS` or more in its past, and stores
-an accepted frame with
-`expires_at_ms = min(receivedAt + STATUS_TTL_MS, builtAtWorkerMs +
-RELAY_AGE_BOUND_MS)`: a frame's serve life ends at most 42 s after its
-build on the worker's clock however late the bytes arrived, and because
-the stamp is conservative the true life is shorter still. The
+refuses a PUT that carries no stamp or whose stamp lies more than
+`WORKER_CLOCK_SLACK_MS` (proposed 2 000) in its own future, **debits
+that slack from every accepted stamp** — the slack exists because the
+worker's `Date.now()` is not one clock but the clocks of whichever edge
+answered, so a stamp translated from one response can sit up to the
+slack ahead of the edge that receives the PUT — and stores an accepted
+frame with
+`expires_at_ms = min(receivedAt + STATUS_TTL_MS, builtAtWorkerMs −
+WORKER_CLOCK_SLACK_MS + RELAY_AGE_BOUND_MS)`, refusing a PUT whose
+debited expiry is not in its future. A stamp can overstate the true
+build by at most the slack, so the debited life ends at most 42 s
+after the true build: a frame's serve life ends no later than
+`RELAY_AGE_BOUND_MS` after its build on the worker's clock however
+late the bytes arrived, and a stamp that ran behind — the normal case —
+makes the true life shorter still. The debit costs nothing in the
+normal case, where the receipt term is the smaller one. The
 tokenserver's own PUT deadline, `RELAY_PUT_BOUND_MS` (proposed 7 000
 ms) on its monotonic clock with every socket operation's timeout set
 to the *remaining* budget (`_default_transport` today applies separate
@@ -548,8 +571,12 @@ hand that to `mailbox.putStatus` as the TTL start, and any worker-side
 delay after receipt then eats into the 20 s rather than extending the
 frame's life. Worker tests pin both (a handler stalled for 5 s after
 receipt stores a frame that expires 20 s after receipt, not 25; a PUT
-received 30 s after its stamped build expires 12 s after receipt, not
-20; one received 42 s after it is refused; a stamp 5 s in the worker's
+received 30 s after its stamped build expires 10 s after receipt, not
+20 (the slack debited); one received 40 s after it is refused; a stamp
+2 s ahead of the true build received 41 s after that build is refused
+rather than served until 44 s, and the same stamp received 39 s after
+it expires no later than 42 s after the true build; a stamp 5 s in the
+worker's
 future is refused; a PUT without a stamp is refused). An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
 the moment the panel's fetch completes, plus the fetch itself, which
 the panel measures on its monotonic clock. The countdown starts at
@@ -1046,14 +1073,18 @@ Regression tests must prove:
   with `g` 500 000 001 behind is older; a same-`l` frame with a newer
   `g` whose `n` — or `m`, or any total — is lower than the retained
   block's, the same served day
-  by `endS` and no `r`, is refused inside the bound and past it, with
-  the retained block dashed, replaces it as an ordinary block with no
-  `NEW LEDGER` marker, while one whose `endS` rose above the retained
+  by `endS` and no `r`, is refused inside the bound and admitted under
+  `NEW LEDGER` past it, while one whose `endS` rose above the retained
   countdown (a rollover) or that carries `r` is a continuation and
   replaces it inside the bound; a forward correction of a day and an
   hour between two snapshots serves the new day with `r` 1 and
-  `waits.dayReset`, a correction of the same size that does not cross
-  the served day's end, and a legitimate midnight, serve no `r`; the
+  `waits.dayReset`, the same correction applied while the service is
+  down (the persisted clock anchor differs at startup by more than
+  `WAIT_CLOCK_JUMP_S` and the first snapshot advances the served day)
+  serves it too, a restart on the same boot across a legitimate
+  midnight serves no `r`, and a correction of the same size that does
+  not cross the served day's end, and a legitimate midnight, serve no
+  `r`; the
   ledger's reservation crossing 10⁹ continues from 0
   and the served `g` follows;
   a block with another `l` and a larger `g` arriving inside the bound
