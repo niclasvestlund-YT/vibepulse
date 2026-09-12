@@ -381,9 +381,13 @@ day with one provider (bar is one colour), the relay-fed variant, the
 stale state (totals with the `STALE` marker, `BLOCKED RIGHT NOW` as
 dashes), the day-ended state (every total dashed under the wider `DAY
 ENDED` marker, a different layout from stale that must be seen to fit
-before it ships), and the Labs off state (page absent, tiles dense).
-Static physical review before any motion. No frame here authorizes a
-flash.
+before it ships), the broad-number state (every seconds field at the
+wire maximum of 999 999 and `countToday` at 9 999, so the hero reads a
+five-digit minute count and `LONGEST WAIT` and `BLOCKED RIGHT NOW` read
+`16666:39` — the skill's broad-number check, without which a capture
+set can pass while clipping a valid measurement), and the Labs off
+state (page absent, tiles dense). Static physical review before any
+motion. No frame here authorizes a flash.
 
 ## Tests
 
@@ -482,7 +486,9 @@ Regression tests must prove:
   `blockedNowS` runs (the writer window after a park), never `0`;
 - `dayEndsInS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
-- the page's landmark captures match the eight frames above, and the header
+- the page's landmark captures match the nine frames above, the
+  broad-number frame shows every glyph inside its box with no overlap
+  (a pixel test on the capture, not only a landmark), and the header
   reads `CLAUDE + CODEX` in the both-providers frame and the single name
   in the one-provider frame.
 
