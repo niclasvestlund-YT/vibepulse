@@ -191,7 +191,13 @@ and keeps the day totals and `LONGEST WAIT` visible with the page's
 stale marker (`STALE`, the treatment the other pages use for a source
 that stopped answering), so the reader sees a number *as of* the last
 answer, not a claim about now. The relay-fed variant follows the same
-rule with the relay's own timestamps. **Yesterday is never shown as
+rule with the same debit the day countdown makes below: exact relay age
+is unavailable, so the stale budget for a relay-fed block starts at
+`TK_WAITS_STALE_MS - STATUS_EXPIRY_S * 1000` (5 000 ms) from accept,
+and on the LAN at `TK_WAITS_STALE_MS` minus the measured request
+duration — otherwise a frame accepted just before its 15 s expiry could
+keep `BLOCKED RIGHT NOW` live for roughly 35 s after the snapshot was
+built, well past the boundary the rule promises. **Yesterday is never shown as
 today:** the block carries `dayEndsInS`, the whole seconds until the
 host's next local midnight (DST-correct, at most 90 000), because the
 panel cannot infer the host's calendar boundary from its own clock,
@@ -451,7 +457,10 @@ Regression tests must prove:
   still parse (C host test);
 - the page's stale rule (C host test on the page model): a retained
   snapshot older than `TK_WAITS_STALE_MS` renders `BLOCKED RIGHT NOW` as
-  dashes and the totals with the stale marker, a newer accepted block
+  dashes and the totals with the stale marker — a relay-fed block goes
+  stale `STATUS_EXPIRY_S` earlier and a LAN block the measured request
+  duration earlier, so no live label outlives 20 s from the snapshot's
+  build — a newer accepted block
   clears it, a snapshot that was never accepted shows the absent state,
   not stale, and a retained block whose `dayEndsInS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
