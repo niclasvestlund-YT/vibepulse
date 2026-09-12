@@ -185,7 +185,18 @@ so the bridge binds a session only when the account value it reads has
 demonstrably been in place since before that session began: it keeps,
 in its state, `accountSeenSince` — the earliest time it has observed the
 current `accountUuid` value continuously, reset to now whenever the
-value it reads differs from the last one it recorded — and it takes the
+value it reads differs from the last one it recorded — **per config
+directory**, keyed by `sha256(CLAUDE_CONFIG_DIR path)[:16]`, because two
+concurrent sessions in two config directories are two accounts that
+each stay stable, not one account flapping; a single mark would reset
+on every alternating trigger and leave both unbindable. **Setup seeds
+the mark:** the install step reads `.claude.json` once and records the
+value and the install time as `accountSeenSince` for the home config
+directory (and for any `CLAUDE_CONFIG_DIR` it was run with), so the
+first session started after the install can bind — without the seed,
+that session's transcript would predate the bridge's first look at the
+file and a user's first or only session would never supply quota data.
+The doctor re-seeds the same way when it finds no mark. And it takes the
 session's start time from the creation time of the `transcript_path`
 the payload names (a `stat`, never a read; `st_birthtime` on macOS,
 creation time on Windows), a file Claude Code creates when the session
@@ -595,8 +606,11 @@ Regression tests must prove:
   lowered a value keeps the old binding (the reset-trigger case), every
   first observation of a session goes to `unknown` whether or not its
   values are unique and the session is bound at its first proving
-  payload only if its transcript's creation time is later than
-  `accountSeenSince` — a login to another account completed between the
+  payload only if its transcript's creation time is later than the
+  `accountSeenSince` of its config directory — a fresh install seeds the
+  mark so the first post-install session binds, two concurrent sessions
+  in different `CLAUDE_CONFIG_DIR`s keep two independent marks and both
+  bind, a login to another account completed between the
   session's response and the bridge run resets `accountSeenSince` and
   leaves that session `unknown` for its lifetime, as does a session that
   predates the bridge install, and a bound session keeps its binding
