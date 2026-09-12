@@ -97,7 +97,16 @@ than from the regressed calendar — and when the wall clock regresses
 across midnight (00:05 back to 23:55) it keeps serving that later date
 — `dayEndS` then counts to the end of the held day, up to the 90 000
 clamp — until the clock passes it again, and `GET /` reports
-`waits.dayHeld` while it does. The single wall anchor
+`waits.dayHeld` while it does. The hold is **bounded to one midnight**:
+it covers the regression a clock correction produces, not a clock that
+was wrong by a year. If the wall date falls more than one day behind
+`servedDay` — the clock jumped forward, served a snapshot dated in the
+future, and was then corrected — the ledger releases the hold: it resets
+`servedDay` to the wall date, logs the discontinuity once, and reports
+`waits.dayReset` on `GET /`; rows anchored to the future date simply
+never overlap a real day again and age out with retention, and the page
+shows the real day's waits from the next poll rather than an empty
+future day for as long as the clock error was large. The single wall anchor
 keeps rows from relocating; this rule keeps "today" itself from
 relocating, so `todayS` cannot change on a backward step even though
 the host's calendar briefly says an earlier date. **Open holds count too, but only what is on disk:** `todayS`, the
@@ -368,9 +377,16 @@ both.
    the marker, with its checkpoint, on disk, and the next start closes
    it as a `restart` row worth exactly what the aggregate was still
    publishing. The row's full duration is exposed only once that write
-   has happened (`close` records the row as *unsaved* and the aggregate
-   counts it by its last checkpoint until the writer reports the save),
-   so the on-disk state is never behind the glass by more than
+   has happened: `close` records the row as *unsaved* and the aggregate
+   counts it by its last checkpoint until a write **that included that
+   row** completes. Acknowledgements are per generation, not "the
+   writer ran": the writer takes its snapshot under the store lock
+   together with a generation number, and on completion marks saved
+   exactly the rows and marker checkpoints that were in that snapshot —
+   a row closed after the snapshot was taken, while the atomic write was
+   still in flight, stays unsaved until the trailing write that carries
+   it completes, so a crash between the two cannot leave the glass ahead
+   of the disk. The on-disk state is therefore never behind the glass by more than
    `nowS`. `GET /` reports `waits.rows` and `waits.unsaved` so
    the doctor can show the file's state. What is persisted for an open
    hold is only its marker (provider, kind, `startedAt`, checkpointed
@@ -447,10 +463,14 @@ applies in full. Exact 480 × 480 simulator frames for: zero state (dashes),
 a live blocked state with a running mm:ss and the hero at `<1 MIN` (the
 first checkpoint of the day's first wait), a day with both providers, a
 day with one provider (bar is one colour), the relay-fed variant, the
-stale state (totals with the `STALE` marker, `BLOCKED RIGHT NOW` as
-dashes), the day-ended state (every total dashed under the wider `DAY
-ENDED` marker, a different layout from stale that must be seen to fit
-before it ships), the broad-number state (every seconds field at the
+stale state and the day-ended state — **both rendered from the same
+non-zero fixture as the both-providers frame**, as the skill requires,
+so provenance is the only visual change between live, stale (totals
+with the `STALE` marker, `BLOCKED RIGHT NOW` as dashes) and day-ended
+(every total dashed under the wider `DAY ENDED` marker, a different
+layout from stale that must be seen to fit before it ships), and a
+capture cannot hide or mislay a measurement behind the treatment —
+the broad-number state (every seconds field at the
 wire maximum of 999 999 and `count` at 9 999, so the hero reads a
 five-digit minute count and `LONGEST WAIT` and `BLOCKED RIGHT NOW` read
 `16666:39` — the skill's broad-number check, without which a capture
@@ -503,7 +523,12 @@ Regression tests must prove:
   returns "shutting down" and adds no second row, and the file after the
   final flush has exactly one row per hold; a restart while the clock is
   still regressed across midnight initialises today from the persisted
-  `servedDay` and leaves `todayS` unchanged; a close followed by a simulated crash inside the
+  `servedDay` and leaves `todayS` unchanged; a clock that jumped a year
+  forward, served a snapshot and was corrected releases the hold on the
+  next snapshot (`waits.dayReset`) and today's waits reappear; a close
+  that lands while the atomic write is blocked (a test holds the file
+  lock) stays unsaved through that write's completion and is
+  acknowledged only by the trailing write; a close followed by a simulated crash inside the
   writer window leaves the row absent but the marker present, the next
   start closes the marker as a `restart` row worth its checkpoint, and
   `todayS`, the provider totals and `longestS` after the restart
@@ -542,8 +567,9 @@ Regression tests must prove:
   LAN snapshot older than `TK_WAITS_STALE_MS` minus its request duration
   renders `BLOCKED RIGHT NOW` as dashes and the totals with the stale
   marker, a relay-fed block does so `TK_WAITS_STALE_RELAY_MS -
-  RELAY_AGE_BOUND_MS` after accept, so no live label outlives 20 s (LAN)
-  or 60 s (relay) from the snapshot's build — a newer accepted block
+  RELAY_AGE_BOUND_MS - request duration` after accept (a 4 s fetch goes
+  stale 4 s sooner), so no live label outlives 20 s (LAN) or 60 s
+  (relay) from the snapshot's build — a newer accepted block
   clears it, a snapshot that was never accepted shows the absent state,
   not stale, and a retained block whose `dayEndS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
