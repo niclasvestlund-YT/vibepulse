@@ -274,8 +274,9 @@ def check_server(base_url, checkout_rev=None, checkout_src=None):
             minutes = age // 60 if isinstance(age, int) else "?"
             results.append((WARN, f"claude statusLine bridge: last sample "
                                   f"{minutes} min ago{tag} — no Claude Code "
-                                  "session has spoken since; the probe is the "
-                                  "source until one does"))
+                                  "session has spoken since; its windows "
+                                  "still hold as a floor, the probe runs at "
+                                  "full cadence"))
         elif state in ("missing", "empty"):
             results.append((WARN, "claude statusLine bridge: installed but "
                                   "no sample yet — finish one turn in a "

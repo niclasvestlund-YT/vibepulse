@@ -1840,7 +1840,9 @@ class _StatusLineState:
     launcher_ours: bool
     python: Path | None
     python_present: bool
+    bridge: Path | None          # the script the launcher was pointed at
     bridge_present: bool
+    bridge_is_this_checkout: bool
     sample_status: str           # missing / unreadable / invalid / empty / stale / fresh
     sample_age_s: int | None
     claude_code_version: str | None
@@ -2024,7 +2026,20 @@ def _statusline_state(*, config_dir: Path, state_dir: Path, repo_root: Path,
     if record is not None and isinstance(record.get("python"), str):
         python = Path(record["python"])
     python_present = python is not None and os.access(python, os.X_OK)
-    bridge_present = _statusline_bridge_script(repo_root).is_file()
+    # The launcher invokes the script the INSTALL recorded, not whatever
+    # checkout the doctor happens to run from: judge that path.
+    bridge = None
+    if record is not None and isinstance(record.get("bridge"), str):
+        bridge = Path(record["bridge"])
+    bridge_present = bridge is not None and bridge.is_file()
+    this_checkout = _statusline_bridge_script(repo_root)
+    bridge_is_this_checkout = False
+    if bridge_present:
+        try:
+            bridge_is_this_checkout = (
+                bridge.resolve() == this_checkout.resolve())
+        except OSError:
+            bridge_is_this_checkout = False
     sample_status, document = statusline_bridge.peek_sample(
         statusline_bridge.sample_path(state_dir))
     age = None
@@ -2041,7 +2056,9 @@ def _statusline_state(*, config_dir: Path, state_dir: Path, repo_root: Path,
         points_at_launcher=points_at_launcher,
         launcher_present=launcher_present, launcher_ours=launcher_ours,
         python=python, python_present=python_present,
-        bridge_present=bridge_present, sample_status=sample_status,
+        bridge=bridge, bridge_present=bridge_present,
+        bridge_is_this_checkout=bridge_is_this_checkout,
+        sample_status=sample_status,
         sample_age_s=age, claude_code_version=version)
 
 
@@ -2101,11 +2118,16 @@ def _statusline_report(state: _StatusLineState, stdout) -> bool:
               file=stdout)
         ok = False
     if not state.bridge_present:
-        print("FIX statusLine bridge: tools/tokenserver/statusline_bridge.py "
-              "is missing from the checkout the launcher points at; run "
+        print(f"FIX statusLine bridge: the launcher points at {state.bridge} "
+              "and that script is gone (checkout moved or deleted); run "
               "`vibepulse_setup.py statusline install --yes-single-account` "
               "again from the durable checkout", file=stdout)
         ok = False
+    elif not state.bridge_is_this_checkout:
+        print(f"VARN statusLine bridge: the launcher runs {state.bridge}, "
+              "another checkout than this one; that is fine as long as it "
+              "is the durable checkout the tokenserver also runs from",
+              file=stdout)
     if not ok:
         return False
     version = (f", Claude Code {state.claude_code_version}"
@@ -2116,8 +2138,9 @@ def _statusline_report(state: _StatusLineState, stdout) -> bool:
     elif state.sample_status == "stale":
         minutes = (state.sample_age_s or 0) // 60
         print(f"VARN statusLine bridge: last sample {minutes} min "
-              f"ago{version}; the tokenserver uses its own probe until "
-              "Claude Code speaks again", file=stdout)
+              f"ago{version}; its windows still hold as a floor until they "
+              "reset, and the probe runs at full cadence until Claude Code "
+              "speaks again", file=stdout)
     elif state.sample_status in ("missing", "empty"):
         print("WAIT statusLine bridge: installed, no sample yet; finish one "
               "turn in a Claude Code session started after the install "
@@ -2131,12 +2154,22 @@ def _statusline_report(state: _StatusLineState, stdout) -> bool:
 
 def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
                         python: Path | None, consent: bool, stdout,
-                        now: int | None = None) -> bool:
-    if sys.platform == "win32":
+                        now: int | None = None,
+                        platform: str | None = None) -> bool:
+    platform = sys.platform if platform is None else platform
+    if platform == "win32":
         print("FIX statusLine bridge: Windows is not supported yet (the "
               "launcher is a POSIX shell script); see the open question in "
               "docs/superpowers/specs/2026-09-10-vibepulse-statusline-"
               "quota-source-design.md", file=stdout)
+        return False
+    if platform != "darwin":
+        # The single-account slice is validated on macOS only; Linux is
+        # not a supported host (AGENTS.md) and Claude Code's settings
+        # location there is unverified. Refuse rather than guess.
+        print(f"FIX statusLine bridge: {platform} is not a supported host "
+              "for the bridge; macOS only until the Linux gates in issue #2 "
+              "pass", file=stdout)
         return False
     if not consent:
         print("FIX statusLine bridge: not installed; " + _STATUSLINE_CONSENT
@@ -2620,7 +2653,8 @@ def main(
         interaction_relay_dir: Path | None = None,
         token_urlsafe=secrets.token_urlsafe,
         claude_config_dir: Path | None = None,
-        statusline_state_dir: Path | None = None) -> int:
+        statusline_state_dir: Path | None = None,
+        statusline_platform: str | None = None) -> int:
     """Run the strict CLI with injectable process and network boundaries."""
     args = _parser().parse_args(argv)
     output = sys.stdout if stdout is None else stdout
@@ -2712,7 +2746,8 @@ def main(
             return 0 if _statusline_install(
                 config_dir=claude_dir, state_dir=bridge_state,
                 repo_root=Path(repo_root), python=python_path,
-                consent=consent, stdout=output) else 1
+                consent=consent, stdout=output,
+                platform=statusline_platform) else 1
 
         if args.command == "status":
             _print_status(load_config(path), output)

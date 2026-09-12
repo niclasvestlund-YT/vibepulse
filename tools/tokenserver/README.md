@@ -519,15 +519,15 @@ own failure take the status line down.
 
 Rules, shared with the doctor and smoke test:
 
-- The sample is used only while **fresh** (newest `seen` within 15 min,
-  `STATUSLINE_FRESH_S`). Stale means no session has spoken; the probe is
-  the source again and the cache keeps the last live figure.
 - Each window is arbitrated separately against the probe's reading, and
   the week also against the cache: the later reset is the newer window;
   within one window the higher figure is the later one, because usage only
-  accumulates. Ties keep the probe. The model week has no statusLine
-  counterpart and is never touched.
-- While a fresh sample covers both windows and the probe is healthy
+  accumulates. Ties keep the probe. A stored window is therefore a floor
+  until it resets, fresh or not: a lagging probe cannot pull the figure
+  down. The model week has no statusLine counterpart and is never touched.
+- Freshness (`seen` within 15 min, `STATUSLINE_FRESH_S`) is judged per
+  window and decides only the probe cadence: while a fresh sample covers
+  both windows, no older than the probe's own, and the probe is healthy
   (`usage_http_200 + ok`), the probe runs every 1800 s
   (`PROBE_WHEN_BRIDGED_S`) instead of 240 s. Every failure state keeps its
   own ladder.

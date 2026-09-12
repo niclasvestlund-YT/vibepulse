@@ -11,8 +11,8 @@ requires `--yes-single-account` -- the operator asserts that Claude Code
 and the tokenserver share one Claude account. The account binding this
 document describes (`oauth/profile`, the identity watcher, generations,
 per-identity cache/tracker/history) is **not implemented**; a two-account
-host must not install the bridge. Windows install is refused (open
-question 4). The rest of this document is the design as reviewed.
+host must not install the bridge. Install is macOS-only: Windows is
+refused (open question 4) and Linux is not a supported host. The rest of this document is the design as reviewed.
 
 **Scope:** Tokenserver Claude quota sourcing, the setup command's
 `settings.json` edit, and the doctor/smoke/SessionStart classification of

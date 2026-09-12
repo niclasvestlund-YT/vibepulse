@@ -300,15 +300,40 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
         self.assertEqual(merged["weekSource"], "statusline")
         self.assertTrue(tokenserver._claude_statusline_bridged)
 
-    def test_stale_sample_is_a_no_op_and_not_bridged(self):
-        self.write(five=(42.0, self.NOW + 3600),
+    def test_stale_sample_is_a_floor_but_never_bridged(self):
+        # Codex P1 on #116: within a window usage only accumulates, so a
+        # stored 60 % beats a lagging probe's 40 % for the same reset even
+        # after Claude Code has gone quiet; only the probe cadence needs
+        # freshness.
+        self.write(five=(60.0, self.NOW + 3600),
                    week=(12.5, self.NOW + 86400),
                    seen_ago=tokenserver.STATUSLINE_FRESH_S + 1)
-        probe = {"sessionPct": 3.0, "sessionResetAt": self.NOW + 100}
-        self.assertIs(self.merge(probe), probe)
+        probe = {"sessionPct": 40.0, "sessionResetAt": self.NOW + 3600}
+        merged = self.merge(probe)
+        self.assertEqual(merged["sessionPct"], 60.0)
+        self.assertEqual(merged["weekPct"], 12.5)
         self.assertFalse(tokenserver._claude_statusline_bridged)
+        # A newer probe window still wins over the stale floor.
+        probe = {"sessionPct": 1.0, "sessionResetAt": self.NOW + 7200}
+        self.assertEqual(self.merge(probe)["sessionPct"], 1.0)
         self.path.unlink()
         self.assertIs(self.merge(probe), probe)
+
+    def test_freshness_is_judged_per_window(self):
+        # Codex P2 on #116: a payload that keeps reporting only one window
+        # leaves the other's ``seen`` behind; the old one must not ride the
+        # new one's freshness into the probe back-off.
+        five = {"pct": 42.0, "resets_at": self.NOW + 3600,
+                "at": self.NOW - 5, "seen": self.NOW - 5}
+        week = {"pct": 12.5, "resets_at": self.NOW + 86400,
+                "at": self.NOW - 7200, "seen": self.NOW - 7200}
+        self.path.write_text(json.dumps({"v": 1, "accounts": {"single": {
+            "five_hour": five, "seven_day": week}}}), encoding="utf-8")
+        merged = self.merge({})
+        self.assertEqual(merged["sessionPct"], 42.0)
+        self.assertEqual(merged["weekPct"], 12.5)  # still a floor
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+        self.assertEqual(tokenserver._claude_statusline_status, "fresh")
 
     def test_later_reset_wins_and_same_reset_higher_figure_wins(self):
         probe = {"sessionPct": 50.0, "sessionResetAt": self.NOW + 3600,
@@ -454,15 +479,19 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
         self.assertIn(("claude", "week", 12.5, self.NOW + 86400, self.NOW),
                       history.record_calls)
 
-    def test_snapshot_ignores_a_stale_sample(self):
+    def test_snapshot_serves_a_stale_sample_as_a_floor(self):
         self.write(five=(42.0, self.NOW + 3600),
                    week=(12.5, self.NOW + 86400),
                    seen_ago=tokenserver.STATUSLINE_FRESH_S + 1)
-        store = mock.Mock()
-        snapshot, persisted = self._snapshot(store=store)
+        snapshot, persisted = self._snapshot()
+        self.assertEqual(snapshot["claudeSessionPct"], 42.0)
+        self.assertEqual(snapshot["claudeWeekPct"], 12.5)
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+        # Expired windows are gone for good.
+        self.write(five=(42.0, self.NOW - 1), week=(12.5, self.NOW - 1))
+        snapshot, persisted = self._snapshot()
         self.assertIsNone(snapshot["claudeSessionPct"])
         self.assertIsNone(snapshot["claudeWeekPct"])
-        store.observe_quota.assert_not_called()
         self.assertEqual(persisted, [])
 
 

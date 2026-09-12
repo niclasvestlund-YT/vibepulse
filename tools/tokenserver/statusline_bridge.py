@@ -184,15 +184,45 @@ def parse_payload(raw: bytes, now: int) -> dict:
 
 # --- the merge (pure) ---------------------------------------------------
 
-def _valid_stored_window(value, now: int, name: str) -> bool:
+def _well_formed_window(value) -> bool:
+    """The persisted shape of one window, regardless of whether it has
+    reset since: the file-level check, so a malformed record is a corrupt
+    file to quarantine, never a value to silently drop and overwrite."""
     return (isinstance(value, dict)
             and _finite_number(value.get("pct"))
             and 0 <= value["pct"] <= 100
             and _finite_number(value.get("resets_at"))
-            and value["resets_at"] > now
-            and value["resets_at"] <= now + WINDOW_HORIZON_S[name]
+            and int(value["resets_at"]) == value["resets_at"]
             and _finite_number(value.get("at"))
             and _finite_number(value.get("seen")))
+
+
+def _valid_stored_window(value, now: int, name: str) -> bool:
+    """Well-formed AND still running: a reset in the future, within the
+    window's horizon."""
+    return (_well_formed_window(value)
+            and value["resets_at"] > now
+            and value["resets_at"] <= now + WINDOW_HORIZON_S[name])
+
+
+def _well_formed_document(document) -> bool:
+    """The whole v1 sample shape, down to each window: the envelope, every
+    account entry an object, every present window well-formed, the version
+    a string when present."""
+    if (not isinstance(document, dict)
+            or document.get("v") != SAMPLE_VERSION
+            or not isinstance(document.get("accounts"), dict)):
+        return False
+    for entry in document["accounts"].values():
+        if not isinstance(entry, dict):
+            return False
+        for name in WINDOWS:
+            if name in entry and not _well_formed_window(entry[name]):
+                return False
+        version = entry.get("claude_code_version")
+        if version is not None and not isinstance(version, str):
+            return False
+    return True
 
 
 def merge_entry(stored, observed: dict, now: int) -> dict:
@@ -266,9 +296,7 @@ def load_sample(path: Path):
         return {}
     except OSError:
         return None
-    if (not isinstance(document, dict)
-            or document.get("v") != SAMPLE_VERSION
-            or not isinstance(document.get("accounts"), dict)):
+    if not _well_formed_document(document):
         quarantine_corrupt(path, "not the v1 sample shape")
         return {}
     return document
@@ -287,9 +315,7 @@ def peek_sample(path: Path) -> tuple[str, dict | None]:
         return "invalid", None
     except OSError:
         return "unreadable", None
-    if (not isinstance(document, dict)
-            or document.get("v") != SAMPLE_VERSION
-            or not isinstance(document.get("accounts"), dict)):
+    if not _well_formed_document(document):
         return "invalid", None
     return "ok", document
 
@@ -300,14 +326,24 @@ def summarize_sample(document: dict | None, now: int) -> dict:
     Returns ``{"status": "empty" | "stale" | "fresh", "ageS": int | None,
     "claudeCodeVersion": str | None, "windows": {name: {...}}}`` where
     ``windows`` holds only the windows that are well-formed and have not
-    reset.  ``ageS`` is the age of the newest ``seen`` across them.
+    reset, each carrying its own ``age_s`` (since its ``seen``) and
+    ``fresh`` flag -- freshness is per window, because a payload that
+    keeps reporting only one window leaves the other's ``seen`` behind.
+    ``ageS`` and ``status`` describe the newest window.
     """
     entry = None
     if isinstance(document, dict) and isinstance(document.get("accounts"), dict):
         entry = document["accounts"].get(ACCOUNT_KEY)
     entry = entry if isinstance(entry, dict) else {}
-    windows = {name: dict(entry[name]) for name in WINDOWS
-               if _valid_stored_window(entry.get(name), now, name)}
+    windows = {}
+    for name in WINDOWS:
+        window = entry.get(name)
+        if not _valid_stored_window(window, now, name):
+            continue
+        window = dict(window)
+        window["age_s"] = max(0, int(now) - int(window["seen"]))
+        window["fresh"] = window["age_s"] <= FRESH_S
+        windows[name] = window
     version = entry.get("claude_code_version")
     if not (isinstance(version, str) and version and version.isprintable()):
         version = None
@@ -316,8 +352,7 @@ def summarize_sample(document: dict | None, now: int) -> dict:
     if not windows:
         return {"status": "empty", "ageS": None,
                 "claudeCodeVersion": version, "windows": {}}
-    seen = max(int(window["seen"]) for window in windows.values())
-    age = max(0, int(now) - seen)
+    age = min(window["age_s"] for window in windows.values())
     return {"status": "fresh" if age <= FRESH_S else "stale", "ageS": age,
             "claudeCodeVersion": version, "windows": windows}
 

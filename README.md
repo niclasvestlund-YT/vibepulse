@@ -415,9 +415,10 @@ Optionally, Claude Code itself can feed the quota: `python3
 tools/vibepulse_setup.py statusline install --yes-single-account` points
 Claude Code's `statusLine` at a small bridge that keeps the session and
 weekly windows Claude Code already hands that command, then runs the status
-line you had before. Fresh samples take precedence over the OAuth probe per
-window and the probe slows to every 30 minutes, so the shared rate-limit
-bucket is spent less. It asks you to confirm that Claude Code and the
+line you had before. Each window is arbitrated against the OAuth probe
+(the later reset wins, within one window the higher figure), and while a
+fresh sample covers both windows the probe slows to every 30 minutes, so
+the shared rate-limit bucket is spent less. It asks you to confirm that Claude Code and the
 tokenserver use the same Claude account; see
 [docs/agent-setup.md](docs/agent-setup.md).
 

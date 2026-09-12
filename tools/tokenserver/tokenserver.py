@@ -333,20 +333,22 @@ def _window_wins(candidate_reset, candidate_pct, incumbent_reset,
 
 
 def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
-    """Let a fresh statusLine sample stand in for -- or ahead of -- the
-    OAuth probe's session and general week figures.
+    """Let the statusLine sample stand in for -- or ahead of -- the OAuth
+    probe's session and general week figures.
 
-    Only a FRESH sample (Claude Code spoke within STATUSLINE_FRESH_S) is
-    used: a stale one means no session is active and the probe is the
-    better source again, so the merge is then a no-op and the cache keeps
-    the last live figure.  Each window is arbitrated separately against
-    the probe's (and, for the week, the cache's) reading by
-    :func:`_window_wins`.  The model week has no statusLine counterpart
-    and is never touched.
+    Each window is arbitrated separately against the probe's (and, for the
+    week, the cache's) reading by :func:`_window_wins`, whether or not the
+    sample is fresh: within a window usage only accumulates, so a stored
+    60 % is a floor until that window resets, and a probe that says 40 %
+    for the same reset is lagging, not newer. Freshness (Claude Code spoke
+    within STATUSLINE_FRESH_S, judged per window) decides only whether the
+    probe may slow down: both windows fresh and no older than the probe's
+    own is ``bridged``. The model week has no statusLine counterpart and
+    is never touched.
     """
     global _claude_statusline_bridged
     summary = _read_claude_statusline(path=path, now_ts=now_ts)
-    if summary is None or summary["status"] != "fresh":
+    if summary is None:
         _claude_statusline_bridged = False
         return claude
     windows = summary["windows"]
@@ -359,7 +361,8 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
     probe_session = (_valid_epoch_after(probe_reset, now_ts)
                      and _valid_pct(probe_pct))
     if five is not None:
-        if not probe_session or five["resets_at"] >= probe_reset:
+        if five["fresh"] and (not probe_session
+                              or five["resets_at"] >= probe_reset):
             covered += 1
         if (not probe_session or _window_wins(
                 five["resets_at"], five["pct"], probe_reset, probe_pct)):
@@ -374,7 +377,8 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
                   and _valid_pct(probe_pct)
                   and isinstance(claude.get("weekIdentity"), str))
     if week is not None:
-        if not probe_week or week["resets_at"] >= probe_reset:
+        if week["fresh"] and (not probe_week
+                              or week["resets_at"] >= probe_reset):
             covered += 1
         cached = quota_cache.latest("claude", "general_weekly", now=now_ts)
         wins = (not probe_week or _window_wins(
@@ -393,8 +397,6 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
             merged["weekObservedAt"] = int(week["at"])
             merged["weekIdentity"] = _quota_identity("claude", "general_weekly")
             merged["weekSource"] = "statusline"
-    # Both windows covered by a fresh sample no older than the probe's own
-    # windows: the probe is a cross-check now and may slow down.
     _claude_statusline_bridged = covered == 2
     return merged
 

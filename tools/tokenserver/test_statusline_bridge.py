@@ -272,6 +272,36 @@ class RecordSampleTests(unittest.TestCase):
             bridge.record_sample(payload(), now=NOW, directory=self.dir)
         self.assertEqual(self.read()["v"], 1)
 
+    def test_malformed_nested_record_is_quarantined_not_overwritten(self):
+        # A valid envelope around a broken window used to be "absent" and
+        # then overwritten by the next write; the bytes are evidence.
+        self.dir.mkdir(parents=True)
+        target = self.dir / bridge.SAMPLE_NAME
+        for entry in ({"five_hour": "junk"},
+                      {"five_hour": {"pct": 500, "resets_at": NOW + 1,
+                                     "at": 1, "seen": 1}},
+                      {"seven_day": {"pct": 1, "resets_at": NOW + 1.5,
+                                     "at": 1, "seen": 1}},
+                      {"claude_code_version": 7},
+                      "not an object"):
+            with self.subTest(entry):
+                for stale in self.dir.glob("*.corrupt-*"):
+                    stale.unlink()
+                corrupt = json.dumps({"v": 1, "accounts": {"single": entry}})
+                target.write_text(corrupt)
+                self.assertEqual(bridge.peek_sample(target), ("invalid", None))
+                with self.assertLogs("tokenserver.state", level="WARNING"):
+                    bridge.record_sample(payload(), now=NOW,
+                                         directory=self.dir)
+                quarantined = list(self.dir.glob("*.corrupt-*"))
+                self.assertEqual(len(quarantined), 1)
+                self.assertEqual(quarantined[0].read_text(), corrupt)
+        # An expired but well-formed window is not corruption.
+        target.write_text(json.dumps({"v": 1, "accounts": {"single": {
+            "five_hour": {"pct": 1, "resets_at": NOW - 1, "at": 1,
+                          "seen": 1}}}}))
+        self.assertEqual(bridge.peek_sample(target)[0], "ok")
+
     def test_unreadable_file_skips_the_write(self):
         self.dir.mkdir(parents=True)
         target = self.dir / bridge.SAMPLE_NAME
@@ -323,6 +353,11 @@ class SummarizeSampleTests(unittest.TestCase):
         self.assertEqual(summary["ageS"], 10)
         self.assertEqual(summary["claudeCodeVersion"], "2.1.0")
         self.assertEqual(set(summary["windows"]), {"five_hour", "seven_day"})
+        # Freshness is per window: the week was last seen 50 min ago.
+        self.assertTrue(summary["windows"]["five_hour"]["fresh"])
+        self.assertEqual(summary["windows"]["five_hour"]["age_s"], 10)
+        self.assertFalse(summary["windows"]["seven_day"]["fresh"])
+        self.assertEqual(summary["windows"]["seven_day"]["age_s"], 3000)
         later = NOW + bridge.FRESH_S + 1
         summary = bridge.summarize_sample(
             self.document(five_hour=five, seven_day=week), later)

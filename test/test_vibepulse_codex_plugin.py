@@ -30,7 +30,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "123f8a3ac979"
+HOST_SOURCE_FINGERPRINT = "dc51d5957a32"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -4466,14 +4466,16 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.launcher = self.state / self.setup.STATUSLINE_LAUNCHER_NAME
         self.command = shlex.quote(str(self.launcher))
 
-    def run_setup(self, *argv, interactive=False, input_fn=None):
+    def run_setup(self, *argv, interactive=False, input_fn=None,
+                  platform="darwin"):
         output = io.StringIO()
         code = self.setup.main(
             list(argv), config_path=self.config, python=Path(sys.executable),
             codex=None, stdout=output, stdin_isatty=interactive,
             input_fn=input_fn or (lambda prompt: ""),
             claude_config_dir=self.config_dir,
-            statusline_state_dir=self.state)
+            statusline_state_dir=self.state,
+            statusline_platform=platform)
         return code, output.getvalue()
 
     def read_settings(self):
@@ -4793,6 +4795,44 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertEqual(self.read_settings()["statusLine"]["command"],
                          "my-status")
+
+    def test_install_is_macos_only(self):
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status"}})
+        for platform, word in (("win32", "Windows"), ("linux", "linux")):
+            with self.subTest(platform):
+                code, text = self.run_setup(
+                    "statusline", "install", "--yes-single-account",
+                    platform=platform)
+                self.assertEqual(code, 1)
+                self.assertIn(word, text)
+                self.assertEqual(self.read_settings()["statusLine"]["command"],
+                                 "my-status")
+                self.assertFalse(self.state.exists())
+
+    def test_status_judges_the_recorded_bridge_path(self):
+        self.run_setup("statusline", "install", "--yes-single-account")
+        record_path = self.state / "claude-statusline-bridge.json"
+        document = json.loads(record_path.read_text())
+        # The checkout the launcher was installed from moved away.
+        for entry in document["dirs"].values():
+            entry["bridge"] = str(self.state / "gone" / "statusline_bridge.py")
+        record_path.write_text(json.dumps(document))
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 1)
+        self.assertIn("that script is gone", text)
+        self.assertIn(str(self.state / "gone"), text)
+        # Another, existing checkout: not a fix, but named.
+        other = self.state / "other" / "tools" / "tokenserver"
+        other.mkdir(parents=True)
+        (other / "statusline_bridge.py").write_text("# copy\n")
+        for entry in document["dirs"].values():
+            entry["bridge"] = str(other / "statusline_bridge.py")
+        record_path.write_text(json.dumps(document))
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 0, text)
+        self.assertIn("VARN statusLine bridge: the launcher runs", text)
+        self.assertIn("another checkout", text)
 
     def test_settings_points_at_launcher_without_a_record_is_a_fix(self):
         self.run_setup("statusline", "install", "--yes-single-account")
