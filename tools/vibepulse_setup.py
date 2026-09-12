@@ -64,7 +64,7 @@ _RELAY_BLOCK_END = "/* VIBEPULSE INTERACTION RELAY END */"
 _MAILBOX_RE = re.compile(r"vp_[A-Za-z0-9_-]{16}\Z")
 _BEARER_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 
-STATUSLINE_LAUNCHER_NAME = "statusline-bridge.sh"
+STATUSLINE_LAUNCHER_PREFIX = "statusline-bridge-"
 STATUSLINE_LAUNCHER_MARKER = "# vibepulse-statusline-bridge"
 STATUSLINE_SETTINGS_MAX_BYTES = 256 * 1024
 STATUSLINE_COMMAND_MAX_CHARS = 4096
@@ -1856,6 +1856,22 @@ def _statusline_settings_path(config_dir: Path) -> Path:
     return Path(config_dir) / "settings.json"
 
 
+def _statusline_launcher_path(state_dir: Path, config_dir: Path) -> Path:
+    """One launcher per Claude config directory: two ``CLAUDE_CONFIG_DIR``
+    installs sharing the state directory must each keep their own baked-in
+    interpreter and fallback status line."""
+    key = statusline_bridge.config_dir_key(config_dir)
+    return Path(state_dir) / f"{STATUSLINE_LAUNCHER_PREFIX}{key}.sh"
+
+
+def _statusline_recorded_launcher(record, fallback: Path) -> Path:
+    """The launcher this record installed (an earlier release wrote one
+    shared launcher), else the per-directory path."""
+    if isinstance(record, dict) and isinstance(record.get("launcher"), str):
+        return Path(record["launcher"])
+    return fallback
+
+
 def _statusline_read_settings(path: Path) -> dict:
     """The whole settings document (``{}`` when absent).  Raises
     ``ConfigError`` when the file exists but cannot be trusted."""
@@ -2001,7 +2017,6 @@ def _statusline_state(*, config_dir: Path, state_dir: Path, repo_root: Path,
     now = int(time.time()) if now is None else int(now)
     config_dir = Path(config_dir)
     settings_path = _statusline_settings_path(config_dir)
-    launcher = Path(state_dir) / STATUSLINE_LAUNCHER_NAME
     record = None
     try:
         dirs = _statusline_read_record_file(
@@ -2010,6 +2025,8 @@ def _statusline_state(*, config_dir: Path, state_dir: Path, repo_root: Path,
         record = candidate if isinstance(candidate, dict) else None
     except ConfigError:
         record = None
+    launcher = _statusline_recorded_launcher(
+        record, _statusline_launcher_path(state_dir, config_dir))
     settings_command = None
     settings_error = None
     try:
@@ -2188,7 +2205,7 @@ def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
     config_dir = Path(config_dir)
     state_dir = Path(state_dir)
     settings_path = _statusline_settings_path(config_dir)
-    launcher = state_dir / STATUSLINE_LAUNCHER_NAME
+    launcher = _statusline_launcher_path(state_dir, config_dir)
     record_path = statusline_bridge.config_path(state_dir)
 
     settings = _statusline_read_settings(settings_path)
@@ -2196,6 +2213,7 @@ def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
     key = statusline_bridge.config_dir_key(config_dir)
     previous = document["dirs"].get(key)
     previous = previous if isinstance(previous, dict) else None
+    previous_launcher = _statusline_recorded_launcher(previous, launcher)
 
     block = settings.get("statusLine")
     if block is None:
@@ -2210,7 +2228,8 @@ def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
     chained = None
     if current is None:
         chained = None
-    elif _statusline_command_is_launcher(current, launcher):
+    elif (_statusline_command_is_launcher(current, launcher)
+          or _statusline_command_is_launcher(current, previous_launcher)):
         # Reinstall: the previous status line lives in our record, not
         # in settings.json (which points at us).
         chained = (previous.get("chained_command")
@@ -2249,6 +2268,16 @@ def _statusline_install(*, config_dir: Path, state_dir: Path, repo_root: Path,
     settings = dict(settings)
     settings["statusLine"] = new_block
     _statusline_write_settings(settings_path, settings)
+    if previous_launcher != launcher and not any(
+            isinstance(other, dict) and other.get("launcher")
+            == str(previous_launcher) for other in document["dirs"].values()):
+        # An earlier release's shared launcher that no record uses now.
+        try:
+            previous_launcher.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ConfigError(f"cannot remove {previous_launcher}") from exc
 
     kept = (f"; your previous status line ({chained[:60]!r}) still runs "
             "after it" if chained else "; there was no status line before, "
@@ -2266,12 +2295,13 @@ def _statusline_uninstall(*, config_dir: Path, state_dir: Path,
     config_dir = Path(config_dir)
     state_dir = Path(state_dir)
     settings_path = _statusline_settings_path(config_dir)
-    launcher = state_dir / STATUSLINE_LAUNCHER_NAME
     record_path = statusline_bridge.config_path(state_dir)
     document = _statusline_read_record_file(record_path)
     key = statusline_bridge.config_dir_key(config_dir)
     record = document["dirs"].get(key)
     record = record if isinstance(record, dict) else None
+    launcher = _statusline_recorded_launcher(
+        record, _statusline_launcher_path(state_dir, config_dir))
 
     settings = _statusline_read_settings(settings_path)
     block = settings.get("statusLine")
@@ -2307,20 +2337,25 @@ def _statusline_uninstall(*, config_dir: Path, state_dir: Path,
                     f"{shown}, not the launcher")
 
     document["dirs"].pop(key, None)
+    doomed = []
     if document["dirs"]:
         _statusline_write_record_file(record_path, document)
-        removed = "; other config directories still use the launcher"
+        removed = "; other config directories keep their own launchers"
+        if not any(isinstance(other, dict) and other.get("launcher")
+                   == str(launcher) for other in document["dirs"].values()):
+            doomed.append(launcher)
     else:
         removed = ""
-        for path in (record_path, launcher,
-                     statusline_bridge.sample_path(state_dir),
-                     state_dir / statusline_bridge.LOCK_NAME):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                raise ConfigError(f"cannot remove {path}") from exc
+        doomed = [record_path, launcher,
+                  statusline_bridge.sample_path(state_dir),
+                  state_dir / statusline_bridge.LOCK_NAME]
+    for path in doomed:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ConfigError(f"cannot remove {path}") from exc
     print(f"PASS statusLine bridge: uninstalled; {restored}{removed}",
           file=stdout)
     return True

@@ -247,12 +247,16 @@ def merge_entry(stored, observed: dict, now: int) -> dict:
                     and new["pct"] > old["pct"])):
             entry[name] = {"pct": new["pct"], "resets_at": new["resets_at"],
                            "at": now, "seen": now}
-        else:
+        elif new["resets_at"] == old["resets_at"]:
             # Same window, same or lower figure (a replay of Claude Code's
-            # cached values on a non-API trigger), or an older window than
-            # the one already stored: the value and its ``at`` stand, the
-            # bridge is nonetheless alive.
+            # cached values on a non-API trigger): the value and its
+            # ``at`` stand, but this window was observed, so it is fresh.
             entry[name] = dict(old, seen=now)
+        else:
+            # An older window than the one stored: another session still
+            # holding a cached, since-superseded window. It never observed
+            # the stored one, so it must not vouch for its freshness.
+            entry[name] = dict(old)
     version = observed.get("version")
     if version is None:
         version = stored.get("claude_code_version")

@@ -30,7 +30,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "dc51d5957a32"
+HOST_SOURCE_FINGERPRINT = "c2e8d9f1af40"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -4463,7 +4463,8 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.state = root / "Application Support" / "VibePulse"
         self.config = root / "config.json"
         self.setup = load_setup()
-        self.launcher = self.state / self.setup.STATUSLINE_LAUNCHER_NAME
+        self.launcher = self.setup._statusline_launcher_path(
+            self.state, self.config_dir)
         self.command = shlex.quote(str(self.launcher))
 
     def run_setup(self, *argv, interactive=False, input_fn=None,
@@ -4833,6 +4834,64 @@ class StatusLineBridgeSetupTests(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertIn("VARN statusLine bridge: the launcher runs", text)
         self.assertIn("another checkout", text)
+
+    def test_each_config_directory_keeps_its_own_launcher(self):
+        # Codex on #116: two CLAUDE_CONFIG_DIRs sharing the state
+        # directory must not overwrite each other's baked-in fallback.
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "first-line"}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        other_dir = Path(self.tmp.name) / "claude-other"
+        other_dir.mkdir()
+        (other_dir / "settings.json").write_text(json.dumps(
+            {"statusLine": {"type": "command", "command": "second-line"}}))
+        output = io.StringIO()
+        code = self.setup.main(
+            ["statusline", "install", "--yes-single-account"],
+            config_path=self.config, python=Path(sys.executable),
+            codex=None, stdout=output, stdin_isatty=False,
+            claude_config_dir=other_dir, statusline_state_dir=self.state,
+            statusline_platform="darwin")
+        self.assertEqual(code, 0, output.getvalue())
+        other_launcher = self.setup._statusline_launcher_path(
+            self.state, other_dir)
+        self.assertNotEqual(other_launcher, self.launcher)
+        self.assertIn("first-line", self.launcher.read_text())
+        self.assertIn("second-line", other_launcher.read_text())
+        # Uninstalling one directory leaves the other's launcher alone.
+        code, text = self.run_setup("statusline", "uninstall")
+        self.assertEqual(code, 0, text)
+        self.assertIn("keep their own launchers", text)
+        self.assertFalse(self.launcher.exists())
+        self.assertTrue(other_launcher.exists())
+        self.assertTrue((self.state / "claude-statusline-bridge.json").exists())
+
+    def test_reinstall_replaces_an_earlier_shared_launcher(self):
+        # Installs from before per-directory launchers recorded one shared
+        # statusline-bridge.sh; a reinstall moves to the keyed name and
+        # removes the orphan.
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": "my-status"}})
+        self.run_setup("statusline", "install", "--yes-single-account")
+        shared = self.state / "statusline-bridge.sh"
+        self.launcher.rename(shared)
+        record_path = self.state / "claude-statusline-bridge.json"
+        document = json.loads(record_path.read_text())
+        for entry in document["dirs"].values():
+            entry["launcher"] = str(shared)
+        record_path.write_text(json.dumps(document))
+        self.write_settings({"statusLine": {"type": "command",
+                                            "command": shlex.quote(str(shared))}})
+        code, text = self.run_setup("statusline", "status")
+        self.assertEqual(code, 0, text)  # the record's launcher is judged
+        code, text = self.run_setup("statusline", "install",
+                                    "--yes-single-account")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.read_settings()["statusLine"]["command"],
+                         self.command)
+        self.assertEqual(self.record()["chained_command"], "my-status")
+        self.assertTrue(self.launcher.exists())
+        self.assertFalse(shared.exists())
 
     def test_settings_points_at_launcher_without_a_record_is_a_fix(self):
         self.run_setup("statusline", "install", "--yes-single-account")

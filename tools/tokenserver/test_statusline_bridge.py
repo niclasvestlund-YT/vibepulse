@@ -149,13 +149,14 @@ class MergeEntryTests(unittest.TestCase):
         self.assertEqual(entry["five_hour"]["pct"], 1.0)
         self.assertEqual(entry["five_hour"]["resets_at"], NOW + 3600)
 
-    def test_older_reset_than_stored_is_a_replay(self):
+    def test_older_reset_than_stored_never_vouches_for_the_newer(self):
+        # Another session re-emitting a superseded window did not observe
+        # the stored one: value, ``at`` AND ``seen`` stay as they were.
         stored = {"five_hour": {"pct": 5.0, "resets_at": NOW + 3600,
                                 "at": NOW - 60, "seen": NOW - 60}}
         entry = bridge.merge_entry(stored, self.observed(
             five_hour={"pct": 99.0, "resets_at": NOW + 100}), NOW)
-        self.assertEqual(entry["five_hour"]["pct"], 5.0)
-        self.assertEqual(entry["five_hour"]["seen"], NOW)
+        self.assertEqual(entry["five_hour"], stored["five_hour"])
 
     def test_absent_window_keeps_stored_until_it_expires(self):
         stored = {"seven_day": {"pct": 12.5, "resets_at": NOW + 100,

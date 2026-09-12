@@ -300,7 +300,7 @@ lives in this section only (OBS-23).
 | `usage-history.json` | quota trend points, ≥15 min apart | 8 days |
 | `quota-cache.json` | last-known quota truths + reset times | until reset passes |
 | `max-tracker.json` | daily peaks, streaks, backfill watermarks | 400 days |
-| `claude-statusline-quota.json` | the statusLine bridge's session/week windows (+ lock file, install record `claude-statusline-bridge.json`, launcher `statusline-bridge.sh` with the previous status line baked in as a fallback) | until each window resets |
+| `claude-statusline-quota.json` | the statusLine bridge's session/week windows (+ lock file, install record `claude-statusline-bridge.json`, one launcher per Claude config directory, `statusline-bridge-<key>.sh`, with the previous status line baked in as a fallback) | until each window resets |
 
 All three are written atomically (temp + fsync + rename + parent-directory
 fsync, OBS-21). An unreadable one — invalid JSON, non-UTF-8 bytes, or the
