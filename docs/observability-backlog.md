@@ -330,8 +330,10 @@ a look before TLS does: `t=826595` is preceded not by a handshake but by a
 display rotation (`rotation: roterade till läge 0`, `MADCTL 0xA0`), which holds
 the LVGL lock while the panel redraws.
 
-**Cheapest bisection, if one is run.** Four clients are plain `#ifdef` gates in
-`secrets.h` and can all be removed in a single rebuild:
+**Cheapest bisection, if one is run.** Three clients are plain `#ifdef` gates
+in `secrets.h` and can be removed in a single rebuild; the fourth, Max
+Tracker, polls without its define since #98 and is switched off in SETTINGS →
+LABS instead (the table keeps its row for the URL's sake):
 
 | Client | Flag | Gate |
 |---|---|---|
@@ -489,8 +491,9 @@ Three results, and the first changes how serious this item is:
    hour 2, 1 in hour 5) happened with nobody at the panel, so the network
    clients and the other periodic tasks stay in scope for those.
 
-3. **The block range never moved.** 19 456–31 744 for six hours, one hour
-   touching 18 432. Stable oscillation, no drift.
+3. **The block range barely moved.** 18 432–31 744 B over the six hours:
+   19 456 as the floor in five of them, 18 432 in hour 4. Stable oscillation,
+   no drift.
 
 The panel was still drawing at the end, at ~7.2 hours of uptime, and no alarm
 condition fired (low-water < 8 000, log stall, or disk < 60 MiB).
