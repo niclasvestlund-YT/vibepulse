@@ -7,8 +7,9 @@ INTERNAL-RAM QUESTION IS SETTLED AT `+0 B`. §2 BOOT-LOG EVIDENCE IS COMPLETE. A
 MEASUREMENT GAP WAS FOUND: THE INTERNAL-HEAP LOW-WATER DIPS BELOW WHAT A FLUSH
 NEEDS, THE DMA BLOCK ITSELF IS NOT TRACKED, AND THE 10 S SAMPLE CANNOT SEE
 THE DIPS (OBS-37). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
-ALL NOT EXERCISED. §5 IS RUNNING UNATTENDED FOR SIX HOURS AS PASSIVE
-OBSERVATION ONLY. §3.5 CODEX AND MANUAL-TEST 4.4/4.5 ARE NOT EXERCISED.**
+ALL NOT EXERCISED. A SIX-HOUR UNATTENDED PASSIVE OBSERVATION COMPLETED WITH NO
+ALARM; IT IS NOT THE RUN SHEET'S §5. §3.5 CODEX AND MANUAL-TEST 4.4/4.5 ARE NOT
+EXERCISED.**
 
 The evening's substance is the flash and the OBS-37 investigation, not the
 checklist. Three deliberate OTA-window cycles were measured because the
@@ -379,6 +380,7 @@ a drop below 100 MiB.
 `spec/device-units.yaml` was updated to `installed_firmware:
 v1.0.0-67-ge51b79f` and `last_physical_verification: "2026-09-06"`.
 
-Nothing was committed. `README.md`'s SETTINGS section still says no panel has
-been flashed with the menu; that sentence cannot be changed yet, because §3 has
-not passed — it has not been attempted.
+Nothing was committed that evening. This PR later changed `README.md`'s
+SETTINGS section: it said no panel had been flashed with the menu, which stopped
+being true with this flash, so it now says the menu is on the panel but
+unreviewed. §3 has still not passed — it has not been attempted.
