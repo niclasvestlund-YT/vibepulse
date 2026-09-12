@@ -8,13 +8,20 @@ this list. Nothing here authorizes a flash by itself — the user says
 
 ## Why this session exists
 
-`spec/device-units.yaml` says `torget-home-01` runs `v1.0.0-25-g054db68`
-(flashed 2026-08-30). `main` is roughly 40 commits past that. What the
-panel has never seen:
+When this sheet was written, `spec/device-units.yaml` said `torget-home-01`
+ran `v1.0.0-25-g054db68` (flashed 2026-08-30) and `main` was roughly 40
+commits past that. **Since 2026-09-06 the panel runs `v1.0.0-67-ge51b79f`**,
+flashed over USB (the session is in
+`docs/superpowers/reviews/2026-09-06-flash-session-key3-physical.md`); every
+row below is on the glass since then, unverified, and the starting state for
+§1 is an image that *has* the SETTINGS menu. What is still missing from the
+glass is everything that landed after `e51b79f`: coredump, the reboot ledger,
+poller backoff and the warm-up placeholders. What the panel had never seen
+when this sheet was written:
 
 | Change | Where it landed | What only the glass can prove |
 |---|---|---|
-| SETTINGS menu on a 3 s KEY3 hold (UPDATE / WIFI / ABOUT) | #72, #73 | timing, z-order against NO NETWORK, the takeover hand-off. The flashed image predates the menu: its hold opens the update window directly, which is how the first delivery in §1 goes |
+| SETTINGS menu on a 3 s KEY3 hold (UPDATE / WIFI / ABOUT) | #72, #73 | timing, z-order against NO NETWORK, the takeover hand-off. On the glass since 2026-09-06; the first delivery in §1 now goes through the menu |
 | Overlay cost lines at boot (`overlaykostnad …`) | #77 | the actual `settings` internal-RAM figure — the FEATURES row waits on it |
 | Setup QR no longer outlives its window | #76 | no leftover QR over `NO NETWORK` |
 | KEY3 arbitration moved to pure platform code | #73 | no behaviour change — a regression here would be a bug |
@@ -113,20 +120,20 @@ takes the newest `build*/torget.bin` by mtime, and it makes that choice
 only after the window opens — too late for you to see it. A stale
 `build-stage/` from an earlier session would win and be sent.
 
-**The first delivery lands on the old image, and the old image has no
-SETTINGS menu.** On `v1.0.0-25-g054db68` the menu does not exist yet; it
-arrives with this build. What that image *does* have is the UPDATE READY
-takeover, and the tokenserver advertises the new `build/torget.bin`
-within about 30 s of `idf.py build` — so by the time you reach the panel
-the takeover has most likely already taken the glass. Two cases, and the
-first is the normal one:
+**The first delivery lands on `v1.0.0-67-ge51b79f`, which has the SETTINGS
+menu.** (The first version of this sheet assumed `v1.0.0-25-g054db68`, whose
+hold opened the window directly; that image has been gone since 2026-09-06.)
+The installed image also has the UPDATE READY takeover, and the tokenserver
+advertises the new `build/torget.bin` within about 30 s of `idf.py build` —
+so by the time you reach the panel the takeover has most likely already taken
+the glass. Two cases, and the first is the normal one:
 
 - **UPDATE READY is showing.** Tap its **UPDATE** pill. A KEY3 hold does
   nothing while the takeover owns the glass — deliberately — so holding
   here leaves the uploader waiting forever.
-- **It has not appeared yet.** Hold KEY3 a full 3 s. There is no
-  SETTINGS on this old image for the hold to reach, so it opens the
-  update window directly and the ring appears.
+- **It has not appeared yet.** Hold KEY3 a full 3 s to open SETTINGS, then
+  tap **UPDATE**; the ring appears. The hold alone only opens the menu —
+  without the tap the window never opens and the uploader waits forever.
 
 Either way the uploader (already polling) sends. Expect RECEIVING →
 VERIFYING → RESTARTING, then the boot-health gate. The script exits after

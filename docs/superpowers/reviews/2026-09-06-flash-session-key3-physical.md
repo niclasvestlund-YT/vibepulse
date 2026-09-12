@@ -4,8 +4,9 @@
 
 **DRAFT, FOR REVIEW. USB FLASH TO `v1.0.0-67-ge51b79f` PASSED AND THE `settings`
 INTERNAL-RAM QUESTION IS SETTLED AT `+0 B`. §2 BOOT-LOG EVIDENCE IS COMPLETE. A
-DEFECT WAS FOUND AND MEASURED: THE PANEL RUNS BELOW ITS OWN FREEZE THRESHOLD
-(OBS-37). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
+MEASUREMENT GAP WAS FOUND: THE INTERNAL-HEAP LOW-WATER DIPS BELOW WHAT A FLUSH
+NEEDS, THE DMA BLOCK ITSELF IS NOT TRACKED, AND THE 10 S SAMPLE CANNOT SEE
+THE DIPS (OBS-37). NONE OF THE KEY3 MANUAL TESTS WERE RUN — §1, §2, §3 AND §4.1–4.3 ARE
 ALL NOT EXERCISED. §5 IS RUNNING UNATTENDED FOR SIX HOURS AS PASSIVE
 OBSERVATION ONLY. §3.5 CODEX AND MANUAL-TEST 4.4/4.5 ARE NOT EXERCISED.**
 
@@ -192,7 +193,7 @@ Counts over ~20 minutes of uptime on `v1.0.0-67-ge51b79f`:
 
 | Signal | Count |
 |---|---|
-| `LÅGT DMA-block … nära fryströskeln` | **76** — essentially every 10 s sample since t=23 s |
+| `LÅGT DMA-block … nära fryströskeln` | **76** of roughly 120 samples, about 63 %, since t=23 s (the full session came to 1 083 of 2 527, 43 %; see OBS-37) |
 | `esp_lv_adapter_lock: Failed to acquire LVGL lock` | **10**, clustered at t≈317–335 s, t≈819–827 s, t=1188 s |
 
 The decisive number is `lägsta någonsin`, which the periodic `heap:` line
@@ -237,7 +238,9 @@ The overlays are not implicated: all three report `internt +0 B`, and the
 condition was already present before SETTINGS was ever opened.
 
 This is the §5 result, obtained without the soak. It should be treated as a
-defect against `v1.0.0-67`, not as a run-sheet checkbox.
+measurement gap to instrument on `v1.0.0-67` — the DMA block's own minimum is
+not tracked, so the transient is inferred from a total — not as a run-sheet
+checkbox and not as a measured threshold breach.
 
 
 ## The OTA window measured, three cycles
