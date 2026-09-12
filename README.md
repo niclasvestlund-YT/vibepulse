@@ -42,8 +42,11 @@ the room, no window to switch to, no menu bar to squint at.
 > a supported prompt on the glass. The Windows core, physical answer loop and
 > persistent sign-in/sleep/reboot lifecycle were verified at the v1.0.0 host
 > runtime and are not re-claimed for a later one. v1.1.0 adds SETTINGS on
-> the glass, an honest warm-up, and crash evidence in the firmware; the
-> firmware side is CI-built and waits for the next flash session. Optional
+> the glass, an honest warm-up, and crash evidence in the firmware. SETTINGS
+> has been on `torget-home-01` since the 2026-09-06 USB flash of
+> `v1.0.0-67-ge51b79f`, with its static on-panel review still unrun; the
+> warm-up, coredump, ledger and backoff changes landed after that build and
+> are CI-built, waiting for the next flash session. Optional
 > integrations remain opt-in, and every platform claim stays tied to its
 > recorded evidence.
 

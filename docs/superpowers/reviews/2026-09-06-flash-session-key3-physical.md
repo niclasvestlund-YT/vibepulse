@@ -268,9 +268,12 @@ then short-tapped to close.
 | internal free after close | 56 859–58 879 | 55 087–68 843 | — |
 | low-water before -> after | 10 179 -> 9 623 | 9 623 -> 9 623 | 9 623 -> 9 623 |
 
-The listener costs a constant ~7 kB, pins internal free at ~47 965 within ten
-bytes regardless of how long the window is open, and returns all of it on close.
-It does not lower the low-water mark per open.
+While open, internal free sits at ~47 965 in all three cycles, within ten
+bytes, regardless of how long the window is open and whatever the pre-open
+figure was; the pre-open figure oscillates by ~10 kB on its own, so the cost is
+not a fixed delta ("~7 kB" is cycle 1's difference only). Free returned to the
+pre-open band after cycles 1 and 2; cycle 3 has no post-close reading. It does
+not lower the low-water mark per open.
 
 ## The low-water walk, unexplained
 

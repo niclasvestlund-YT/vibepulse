@@ -274,9 +274,11 @@ wrong (the correction further down has the detail):
 W (307120) torget: LÅGT DMA-block: 19456 byte (flush behöver 11520) — nära fryströskeln
 ```
 
-The sampled largest DMA block stays in a **19 456–31 744 B** band (the guard
-fires below twice the flush size, 23 040 B, so it fires on that band without any
-block being too small). The separately tracked `lägsta någonsin` figure fell to
+The sampled largest DMA block stays in a **19 456–31 744 B** band over these
+first 20 minutes (the guard fires below twice the flush size, 23 040 B, so it
+fires on that band without any block being too small); the lowest sampled block
+of the whole session was **16 384 B**, during the 141 s window open measured
+further down. The separately tracked `lägsta någonsin` figure fell to
 **11 143 B**. **What that figure is, precisely:** `main/main.c:650` prints
 `heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)`, and ESP-IDF computes
 that by summing, over every internal heap region, that region's own lifetime
@@ -403,11 +405,15 @@ and after each:
 | low-water before -> after | 10 179 -> 9 623 | 9 623 -> 9 623 | 9 623 -> 9 623 |
 | memory returned on close | full | full | full |
 
-What the listener actually does is now measured rather than inferred: it costs a
-**constant ~7 kB of internal RAM**, pinning internal free at ~47 965 within ten
-bytes across all three cycles and independent of how long the window stays open,
-and it **returns all of it on close** — free and largest block come back to, or
-slightly above, the pre-open values. There is no leak across cycles.
+What the listener actually does is now measured rather than inferred: while the
+window is open, internal free sits at **~47 965 in all three cycles, within ten
+bytes**, however long the window stays open and whatever the pre-open figure was
+(55 079, 65 075 and 55 075 B — the pre-open figure oscillates by ~10 kB on its
+own, so the listener's cost is not a fixed delta, and the "~7 kB" first read off
+cycle 1 is that cycle's difference only). After close, free returned to the
+pre-open band in cycles 1 and 2 (56 859–58 879 and 55 087–68 843 B); cycle 3
+has no post-close reading. No leak is visible across the two cycles that have
+both readings.
 
 Critically, **it does not lower the low-water mark per open.** Cycles 2 and 3
 moved it by zero. Cycle 1's 556-byte drop was a transient that happened to
@@ -458,11 +464,15 @@ Three results, and the first changes how serious this item is:
    under the 11 520 B a flush needs — which, as above, is not a statement about
    any single instant — and that floor is stable.
 
-2. **Lock failures track interaction, not uptime.** 14 in hour 1 — which still
-   contained the tail of the interactive session — then 4, 0, 0, 1, 0. Nineteen
-   in six hours, effectively none once the panel was left alone. This supports
-   the rotation outlier noted above and points the LVGL-lock question first at
-   UI activity. It does not clear the background tasks: five failures (4 in
+2. **Lock failures fall off once the panel is left alone.** 14 in hour 1, then
+   4, 0, 0, 1, 0. The soak began at 02:03, minutes after the last measured
+   window cycle, so hour 1 holds the cool-down after the interactive session but
+   no interaction inside the bucket; its 14 cannot be attributed to UI activity
+   with this data, and the interaction correlation rests on the interactive
+   period before the soak (17 failures in its first ~20 minutes) against hours
+   2–6. Nineteen in six hours, effectively none once the panel was left alone.
+   This supports the rotation outlier noted above and points the LVGL-lock
+   question first at UI activity. It does not clear the background tasks: five failures (4 in
    hour 2, 1 in hour 5) happened with nobody at the panel, so the network
    clients and the other periodic tasks stay in scope for those.
 
@@ -480,8 +490,10 @@ than a real threshold breach, which is itself worth noting: a guard that fires
 on 43 % of samples is close to being ignorable, and it fired identically during
 the hours when nothing at all was wrong.
 
-Not yet investigated: whether the flush allocation actually fails when the
-block dips under 11 520, or whether it retries and hides it. And the DMA
+Not yet investigated: whether the DMA block ever dips under 11 520 B at all —
+the sampled minimum was 16 384 B, and nothing tracks the block between samples
+— and, only if it does, whether the flush allocation fails or retries and hides
+it. And the DMA
 block's own minimum is not tracked at all — `lägsta någonsin` is a total, per
 `main/main.c:650`. The instrumentation this item asks for starts with a
 `heap_caps_get_largest_free_block(MALLOC_CAP_DMA)` low-water of its own and a
