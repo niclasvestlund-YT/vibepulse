@@ -64,6 +64,10 @@ Codex. You do not need to read this whole page:
    hold opens [SETTINGS](#one-button-one-menu)** on the glass — UPDATE, WIFI and ABOUT today; the
    on-glass feature switches are specified but not built yet (see the spec
    in `docs/superpowers/specs/`). Sound has no verified backend yet.
+4. **Choose what to add later:** [Vibe Labs](docs/labs/README.md) lists the
+   optional integrations, today's installed pages, and the planned simpler
+   base. GitHub Stars is available; standalone reset clocks and coding quotes
+   are concepts. Value, burn rate and Max Tracker are still included today.
 
 ## Latest release: v1.1.0
 
