@@ -143,8 +143,13 @@ wait that started before that midnight and ended after it keeps its
 row and its overlap into the next day, because its anchor is real and
 dropping it by `endedAt` would make the measured total retreat. It
 re-anchors an open hold whose `startedAt` lies in the future to
-`now − elapsedS` so its checkpointed seconds land in the real day
-rather than a future one — **both** the persisted marker and the
+`now − (live monotonic elapsed)` — the hold's true age from the
+store's monotonic clock, not the checkpointed `elapsedS`, which can
+trail the live age by up to `WAIT_MARKER_CHECKPOINT_S` and would shift
+the eventual close's derived endpoint forward by that lag, enough to
+push a hold that really ends at midnight into the next day; `elapsedS`
+stays what it is, the durable crash-recovery duration — so its
+seconds land in the real day rather than a future one — **both** the persisted marker and the
 in-memory `_Pending.started_wall`, changed together under the store
 lock, because `wait_aggregates` snapshots the in-memory field and a
 later `close` derives its row from the pending entry, so a marker
@@ -153,9 +158,15 @@ the future and the close recreating the very row the release removed
 — counts the drops and the re-anchors in the discontinuity log line,
 and persists the drops, the re-anchoring and the reset `servedDay` in
 one write; and retention prunes on both sides of the window in
-general — rows older than the cutoff and rows *anchored* after the
-served day's end plus one day, which no legitimate row is — so a
-future-dated row never survives a prune even when a reset was missed. **The discontinuity is shown, not smoothed
+general — rows older than the cutoff and rows *anchored* more than one
+day after the **current day**, the later of the wall date and
+`servedDay` at the moment of the prune, never `servedDay` alone: the
+served day advances only when a snapshot is built, and a panel that is
+disconnected for days with the relay off leaves it days behind while
+hooks keep closing legitimate waits anchored after it, which a prune
+against the stale served day would delete. No legitimate row is
+anchored more than a day past the current wall day, so the rule still
+removes every future-dated row even when a reset was missed. **The discontinuity is shown, not smoothed
 over:** the page may already have displayed the future day's non-zero
 totals under `TODAY`, and the real day's total is usually smaller, so
 a reset must never look like a counter that retreated. The block
@@ -795,10 +806,16 @@ Regression tests must prove:
   the future day accumulated are absent from the file after the write
   that persists the reset while a legitimate row that started before
   the reset day's midnight and ended after it survives with its overlap
-  intact, an open hold parked under the bad clock keeps its
-  checkpointed seconds in the real day and its in-memory `started_wall`
-  moves with its marker so the next snapshot places it in the real day
-  and its eventual close writes a real-day row, and advancing the clock to
+  intact, an open hold parked under the bad clock is re-anchored from
+  its live monotonic elapsed (a release 25 s after its last checkpoint
+  anchors it 25 s earlier than `now − elapsedS` would, so a hold that
+  ends at midnight closes into the preceding day with no count in the
+  next) and its in-memory `started_wall` moves with its marker so the
+  next snapshot places it in the real day and its eventual close writes
+  a real-day row; with the panel disconnected for three days and the
+  relay off, waits closed by hooks on the second and third day are
+  anchored after the stale `servedDay` plus one day and survive every
+  prune, reappearing in full when the panel returns; and advancing the clock to
   the once-future date afterwards shows no trace of them; a future-dated
   row planted in the file without a reset is pruned by retention rather
   than kept until its date; a close
