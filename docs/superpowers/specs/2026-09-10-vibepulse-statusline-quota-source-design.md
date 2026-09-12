@@ -229,7 +229,17 @@ timestamp, not by which source it is:
    decides the direction.
 2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
-   record).
+   record) **plus the same account gate**: the file names its organization
+   (`org`, which `_read_claude_plan_usage` validates and today discards),
+   and Desktop can be signed into a different account than the probe and
+   bridge. So the reader keeps `org` as a hash, the fingerprint side
+   records `sha256(oauthAccount.organizationUuid)[:16]` from the same
+   `.claude.json` beside its account fingerprint, and the plan-usage
+   step runs only when the two organization hashes are equal; when either
+   is unknown or they differ the step is skipped and `GET /` says
+   `claudePlanUsage: other_account` / `account_unknown`, rather than
+   borrowing B's cache record to relabel A's number. The raw
+   organization id still never leaves the reader.
 3. The quota cache, marked stale, as today — **filtered by the same
    account**. `QuotaCache.latest(provider, scope)` today returns the
    newest unexpired record across every identity, and `_quota_identity`
@@ -310,8 +320,12 @@ sample file too, and the merge treats it as "no observation", not zero.
    of the youngest window in the probe's own entry and `account` is
    `match`, `mismatch` or `unknown`; the tokenserver reads only that
    entry and never the other accounts'.
-4. `/api/tokens` is byte-identical in shape. `claudeWeekStale` and
-   `claudeSessionPct` come from whichever source won; `claudeModelWeekPct`
+4. `/api/tokens` is byte-identical in shape. `claudeWeekPct` and
+   `claudeSessionPct` come from whichever source won; `claudeWeekStale`
+   does **not** — it is the weekly window's liveness inverted, computed
+   from both sources as the source-order section says, so an older probe
+   observation that wins on percentage never marks the card stale while
+   a matching bridge window is fresh; `claudeModelWeekPct`
    keeps its probe-or-cache path. The Max Tracker records a bridge
    observation as live only under the same "fresh, live, with reset" gate
    the probe's observations pass today.
@@ -399,6 +413,11 @@ Regression tests must prove:
   past `STATUSLINE_FRESH_S` still beats an unexpired probe observation
   of 40 % for the same reset, so the ring holds 60 % until the window
   resets while the bridge counts as stale for scheduling;
+- the plan-usage step runs only when the file's organization hash equals
+  the one beside the probe's fingerprint: Desktop signed into account A
+  beside a probe and bridge on B leaves B's figures untouched and `GET /`
+  reports `other_account`; an unknown organization on either side skips
+  the step;
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
