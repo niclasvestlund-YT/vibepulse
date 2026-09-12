@@ -75,9 +75,15 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 `pending`; it gains `waits`:
 
 ```json
-"waits": {"todayS": 2040, "longestS": 660, "nowS": 252,
-          "claudeS": 1500, "codexS": 540, "count": 7, "dayEndS": 30540}
+"waits": {"dayS": 2040, "maxS": 660, "nowS": 252, "clS": 1500,
+          "cxS": 540, "count": 7, "endS": 30540, "g": 51234}
 ```
+
+`dayS` is today's total, `maxS` the longest in-day part, `nowS` the
+age of the oldest still-parked interaction, `clS` and `cxS` the
+provider totals, `count` the number of waits, `endS` the seconds to the
+host's next local midnight, and `g` the ledger's build generation
+(below).
 
 One optional key, `"reset": 1`, is added only while the served day is the
 day of a persisted `dayReset` (the clock-correction release below) and is
@@ -104,7 +110,7 @@ first snapshot after local midnight does not compute the new day; it
 queues the advance to the writer, which persists the later `servedDay`
 under the generation rule below, and until that generation's write is
 acknowledged every snapshot keeps serving the previous durable day —
-its totals with `dayEndS` 0, which the page renders as `DAY ENDED` for
+its totals with `endS` 0, which the page renders as `DAY ENDED` for
 at most one writer window (`WAIT_LEDGER_FLUSH_S`, 2 s) — so a crash
 before the write and a restart with the clock regressed across midnight
 find the file, the last snapshot and `max(wall date, servedDay)` all
@@ -112,7 +118,7 @@ naming the same day, and the counter cannot move backward. A failed
 write keeps the previous day served and is retried on the next snapshot;
 `GET /` shows it as `waits.saveOk` false. When the wall clock regresses
 across midnight (00:05 back to 23:55) the ledger keeps serving the later date
-— `dayEndS` then counts to the end of the held day, up to the 90 000
+— `endS` then counts to the end of the held day, up to the 90 000
 clamp — until the clock passes it again, and `GET /` reports
 `waits.dayHeld` while it does. The hold is **bounded to one midnight**:
 it covers the regression a clock correction produces, not a clock that
@@ -147,8 +153,8 @@ page then shows the real day's waits from the next poll rather than an
 empty future day for as long as the clock error was large. The single
 wall anchor
 keeps rows from relocating; this rule keeps "today" itself from
-relocating, so `todayS` cannot change on a backward step even though
-the host's calendar briefly says an earlier date. **Open holds count too, but only what is on disk:** `todayS`, the
+relocating, so `dayS` cannot change on a backward step even though
+the host's calendar briefly says an earlier date. **Open holds count too, but only what is on disk:** `dayS`, the
 provider totals and `count` include, for every still-parked
 interaction, the in-day part of its **last persisted checkpoint**
 (`elapsedS` in the open-hold marker, below), computed the same way as a
@@ -160,14 +166,14 @@ and so the cumulative total never contains a second that a crash could
 take back: the hero advances in steps of at most
 `WAIT_MARKER_CHECKPOINT_S` and can trail the live age by that much,
 which the spec prefers to a number that moves backward. `nowS`
-alone is the live age. `longestS` follows the same rule: the
+alone is the live age. `maxS` follows the same rule: the
 largest in-day part over closed rows **and** open holds' checkpoints, so
 `LONGEST WAIT` can never read less than the **checkpointed in-day part**
 of the current hold. It can legitimately read less than `BLOCKED RIGHT
 NOW`, which is the hold's whole live age, for two reasons the page
 accepts: the checkpoint lag, and midnight — at 00:10 a hold parked at
 23:50 shows `nowS` 1200 and contributes at most 600 to
-`longestS`, because the other 600 belong to yesterday. The provider
+`maxS`, because the other 600 belong to yesterday. The provider
 header is derived from the provider totals alone — the block carries no
 presence flags and the encrypted relay strips `pending`, so a relay-fed
 panel has nothing else to read — and so a freshly parked hold, whose
@@ -182,8 +188,8 @@ duration replace it. The rule is the same one throughout: the hero
 contains persisted seconds only, and the total never steps back at the
 close, at the save, or at a crash between the two. Closed rows
 contribute only the part of their measured duration that falls in the
-day. The split is made on the interval
-`[startedAt, startedAt + durationS]`: the monotonic `durationS` is the
+day. The split is made on the end-exclusive interval
+`[startedAt, startedAt + durationS)`: the monotonic `durationS` is the
 measurement and `startedAt` — the **one** wall-clock reading a hold ever
 takes, at park — is the only calendar anchor, for the checkpointed open
 hold, the closed row and the `restart` row alike. No second wall reading
@@ -191,23 +197,23 @@ is taken at close, because two anchors would let a clock correction
 between them move seconds across midnight at the handoff: a checkpoint
 just after 00:05 counted in today, then a ten-minute backward step before
 the close, would otherwise land the finished row in yesterday and step
-`todayS` back. With one anchor a wall-clock correction during the hold
+`dayS` back. With one anchor a wall-clock correction during the hold
 (an NTP step, a manual change) changes neither *how many* seconds there
 are nor *where* they land — a ten-second hold across a one-hour forward
 step contributes ten seconds, not 3 610, in the day the park was in.
 What a correction can do is date a hold by a clock that was later found
 wrong; the spec accepts that as the honest reading of the clock at the
 time. A wait parked at 23:50 and answered at 00:10 puts ten
-minutes in yesterday and ten in today, in `todayS`, the provider totals
+minutes in yesterday and ten in today, in `dayS`, the provider totals
 and `count` alike. A split row counts once, and only in a day it has
 **positive overlap** with: a row's interval is end-exclusive,
 `[startedAt, startedAt + durationS)`, so a wait answered exactly at
 midnight belongs wholly to the preceding day and gives the new day
-neither seconds nor a count — never a `count` of 1 over a `todayS` of 0
+neither seconds nor a count — never a `count` of 1 over a `dayS` of 0
 that would render `<1 MIN` for a day holding no measured wait — and a
 zero-length row (a sub-second wait floored to 0) counts in the day of
 its `startedAt`, the one day the rule above leaves it.
-`longestS` is the longest in-day part, not the longest whole row,
+`maxS` is the longest in-day part, not the longest whole row,
 over open holds and closed rows alike.
 Day boundaries are local wall-clock midnights (`datetime.astimezone()`),
 so a DST day is 23 or 25 hours and the split follows it. The block is
@@ -245,7 +251,7 @@ the wire's own 0: a wait that ended in under a second has a positive
 monotonic `durationS`, counts once in `count`, and floors to 0 on
 the wire, so the presentation keys on `count`, not on the seconds.
 `LONGEST WAIT` follows suit: `<1s` when `count > 0` and
-`longestS` is 0. A zero the measurement did not contain is the
+`maxS` is 0. A zero the measurement did not contain is the
 invented zero this spec forbids, and dashes are reserved for no durable
 data (`count` 0, whether or not something is blocked) —
 the bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
@@ -292,17 +298,44 @@ when its countdown runs out) until a frame arrives; it never becomes
 absent on a timer. An **accepted** frame without a `waits` block — an
 older server, or a rollback — is a server statement and renders the
 absent state, on the LAN and over the relay alike, so a rollback does
-not leave retained data on the glass. **Yesterday is never shown as
-today:** the block carries `dayEndS`, the whole seconds until the
+not leave retained data on the glass. **A block never replaces a newer
+one.** Frames reach the page from two transports whose order the page
+cannot infer on its own: `seq` counts agent-row changes, not builds
+(`_seq` in `agent_status.py` moves only when a record changes), the
+relay publication id has no LAN counterpart, and
+`tk_agent_source_allow_relay` lets a relay frame in five seconds after
+the last LAN answer while an accepted relay frame may be 42 s old — so
+with the LAN gone quiet, a mailbox frame built *before* the last LAN
+block could otherwise overwrite it and the cumulative totals would
+retreat. The block therefore carries the ledger's **build generation**
+`g`: a counter the ledger increments on every snapshot build (changed
+or not), persisted in the ledger file by every write and, while the
+file is otherwise clean, every `WAIT_GEN_PERSIST_S` (proposed 60 s),
+and restored on start as the persisted value plus 120 — more than the
+builds a clean interval can hold — so a restarted server never serves a
+generation the panel has already seen. The page keeps the `g` of its
+retained block and lets a frame's block replace it only when the
+frame's `g` is **greater**: a smaller or equal `g` leaves the block, its
+totals and its accept stamp untouched whichever transport brought it
+(the frame's agent rows still follow the source policy) — **unless the
+retained block is already `STALE`**, when any accepted block replaces
+it. The ordering guards a live block against a lagging duplicate; once
+the block is stale no accepted frame can be older than it — a LAN frame
+is at most its 2.5 s request old, a relay frame at most 42 s plus the
+fetch, both inside the budgets that made the block stale — so the
+exception cannot retreat, and it also covers a ledger file that was
+quarantined and restarted `g` from zero: at most one stale budget of
+`STALE`, never a step back. **Yesterday is never shown as
+today:** the block carries `endS`, the whole seconds until the
 host's next local midnight (DST-correct, at most 90 000), because the
 panel cannot infer the host's calendar boundary from its own clock,
-least of all over the relay. `dayEndS` is relative to the moment the
+least of all over the relay. `endS` is relative to the moment the
 server built the block, so the page first subtracts the block's **age at
 accept** and only then counts down on its monotonic clock. On the LAN
 that age is the poll's own request duration, which the direct poller
 allows up to its 2 500 ms HTTP timeout (`agent_net.c`), so the page
 records the request on its monotonic clock from send to accept and
-starts the countdown at `dayEndS` minus that whole duration, rounded
+starts the countdown at `endS` minus that whole duration, rounded
 up to a whole second — the server's floor and the round-up both err
 early, never late. Over the relay the age of an accepted frame is
 bounded **by server clocks only**, never by the panel's:
@@ -315,11 +348,11 @@ before every upload attempt — `_prepare_status` today builds it once
 and the retry path can re-upload the same aged bytes, which this spec
 changes: an envelope older than `STATUS_EXPIRY_S` (15 s) on the
 tokenserver's own monotonic clock is discarded and rebuilt with fresh
-`expires_at` and fresh `dayEndS` before it is sent, so a frame is at
+`expires_at` and fresh `endS` before it is sent, so a frame is at
 most 15 s old when the PUT *starts* — and an envelope is likewise
 discarded and rebuilt, whatever its age, when the ledger's `servedDay`
 has changed since it was built, because a block that still carries
-yesterday's totals and a `dayEndS` counting to a midnight that has
+yesterday's totals and a `endS` counting to a midnight that has
 already passed is not one the panel's transit debit can correct, and a
 subsequent outage would keep yesterday under `BLOCKED ON YOU · TODAY`. Second, the PUT itself takes time
 that the worker's clock does not see, and `index.ts` starts the mailbox
@@ -347,7 +380,7 @@ frame's life. A worker test pins it (a handler stalled for 5 s after
 receipt stores a frame that expires 20 s after receipt, not 25). An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
 the moment the panel's fetch completes, plus the fetch itself, which
 the panel measures on its monotonic clock. The countdown starts at
-`dayEndS - RELAY_AGE_BOUND_MS/1000 - request duration` with
+`endS - RELAY_AGE_BOUND_MS/1000 - request duration` with
 `RELAY_AGE_BOUND_MS` = 42 000, needs no clock but the panel's monotonic
 one, and can only end early, never late — at worst the page shows
 `DAY ENDED` 42 s before the host's midnight, and the next accepted block
@@ -402,7 +435,7 @@ for hours charges the human the seconds it measured before it died and
 nothing of the outage (the hook connection ended at the crash, and so
 did the wait). And because the live aggregate above counts open holds
 by the same checkpoint, a crash between checkpoints takes back nothing
-the panel had already added to `todayS`: the total after the restart
+the panel had already added to `dayS`: the total after the restart
 equals the total before it, with only `nowS` gone. A stale marker left by a close that
 happened inside the writer window before a crash resolves the same way:
 its checkpoint is at most the hold's true length, so a short completed
@@ -419,15 +452,19 @@ payload over `MAX_STATUS_BYTES` (2560) outright, and the field-wise full
 agent snapshot already measures 2 394 bytes, so the block is serialized
 as **bounded integers**: every seconds field is a whole number of
 seconds (floored) clamped to 999 999, `count` is clamped to 9 999,
-`dayEndS` to 90 000, never a float, never scientific notation. The
-worst-case block, `reset` included, is then 131 bytes in the relay's
-compact encoding and the worst-case relay payload 2 524 bytes, 36 under
-the frame; on the direct path the worst-case snapshot plus pending item
-plus this block encodes to 3 269 bytes with the capacity test's default
-separators, 7 under its 80 % headroom gate. Both tests prove it rather
+`endS` to 90 000, `g` to 999 999 999 (nine digits; at one build a
+second plus the restart step it wraps after about thirty years, and a
+wrap is covered by the stale rule below), never a float, never
+scientific notation. The
+worst-case block, `reset` and `g` included, is then 119 bytes in the
+relay's compact encoding and the worst-case relay payload 2 522 bytes,
+38 under the frame; on the direct path the worst-case snapshot plus
+pending item plus this block encodes to 3 269 bytes with the capacity
+test's default separators, 7 under its 80 % headroom gate — the keys
+were shortened a second time (`dayS`, `maxS`, `clS`, `cxS`, `endS`)
+to pay for `g`. Both tests prove it rather
 than the spec assuming it (below), and any further field must first be
-paid for in both — at 7 bytes of direct headroom, by shortening a key
-rather than by adding one.
+paid for in both; there is no key left to shorten.
 
 ## Data flow
 
@@ -499,16 +536,21 @@ rather than by adding one.
    same lock before the pending entry is dropped, so a snapshot can never
    observe the gap between "row not yet appended" and "hold no longer
    pending" and report a lower total for one second. Not only the oldest
-   open hold is seen: with three agents parked at once, `todayS`, the
-   provider totals, `count` and `longestS` count all three,
+   open hold is seen: with three agents parked at once, `dayS`, the
+   provider totals, `count` and `maxS` count all three,
    and `nowS` is the largest elapsed among them. No new public API
    and nothing leaves the process; the method exists so the two sources
    are read together.
-5. The firmware's agent-status parser reads `waits` optionally (all seven
-   fields numeric and non-negative, `reset` absent, 0 or 1, else the
-   block is treated as absent), stamps the accepted block with the
-   monotonic clock, and the page renders it, or its stale form once
-   `TK_WAITS_STALE_MS` has passed without a newer accepted block; the
+5. The firmware's agent-status parser reads `waits` optionally (all
+   eight fields, `g` included, numeric and non-negative, `reset` absent,
+   0 or 1, else the block is treated as absent), lets it replace the
+   retained block only when its `g` is greater or the retained block is
+   already stale, stamps the accepted block with the monotonic clock,
+   and the page renders it, or its stale form once its budget has passed
+   without a newer accepted block — `TK_WAITS_STALE_MS` minus the
+   request duration for a LAN-fed block, `TK_WAITS_STALE_RELAY_MS -
+   RELAY_AGE_BOUND_MS - request duration` for a relay-fed one, the two
+   rules above, never the LAN budget for a relay frame; the
    relay source clear's synthetic empty snapshot bypasses the `waits`
    slot and leaves the retained block and its stamp in place.
 6. `GET /` reports `waits: {rows, unsaved, open, oldestDay, saveOk,
@@ -549,7 +591,7 @@ rather than by adding one.
   persisted marker alone, so a wall step between the two processes
   changes nothing about the row — the new process's clock may alter
   only the served logical day, never where already-counted seconds
-  land, and `todayS` cannot retreat across a restart.
+  land, and `dayS` cannot retreat across a restart.
 
 ## Visual gate
 
@@ -596,15 +638,15 @@ Regression tests must prove:
 - a park writes its marker within the writer window, an ending removes
   it, and an open hold's checkpoint advances at least every
   `WAIT_MARKER_CHECKPOINT_S`, so the persisted `open` list mirrors
-  `_pending`; a simulated crash between two checkpoints leaves `todayS`,
-  the provider totals, `count` and `longestS` exactly where the
+  `_pending`; a simulated crash between two checkpoints leaves `dayS`,
+  the provider totals, `count` and `maxS` exactly where the
   panel last saw them (only `nowS` drops to 0);
-- an open hold is counted in `todayS`, its provider total, `count`
-  and `longestS` by its checkpoint: after the first checkpoint the
+- an open hold is counted in `dayS`, its provider total, `count`
+  and `maxS` by its checkpoint: after the first checkpoint the
   day's first hold makes `LONGEST WAIT` equal the checkpointed part of
   `BLOCKED RIGHT NOW` and never 0, the hero never exceeds what the
   marker file holds, and at 00:10 a hold parked at 23:50 makes
-  `nowS` 1200 and `longestS` at most 600; three concurrent
+  `nowS` 1200 and `maxS` at most 600; three concurrent
   holds across both providers are all counted and `nowS` is the
   oldest; and closing one does not step the total back — including a
   close that races the 1 s snapshot, which a test drives by interleaving
@@ -622,8 +664,8 @@ Regression tests must prove:
   returns "shutting down" and adds no second row, and the file after the
   final flush has exactly one row per hold; a restart while the clock is
   still regressed across midnight initialises today from the persisted
-  `servedDay` and leaves `todayS` unchanged; the first snapshot after
-  midnight keeps serving the previous day with `dayEndS` 0 until the
+  `servedDay` and leaves `dayS` unchanged; the first snapshot after
+  midnight keeps serving the previous day with `endS` 0 until the
   write that carries the advanced `servedDay` is acknowledged (a test
   blocks the file lock and asserts the day does not advance on the glass
   before it is on disk), and a crash before that write followed by a
@@ -644,15 +686,15 @@ Regression tests must prove:
   acknowledged only by the trailing write; a close followed by a simulated crash inside the
   writer window leaves the row absent but the marker present, the next
   start closes the marker as a `restart` row worth its checkpoint, and
-  `todayS`, the provider totals and `longestS` after the restart
+  `dayS`, the provider totals and `maxS` after the restart
   equal what the aggregate published before the crash;
 - a row's `durationS` comes from the monotonic pair and its days from
-  `[startedAt, startedAt + durationS]`: a wall-clock jump of an hour
+  the end-exclusive `[startedAt, startedAt + durationS)`: a wall-clock jump of an hour
   during a hold changes neither the total nor the longest wait nor the
   day placement, a backward step across local midnight between a
-  checkpoint and the close leaves `todayS` exactly where it was because
+  checkpoint and the close leaves `dayS` exactly where it was because
   the served day is held (the open-to-closed handoff test, which also
-  asserts `waits.dayHeld` on `GET /` and a `dayEndS` counting to the
+  asserts `waits.dayHeld` on `GET /` and a `endS` counting to the
   held day's end), `endedAt` equals `startedAt + durationS`
   on every row, and the day parts of every row always sum to its
   `durationS`;
@@ -664,7 +706,7 @@ Regression tests must prove:
   by local wall-clock boundaries, and the 8-day retention prunes;
 - two closes anchored at 00:05 and then, after a backward step, at
   23:55 the previous day leave the ledger in `endedAt` order and today's
-  slice still holds the 00:05 row, so `todayS` does not retreat; a file
+  slice still holds the 00:05 row, so `dayS` does not retreat; a file
   saved out of order is sorted on load, logged once, and aggregates the
   same as its sorted form;
 - `nowS` follows the oldest open interaction and drops to 0 on
@@ -676,11 +718,17 @@ Regression tests must prove:
   `test_worst_case_snapshot_plus_pending_fits_the_device` and
   `test_encrypted_status_strips_pending_and_fits_fixed_frame` both gain
   the worst-case `waits` block (every seconds field 999 999, `count`
-  9 999, `dayEndS` 90 000) beside the field-wise full agent snapshot and
+  9 999, `endS` 90 000) beside the field-wise full agent snapshot and
   still pass their own bounds — the 80 % headroom gate on the direct
   path and `MAX_STATUS_BYTES` on the relay; a float or an over-clamp
   value never reaches the wire;
 - a corrupt ledger is quarantined and a failing save shows on `GET /`;
+- `g` increments on every snapshot build whether or not anything
+  changed, is in the file after every write and within
+  `WAIT_GEN_PERSIST_S` of a build with the file otherwise clean, and a
+  restart serves the persisted value plus 120 on its first build, so
+  the first block after a restart carries a `g` above any the previous
+  process served;
 - the firmware parser accepts the block, rejects a malformed one as absent
   without dropping the rest of the payload, and older payloads without it
   still parse (C host test);
@@ -692,7 +740,7 @@ Regression tests must prove:
   stale 4 s sooner), so no live label outlives 20 s (LAN) or 60 s
   (relay) from the snapshot's build — a newer accepted block
   clears it, a snapshot that was never accepted shows the absent state,
-  not stale, a retained block whose `dayEndS` has counted down to
+  not stale, a retained block whose `endS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
   arrives, and a block with `reset` 1 renders its totals under `CLOCK
   RESET` while a `reset` of 2 or `true` makes the block absent; the relay
@@ -704,13 +752,19 @@ Regression tests must prove:
   stamp survive the clear, the block goes `STALE` at its own relay
   budget and is still `STALE`, never absent, 5 minutes later, and an
   accepted relay or LAN frame without `waits` afterwards renders the
-  absent state; the header reads `AGENTS` for a block with `count` 1 and
-  both provider totals 0; the hero reads `<1 MIN` for `todayS` 1 to 59,
+  absent state; the generation rule (same test): a LAN block with `g`
+  1 000 followed, inside its live budget, by a relay frame with `g` 990
+  leaves the block and its stamp untouched while the frame's agent rows
+  apply, a frame with `g` 1 001 replaces it, a frame with `g` 1 000
+  from the other transport neither replaces it nor refreshes its stamp,
+  and after the block has gone `STALE` a frame with `g` 3 replaces it;
+  the header reads `AGENTS` for a block with `count` 1 and
+  both provider totals 0; the hero reads `<1 MIN` for `dayS` 1 to 59,
   `<1 MIN` for 0 as well whenever `count` is above 0 (a completed
-  sub-second wait floors to `todayS` 0 with `count` 1 and is still a
+  sub-second wait floors to `dayS` 0 with `count` 1 and is still a
   measurement), dashes for 0 only when `count` is 0, and whole floored
   minutes above;
-- the day countdown over the relay starts at `dayEndS -
+- the day countdown over the relay starts at `endS -
   RELAY_AGE_BOUND_MS/1000 - request duration` with no wall clock
   involved: a relay frame built one second before the host's midnight
   and accepted five seconds later renders day-ended on arrival, and so
@@ -718,20 +772,20 @@ Regression tests must prove:
   so does a frame that sat in the mailbox for its full `STATUS_TTL_MS`;
   the tokenserver never starts a PUT with an envelope older than
   `STATUS_EXPIRY_S` on its monotonic clock (a retry after the window
-  rebuilds it with a fresh `dayEndS`), nor one built before the served
+  rebuilds it with a fresh `endS`), nor one built before the served
   day changed (a retry that straddles midnight carries the new day's
   block, asserted by advancing the clock between build and retry), and a PUT that ran to its full
   connect-plus-read timeout still lands inside the bound;
   `STATUS_EXPIRY_S * 1000 + RELAY_PUT_BOUND_MS + STATUS_TTL_MS ==
   RELAY_AGE_BOUND_MS` is asserted; a LAN block subtracts the measured
-  request duration rounded up (a 2 400 ms poll of a block with `dayEndS`
-  2 renders day-ended on arrival); a block with `dayEndS` 40 over the
+  request duration rounded up (a 2 400 ms poll of a block with `endS`
+  2 renders day-ended on arrival); a block with `endS` 40 over the
   relay is day-ended on arrival and at most 42 s early;
 - the hero reads `<1 MIN` and `LONGEST WAIT` reads `<1s` for a block
   with `count` 1 and every seconds field 0 (a sub-second wait
   floored on the wire), and dashes for `count` 0 even while
   `nowS` runs (the writer window after a park), never `0`;
-- `dayEndS` is the whole seconds to the host's next local midnight,
+- `endS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
 - the page's landmark captures match the ten frames above, the
   broad-number frame shows every glyph inside its box with no overlap
