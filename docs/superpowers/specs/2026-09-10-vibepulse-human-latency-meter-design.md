@@ -158,8 +158,12 @@ the number measures — `CLAUDE + CODEX` when both contributed today,
 something is counted but no provider total is non-zero yet, never one
 provider's name over a combined total — and the split bar carries the
 per-provider share. Then
-the label `BLOCKED ON YOU · TODAY`, one dominant number in minutes, the
-bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
+the label `BLOCKED ON YOU · TODAY`, one dominant number in whole minutes
+(floored) — except that a total of 1 to 59 seconds, which a short
+completed wait or the first checkpoint of a live one produces, reads
+`<1 MIN` and never `0`: a zero the payload did not contain is the
+invented zero this spec forbids, and dashes are reserved for no data —
+the bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
 (live, from `blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
 block is absent
 (older server) or `countToday` is 0 and nothing is blocked now.
@@ -180,12 +184,24 @@ rule with the relay's own timestamps. **Yesterday is never shown as
 today:** the block carries `dayEndsInS`, the whole seconds until the
 host's next local midnight (DST-correct, at most 90 000), because the
 panel cannot infer the host's calendar boundary from its own clock,
-least of all over the relay. The page counts that down from the accept
-time on its monotonic clock, and once it reaches zero a retained block
-is no longer rendered as today's measurement: the totals and `LONGEST
-WAIT` become dashes with the stale marker (`DAY ENDED`), and a fresh
-accepted block — which the server has already rolled over — replaces
-them. The number
+least of all over the relay. `dayEndsInS` is relative to the moment the
+server built the block, so the page first subtracts the block's **age at
+accept** and only then counts down on its monotonic clock. On the LAN
+that age is the poll's own round trip, under a second, and the server's
+floor already rounds the value down, so the countdown starts at accept
+with nothing subtracted and the page can be late by less than a second
+at most. Over the relay a frame can be up to `STATUS_EXPIRY_S` (15 s)
+old when it is accepted — `decode_status_snapshot` takes any unexpired
+publication — so the page derives the frame's publication time from the
+`expires_at` the frame already carries (`expires_at - STATUS_EXPIRY_S`),
+takes the age against the same wall clock it used to accept the frame,
+and starts the countdown at `dayEndsInS - age`; a result of zero or less
+means the host's day ended in transit and the block is rendered as
+day-ended on arrival, never as today. Once the countdown reaches zero a
+retained block is no longer rendered as today's measurement: the totals
+and `LONGEST WAIT` become dashes with the stale marker (`DAY ENDED`),
+and a fresh accepted block — which the server has already rolled over —
+replaces them. The number
 is **never framed as waste**: the label is what it measures, not a verdict
 on the reader.
 
@@ -333,7 +349,8 @@ first be paid for there.
 
 The page is AMOLED work: `.claude/skills/iterating-esp32-amoled-ui/SKILL.md`
 applies in full. Exact 480 × 480 simulator frames for: zero state (dashes),
-a live blocked state with a running mm:ss, a day with both providers, a
+a live blocked state with a running mm:ss and the hero at `<1 MIN` (the
+first checkpoint of the day's first wait), a day with both providers, a
 day with one provider (bar is one colour), the relay-fed variant, the
 stale state (totals with the `STALE` marker, `BLOCKED RIGHT NOW` as
 dashes), and the Labs off state (page absent, tiles dense). Static
@@ -417,7 +434,13 @@ Regression tests must prove:
   not stale, and a retained block whose `dayEndsInS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
   arrives; the header reads `AGENTS` for a block with `countToday` 1 and
-  both provider totals 0;
+  both provider totals 0; the hero reads `<1 MIN` for `todayS` 1 to 59,
+  dashes for 0 with nothing blocked, and whole floored minutes above;
+- the day countdown subtracts the block's age at accept: a relay frame
+  built one second before the host's midnight and accepted five seconds
+  later renders day-ended on arrival, a LAN block starts its countdown
+  at accept, and a frame accepted with `dayEndsInS - age` exactly zero is
+  day-ended;
 - `dayEndsInS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
 - the page's landmark captures match the seven frames above, and the header
