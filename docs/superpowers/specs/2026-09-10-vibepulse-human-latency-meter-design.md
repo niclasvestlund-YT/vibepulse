@@ -35,9 +35,18 @@ that needs no telemetry, adopt the span when it leaves beta.
 
 **A ledger of waits, on the server, durations only.** When a parked
 interaction ends, the store appends one row to a `WaitLedger`: provider
-(`claude`/`codex`), kind (`approval`/`question`), `started_at`, `ended_at`,
+(`claude`/`codex`), kind (`approval`/`question`), `startedAt` and `endedAt`
+as wall-clock epoch seconds, `durationS` measured on the monotonic clock,
 and `outcome` in `{panel, computer, expired, panic, removed}`, mapped from
-the removal reasons the store already produces. No request id, project,
+the removal reasons the store already produces. Two clocks on purpose:
+the store's existing `created_at` is monotonic (`InteractionStore._now`,
+`time.monotonic` by default), which is right for expiry and elapsed time
+and useless for "which day was that" — a row stamped with it would land
+near 1970. So `_Pending` gains `started_wall`, captured from the store's
+existing `_wall` clock at park time, and the row carries that for calendar
+placement while the duration comes from the monotonic pair, so a
+wall-clock jump during a hold neither stretches nor shrinks what was
+measured. No request id, project,
 session key, tool name, command, question text or verdict content is ever
 written. The ledger persists to `interaction-waits.json` in the state
 directory through `state_files` (atomic write, parent fsync, quarantine on
@@ -53,7 +62,15 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 
 `blockedNowS` is the age of the oldest still-parked interaction, or 0.
 "Today" is the host's local calendar day, the same rule the Max Tracker
-uses. The block is about 110 bytes; it must stay inside the device's
+uses, and a row contributes only the part of `[startedAt, endedAt]` that
+overlaps that day: a wait parked at 23:50 and answered at 00:10 puts ten
+minutes in yesterday and ten in today, in `todayS`, the provider totals
+and `countToday` alike (a split row counts once, in the day it ended).
+`longestTodayS` is the longest overlap, not the longest whole row. Day
+boundaries are local wall-clock midnights (`datetime.astimezone()`), so
+a DST day is 23 or 25 hours and the overlap follows it; nothing is
+assigned by `startedAt` or `endedAt` alone. The block is about 110 bytes;
+it must stay inside the device's
 4096-byte body budget with the pending block and a full agent list
 (`test/test_agent_status_body_capacity.py` is the gate). The firmware
 ignores unknown root keys, so already-flashed panels are unaffected.
@@ -72,10 +89,12 @@ on the reader.
 **What is counted, exactly.** Time between a hook parking an interaction
 and that interaction ending, whatever ended it. Not counted: time an agent
 sits idle at a prompt with nothing parked (unknown to the server), time
-spent by the agent itself, and holds that ended because the tokenserver
-restarted (the ledger records nothing for them, and the doctor says so
-once at startup if any were open). An `expired` wait counts in full: the
-human was needed for the whole hold.
+spent by the agent itself, and holds that were open when the tokenserver
+restarted: `InteractionStore._pending` is memory-only, the ledger writes a
+row only when an interaction ends, so the new process has no way to know
+those holds existed and records nothing for them. No startup message
+claims otherwise; a durable open-hold marker is open question 4. An
+`expired` wait counts in full: the human was needed for the whole hold.
 
 **Same data across the relay.** The numbers relay carries `/api/tokens`
 and `/api/max-tracker`; `/api/agent-status` rides the encrypted status
@@ -84,7 +103,9 @@ relay-fed panel sees the same page. No new relay endpoint.
 
 ## Data flow
 
-1. A hook parks an interaction; `created_at` is already recorded.
+1. A hook parks an interaction; the store records `created_at` from its
+   monotonic clock as today, and additionally `started_wall` from its
+   wall clock (`self._wall()`, already read there for the relay expiry).
 2. The interaction ends. In the one place each ending already passes
    through (`resolve`, `resolve_relay`, `panic`, expiry sweep, computer
    fallback removal), the store calls `ledger.close(entry, outcome, now)`.
@@ -103,9 +124,13 @@ relay-fed panel sees the same page. No new relay endpoint.
 ## Failure and privacy boundaries
 
 - The ledger holds durations and two enums. A test asserts the persisted
-  file, the `/api/agent-status` block and every log line contain none of:
-  request ids, project names, session keys, tool names, commands, question
-  text, verdict payloads, addresses.
+  file, the `/api/agent-status` block and every log line the `WaitLedger`
+  itself emits contain none of: request ids, project names, session keys,
+  tool names, commands, question text, verdict payloads, addresses. The
+  store's existing audit line (`InteractionStore._log`, wired to the
+  tokenserver logger in `main`) already names the request id, tool,
+  project and session by design and is out of this spec's scope; the
+  ledger adds no new line that repeats any of it.
 - A ledger failure (disk full, corrupt file) never blocks a decision: the
   hook path calls `close` under the store lock but the write happens on the
   writer thread, and any exception in `close` is caught and reported on
@@ -131,9 +156,15 @@ any motion. No frame here authorizes a flash.
 Regression tests must prove:
 
 - every ending path (panel answer, relay answer, computer fallback, expiry,
-  panic, restart-open) produces exactly one ledger row or, for restart,
-  none, with the right outcome;
-- aggregates roll over at local midnight and the 8-day retention prunes;
+  panic) produces exactly one ledger row with the right outcome, and a
+  store constructed fresh (the restart case) produces none for holds the
+  previous process had open;
+- a row's `durationS` comes from the monotonic pair and its day from the
+  wall-clock pair: a wall-clock jump of an hour during a hold changes
+  neither;
+- aggregates roll over at local midnight, a wait spanning midnight is
+  split by overlap into both days, a wait spanning a DST change is placed
+  by local wall-clock boundaries, and the 8-day retention prunes;
 - `blockedNowS` follows the oldest open interaction and drops to 0 on
   close;
 - the persisted file and the payload carry no content fields (the
@@ -164,3 +195,7 @@ page off.
 3. Adopt `claude_code.tool.blocked_on_user` when it leaves beta, or keep the
    hook-derived number as the single source to avoid two definitions of
    the same minute? The spec leans single source.
+4. Should the store persist a privacy-safe open-hold marker (count and
+   wall-clock start only, written at park and cleared at end) so a restart
+   can say "N holds were open and are not measured"? Today it cannot know;
+   the spec leaves that unmeasured rather than guessed.
