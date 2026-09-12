@@ -711,6 +711,41 @@ rejection. Enough to aim the next question, cheap enough for an ESP32.
 
 ---
 
+### OBS-39 · A live probe can pull the cached week down within one window
+`tokenserver · S · open` — raised by Codex on #116 (2026-09-12); pre-existing.
+
+**Symptom:** the quota cache holds 60 % for a general-week reset and a
+later probe reports 40 % for the same, unexpired reset. `_resolve_weekly_quota`
+treats the probe as live and the async writer replaces the cached row, so
+the ring moves backward. Usage only accumulates within a window, so the
+lower figure is a lag on the API side, not a newer truth.
+**Evidence:** `_resolve_weekly_quota` (live → cache_record); `_merge_claude_statusline`
+already applies the same-window monotonic rule between the bridge sample
+and the cache, but only when a sample exists.
+**Fix:** make the cache an arbitration participant for the probe as well
+(same reset, higher figure wins; ties keep the probe), behind one real
+"same reset, lower figure" probe observation in the log first — the API
+may legitimately re-baseline a window, and that would be a different bug.
+
+---
+
+### OBS-40 · The session floor does not survive a tokenserver restart
+`tokenserver · S · open` — raised by Codex on #116 (2026-09-12); by design so far.
+
+**Symptom:** the probe observed 60 % for the 5 h window, the statusLine
+sample holds 40 % for the same reset, and the service restarts while the
+probe is down (429 rest, expired credential). `get_limits()` is empty, so
+the 40 % floor from the sample is served and recorded into Max Tracker
+(day peaks, so it cannot lower them) and the usage history (a lower point
+in the same window) until the probe recovers.
+**Evidence:** the README states on purpose that the session window is not
+cached; `quota_cache` already knows the `general_session` scope.
+**Fix:** persist the session observation in `general_session` and run the
+same three-way arbitration (probe, sample, cache) the week uses. Small,
+but a contract change for the session field: its own PR.
+
+---
+
 ## P3 — process & hygiene
 
 ### OBS-23 · The best diagnostics are undocumented; one documented one is wrong
