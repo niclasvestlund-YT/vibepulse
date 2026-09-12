@@ -318,14 +318,20 @@ retained block and lets a frame's block replace it only when the
 frame's `g` is **greater**: a smaller or equal `g` leaves the block, its
 totals and its accept stamp untouched whichever transport brought it
 (the frame's agent rows still follow the source policy) — **unless the
-retained block is already `STALE`**, when any accepted block replaces
-it. The ordering guards a live block against a lagging duplicate; once
-the block is stale no accepted frame can be older than it — a LAN frame
-is at most its 2.5 s request old, a relay frame at most 42 s plus the
-fetch, both inside the budgets that made the block stale — so the
-exception cannot retreat, and it also covers a ledger file that was
-quarantined and restarted `g` from zero: at most one stale budget of
-`STALE`, never a step back. **Yesterday is never shown as
+retained block was accepted more than `RELAY_AGE_BOUND_MS` plus the
+accepting request's own measured duration ago**, when any accepted
+block replaces it, because no frame either transport can deliver is
+older than that: a LAN frame is at most its request old and a relay
+frame at most 42 s plus the fetch, so a block older than that bound is
+older than any frame arriving now. Being merely `STALE` is not enough —
+a LAN block that went stale at 20 s is younger than a relay frame can
+be, and a smaller `g` inside the bound is a lagging frame, refused
+whatever the block's stale state. The ordering guards a live or stale
+block against a lagging duplicate; the exception exists for a ledger
+whose file was quarantined and whose `g` restarted from zero, and there
+the panel holds the old block for at most 42 s plus a fetch beyond the
+point where nothing newer could be pending, then follows the new
+ledger — never a step back within one ledger. **Yesterday is never shown as
 today:** the block carries `endS`, the whole seconds until the
 host's next local midnight (DST-correct, at most 90 000), because the
 panel cannot infer the host's calendar boundary from its own clock,
@@ -544,8 +550,9 @@ paid for in both; there is no key left to shorten.
 5. The firmware's agent-status parser reads `waits` optionally (all
    eight fields, `g` included, numeric and non-negative, `reset` absent,
    0 or 1, else the block is treated as absent), lets it replace the
-   retained block only when its `g` is greater or the retained block is
-   already stale, stamps the accepted block with the monotonic clock,
+   retained block only when its `g` is greater or the retained block was
+   accepted more than `RELAY_AGE_BOUND_MS` plus this request's duration
+   ago, stamps the accepted block with the monotonic clock,
    and the page renders it, or its stale form once its budget has passed
    without a newer accepted block — `TK_WAITS_STALE_MS` minus the
    request duration for a LAN-fed block, `TK_WAITS_STALE_RELAY_MS -
@@ -587,7 +594,7 @@ paid for in both; there is no key left to shorten.
 - Clock regression on the host makes `nowS` clamp at 0 and a
   negative duration is dropped rather than written; a `restart` row's
   duration is the checkpoint, monotonic-derived like every other, and
-  its placement is `[startedAt, startedAt + elapsedS]` from the
+  its placement is the end-exclusive `[startedAt, startedAt + elapsedS)` from the
   persisted marker alone, so a wall step between the two processes
   changes nothing about the row — the new process's clock may alter
   only the served logical day, never where already-counted seconds
@@ -757,7 +764,9 @@ Regression tests must prove:
   leaves the block and its stamp untouched while the frame's agent rows
   apply, a frame with `g` 1 001 replaces it, a frame with `g` 1 000
   from the other transport neither replaces it nor refreshes its stamp,
-  and after the block has gone `STALE` a frame with `g` 3 replaces it;
+  a frame with `g` 990 arriving 25 s after the block's accept is refused
+  although the LAN block is already `STALE`, and one with `g` 3 arriving
+  `RELAY_AGE_BOUND_MS` plus its own fetch after the accept replaces it;
   the header reads `AGENTS` for a block with `count` 1 and
   both provider totals 0; the hero reads `<1 MIN` for `dayS` 1 to 59,
   `<1 MIN` for 0 as well whenever `count` is above 0 (a completed
