@@ -749,8 +749,11 @@ image alone, exactly as today.
 **2026-09-08 update:** the [Vibe Labs catalogue](../../labs/README.md) now
 records current installation behaviour, intended defaults, activation paths
 and display experiments. The catalogue portion of step 8 is complete; the
-runtime feature selector and leaner defaults are still pending. In particular,
-Value, burn rate and Max Tracker remain included in today's page rotation.
+runtime selector is now implemented as SETTINGS → LABS with five persisted
+choices that take effect after restart. New sample configurations seed the
+lean base; old configurations retain their analytics and GitHub defaults.
+The selector's physical memory/touch review remains pending. This implements
+the display-choice slice, not the complete onboarding specification.
 
 - **Firmware:** existing components stay where they are. New optional
   features live under `components/labs_*`; new optional host code under

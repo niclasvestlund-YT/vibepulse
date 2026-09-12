@@ -9,9 +9,9 @@
     "wordY": 24,
     "rowX": 74,
     "rowWidth": 332,
-    "rowHeight": 84,
-    "rowGap": 16,
-    "firstRowY": 120,
+    "rowHeight": 66,
+    "rowGap": 12,
+    "firstRowY": 108,
     "rowRadius": 28,
     "rowBorderWidth": 2,
     "footerY": 442
@@ -19,6 +19,7 @@
   "rows": [
     "UPDATE",
     "WIFI",
+    "LABS",
     "ABOUT"
   ],
   "about": {

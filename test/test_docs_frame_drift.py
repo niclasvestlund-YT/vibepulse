@@ -86,10 +86,11 @@ from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# ONE mode, deliberately. --vibepulse-static-qa is the only QA flow that runs
+# The page-shell authority remains --vibepulse-static-qa, the flow that runs
 # capture_global_wifi_matrix() and therefore the only one whose captures show
-# the page shell the panel actually draws. See the docstring: the others
-# leave the indicator HIDDEN and their blanks are harness artifacts.
+# the page shell the panel actually draws. The additional LABS mode captures
+# only its opaque settings overlay, with explicit full-frame pins;
+# it is not another source for accepting blank Wi-Fi indicators.
 QA_MODE = "--vibepulse-static-qa"
 
 # platform/torget_ui.c: wifi_status_create() places the group at (426, 28)
@@ -100,6 +101,9 @@ WIFI_BOX = (426, 28, 426 + 20, 28 + 18)
 
 # Frames the simulator reproduces exactly. Byte-for-byte or the test fails.
 PINNED = {
+    "vibepulse-labs-analytics.png": "torget-settings-labs-analytics.bmp",
+    "vibepulse-labs-github.png": "torget-settings-labs-github.bmp",
+    "vibepulse-labs-pending.png": "torget-settings-labs-pending.bmp",
     "vibepulse-settings-menu.png": "torget-settings-menu.bmp",
     "vibepulse-settings-about.png": "torget-settings-about-found.bmp",
     "vibepulse-settings-no-address.png": "torget-settings-menu-address-lost.bmp",
@@ -257,6 +261,12 @@ class DocsFrameDriftTests(unittest.TestCase):
                            capture_output=True)
         subprocess.run(
             [str(ROOT / "sim/build/torget-sim"), QA_MODE],
+            cwd=ROOT,
+            env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir)},
+            check=True, text=True, capture_output=True)
+
+        subprocess.run(
+            [str(ROOT / "sim/build/torget-sim"), "--vibepulse-labs-captures"],
             cwd=ROOT,
             env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir)},
             check=True, text=True, capture_output=True)

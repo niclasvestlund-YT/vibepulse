@@ -65,6 +65,8 @@ add_executable(torget-sim
   ../platform/button_arbitration.c
   ../main/registry.c
   ../components/app_tokens/app.c
+  ../components/app_tokens/labs_features.c
+  ../components/app_tokens/labs_store.c
   ../components/app_tokens/tokens_parse.c
   ../components/app_tokens/usage_presenter.c
   ../components/app_tokens/usage_screen.c

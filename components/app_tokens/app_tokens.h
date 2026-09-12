@@ -7,7 +7,8 @@
 
 #include "torget_app.h"
 
-#include "app_tokens_config.h"   /* TK_GITHUB_SCREEN_ENABLED */
+#include "app_tokens_config.h"
+#include "labs_features.h"
 
 #include "tokens.h"
 #include "agent_status.h"
@@ -25,28 +26,7 @@
 
 extern const torget_app_t tokens_app;
 
-enum {
-  VIEW_CLAUDE_FABLE = 0,
-  VIEW_CLAUDE_ALL = 1,
-  VIEW_CODEX_WEEKLY = 2,
-  VIEW_BURN_RATE = 3,
-  VIEW_TRACKER_CLAUDE = 4,
-  VIEW_TRACKER_CODEX = 5,
-  VIEW_GITHUB = 6,
-  /* GitHub-sidan är VALFRI, och indexen måste vara TÄTA: `ui.tiles` är precis
-   * TK_USAGE_SCREEN_VIEWS lång, och tileviewen har ingen tile på index 6 att
-   * svepa förbi när sidan är bortvald.
-   *
-   * Med ett fast VIEW_VALUE 7 blev båda fel så snart GitHub var av — vilket är
-   * standardläget i en färsk klon. TK_USAGE_SCREEN_VIEWS blir då 7, alltså
-   * giltiga index 0-6, och värdesidan hamnade ett steg BORTOM det:
-   * `ui.tiles[VIEW_VALUE]` skrev utanför arrayen, och mellan trackern och
-   * värdesidan fanns ett hål som varken svep eller knapp kunde ta sig över.
-   *
-   * VIEW_GITHUB behåller sitt nummer även när sidan är av: ingen tile skapas
-   * där och ingenting indexerar det. Det är VIEW_VALUE som måste flytta. */
-  VIEW_VALUE = 6 + TK_GITHUB_SCREEN_ENABLED,
-};
+
 
 /* Ett lyckat /api/tokens-svar. Snappar tickern, stämplar färskhet och
  * håller skärmen vaken när tokens brinner. Kallas under torget_ui_lock(). */
@@ -65,7 +45,7 @@ bool tokens_clear_agent_status_relay(int64_t now_us);
 void tokens_apply_max_tracker(const tk_max_tracker *t);
 
 /* One strict /api/github payload. The optional page and popup have separate
- * compile-time switches; either can consume the same feed. */
+ * persisted LABS switches; either can consume the same feed. */
 void tokens_apply_github(const tk_github_status *status);
 
 /* Targetets 1 Hz-hämtning. Utan TK_AGENT_STATUS_URL loggas avstängt läge

@@ -812,9 +812,7 @@ static void poll_keys(lv_timer_t *t) {
       else if (i == 7) torget_app_next();
       else if (i == 8 || i == 9) {
         torget_app_show(SIM_APP_VIBEPULSE);
-        int view = usage_screen_current_view() + (i == 8 ? -1 : 1);
-        if (view < 0) view = TK_USAGE_SCREEN_VIEWS - 1;
-        if (view >= TK_USAGE_SCREEN_VIEWS) view = 0;
+        int view = tk_labs_next_view(usage_screen_current_view(), i == 8 ? -1 : 1);
         tokens_show_view(view);
       }
       else if (i == 10)
@@ -1753,6 +1751,48 @@ static int run_vibepulse_needs_you_render_qa(void) {
   return 0;
 }
 
+/* Run in a fresh process for every mask; hit the real shared renderer and
+ * update paths with pages absent. Pure policy tests alone cannot catch a NULL
+ * label dereference or a tileview column mistaken for a semantic ID. */
+static int run_vibepulse_labs_qa(bool catalogue) {
+  torget_app_show(SIM_APP_VIBEPULSE);
+  apply_agent_file("agent-status-idle.json");
+  feed_tokens_file("tokens.json");
+  apply_github_file("github.json", false);
+  apply_max_tracker_fixture(0);
+  usage_screen_tick(torget_now_us());
+  usage_screen_set_stale(true);
+  usage_screen_set_stale(false);
+  int visited = 0;
+  for (int id = 0; id < TK_USAGE_SCREEN_VIEWS; id++) {
+    int before = usage_screen_current_view();
+    tokens_show_view(id);
+    if (tk_labs_view_position(id) < 0) {
+      if (usage_screen_current_view() != before) return 1;
+    } else {
+      if (usage_screen_current_view() != id) return 1;
+      visited++;
+    }
+  }
+  if (visited != tk_labs_view_count()) return 1;
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  if (!catalogue) dump_frame("labs-core");
+  torget_settings_open("LABS PREVIEW", "192.168.1.42");
+  torget_settings_click_slot(TG_SETTINGS_ROW_LABS);
+  dump_frame(catalogue ? "settings-labs-analytics" : "labs-menu");
+  torget_settings_click_slot(2);
+  if (!tk_labs_pending()) return 1;
+  dump_frame(catalogue ? "settings-labs-pending" : "labs-pending");
+  torget_settings_click_slot(2);
+  if (tk_labs_pending()) return 1;
+  torget_settings_click_slot(3);
+  dump_frame(catalogue ? "settings-labs-github" : "labs-github");
+  torget_settings_click_slot(3);
+  if (catalogue) dump_frame("settings-labs-return");
+  printf("LABS: %d dense tiles verified\n", visited);
+  return capture_failures == 0 ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
   /* Radbuffrat även vid pipe: fixtureloggen ska överleva en kill. */
   setvbuf(stdout, NULL, _IOLBF, 0);
@@ -1761,6 +1801,13 @@ int main(int argc, char **argv) {
   lv_sdl_window_set_title(disp, "Torget 480x480 — G GitHub-star, S agentstatus, T VibePulse, M Max Tracker, [ och ] vy, N nästa app, L launcher");
   lv_sdl_mouse_create();
 
+  const char *labs_mask = getenv("TORGET_LABS_MASK");
+  if (labs_mask) {
+    char *end;
+    long mask = strtol(labs_mask, &end, 10);
+    if (*end || mask < 0 || mask > TK_LABS_ALL) return 2;
+    tk_labs_store_write(TK_LABS_RECORD_VERSION | (uint32_t)mask);
+  }
   torget_ui_create(); /* bygger apparna via registret, går in i app 0 */
   tk_agent_monitor_set_needs_you_cb(sim_needs_you_verdict);
   /* Wi-Fi-lagret före OTA-ringen — samma topplagerordning som targetet,
@@ -1772,6 +1819,11 @@ int main(int argc, char **argv) {
    * så READY-takeovern vinner över menyn på båda. */
   torget_settings_create();
   torget_ota_ui_create();
+
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-qa") == 0)
+    return run_vibepulse_labs_qa(false);
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-captures") == 0)
+    return run_vibepulse_labs_qa(true);
 
   if (argc == 2 &&
       strcmp(argv[1], "--vibepulse-needs-you-render-qa") == 0) {

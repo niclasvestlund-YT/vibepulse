@@ -13,7 +13,7 @@ button-hold on the panel opens its own settings on the glass.**
 Claude Code and Codex usage, live agent activity, and a full-screen
 **NEEDS YOU** alert you can answer with a tap. A three-second hold on the
 panel's one user button opens **SETTINGS** on the glass — update the firmware,
-teach it a new network, or read its address. A ~$30 ESP32-S3 panel plus a
+teach it a new network, choose Labs displays, or read its address. A ~$30 ESP32-S3 panel plus a
 core, pure-stdlib Python service on your Mac or Windows PC. Local mode needs no
 VibePulse account and keeps agent activity on your LAN. The optional
 numbers-only relay can carry quota data across isolated WiFi; a separate,
@@ -64,13 +64,13 @@ Codex. You do not need to read this whole page:
    panel, the relays, and GitHub are add-ons, each off by default and opted
    into separately: today through the setup command, `secrets.h`, and the
    table under [Independent switches](#independent-switches). A **3 s KEY3
-   hold opens [SETTINGS](#one-button-one-menu)** on the glass — UPDATE, WIFI and ABOUT today; the
-   on-glass feature switches are specified but not built yet (see the spec
-   in `docs/superpowers/specs/`). Sound has no verified backend yet.
+   hold opens [SETTINGS](#one-button-one-menu)** on the glass — UPDATE, WIFI, LABS and ABOUT; the
+   LABS choices are saved and apply after restart. Sound has no verified
+   backend yet.
 4. **Choose what to add later:** [Vibe Labs](docs/labs/README.md) lists the
-   optional integrations, today's installed pages, and the planned simpler
-   base. GitHub Stars is available; standalone reset clocks and coding quotes
-   are concepts. Value, burn rate and Max Tracker are still included today.
+   the base installation, optional analytics/integrations and future ideas. GitHub Stars is available; standalone reset clocks and coding quotes
+   are concepts. New installs start with quotas and activity; analytics are
+   optional in SETTINGS → LABS.
 
 ## Latest release: v1.1.0
 
@@ -112,13 +112,12 @@ Contributing or validating another host? Read
 
 ## What's on screen
 
-Six core pages, swipe or auto-rotate, plus the always-present value-multiple
-page (it shows the dollar total once agents log priced usage, but the
-multiple itself stays dashed — `SET YOUR PLAN COST` — until you pick a named
-plan tier or state your exact cost) and an optional, compile-time-gated
-GitHub project pulse. Every image below is an exact 480×480 frame — the
-simulator renders
-the same pixels as the panel.
+Three quota pages form the new-install base. The examples below also show
+optional LABS pages: burn rate, two Max Trackers, API-equivalent Value and a
+GitHub project pulse. Value needs priced usage; its comparison says
+`SET YOUR PLAN COST` until a plan cost is configured. Choose the pages you
+want in SETTINGS → LABS and restart to apply. The screenshots are native
+480×480 LVGL output; physical review status is recorded with each feature.
 
 <table>
 <tr>
@@ -253,7 +252,7 @@ relay or the live agent status relay.
 
 ### Optional GitHub project pulse
 
-One public `owner/repository` can add a deliberately sparse seventh page:
+One public `owner/repository` can add a deliberately sparse optional page:
 the current star count is the hero and forks are the only secondary metric.
 The same raster covers every data provenance, so the glass never lies about
 freshness:
@@ -295,9 +294,10 @@ foreground shell:
   -GithubRepo "owner/repository"
 ```
 
-Then opt into `TK_GITHUB_SCREEN_ENABLED` and/or
-`TK_GITHUB_NOTIFICATIONS_ENABLED` in your gitignored `secrets.h`. Both are
-off by default. No GitHub token is required for a public repository.
+Then open SETTINGS → LABS → MORE on the panel and enable **GITHUB PAGE**
+and/or **STAR POPUP**. Restart the panel to apply the saved choices. Both start
+off on a new installation; the old `secrets.h` macros seed defaults only until
+a choice is saved. No GitHub token is required for a public repository.
 
 `TK_GITHUB_SOUND_ENABLED` is a separate default-off gate for the 258 ms
 A5-to-C#6 chime. The sequence and failure-isolated playback contract are in
@@ -573,6 +573,29 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
    launchd from running a deleted PR worktree. Full details:
    [tools/tokenserver/README.md](tools/tokenserver/README.md).
 
+## Vibe Labs: start small, add later
+
+New installations using `secrets.h.example` show quotas with reset information
+and local activity when available. In **SETTINGS → LABS**, add burn rate,
+Max Tracker, API-equivalent value, a GitHub page or independent star popups.
+Tap to save a choice, then restart the panel to apply it. GitHub needs a
+repository configured on the computer; Value needs prices and a plan cost for
+its comparison. These choices do not start cloud services.
+
+<p align="center">
+  <img src="docs/img/vibepulse-labs-analytics.png" width="31%" alt="LABS analytics menu with three optional display choices">
+  &nbsp;
+  <img src="docs/img/vibepulse-labs-github.png" width="31%" alt="Independent GitHub page and star popup choices">
+  &nbsp;
+  <img src="docs/img/vibepulse-labs-pending.png" width="31%" alt="API Value switched off, saved with restart required to apply">
+</p>
+
+Existing configurations retain their initial views; saved menu choices survive
+firmware updates. Disabled pages are not created at boot. The new selector
+has shared LVGL simulator coverage; physical memory and touch review are
+pending before release. [Setup, defaults and future experiments](docs/labs/README.md).
+Countdown clocks and coding quotes remain concepts for a later Labs addition.
+
 ## One button, one menu
 
 **KEY3** is the panel's one user button — BOOT and reset are recovery
@@ -580,9 +603,9 @@ controls, not part of normal use. Hold KEY3 for three seconds and
 **SETTINGS** opens on the glass.
 
 <p align="center">
-  <img src="docs/img/vibepulse-settings-menu.png" width="31%" alt="The SETTINGS menu on the panel: UPDATE, WIFI and ABOUT, with KEY3 CLOSES in the footer">
+  <img src="docs/img/vibepulse-settings-menu.png" width="31%" alt="The SETTINGS menu on the panel: UPDATE, WIFI, LABS and ABOUT, with KEY3 CLOSES in the footer">
   &nbsp;
-  <img src="docs/img/vibepulse-settings-no-address.png" width="31%" alt="The same menu on a panel with no network: UPDATE is greyed out while WIFI and ABOUT stay lit">
+  <img src="docs/img/vibepulse-settings-no-address.png" width="31%" alt="The same menu on a panel with no network: UPDATE is greyed out while WIFI, LABS and ABOUT stay lit">
   &nbsp;
   <img src="docs/img/vibepulse-settings-about.png" width="31%" alt="The ABOUT page showing only the firmware version and the panel address, with a BACK control">
 </p>
@@ -592,6 +615,8 @@ controls, not part of normal use. Hold KEY3 for three seconds and
   needs — see [Over-the-air updates](#over-the-air-updates).
 - **WIFI** opens the setup window that teaches the panel a new network — see
   [Take it with you](#take-it-with-you).
+- **LABS** saves optional display features; restart to apply them. See
+  [Vibe Labs](#vibe-labs-start-small-add-later).
 - **ABOUT** shows the firmware version and the panel's address, and nothing
   else. No token, no device key, no password: every line on it is already in
   the logs or on the glass somewhere else.
@@ -604,7 +629,7 @@ choice is visible and yours.
 **A window the panel cannot use is never offered.** With no address, UPDATE
 goes grey *and* refuses the press — a maintenance window with no address
 could never receive an upload, so offering it would be a promise the screen
-cannot keep. UPDATE is the only row that goes dark — WIFI and ABOUT stay
+cannot keep. UPDATE is the only row that goes dark — WIFI, LABS and ABOUT stay
 lit — which leaves WIFI as the only row that can change the situation, and
 that is exactly where a panel in that state needs to go. ABOUT shows the
 address as a dash rather than inventing one. If the network drops while the
