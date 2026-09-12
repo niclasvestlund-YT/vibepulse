@@ -151,13 +151,24 @@ at invocation time would label A's replayed values with B's
 fingerprint. The bridge therefore keeps, in its own state beside the
 sample file, a small per-session record — `sha256(session_id)[:16]`
 (never the id), the last `rate_limits` values seen for that session, and
-the fingerprint bound to them, pruned after 24 h — and attaches the
-current `.claude.json` fingerprint to a payload **only when its
-`rate_limits` differ from that session's last-seen values**, which is
-what proves a fresh API response made with the session's current
-credential; a payload identical to the last-seen one is a replay and
-carries the fingerprint bound when those values were first seen. A
-session with no record and no fingerprint readable is `unknown`. The tokenserver derives the probe's the same
+the fingerprint bound to them — and attaches the current `.claude.json`
+fingerprint to a payload **only when its `rate_limits` differ from that
+session's last-seen values**, which is what proves a fresh API response
+made with the session's current credential; a payload identical to the
+last-seen one is a replay and carries the fingerprint bound when those
+values were first seen. The record lives **as long as the session can
+still replay**: it is pruned only when the session has not run the
+bridge for `STATUSLINE_SESSION_TTL_S` (proposed 7 days, longer than any
+`seven_day` window it could still be replaying) and never merely on age
+since first seen — a session idle for a day and a half still owns its
+binding. And a session's **first** observation the bridge sees is
+bound only if it arrives with `rate_limits` the file has never seen
+for any session under the current fingerprint's entry; a first
+observation whose values equal a window already stored under another
+account's entry is a replay of unknown provenance (the process may
+predate a login) and is written to `unknown`, never to the current
+account. A session with no record and no fingerprint readable is
+`unknown`. The tokenserver derives the probe's the same
 way, from the `.claude.json` beside the credential store the winning token
 came from: the keychain entry and the credentials file are written by
 that `/login`, so a probe served by either carries the home directory's
@@ -253,9 +264,13 @@ timestamp, not by which source it is:
    already persists the weekly record under the identity, the session
    window is persisted the same way under its own scope
    (`general_session` exists in `_SCOPES` today), and the identity-matched
-   cache record for a window takes part in the same-reset
-   higher-percentage comparison as a third participant rather than only
-   as the step-3 fallback. A tokenserver restarted during a 429 after
+   cache record for a window is a **full third participant** in step 1
+   — in the later-`resets_at` selection as much as in the same-reset
+   higher-percentage comparison — rather than only the step-3 fallback.
+   So a tokenserver restarted after the probe persisted a newer reset
+   than the bridge's still-unexpired older one selects the newer window
+   from the record, not the obsolete bridge window, and the ring cannot
+   jump backward when the bridge catches up. A tokenserver restarted during a 429 after
    the probe saw 60 % therefore still serves 60 % against a bridge
    replaying 40 % for the same reset, on both rings, because the record
    it wrote before the restart is in the comparison. Otherwise a probe that saw 60 % and then hit a 429 would drop
@@ -527,8 +542,11 @@ Regression tests must prove:
   installed or not;
 - a session whose `rate_limits` are unchanged since its last run keeps
   the fingerprint bound then even if `.claude.json` now names another
-  account, a changed `rate_limits` payload takes the current
-  fingerprint, and the per-session record contains a hash, never the
+  account — including after 36 idle hours, the record surviving until
+  `STATUSLINE_SESSION_TTL_S` of bridge silence — a changed `rate_limits`
+  payload takes the current fingerprint, a first observation whose
+  values equal a window stored under another account's entry is written
+  to `unknown`, and the per-session record contains a hash, never the
   session id;
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
@@ -586,7 +604,9 @@ Regression tests must prove:
   40 % for the same reset keeps both rings at 60 % until the window
   resets — also across a tokenserver restart during the cooldown, for
   the session ring as well as the weekly one, because the persisted
-  identity-matched record is in the comparison — and `claudeWeekStale`
+  identity-matched record is in the comparison — a restart with a
+  persisted record for a newer reset and a bridge entry for an older
+  unexpired one selects the newer reset from the record, and `claudeWeekStale`
   stays false for as long as the bridge keeps reporting the selected
   reset, going true once both the probe is past its interval and the
   bridge's `seen` is past `STATUSLINE_FRESH_S`, and also when the
