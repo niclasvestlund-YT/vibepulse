@@ -61,10 +61,8 @@ class SettingsDesignTests(unittest.TestCase):
         )
 
         rows = design["rows"]
-        # Three rows that work, not the spec's five. FEATURES needs the
-        # on-unit RAM re-measurement and PAIR belongs to step 4; a row that
-        # does nothing is a promise the screen cannot keep.
-        self.assertEqual(rows, ["UPDATE", "WIFI", "ABOUT"])
+        # LABS reuses the four row controls; no extra overlay is allocated.
+        self.assertEqual(rows, ["UPDATE", "WIFI", "LABS", "ABOUT"])
 
         # The row geometry is deliberately the Wi-Fi window's proven MANUAL
         # SETUP control. If either moves, they should move together.

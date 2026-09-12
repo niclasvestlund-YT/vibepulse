@@ -1833,10 +1833,13 @@ class PluginPackageTests(unittest.TestCase):
                         changelog.index("## v1.1.0"))
         self.assertLess(changelog.index("## v1.1.0"),
                         changelog.index("## v1.0.0"))
-        # The cut left nothing behind: Unreleased is empty until the next change.
+        # The cut left nothing behind: v1.1.0's entries live under v1.1.0,
+        # never under Unreleased (which may already hold the next change).
         between = changelog[changelog.index("## Unreleased"):
                             changelog.index("## v1.1.0")]
-        self.assertEqual(between.strip(), "## Unreleased")
+        for shipped in ("coredump", "reboot ledger", "poll_backoff_policy",
+                        "ruff"):
+            self.assertNotIn(shipped, between)
         for forbidden in ("oauth token:", "refresh token:",
                           "account id:", "relay address:"):
             self.assertNotIn(forbidden, release.lower())

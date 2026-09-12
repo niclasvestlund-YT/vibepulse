@@ -17,19 +17,28 @@
  * tokens, ingen enhetsnyckel, inget lösenord. Raderna är desamma som redan
  * loggas och syns på glaset i andra lägen.
  *
- * FEATURES och PAIR står i specen men finns inte här ännu: FEATURES kräver att
- * internminnesbudgeten mäts om på enheten först (GitHub-sidan blir alltid
- * resident när kompileringsvakterna blir runtime-val), och PAIR hör till
- * sekvenssteg 4. En rad som inte gör något vore ett löfte skärmen inte kan
- * hålla, så de ritas inte förrän de fungerar.
+ * LABS reuses these same row controls. The app supplies names and persisted
+ * choices; changes take effect at the next boot, so disabled pages cost no
+ * LVGL objects. PAIR belongs to a later onboarding step.
  */
 
 typedef enum {
   TG_SETTINGS_ROW_UPDATE,
   TG_SETTINGS_ROW_WIFI,
+  TG_SETTINGS_ROW_LABS,
   TG_SETTINGS_ROW_ABOUT,
   TG_SETTINGS_ROW_COUNT,
 } tg_settings_row;
+
+/* App-owned LABS state. Bind before create; callbacks run under the UI lock. */
+typedef struct {
+  const char *(*name)(int feature);
+  bool (*selected)(int feature);
+  bool (*toggle)(int feature);
+  bool (*pending)(void);
+  bool (*storage_error)(void);
+} tg_settings_labs;
+void torget_settings_bind_labs(const tg_settings_labs *labs);
 
 /* Vad menyn vill att värden gör härnäst. Menyn rör aldrig OTA:n eller nätet
  * själv — main.c äger ordningen mellan fönstren (porten är delad) och får
@@ -106,6 +115,8 @@ void torget_settings_keep_foreground(void);
  * simulatorn och värdtesterna kan driva EXAKT samma väg som ett finger i
  * stället för en egen QA-bakdörr som kunde hinna glida isär från den. */
 void torget_settings_click_row(tg_settings_row row);
+/* Physical row slots, also used by simulator touch-path checks in submenus. */
+void torget_settings_click_slot(unsigned slot);
 
 /* Hämtar och nollställer en väntande avsikt. Returnerar NONE när inget
  * väntar. Anropas från samma task som äger fönsterordningen. */

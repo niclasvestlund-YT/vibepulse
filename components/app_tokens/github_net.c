@@ -25,8 +25,12 @@ static const char *TAG = "github-net";
 #define GITHUB_FETCH_MAX_MS 300000
 #define GITHUB_BODY_MAX 768
 
-#if defined(TK_GITHUB_URL) && \
-    (TK_GITHUB_SCREEN_ENABLED || TK_GITHUB_NOTIFICATIONS_ENABLED)
+#ifndef TK_GITHUB_URL
+#define TK_GITHUB_URL NULL
+#define TK_GITHUB_URL_CONFIGURED 0
+#else
+#define TK_GITHUB_URL_CONFIGURED 1
+#endif
 
 static void github_net_task(void *arg) {
   (void)arg;
@@ -37,6 +41,14 @@ static void github_net_task(void *arg) {
   tk_poll_backoff_init(&backoff, GITHUB_FETCH_EVERY_MS, GITHUB_FETCH_MAX_MS);
 
   torget_net_wait();
+  /* LABS can switch this feed on without a rebuild, so a secrets.h that
+   * never had TK_GITHUB_URL is a normal state now, not a misconfiguration:
+   * the feed then lives on the advertised tokenserver alone. Said once, so
+   * an empty page has a reason in the log. */
+#if !TK_GITHUB_URL_CONFIGURED
+  ESP_LOGI(TAG, "TK_GITHUB_URL saknas i secrets.h — GitHub-flödet hämtas "
+                "bara från en annonserad tokenserver");
+#endif
   /* Separate this request from quotas (10 s), Max Tracker (15 s) and the
    * one-second agent feed. GitHub can wait; it must never contend with them. */
   vTaskDelay(pdMS_TO_TICKS(20000));
@@ -72,13 +84,10 @@ static void github_net_task(void *arg) {
 }
 
 void tokens_github_net_start(void) {
-  xTaskCreate(github_net_task, "github", 5120, NULL, 4, NULL);
+  if (!tk_labs_active(TK_LABS_GITHUB) && !tk_labs_active(TK_LABS_STAR_POPUP)) {
+    ESP_LOGI(TAG, "GitHub-sida och stjärnnotiser är avstängda");
+    return;
+  }
+  if (xTaskCreate(github_net_task, "github", 5120, NULL, 4, NULL) != pdPASS)
+    ESP_LOGE(TAG, "GitHub-tasken kunde inte starta");
 }
-
-#else
-
-void tokens_github_net_start(void) {
-  ESP_LOGI(TAG, "GitHub-sida och stjärnnotiser är avstängda");
-}
-
-#endif

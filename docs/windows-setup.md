@@ -130,10 +130,13 @@ $VibePulseHost = @{
 }
 ```
 
-`GithubRepo` enables the public repository source. The panel firmware must
-also be built with `TK_GITHUB_SCREEN_ENABLED=1` for the GitHub page and/or
-`TK_GITHUB_NOTIFICATIONS_ENABLED=1` for star notifications. Those device-side
-choices are independent of Windows and remain off in a clean default build.
+`GithubRepo` enables the public repository source. On the panel, the GitHub
+page and the star popup are switched on in SETTINGS → LABS → MORE; a saved
+choice applies after a restart. The `TK_GITHUB_SCREEN_ENABLED` and
+`TK_GITHUB_NOTIFICATIONS_ENABLED` macros in `secrets.h` only seed the defaults
+of a panel that has no saved Labs record yet, so rebuilding with them does not
+change a choice already saved. Those device-side choices are independent of
+Windows and start off on a new installation.
 
 First verify the exact interpreter, checkout, and runtime construction of the
 ScheduledTasks action, trigger, and settings without changing Windows:

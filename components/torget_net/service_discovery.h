@@ -11,7 +11,10 @@ typedef enum {
 
 /* Resolve the local _vibepulse._tcp service and append one fixed endpoint
  * path.  Discovery is best-effort: multicast failure, missing records, or a
- * bounded query timeout returns the configured full URL unchanged. */
+ * bounded query timeout returns the configured full URL unchanged.  A NULL
+ * configured_url is allowed (a feed switched on in LABS on a panel whose
+ * secrets.h never had its URL): discovery still runs, and without a
+ * discovered origin the call fails instead of dereferencing the fallback. */
 bool torget_service_endpoint_url(const char *path, const char *configured_url,
                                  char *url, size_t cap,
                                  tg_service_source *source);
