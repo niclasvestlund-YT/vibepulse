@@ -393,8 +393,11 @@ Nothing in `docs/manual-test-key3.md` was walked as written. Specifically:
   a dozen SETTINGS opens under watch; those were done earlier as part of the
   OBS-37 investigation, not as §5. Results are in OBS-37: the low-water
   plateaued at 9 355 (268 bytes from the last measured cycle's 9 623, 36 bytes
-  across the six hourly readings, against 34 576 bytes in the first 45 minutes), lock failures fell to effectively zero once the panel
-  was left alone, and the block range held at 19 456–31 744. The panel was still
+  across the six hourly readings, against 34 576 bytes in the first 45 minutes), lock failures ran 14, 4, 0, 0, 1, 0 per hour with nobody at the panel —
+  declining after hour 2, with those 19 unattended failures keeping the
+  background tasks in scope — and the sampled block range held at 18 432–31 744
+  (hour 4 touched 18 432; the session's 16 384 belongs to the earlier deliberate
+  window cycles). The panel was still
   drawing at ~7.2 hours uptime.
 
 ## Host state at end of session

@@ -13,8 +13,9 @@ ran `v1.0.0-25-g054db68` (flashed 2026-08-30) and `main` was roughly 40
 commits past that. **Since 2026-09-06 the panel runs `v1.0.0-67-ge51b79f`**,
 flashed over USB (the session is in
 `docs/superpowers/reviews/2026-09-06-flash-session-key3-physical.md`); every
-row below is on the glass since then, unverified, and the starting state for
-§1 is an image that *has* the SETTINGS menu. What is still missing from the
+firmware row below is on the glass since then, unverified (the last row is
+host-side behaviour, not panel image), and the starting state for §1 is an
+image that *has* the SETTINGS menu. What is still missing from the
 glass is everything that landed after `e51b79f`: coredump, the reboot ledger,
 poller backoff and the warm-up placeholders. **One of those needs USB even
 though the app goes over the air:** the coredump partition is new in the

@@ -483,7 +483,7 @@ Three results, and the first changes how serious this item is:
    with this data, and the interaction correlation rests on the interactive
    period before the soak (17 failures across the roughly half hour of uptime
    the interval analysis covers, 10 of them inside its first 20 minutes)
-   against hours 2–6. Nineteen in six hours, effectively none once the panel was left alone.
+   against hours 2–6. Nineteen in six hours, declining after hour 2.
    This supports the rotation outlier noted above and points the LVGL-lock
    question first at UI activity. It does not clear the background tasks: five failures (4 in
    hour 2, 1 in hour 5) happened with nobody at the panel, so the network
