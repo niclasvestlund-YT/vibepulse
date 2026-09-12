@@ -427,11 +427,14 @@ bridge era accumulated stay readable and a probe failure right after
 uninstall still finds its cache, with nothing disappearing or moving
 backward. `GET /` reports `quotaIdentity: retained_after_uninstall`.
 Only an installation that never had the bridge — and so never resolved
-anything — uses `default-v1` and makes no profile call. The profile call follows
+anything — uses `default-v1` and makes no profile call. The **home credential's** profile call follows
 the probe's rules: it is never made during a cooldown, a 429 on it
 starts the same cooldown a usage 429 does and skips the usage call, and
 it is made *before* the usage call so a token that cannot be resolved
-is known before its figures exist. A token whose profile call fails —
+is known before its figures exist; an **auxiliary** profile call — one
+for a registered directory's token, below — is never in this rule: its
+429 backs off that directory alone and never touches the home usage
+call. A token whose profile call fails —
 any non-2xx, a credential record without the `user:profile` scope, a
 response without the account field — is **account-unknown**: its
 figures are keyed under its credential fingerprint (the cache rule
@@ -595,14 +598,18 @@ timestamp, not by which source it is:
    is unknown or they differ the step is skipped and `GET /` says
    `claudePlanUsage: other_account` / `account_unknown`, rather than
    borrowing B's cache record to relabel A's number. **The gate exists
-   on the bridge-enabled path only**: with the bridge declined there is
-   no profile call and so no organization hash, and no bridge sample
-   for a plan-usage sample to be merged across accounts with, so the
-   plan-usage step keeps today's ungated behaviour exactly — the
-   fresh-week fallback during a stale probe that
+   wherever an organization hash exists**: on the bridge-enabled path,
+   and equally in the `retained_after_uninstall` mode below, where
+   resolution continues and a Desktop signed into B beside a retained
+   home identity A must not have B's weekly figure merged and persisted
+   under A. Only the never-installed or declined `default-v1` mode is
+   ungated: there is no profile call and so no organization hash, and
+   no bridge sample for a plan-usage sample to be merged across
+   accounts with, so the plan-usage step keeps today's ungated
+   behaviour exactly — the fresh-week fallback during a stale probe that
    `test_snapshot_uses_fresh_local_claude_week_when_oauth_is_stale`
    asserts stays as it is — rather than being skipped for want of a
-   hash the disabled path never has. The raw
+   hash that mode never has. The raw
    organization id still never leaves the reader.
 3. The quota cache, marked stale, as today — **filtered by the same
    account**. `QuotaCache.latest(provider, scope)` today returns the
@@ -1117,7 +1124,10 @@ Regression tests must prove:
   resolution and that identity for the cache, tracker and history: a
   probe failure right after uninstall serves the fingerprint-keyed
   cache record, the tracker and forecast values are unchanged, `GET /`
-  reports `retained_after_uninstall`, a token refresh with the account
+  reports `retained_after_uninstall`, the organization gate still
+  applies (Desktop signed into B beside the retained identity A leaves
+  A's figures untouched and `GET /` says `other_account`), a token
+  refresh with the account
   unchanged costs one profile call and moves nothing, and a `/login`
   to account B after uninstall resolves B's fingerprint on the next
   cycle so B's quota, peaks and samples land under B while A's records
