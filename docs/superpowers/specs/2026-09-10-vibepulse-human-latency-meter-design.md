@@ -159,10 +159,17 @@ something is counted but no provider total is non-zero yet, never one
 provider's name over a combined total — and the split bar carries the
 per-provider share. Then
 the label `BLOCKED ON YOU · TODAY`, one dominant number in whole minutes
-(floored) — except that a total of 1 to 59 seconds, which a short
-completed wait or the first checkpoint of a live one produces, reads
-`<1 MIN` and never `0`: a zero the payload did not contain is the
-invented zero this spec forbids, and dashes are reserved for no data —
+(floored) — except that a total under 60 seconds while something was
+counted (`countToday > 0`) or is running (`blockedNowS > 0`) reads
+`<1 MIN` and never `0`. That covers 1 to 59 seconds, which a short
+completed wait or the first checkpoint of a live one produces, **and**
+the wire's own 0: a wait that ended in under a second has a positive
+monotonic `durationS`, counts once in `countToday`, and floors to 0 on
+the wire, so the presentation keys on `countToday`, not on the seconds.
+`LONGEST WAIT` follows suit: `<1s` when `countToday > 0` and
+`longestTodayS` is 0. A zero the measurement did not contain is the
+invented zero this spec forbids, and dashes are reserved for no data
+(`countToday` 0 and nothing blocked) —
 the bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
 (live, from `blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
 block is absent
@@ -192,12 +199,18 @@ floor already rounds the value down, so the countdown starts at accept
 with nothing subtracted and the page can be late by less than a second
 at most. Over the relay a frame can be up to `STATUS_EXPIRY_S` (15 s)
 old when it is accepted — `decode_status_snapshot` takes any unexpired
-publication — so the page derives the frame's publication time from the
-`expires_at` the frame already carries (`expires_at - STATUS_EXPIRY_S`),
-takes the age against the same wall clock it used to accept the frame,
-and starts the countdown at `dayEndsInS - age`; a result of zero or less
-means the host's day ended in transit and the block is rendered as
-day-ended on arrival, never as today. Once the countdown reaches zero a
+publication, and it checks the envelope's expiry against the panel's
+own `time(NULL)` without establishing that the two clocks agree, so an
+age *estimated* from `expires_at` would be wrong by the host–panel skew
+and a lagging panel would keep yesterday on the glass. The page
+therefore subtracts no estimate but the **whole lifetime**: the
+countdown starts at `dayEndsInS - STATUS_EXPIRY_S`, which needs no
+clock but the panel's monotonic one and can only end early, never late
+— at worst the page shows `DAY ENDED` 15 s before the host's midnight,
+and the next accepted block (the relay publishes every second or so)
+replaces it within seconds. A result of zero or less means the host's
+day may have ended in transit and the block is rendered as day-ended on
+arrival, never as today. Once the countdown reaches zero a
 retained block is no longer rendered as today's measurement: the totals
 and `LONGEST WAIT` become dashes with the stale marker (`DAY ENDED`),
 and a fresh accepted block — which the server has already rolled over —
@@ -436,11 +449,17 @@ Regression tests must prove:
   arrives; the header reads `AGENTS` for a block with `countToday` 1 and
   both provider totals 0; the hero reads `<1 MIN` for `todayS` 1 to 59,
   dashes for 0 with nothing blocked, and whole floored minutes above;
-- the day countdown subtracts the block's age at accept: a relay frame
-  built one second before the host's midnight and accepted five seconds
-  later renders day-ended on arrival, a LAN block starts its countdown
-  at accept, and a frame accepted with `dayEndsInS - age` exactly zero is
-  day-ended;
+- the day countdown over the relay starts at `dayEndsInS -
+  STATUS_EXPIRY_S` with no wall clock involved: a relay frame built one
+  second before the host's midnight and accepted five seconds later
+  renders day-ended on arrival, and so does one accepted with the panel
+  clock set 30 s behind the host's; a LAN block starts its countdown at
+  accept; a block with `dayEndsInS` 10 over the relay is day-ended on
+  arrival and at most 15 s early;
+- the hero reads `<1 MIN` and `LONGEST WAIT` reads `<1s` for a block
+  with `countToday` 1 and every seconds field 0 (a sub-second wait
+  floored on the wire), and dashes only for `countToday` 0 with
+  `blockedNowS` 0;
 - `dayEndsInS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
 - the page's landmark captures match the seven frames above, and the header
