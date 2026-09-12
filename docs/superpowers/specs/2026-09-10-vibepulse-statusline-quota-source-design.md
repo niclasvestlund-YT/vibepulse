@@ -143,7 +143,21 @@ bridge's is the first 16 hex characters of `sha256(oauthAccount.accountUuid)`
 read from the `.claude.json` of the session's config directory
 (`CLAUDE_CONFIG_DIR`, default the home directory) — the file the same
 `/login` writes beside the credential that session uses; absent when the
-file or field cannot be read. The tokenserver derives the probe's the same
+file or field cannot be read. **The fingerprint is bound to the
+observation, not to the invocation:** a running session keeps Claude
+Code's cached `rate_limits` and re-emits them on non-API triggers, so if
+another process logs in as account B in between, reading `.claude.json`
+at invocation time would label A's replayed values with B's
+fingerprint. The bridge therefore keeps, in its own state beside the
+sample file, a small per-session record — `sha256(session_id)[:16]`
+(never the id), the last `rate_limits` values seen for that session, and
+the fingerprint bound to them, pruned after 24 h — and attaches the
+current `.claude.json` fingerprint to a payload **only when its
+`rate_limits` differ from that session's last-seen values**, which is
+what proves a fresh API response made with the session's current
+credential; a payload identical to the last-seen one is a replay and
+carries the fingerprint bound when those values were first seen. A
+session with no record and no fingerprint readable is `unknown`. The tokenserver derives the probe's the same
 way, from the `.claude.json` beside the credential store the winning token
 came from: the keychain entry and the credentials file are written by
 that `/login`, so a probe served by either carries the home directory's
@@ -313,16 +327,17 @@ timestamp, not by which source it is:
    under the hashed `default-v1` identity, and an identity-filtered
    lookup would leave them unreadable until the next successful probe —
    during a failing probe or a persisted cooldown that is exactly when
-   the cache matters, bridge or no bridge. So on the first load under
-   this scheme the tokenserver re-keys each legacy Claude record to the
-   current fingerprint **when the local credential store is
-   unambiguous** (the same rule the cooldown restart uses: one
-   candidate, or Desktop equal to keychain), because such a record can
-   only have come from that account; with two differing tokens the
-   legacy records stay under `default-v1`, unreadable, and `GET /`
-   reports `quotaCache: legacy_records_unmigrated` so the one-time stale
-   card has a stated cause rather than looking like a regression. The
-   migration runs whether or not the bridge is installed.
+   the cache matters, bridge or no bridge. They are **not** re-keyed:
+   the old identity carries no provenance, and an unambiguous credential
+   store today says nothing about who produced a record last week (the
+   user may have switched from A to B before upgrading), so relabelling
+   would hand A's unexpired quota to B exactly when B's probe is
+   failing. Legacy Claude records stay under `default-v1`, unreadable,
+   until they expire; the panel shows the honest stale card for that
+   one window, `GET /` reports `quotaCache: legacy_records_unreadable`
+   with their count so the cause is stated rather than looking like a
+   regression, and the first successful probe writes records under the
+   fingerprint. This happens whether or not the bridge is installed.
 
 The heaviest-model weekly window keeps today's order: probe, then cache,
 under the same identity filter.
@@ -411,8 +426,13 @@ sample file too, and the merge treats it as "no observation", not zero.
 
 ## Failure and privacy boundaries
 
-- The bridge reads stdin **once**, size-bounded (the documented payload is
-  a few kilobytes; cap at 64 KiB), and never logs it. The statusLine input
+- The bridge reads stdin **once**, parses at most 64 KiB of it (the
+  documented payload is a few kilobytes) and never logs it. A payload
+  beyond the cap is not a sample — nothing is written — but it is still
+  the chained command's input: the bridge drains the rest of stdin and
+  streams **all** of it, the parsed head included, to the chained
+  command, so the user's own status line receives byte-for-byte what
+  Claude Code sent whatever the bridge made of it. The statusLine input
   also carries `cwd`, `transcript_path`, `session_id`, `model`, `cost`,
   `workspace.repo` and, on some builds, PR and worktree names. **None of it
   is written anywhere.** A test feeds a payload with every documented key
@@ -500,9 +520,16 @@ Regression tests must prove:
   from an unambiguous local store: one candidate, or Desktop equal to
   keychain; with two differing tokens the account stays unknown and the
   bridge is not accepted until a probe succeeds;
-- legacy `default-v1` Claude records are re-keyed to the fingerprint on
-  first load when the local store is unambiguous and stay unreadable
-  (with `GET /` naming it) when it is not, bridge installed or not;
+- legacy `default-v1` Claude records are never re-keyed: with a legacy
+  record present and a fingerprint known, the lookup returns nothing for
+  the fingerprint, `GET /` names the unreadable records and their count,
+  and the first successful probe writes under the fingerprint, bridge
+  installed or not;
+- a session whose `rate_limits` are unchanged since its last run keeps
+  the fingerprint bound then even if `.claude.json` now names another
+  account, a changed `rate_limits` payload takes the current
+  fingerprint, and the per-session record contains a hash, never the
+  session id;
 - the quota cache serves only records under the probe's own identity:
   after the bridge has fed account A's value into the cache, a probe
   switched to account B with no live result gets no cached value (stale
@@ -526,7 +553,10 @@ Regression tests must prove:
   the next sample starts from empty; a stored file that cannot be read is
   left untouched and no write happens;
 - the bridge passes a chained command's stdout and exit status through
-  unchanged and still runs it when the sample write raises; the launcher
+  unchanged and still runs it when the sample write raises, and the
+  chained command receives stdin byte-for-byte — asserted on the full
+  bytes, including a payload over the 64 KiB cap that the bridge itself
+  rejected; the launcher
   runs the chained command when the recorded interpreter path does not
   resolve;
 - a bridge write is visible on the very next `/api/tokens` request without
@@ -605,7 +635,7 @@ session and weekly rings follow the statusLine within one panel poll of a
 Claude Code turn, the probe's 429 cooldowns no longer produce a stale
 Claude card while the bridge is fresh, the Fable/Opus ring behaves exactly
 as before, and a user who declines the bridge sees no change at all
-beyond the one-time cache re-keying that step 3 names.
+beyond the one-time unreadable legacy cache window that step 3 names.
 
 ## Open questions for the maintainer
 
