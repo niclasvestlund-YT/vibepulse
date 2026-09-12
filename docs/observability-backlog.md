@@ -496,11 +496,12 @@ Three results, and the first changes how serious this item is:
    period before the soak (17 failures across the roughly half hour of uptime
    the interval analysis covers, 10 of them inside its first 20 minutes)
    against hours 2–6. Nineteen in six hours, declining after hour 2.
-   This is consistent with UI-linked activity in general (the rotation line
-   noted above supplies no mechanism of its own) and points the LVGL-lock
-   question first at UI activity. It does not clear the background tasks: five failures (4 in
-   hour 2, 1 in hour 5) happened with nobody at the panel, so the network
-   clients and the other periodic tasks stay in scope for those.
+   The decline after hour 1 is consistent with UI-linked activity in general
+   (the rotation line noted above supplies no mechanism of its own), but all
+   nineteen soak failures happened with nobody at the panel — 14 in the
+   cool-down hour, then 4, 0, 0, 1, 0 — so the background tasks stay in scope
+   on an equal footing with UI activity; the attribution instrumentation this
+   item asks for is what decides between them, not this table.
 
 3. **The block range barely moved.** 18 432–31 744 B over the six hours:
    19 456 as the floor in five of them, 18 432 in hour 4. Stable oscillation,

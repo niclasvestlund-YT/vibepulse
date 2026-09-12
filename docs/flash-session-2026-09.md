@@ -54,6 +54,12 @@ over USB, separately and explicitly authorized like any USB flash (README,
 "Latest release"); until then the boot log says so on every boot and the
 delivered firmware runs without usable crash dumps. Do it in the same session
 as the §1 delivery, after the boot-log read in §2 confirms the new image.
+**And before the uploader starts:** `.ota-device` held a stale lease on
+2026-09-06 (the session review, "Host state"), so in §0 compare its contents
+with the panel's current address — SETTINGS → ABOUT on the glass, or the
+`esp_netif_handlers` line in the boot log — and rewrite the file if they
+differ; otherwise the window opens on the panel while `tools/ota-flash.sh`
+polls the wrong host until it gives up.
 What the panel had never seen when this sheet was written:
 
 | Change | Where it landed | What only the glass can prove |
