@@ -89,11 +89,15 @@ so the contract is sized to the gate rather than the gate loosened.
 `nowS` is the age of the oldest still-parked interaction, or 0.
 "Today" is the host's local calendar day, the same rule the Max Tracker
 uses, with one addition: **the served day never moves backward**. The
-ledger keeps the latest local date it has served as today, and when the
-wall clock regresses across midnight (00:05 back to 23:55) it keeps
-serving that later date — `dayEndS` then counts to the end of the held
-day, up to the 90 000 clamp — until the clock passes it again, and
-`GET /` reports `waits.dayHeld` while it does. The single wall anchor
+ledger keeps the latest local date it has served as today — **and
+persists it**, as `servedDay` in the same file as the rows and markers,
+written by the same writer, so a process started while the clock is
+still regressed initialises from `max(wall date, servedDay)` rather
+than from the regressed calendar — and when the wall clock regresses
+across midnight (00:05 back to 23:55) it keeps serving that later date
+— `dayEndS` then counts to the end of the held day, up to the 90 000
+clamp — until the clock passes it again, and `GET /` reports
+`waits.dayHeld` while it does. The single wall anchor
 keeps rows from relocating; this rule keeps "today" itself from
 relocating, so `todayS` cannot change on a backward step even though
 the host's calendar briefly says an earlier date. **Open holds count too, but only what is on disk:** `todayS`, the
@@ -208,10 +212,12 @@ that stopped answering), so the reader sees a number *as of* the last
 answer, not a claim about now. The relay-fed variant follows the same
 rule with the same debit the day countdown makes below: exact relay age
 is unavailable, so the stale budget for a relay-fed block starts at
-`TK_WAITS_STALE_RELAY_MS - RELAY_AGE_BOUND_MS` from accept, where
-`RELAY_AGE_BOUND_MS` is the clock-independent 42 000 ms derived below
-and `TK_WAITS_STALE_RELAY_MS` is proposed at 60 000 — a relay-fed live
-label therefore lasts at most 18 s past accept and never more than 60 s
+`TK_WAITS_STALE_RELAY_MS - RELAY_AGE_BOUND_MS - request duration` from
+accept — the same three terms the day countdown subtracts, the fetch
+included — where `RELAY_AGE_BOUND_MS` is the clock-independent 42 000 ms
+derived below and `TK_WAITS_STALE_RELAY_MS` is proposed at 60 000 — a
+relay-fed live label therefore lasts at most 18 s past accept, less the
+fetch, and never more than 60 s
 past the snapshot's build, and the spec says so rather than promising
 the LAN's 20 s over a path that cannot deliver it; on the LAN the budget
 starts at `TK_WAITS_STALE_MS` (20 000 ms) minus the measured request
@@ -240,11 +246,19 @@ changes: an envelope older than `STATUS_EXPIRY_S` (15 s) on the
 tokenserver's own monotonic clock is discarded and rebuilt with fresh
 `expires_at` and fresh `dayEndS` before it is sent, so a frame is at
 most 15 s old when the PUT *starts*. Second, the PUT itself takes time
-that the worker's clock does not see: the transport allows a connect
-timeout plus a read timeout (`RELAY_PUT_BOUND_MS`, the sum of the two
-constants the tokenserver passes to `_default_transport`, 7 000 ms
-today), and `index.ts` starts the mailbox TTL only once it has received
-and hashed the body. Third, the mailbox serves a frame for at most
+that the worker's clock does not see, and `index.ts` starts the mailbox
+TTL only once it has received and hashed the body — so the PUT gets a
+**true end-to-end deadline**, `RELAY_PUT_BOUND_MS` (proposed 7 000 ms),
+enforced on the tokenserver's monotonic clock rather than assumed from
+socket timeouts: `_default_transport` today applies separate connect
+and read timeouts, which DNS, TLS, a trickling request body and the
+response can each stretch past their sum, so this spec has the status
+PUT set every socket operation's timeout to the *remaining* budget and
+abandon the attempt (close the connection, count a failure) the moment
+the deadline passes. A frame the worker stored was therefore received
+within the deadline — a store that happens before the client's abandon
+is still inside it — and one the worker did not store carries no age
+at all. Third, the mailbox serves a frame for at most
 `STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) after that on the worker's
 clock. An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
 the moment the panel's fetch completes, plus the fetch itself, which
@@ -282,8 +296,20 @@ checkpoint** of the hold's elapsed time as of the last write. The writer
 rewrites the list at every park and every ending, and, while any hold is
 open, at least every `WAIT_MARKER_CHECKPOINT_S` (proposed 30 s), so the
 checkpoint is never more than that far behind the live figure. A hold
-open at a **clean** shutdown is closed by the final flush as a `restart`
-row with its exact monotonic elapsed. After an **unclean** stop the new
+open at a **clean** shutdown is closed as a `restart` row with its exact
+monotonic elapsed by a **locked shutdown transition**, not by a flush
+racing live handlers: `serve_forever()` returning does not quiesce the
+daemon handler threads (`BoundedThreadingHTTPServer` sets
+`daemon_threads = True` and `block_on_close = False`, and
+`server_close()` runs after the final saves today), so a handler could
+still resolve or expire the hold while the flush converts it and append
+a second row, or land after the last save. So `main` first calls
+`store.begin_shutdown()`, which under the store lock marks the store
+closing — every later `park`, `resolve`, `resolve_relay`, `panic` and
+sweep returns "shutting down" without touching `_pending` — converts
+every pending entry to its `restart` row in that same critical section,
+and drops the entries; only then does the ledger's final flush run, and
+`server_close()` after it. After an **unclean** stop the new
 process closes each surviving marker as a `restart` row with
 `durationS` = the marker's `elapsedS` and `endedAt` = `startedAt +
 elapsedS`, then clears the list: the row stops at the last durable
@@ -332,7 +358,9 @@ both.
    **Durability boundary:** the writer runs within `WAIT_LEDGER_FLUSH_S`
    (proposed 2 s) of a close, and `main` gives the ledger the same final
    flush on shutdown the Max Tracker already gets (`max_tracker_store.save()`
-   after `serve_forever` returns), so a clean stop loses nothing. An
+   after `serve_forever` returns), preceded by the locked shutdown
+   transition above so no handler can add a row after it, so a clean
+   stop loses nothing. An
    unclean stop (crash, power) can lose a row closed inside that last
    window — but not the seconds the panel showed for it: rows and
    open-hold markers live in the **same file** and one atomic write
@@ -470,7 +498,12 @@ Regression tests must prove:
   the day arithmetic runs (a park issued from another thread during the
   aggregation completes without waiting for it);
 - a close followed by a clean shutdown before the writer ran is on disk
-  after the final flush; a close followed by a simulated crash inside the
+  after the final flush; a resolve that races the shutdown transition
+  (issued from a handler thread after `begin_shutdown` took the lock)
+  returns "shutting down" and adds no second row, and the file after the
+  final flush has exactly one row per hold; a restart while the clock is
+  still regressed across midnight initialises today from the persisted
+  `servedDay` and leaves `todayS` unchanged; a close followed by a simulated crash inside the
   writer window leaves the row absent but the marker present, the next
   start closes the marker as a `restart` row worth its checkpoint, and
   `todayS`, the provider totals and `longestS` after the restart
