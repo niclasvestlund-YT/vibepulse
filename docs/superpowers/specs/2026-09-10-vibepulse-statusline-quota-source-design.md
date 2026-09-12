@@ -153,11 +153,19 @@ inside the bridge's own configuration (the bridge never rewrites
 `settings.json` itself) and the bridge executes it with the same stdin,
 passing its stdout and exit status through unchanged. **Install is
 idempotent:** if the existing command is this checkout's launcher, or any
-earlier VibePulse launcher (recognised by a fixed marker in the launcher
-file it points at, not by path), setup keeps the chained command it
-already recorded and rewrites only the launcher path; recording the
-launcher as the chained command would make every status-line run start a
-second bridge, recursively. If none exists, the bridge exits 0 with empty
+earlier VibePulse launcher — recognised **either** by the launcher path
+setup recorded in the bridge configuration at the last install (that
+file lives in the tokenserver's state directory, so it survives a
+checkout being moved or deleted) **or** by a fixed marker in the
+launcher file the command points at, when that file can still be read —
+setup keeps the chained command it already recorded and rewrites only
+the launcher path; recording the launcher as the chained command would
+make every status-line run start a second bridge, recursively, and a
+moved checkout would otherwise leave the user's line invoking a path
+that no longer exists. A command that is neither the recorded path nor
+a readable marked launcher is foreign and is recorded as the chained
+command as before; the doctor reports `FIX statusLine bridge: launcher
+missing` while the recorded path does not resolve. If none exists, the bridge exits 0 with empty
 output, which Claude Code renders as no status line, the same as
 before. The launcher exists for the one failure the bridge cannot survive
 on its own: if the recorded interpreter no longer resolves (a moved or
@@ -203,14 +211,22 @@ timestamp, not by which source it is:
    bridge that saw 60 % and then went quiet for 15 minutes would drop
    out while an unexpired probe observation of 40 % remains, and either
    way a ring would walk backward inside one reset window on nothing but
-   a timer. What freshness still governs is liveness and scheduling:
-   the probe's age drives the `claudeWeekStale` flag and its own
-   interval, the bridge's `seen` (younger than `STATUSLINE_FRESH_S`,
-   proposed 15 minutes) drives the bridged probe interval and the
-   doctor's `fresh`/`stale` word — never which value is served.
-   `seen` decides liveness, `resets_at` the window, `at` is the record
-   of when the winning value was observed; none of them decides the
-   direction.
+   a timer. What freshness still governs is liveness and scheduling,
+   and liveness is a property of the **window**, not of the winning
+   value: a window is live when *either* the probe succeeded within its
+   own interval *or* a matching-account bridge window has `seen` younger
+   than `STATUSLINE_FRESH_S` (proposed 15 minutes) and is unexpired.
+   `claudeWeekStale` is the weekly window's liveness inverted, so in the
+   probe-60 / bridge-40 case the card stays *not stale* through the
+   probe's 429 cooldown as long as the bridge keeps reporting, even
+   though the probe's 60 % is the figure served — the value is the
+   highest honest observation, the flag says whether anyone is still
+   watching the window. The bridge's `seen` also drives the bridged
+   probe interval and the doctor's `fresh`/`stale` word; the probe's
+   age drives its own interval. None of it decides which value is
+   served: `seen` decides liveness, `resets_at` the window, `at` is the
+   record of when the winning value was observed, and none of them
+   decides the direction.
 2. The Claude Desktop plan-usage file, under the rules the 2026-08-23 spec
    already sets (general week only, reset borrowed from a still-valid cache
    record).
@@ -420,12 +436,15 @@ Regression tests must prove:
   seeing more wins over an older probe, and the persisted quota cache
   never records a lower figure for a window it already holds; a probe
   observation of 60 % followed by a 429 and a fresh bridge replay of
-  40 % for the same reset keeps both rings at 60 % (and `claudeWeekStale`
-  reflects the probe's age) until the window resets; for
+  40 % for the same reset keeps both rings at 60 % until the window
+  resets and `claudeWeekStale` stays false for as long as the bridge
+  keeps reporting, going true only once both the probe is past its
+  interval and the bridge's `seen` is past `STATUSLINE_FRESH_S`; for
   different windows the later `resets_at` wins; it prefers both over an
-  older plan-usage sample, falls back to the probe when the sample is
-  stale or its reset has passed, and never invents a model-pool
-  percentage from the bridge;
+  older plan-usage sample, uses the probe alone only when the bridge
+  window is absent, expired or from another account (never merely
+  because `seen` aged out), and never invents a model-pool percentage
+  from the bridge;
 - the probe interval is `PROBE_WHEN_BRIDGED_S` only while both windows
   are fresh and the last status was a completed probe; one fresh window
   beside a missing or stale one keeps the current ladder, the
@@ -442,7 +461,10 @@ Regression tests must prove:
   diff, refuses an unrepresentable existing command, records a chained
   command, and a second install over an existing launcher keeps the
   originally recorded chained command instead of recording the launcher
-  (the recursion test); uninstall, when the command is still the
+  (the recursion test), and so does a second install from a **moved**
+  checkout whose old launcher path no longer exists but matches the
+  recorded one (the moved-checkout test: the chained command survives
+  and the doctor's `launcher missing` clears); uninstall, when the command is still the
   launcher, removes a `type` the installer added, restores a replaced
   `command`, keeps unrelated siblings in every case — including a
   `padding` added after an install that created the object, which then
