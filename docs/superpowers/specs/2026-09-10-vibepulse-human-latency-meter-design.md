@@ -137,16 +137,25 @@ future, and was then corrected — the ledger releases the hold: it resets
 **discarded, not left to age out**: retention prunes by a lower cutoff,
 so a row with a future `endedAt` would survive it and resurface as a
 real day's total once the calendar caught up with the bad clock. The
-release therefore drops every row whose `endedAt` lies after the end of
-the reset wall day, re-anchors an open-hold marker whose `startedAt`
-lies in the future to `now − elapsedS` so its checkpointed seconds land
-in the real day rather than a future one, counts both in the
-discontinuity log line, and persists the drops, the re-anchoring and
-the reset `servedDay` in one write; and retention prunes on both sides
-of the window in general — rows older than the cutoff and rows ending
-after the served day's end plus one day, the most a legitimate midnight
-overlap can reach — so a future-dated row never survives a prune even
-when a reset was missed. **The discontinuity is shown, not smoothed
+release therefore drops every row whose **anchor** — its `startedAt` —
+lies after the end of the reset wall day, and only those: a legitimate
+wait that started before that midnight and ended after it keeps its
+row and its overlap into the next day, because its anchor is real and
+dropping it by `endedAt` would make the measured total retreat. It
+re-anchors an open hold whose `startedAt` lies in the future to
+`now − elapsedS` so its checkpointed seconds land in the real day
+rather than a future one — **both** the persisted marker and the
+in-memory `_Pending.started_wall`, changed together under the store
+lock, because `wait_aggregates` snapshots the in-memory field and a
+later `close` derives its row from the pending entry, so a marker
+re-anchored alone would leave the next snapshot placing the hold in
+the future and the close recreating the very row the release removed
+— counts the drops and the re-anchors in the discontinuity log line,
+and persists the drops, the re-anchoring and the reset `servedDay` in
+one write; and retention prunes on both sides of the window in
+general — rows older than the cutoff and rows *anchored* after the
+served day's end plus one day, which no legitimate row is — so a
+future-dated row never survives a prune even when a reset was missed. **The discontinuity is shown, not smoothed
 over:** the page may already have displayed the future day's non-zero
 totals under `TODAY`, and the real day's total is usually smaller, so
 a reset must never look like a counter that retreated. The block
@@ -338,10 +347,12 @@ or not). The ledger **never serves a `g` it has not first made durable
 room for**, because the build rate is unbounded — the panel, the relay
 publisher and any local `/api/agent-status` client each build — so no
 fixed restart increment could be proven larger than what a crash
-loses. The file holds a **reservation**, `gReserved`, and a build may
-serve a generation only while the forward modular distance from the
-last served `g` to `gReserved` — `(gReserved − g) mod 10⁹` — is above
-zero, never by a raw `g < gReserved` comparison, which is false the
+loses. The file holds a **reservation**, `gReserved`, which is
+**exclusive**: a build may serve the next generation `g + 1` only while
+the forward modular distance from that candidate to the reservation —
+`(gReserved − (g + 1)) mod 10⁹` — is above zero, so a served generation
+never reaches `gReserved` itself and the test contract below holds by
+construction; the check is never a raw `g < gReserved` comparison, which is false the
 moment a reservation straddles the modulus (`g` at 999 950 000 with
 `gReserved` wrapped to 50 000 still has 100 000 generations in hand):
 on start the ledger reads `gReserved`, sets
@@ -782,8 +793,12 @@ Regression tests must prove:
   `r` 1 on the wire for the rest of that served day and absent
   after the next rollover and on every block before the reset, the rows
   the future day accumulated are absent from the file after the write
-  that persists the reset, an open hold parked under the bad clock keeps
-  its checkpointed seconds in the real day, and advancing the clock to
+  that persists the reset while a legitimate row that started before
+  the reset day's midnight and ended after it survives with its overlap
+  intact, an open hold parked under the bad clock keeps its
+  checkpointed seconds in the real day and its in-memory `started_wall`
+  moves with its marker so the next snapshot places it in the real day
+  and its eventual close writes a real-day row, and advancing the clock to
   the once-future date afterwards shows no trace of them; a future-dated
   row planted in the file without a reset is pruned by retention rather
   than kept until its date; a close
@@ -835,7 +850,9 @@ Regression tests must prove:
   its totals under `LEDGER RESET`, `GET /` reports `ledgerReset`, and a
   failing save shows on `GET /`;
 - `g` increments on every snapshot build whether or not anything
-  changed and never reaches the persisted `gReserved`: the reservation
+  changed and never reaches the persisted `gReserved` (the bound is
+  exclusive: with the distance from the last served `g` at exactly one,
+  the next build re-serves `g` rather than serving `gReserved`): the reservation
   is persisted before the first build after a start, the next one lands
   once half is consumed, a build storm that exhausts a reservation
   before the writer landed the next re-serves the last `g` (the page
