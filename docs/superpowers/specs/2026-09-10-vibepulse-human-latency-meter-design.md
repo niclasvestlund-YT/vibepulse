@@ -155,8 +155,20 @@ relay-fed panel sees the same page. No new relay endpoint.
    hook's thread, and `GET /` reports `waits.rows` so the doctor can show
    the file's state. The open-hold live contribution above is never
    persisted; it is recomputed from `_pending` on every poll.
-4. `AgentStatusService.snapshot()` asks the ledger for today's aggregates
-   and the store for the oldest open `created_at`, and adds `waits`.
+4. `AgentStatusService.snapshot()` calls one method,
+   `InteractionStore.wait_aggregates(now)`, which under the store's own
+   lock reads the ledger's in-memory rows **and** every entry in
+   `_pending` in the same critical section and returns the finished
+   `waits` block. `close` appends to the ledger under that same lock
+   before the pending entry is dropped, so a poll can never observe the
+   gap between "row not yet appended" and "hold no longer pending" and
+   report a lower total for one second. The open-hold half is a
+   privacy-limited view of *all* pending entries — provider, kind,
+   `started_wall` and monotonic elapsed, nothing else — not only the
+   oldest: with three agents parked at once, `todayS`, the provider
+   totals and `countToday` count all three, and `blockedNowS` is the
+   largest elapsed among them. No new public API and nothing leaves the
+   process; the method exists so the two sources are read together.
 5. The firmware's agent-status parser reads `waits` optionally (all six
    fields numeric and non-negative, else the block is treated as absent),
    and the page renders it.
@@ -205,7 +217,11 @@ Regression tests must prove:
   constructed fresh (the restart case) produces none for holds the
   previous process had open;
 - an open hold is counted live in `todayS`, its provider total and
-  `countToday`, and closing it does not step the total back;
+  `countToday`; three concurrent holds across both providers are all
+  counted and `blockedNowS` is the oldest; and closing one does not step
+  the total back — including a close that races the 1 s snapshot, which
+  a test drives by interleaving `close` between what would have been two
+  separate reads and asserting the block is monotone;
 - a close followed by a clean shutdown before the writer ran is on disk
   after the final flush; a close followed by a simulated crash inside the
   writer window is absent after restart and the test names that as the
