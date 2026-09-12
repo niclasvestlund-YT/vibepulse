@@ -244,18 +244,42 @@ the account on either side clears it until the next consistent
 observation. The same comparison runs at tokenserver start against the
 persisted last observation (credential fingerprint, account fingerprint
 and both modification times, hashes and times only), so an outage
-hides no more than a watch interval does. The bridge reads the mark from the
-tokenserver's state (the same directory its own state lives in, read
-only) and never derives one of its own for the home directory. For
-another `CLAUDE_CONFIG_DIR`, which the tokenserver does not watch, the
-mark is the bridge's own — the earliest time it has observed the
-current `accountUuid` value continuously, reset whenever the value it
-reads differs from the last recorded, seeded by setup and by the doctor
-run in that directory (they read `.claude.json` once and record the
-value and the run time) — and a login there followed by a session
-before any other bridge invocation leaves that session `unknown`; that
-gap is a stated boundary below, not a silent one: `GET /` reports such
-a directory as `bridge: unproven_dir`. And it takes the
+hides no more than a watch interval does. **Detection at the next
+observation is not enough on its own:** a session that ran the `/login`
+to B and kept B's credential can emit a proving payload *between* two
+observations, after another process returned the files to A, while the
+persisted mark still says A and generation N — and a sample merged then
+cannot be un-merged when the watcher catches up. So the bridge gates
+every write under a fingerprint on the mark being **current**: the mark
+records the `.claude.json` modification time the tokenserver last
+confirmed, and the bridge, which `stat`s that file anyway, compares.
+A payload arriving while the file's modification time differs from the
+confirmed one is handled as if the account were unknown — it lands in
+the `unknown` entry, no binding is made and none is used — until the
+watcher's next observation either re-confirms the mark with the new
+time (a rewrite alone) or replaces it (a transition). A login always
+rewrites `.claude.json`, so the window between a hidden round trip and
+its detection admits no write under a fingerprint; the price is up to
+one watch interval of `unknown` after every `.claude.json` rewrite,
+which delays a session's next proving payload rather than losing the
+session. The bridge reads the mark from the tokenserver's state (the
+same directory its own state lives in, read only) and **never derives
+one of its own**: reading `.claude.json` once at setup or doctor time
+would seed a mark from one file, which proves nothing about the
+credential beside it — a `/login` that has written the file for B and
+not yet replaced A's token would leave a session started in that torn
+moment able to bind A's quota to B. Only a **watched directory** can
+bind. The tokenserver watches the home config directory by default and
+every `CLAUDE_CONFIG_DIR` that setup was run with (setup records the
+directory in the tokenserver's configuration; the doctor lists them and
+warns about a directory it is run in that is not registered), each
+with its own credential store (`<dir>/.credentials.json`), `.claude.json`,
+profile resolution, mark and generation. A registered directory whose
+credential store the tokenserver cannot read — on macOS a non-default
+directory may keep its token in a keychain item the tokenserver does
+not read — and an unregistered directory are `unproven_dir`: their
+sessions stay `unknown` for their lifetime, and `GET /` and the doctor
+say so rather than letting the gap pass as `account_unknown`. And it takes the
 session's start time from the creation time of the `transcript_path`
 the payload names (a `stat`, never a read; `st_birthtime` on macOS,
 creation time on Windows), a file Claude Code creates when the session
@@ -604,13 +628,12 @@ sample file too, and the merge treats it as "no observation", not zero.
 
 ## Failure and privacy boundaries
 
-- The account proof for the home config directory is the tokenserver's
-  watch; a non-default `CLAUDE_CONFIG_DIR` has only the bridge's own
-  observation mark, so a login there followed directly by a session
-  leaves that session `unknown` until a later session or a doctor run
-  in that directory re-seeds the mark. `GET /` and the doctor name the
-  directory as `unproven_dir` rather than letting the gap pass as
-  `account_unknown`.
+- The account proof is the tokenserver's watch and nothing else: no
+  file is ever read once to seed a mark. A `CLAUDE_CONFIG_DIR` that
+  setup did not register, or whose credential store the tokenserver
+  cannot read, is `unproven_dir` — its sessions stay `unknown` for their
+  lifetime — and `GET /` and the doctor name it rather than letting the
+  gap pass as `account_unknown`.
 - The bridge reads stdin **once**, parses at most 64 KiB of it (the
   documented payload is a few kilobytes) and never logs it. A payload
   beyond the cap is not a sample — nothing is written — but it is still
@@ -759,11 +782,20 @@ Regression tests must prove:
   tokenserver was down, judged against its persisted last observation;
   a binding records the mark generation it was made under and any
   binding from an older generation is dead even when the account value
-  reads the same; a fresh install seeds the mark so the first
-  post-install session binds; two concurrent sessions in different
-  `CLAUDE_CONFIG_DIR`s keep two independent marks and both bind, while a
-  login in a non-default directory followed directly by a session leaves
-  that session `unknown` and `GET /` names the directory `unproven_dir`;
+  reads the same; a proving payload from a session bound under the
+  current generation that arrives while `.claude.json`'s modification
+  time differs from the mark's confirmed one lands in `unknown` and
+  makes and uses no binding, and the same session's next payload after
+  the watcher re-confirmed the mark (a rewrite alone) is bound again,
+  while after a round trip detected at that observation it lands in
+  `unknown` for good; a fresh install binds the first post-install
+  session because the watcher's first observation confirms the pair at
+  the files' modification times, with no seed read anywhere; two
+  concurrent sessions in two registered `CLAUDE_CONFIG_DIR`s keep two
+  independent marks and both bind, while a session in an unregistered
+  directory, or in a registered one whose credential store the
+  tokenserver cannot read, stays `unknown` and `GET /` names the
+  directory `unproven_dir`;
   a login to another account completed between the
   session's response and the bridge run resets `accountSeenSince` and
   leaves that session `unknown` for its lifetime, as does a session that
