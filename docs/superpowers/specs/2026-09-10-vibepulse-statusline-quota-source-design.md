@@ -148,7 +148,17 @@ bridge's is the first 16 hex characters of `sha256(oauthAccount.accountUuid)`
 read from the `.claude.json` of the session's config directory
 (`CLAUDE_CONFIG_DIR`, default the home directory) — the file the same
 `/login` writes beside the credential that session uses; absent when the
-file or field cannot be read. **The fingerprint is bound to the
+file or field cannot be read. **An authentication override keeps the
+session `unknown`:** Claude Code spawns the status line with its own
+environment, so the bridge sees the `CLAUDE_CODE_OAUTH_TOKEN` (the
+injected credential `_read_process_oauth_token` already knows about),
+`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` the session was launched
+with. A session running under any of them authenticates as whatever
+that value names, which no watched store proves — `.claude.json` and
+the Keychain can still say A while the request went out as B — so the
+bridge writes such a session's payloads to `unknown`, makes no binding,
+and tests only the variable's presence: the value is never read into a
+sample, a log or the state file. **The fingerprint is bound to the
 observation, not to the invocation:** a running session keeps Claude
 Code's cached `rate_limits` and re-emits them on non-API triggers, so if
 another process logs in as account B in between, reading `.claude.json`
@@ -649,7 +659,20 @@ window as "no observation", not zero.
    completed probe but is not once a persisted session floor can be
    served after a restart with both sources stale. So a session value
    is recorded as an observation only when the session window is
-   **live** by the liveness rule above. The wire has no session-stale
+   **live** by the liveness rule above. **And the tracker is partitioned
+   like the cache:** `MaxTrackerStore` today keeps one Claude bucket of
+   day peaks and maxed weeks with no account identity, so account A's
+   80 % session peak would stay on B's tracker after a switch to B at
+   10 %. `observe_quota` gains the same identity argument `latest`
+   gains, Claude day peaks and maxed weeks are stored per identity (the
+   persisted file keys Claude's `days` and `weeks` by identity; Codex is
+   unchanged), the tracker page reads the probe's current identity — B's
+   tracker is empty until B's own observations arrive, and A's peaks
+   wait under A — and `usage_history.record_many` carries the identity
+   on Claude samples the same way. Existing Claude peaks without an
+   identity are the legacy case: kept, never re-keyed, shown only while
+   no identity is known, and left to age out, the same rule as legacy
+   cache records. The wire has no session-stale
    key the firmware would honour — `test/test_tokens.c` asserts that
    `claudeSessionStale` never sets provenance, and the card's only stale
    mark is `claudeWeekStale` — so a session value is sent only when the
@@ -949,6 +972,16 @@ Regression tests must prove:
   recorded nowhere, and the same floor beside a live weekly window from
   a fresh bridge payload without a session window is withheld
   (`claudeSessionPct` null) because the firmware could not flag it;
+- after account A contributed an 80 % session peak, a switch to B at
+  10 % shows B's tracker with 10 % and no 80 %, A's day peak stays under
+  A and is shown again when A returns, the usage history carries the
+  identity on each Claude sample, and a legacy peak without an identity
+  is shown only while no identity is known and is never re-keyed;
+- a bridge run with `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN` or
+  `ANTHROPIC_API_KEY` set in its environment lands its payload in
+  `unknown` and makes no binding even when its transcript postdates the
+  mark, and the variable's value appears in no sample, log or state
+  file;
 - with no bridge installed and the probe stale, a fresh matching
   plan-usage sample of the selected reset keeps `claudeWeekStale` false
   exactly as `test_snapshot_uses_fresh_local_claude_week_when_oauth_is_stale`
