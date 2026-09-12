@@ -942,8 +942,11 @@ Regression tests must prove:
   card), never A's; the reverse holds; two consecutive unidentified
   accounts (tokens whose profile calls failed) land in two
   credential-fingerprint partitions and the second never reads the
-  first's record; and the persisted cache never contains a token or
-  `default-v1` for Claude;
+  first's record; and the persisted cache never contains a token, and
+  gains no new Claude `default-v1` record while the bridge is enabled
+  (an unexpired legacy `default-v1` record from before the upgrade
+  stays persisted and unreadable, as the migration rule says, until it
+  expires);
 - a tokenserver restarted during a persisted 429 cooldown restores the
   cache identity and the resolved pairs from the probe state file,
   carries the account fingerprint for a current token whose credential
