@@ -6,11 +6,19 @@
 authorizes no code, no simulator frame and no flash.
 
 **Scope:** One new optional page, "Blocked on you", and the server-side
-ledger that feeds it. Also records that the *panic stop* the same
+ledger that feeds it. Also records where the *panic stop* the same
 brainstorm document names as "the one feature to build before all of them"
-already shipped: KEY3 sends a signed deny-all to `/api/panic`
-(`platform/button_arbitration.c`, `components/app_tokens/needs_you_net.c`,
-`InteractionStore.panic`), so this spec does not re-design it.
+stands, so this spec does not re-design it: the first half shipped — KEY3
+sends a signed deny-all to `/api/panic` (`platform/button_arbitration.c`,
+`components/app_tokens/needs_you_net.c`, `InteractionStore.panic`) and
+`deny_all()` denies **the interactions pending at that moment**, which
+`test_authenticated_panic_denies_only_the_current_snapshot` pins on
+purpose. The second half the brainstorm asks for, *holding a deny-all
+flag until cleared* so nothing can park right after the press, is **not
+implemented** and stays remaining work outside this spec; a hook can park
+a new interaction one second after a panic today. The ledger records a
+panic as `panic` for exactly the holds it denied and claims nothing
+about later ones.
 
 ## Problem
 
@@ -71,21 +79,29 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 
 `blockedNowS` is the age of the oldest still-parked interaction, or 0.
 "Today" is the host's local calendar day, the same rule the Max Tracker
-uses. **Open holds count too:** `todayS`, the provider totals and
-`countToday` include the in-day elapsed part of every still-parked
-interaction, computed the same way as a closed row with `endedAt` taken
-as now, so the day's first wait is visible on the hero while it is
-happening and not only once it closes — a page saying `0` over a
-`BLOCKED RIGHT NOW` of several minutes would be the invented-zero the
-honesty rule forbids. `longestTodayS` is the same: it is the largest
-in-day part over closed rows **and** open holds, so `LONGEST WAIT`
-can never read less than the **in-day part** of the current hold. It
-can legitimately read less than `BLOCKED RIGHT NOW`, which is the
-hold's whole age: at 00:10 a hold parked at 23:50 shows `blockedNowS`
-1200 and contributes 600 to `longestTodayS`, because the other 600
-belong to yesterday, and the page shows exactly that. The provider header names the providers
-of open holds as well. When an open hold closes, its row replaces its
-live contribution; the total never steps back at that moment. Closed rows
+uses. **Open holds count too, but only what is on disk:** `todayS`, the
+provider totals and `countToday` include, for every still-parked
+interaction, the in-day part of its **last persisted checkpoint**
+(`elapsedS` in the open-hold marker, below), computed the same way as a
+closed row with `endedAt` taken as the checkpoint's moment — so the
+day's first wait is visible on the hero while it is happening and not
+only once it closes (a page saying `0` over a `BLOCKED RIGHT NOW` of
+several minutes would be the invented-zero the honesty rule forbids),
+and so the cumulative total never contains a second that a crash could
+take back: the hero advances in steps of at most
+`WAIT_MARKER_CHECKPOINT_S` and can trail the live age by that much,
+which the spec prefers to a number that moves backward. `blockedNowS`
+alone is the live age. `longestTodayS` follows the same rule: the
+largest in-day part over closed rows **and** open holds' checkpoints, so
+`LONGEST WAIT` can never read less than the **checkpointed in-day part**
+of the current hold. It can legitimately read less than `BLOCKED RIGHT
+NOW`, which is the hold's whole live age, for two reasons the page
+accepts: the checkpoint lag, and midnight — at 00:10 a hold parked at
+23:50 shows `blockedNowS` 1200 and contributes at most 600 to
+`longestTodayS`, because the other 600 belong to yesterday. The provider
+header names the providers of open holds as well. When an open hold
+closes, its row replaces its checkpointed contribution with the full
+measured duration; the total never steps back at that moment. Closed rows
 contribute only the part of their measured duration that falls in the
 day. The split is made on the interval
 `[endedAt - durationS, endedAt]`, not on `[startedAt, endedAt]`: the
@@ -151,10 +167,10 @@ elapsedS`, then clears the list: the row stops at the last durable
 observation, so a process that dies with a hold parked and stays down
 for hours charges the human the seconds it measured before it died and
 nothing of the outage (the hook connection ended at the crash, and so
-did the wait). The bound runs the other way: the panel may have shown up
-to `WAIT_MARKER_CHECKPOINT_S` more live than the checkpoint holds, and a
-crash then steps the total back by at most that, named beside the
-lost-row bound rather than hidden. A stale marker left by a close that
+did the wait). And because the live aggregate above counts open holds
+by the same checkpoint, a crash between checkpoints takes back nothing
+the panel had already added to `todayS`: the total after the restart
+equals the total before it, with only `blockedNowS` gone. A stale marker left by a close that
 happened inside the writer window before a crash resolves the same way:
 its checkpoint is at most the hold's true length, so a short completed
 wait can be recorded short or absent, never long. No wall-clock
@@ -193,19 +209,22 @@ test proves it rather than the spec assuming it (below).
    window, and a total the panel already showed can then be lower after
    the restart; the spec accepts that bound rather than writing on the
    hook's thread, and `GET /` reports `waits.rows` so the doctor can show
-   the file's state. The open-hold live contribution above is recomputed
-   from `_pending` on every poll; what is persisted for an open hold is
-   only its marker (provider, kind, `startedAt`, checkpointed
-   `elapsedS`), rewritten by the same writer at park, at ending and on
-   the checkpoint cadence while anything is open, and closed by the final
-   flush on a clean stop, so a restart closes it at the last observation
-   rather than forgetting it or extending it to the next boot.
+   the file's state. What is persisted for an open hold is only its
+   marker (provider, kind, `startedAt`, checkpointed `elapsedS`),
+   rewritten by the same writer at park, at ending and on the checkpoint
+   cadence while anything is open, and closed by the final flush on a
+   clean stop, so a restart closes it at the last observation rather
+   than forgetting it or extending it to the next boot. The aggregate
+   counts each open hold by that persisted checkpoint (the store keeps
+   the value the writer last wrote beside the pending entry) and only
+   `blockedNowS` by its live age.
 4. `AgentStatusService.snapshot()` calls one method,
    `InteractionStore.wait_aggregates(now)`, in two steps. Under the
    store's own lock it takes one coherent **snapshot** — the ledger's
    rows that can touch today and a privacy-limited view of *all* pending
-   entries (provider, kind, `started_wall` and monotonic elapsed, nothing
-   else) in the same critical section — and releases the lock. Rows are
+   entries (provider, kind, `started_wall`, the last persisted checkpoint
+   and the live monotonic elapsed, nothing else) in the same critical
+   section — and releases the lock. Rows are
    kept in `endedAt` order and a row touches today only if its `endedAt`
    is at or after today's local midnight, so that copy is a bisect plus a
    slice of today's tail, not a walk of the eight-day file. The overlap
@@ -279,13 +298,15 @@ Regression tests must prove:
 - a park writes its marker within the writer window, an ending removes
   it, and an open hold's checkpoint advances at least every
   `WAIT_MARKER_CHECKPOINT_S`, so the persisted `open` list mirrors
-  `_pending` and a crash steps the total back by at most that interval
-  (the test names the bound);
-- an open hold is counted live in `todayS`, its provider total,
-  `countToday` and `longestTodayS` (the first hold of the day makes
-  `LONGEST WAIT` equal `BLOCKED RIGHT NOW`, never 0; at 00:10 a hold
-  parked at 23:50 makes `blockedNowS` 1200 and `longestTodayS` 600, and
-  the two are allowed to diverge exactly there); three concurrent
+  `_pending`; a simulated crash between two checkpoints leaves `todayS`,
+  the provider totals, `countToday` and `longestTodayS` exactly where the
+  panel last saw them (only `blockedNowS` drops to 0);
+- an open hold is counted in `todayS`, its provider total, `countToday`
+  and `longestTodayS` by its checkpoint: after the first checkpoint the
+  day's first hold makes `LONGEST WAIT` equal the checkpointed part of
+  `BLOCKED RIGHT NOW` and never 0, the hero never exceeds what the
+  marker file holds, and at 00:10 a hold parked at 23:50 makes
+  `blockedNowS` 1200 and `longestTodayS` at most 600; three concurrent
   holds across both providers are all counted and `blockedNowS` is the
   oldest; and closing one does not step the total back — including a
   close that races the 1 s snapshot, which a test drives by interleaving
@@ -344,7 +365,8 @@ page off.
    hook-derived number as the single source to avoid two definitions of
    the same minute? The spec leans single source.
 4. Should a `restart` row be shown apart from the others on the page one
-   day (its duration is wall-derived and ends at the new process's start,
-   not at the human's answer)? The spec counts it in the totals so the
-   number never steps back, and leaves any separate rendering to a later
-   design.
+   day? Its duration is the marker's monotonic-derived checkpoint and its
+   synthetic end is `startedAt + elapsedS`, the last moment the old
+   process observed the hold, not the human's answer and not the new
+   process's start. The spec counts it in the totals so the number never
+   steps back, and leaves any separate rendering to a later design.
