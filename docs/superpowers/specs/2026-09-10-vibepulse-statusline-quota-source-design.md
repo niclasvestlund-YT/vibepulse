@@ -206,8 +206,15 @@ lifetime, because the account file changed during it or before the
 bridge could witness it — the racing-login case, an in-session
 `/login`, and a session that predates the bridge install all land
 there, by design, rather than under a fingerprint nobody proved. A
-bound session never re-reads the file: later proving payloads keep the
-binding made at the first one. The tokenserver derives the probe's the same
+bound session never re-reads the file to *re-bind*: later proving
+payloads keep the binding made at the first one. But a binding is not
+permanent either: an in-session `/login` changes the account behind an
+already-bound session, and the bridge cannot tell which session ran it,
+so **an observed account transition in a config directory invalidates
+every binding made under the previous value in that directory** — those
+sessions go to `unknown` for the rest of their lifetime, their later
+increases and rollovers land in the `unknown` entry rather than in A's,
+and a switch back never revives the old binding. The tokenserver derives the probe's the same
 way, from the `.claude.json` beside the credential store the winning token
 came from: the keychain entry and the credentials file are written by
 that `/login`, so a probe served by either carries the home directory's
@@ -330,11 +337,16 @@ timestamp, not by which source it is:
    way a ring would walk backward inside one reset window on nothing but
    a timer. What freshness still governs is liveness and scheduling,
    and liveness is a property of the **window**, not of the winning
-   value: a window is live when *either* the probe succeeded within its
-   own interval and its observation is of the selected reset *or* a
+   value: a window is live when the probe succeeded within its own
+   interval and its observation is of the selected reset, *or* a
    matching-account bridge window has `seen` younger than
    `STATUSLINE_FRESH_S` (proposed 15 minutes), is unexpired **and is the
-   reset the arbitration selected** — a bridge still reporting an older
+   reset the arbitration selected**, *or* — for the weekly window only —
+   an accepted plan-usage sample of the selected reset is fresh under
+   the 2026-08-23 rules, which is what keeps the card live today with
+   the probe stale and no bridge
+   (`test_snapshot_uses_fresh_local_claude_week_when_oauth_is_stale`)
+   and must go on doing so for a user who declines the bridge — a bridge still reporting an older
    reset while the probe has moved to a newer one is not watching the
    window the ring shows, so it cannot keep that window live, exactly as
    it cannot stretch the probe interval.
@@ -482,7 +494,16 @@ sample file too, and the merge treats it as "no observation", not zero.
    a matching bridge window is fresh; `claudeModelWeekPct`
    keeps its probe-or-cache path. The Max Tracker records a bridge
    observation as live only under the same "fresh, live, with reset" gate
-   the probe's observations pass today.
+   the probe's observations pass today — and the session window gets
+   the gate it lacks: `get_snapshot()` today forwards every non-null
+   `sessionPct` to `MaxTrackerStore.observe_quota` and
+   `usage_history.record_many` hard-codes the session sample as live,
+   which was harmless while a session value could only come from a
+   completed probe but is not once a persisted session floor can be
+   served after a restart with both sources stale. So a session value
+   is recorded as an observation only when the session window is
+   **live** by the liveness rule above; a served-but-stale floor reaches
+   the ring, flagged, and never the tracker or the history.
 5. The doctor prints `PASS statusLine bridge: fresh (N s)` / `WAIT statusLine
    bridge: installed, no sample yet` / `FIX statusLine bridge: the
    configured command is not this checkout's bridge` / `OFF`. The smoke test
@@ -698,7 +719,18 @@ Regression tests must prove:
   stale after a probe was scheduled at the long interval makes
   `get_limits()` start a probe on the next request;
 - a bridge observation reaches the Max Tracker only through the existing
-  live gate;
+  live gate, and a session value reaches the Max Tracker and the usage
+  history only while the session window is live: a persisted session
+  floor served after a restart with the probe past its interval and no
+  fresh bridge is shown on the ring and recorded nowhere;
+- with no bridge installed and the probe stale, a fresh matching
+  plan-usage sample of the selected reset keeps `claudeWeekStale` false
+  exactly as `test_snapshot_uses_fresh_local_claude_week_when_oauth_is_stale`
+  asserts today;
+- an account transition observed in a config directory sends every
+  session bound under the previous value to `unknown` for its lifetime,
+  their later proving payloads land in the `unknown` entry, and a
+  switch back does not revive the old binding;
 - `GET /` reports the five bridge statuses; the doctor and smoke test map
   them as specified; the SessionStart context stays within its byte bound;
 - setup writes a complete `{"type": "command", "command": …}` object
