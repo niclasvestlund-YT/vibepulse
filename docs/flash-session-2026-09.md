@@ -16,16 +16,30 @@ flashed over USB (the session is in
 firmware row below is on the glass since then, unverified (the last row is
 host-side behaviour, not panel image), and the starting state for §1 is an
 image that *has* the SETTINGS menu. What is still missing from the
-glass is everything that landed after `e51b79f`: coredump, the reboot ledger,
-poller backoff, the warm-up placeholders, the relay-URL log redaction
-(`add41fd`, #88 — on the installed image a failed numbers-relay fetch still
-logs the credential-bearing relay URL, so **serial logs from `e51b79f` are not
-safe to share unredacted** until the next flash; check the fix on the glass by
-forcing one failed fetch and reading the line), and SETTINGS → LABS (#98,
-`8d53c69`), whose physical selector review `CHANGELOG.md` still lists as
-pending — the KEY3 manual test has no LABS checks, so before calling LABS
-reviewed walk SETTINGS → LABS, flip each choice, restart, and compare the glass
-against the frames in `docs/superpowers/reviews/2026-09-09-labs-static-simulator.md`. **One of those needs USB even
+glass is every firmware commit after `e51b79f` — the list below is
+`git log e51b79f..main -- main components` as of 2026-09-12; regenerate it
+before the session and add a check for anything new:
+
+- `f01210f` (#109) coredump to flash, reboot ledger, pinned logging — check:
+  the `omstartsliggare` line after the banner, and the dump notice after the
+  one-time partition-table flash below.
+- `5bc2792` (#110) poller backoff — check: stop the tokenserver, watch the
+  transitions log, restart it, watch the recovery line.
+- `29e1d64` (#104) warm-up placeholders — check: restart the service with a
+  large history and watch the quota rings refresh while the volume counters
+  keep their last values instead of showing zeros.
+- `ae01fed` (#92) the optional GitHub tile left a hole and Value indexed past
+  the end — check: with the GitHub page off, swipe through every page and
+  confirm Value is reachable as the last tile with no blank tile before it.
+- `add41fd` (#88) relay-URL log redaction — on the installed image a failed
+  numbers-relay fetch still logs the credential-bearing relay URL, so **serial
+  logs from `e51b79f` are not safe to share unredacted** until the next flash;
+  check: force one failed fetch and read the line.
+- `8d53c69` (#98) SETTINGS → LABS — its physical selector review is still
+  listed as pending in `CHANGELOG.md` and the KEY3 manual test has no LABS
+  checks; check: open SETTINGS → LABS, flip each choice, restart, and compare
+  the glass against the frames in
+  `docs/superpowers/reviews/2026-09-09-labs-static-simulator.md`. **One of those needs USB even
 though the app goes over the air:** the coredump partition is new in the
 partition table, and OTA never writes the table, so before the first dump can
 land the operator runs a one-time `idf.py -p <port> partition-table-flash`
@@ -66,9 +80,14 @@ What the panel had never seen when this sheet was written:
    launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver
    ```
 
-   Then `python3 tools/vibepulse_setup.py doctor` — it now names a saved
+   Use the checkout's `.venv/bin/python` for every tool below: on this Mac
+   bare `python3` is 3.9.6 and the doctor crashes on it before it can run
+   (found 2026-09-06; the venv recipe is in README under "Hardware
+   knowledge").
+
+   Then `.venv/bin/python tools/vibepulse_setup.py doctor` — it now names a saved
    Codex mode that would silently hide permission cards (#82) — **and**
-   `python3 tools/tokenserver/smoke.py`, which compares the live service's
+   `.venv/bin/python tools/tokenserver/smoke.py`, which compares the live service's
    `rev` and `srcFingerprint` against *this* checkout. That second check
    is not optional: `kickstart` restarts whatever checkout the plist
    already points at, and a service running from an older worktree
@@ -76,7 +95,7 @@ What the panel had never seen when this sheet was written:
    read `build*/torget.bin` from *that* tree, so the staged build in §3
    would never be advertised and 3.4 could not fire. If smoke reports a
    rev or fingerprint mismatch, re-point the service with
-   `python3 tools/vibepulse_macos_service.py install` from this checkout
+   `.venv/bin/python tools/vibepulse_macos_service.py install` from this checkout
    (it does a real `bootout` + `bootstrap`; `kickstart` cannot move it),
    then run smoke again before going on.
 4. **Power and serial at the same time.** The panel must run from its
