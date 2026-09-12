@@ -311,8 +311,10 @@ and the page model's `waits` slot is written by accepted frames alone —
 and the retained block keeps its accept stamp, ages into `STALE` on its
 own 60 s relay budget above, and stays `STALE` (or becomes `DAY ENDED`
 when its countdown runs out) until a frame arrives; it never becomes
-absent on a timer. An **accepted** frame without a `waits` block — an
-older server, or a rollback — is a server statement, but one the page
+absent on a timer. An **accepted** frame whose `waits` member is
+*missing* — an older server, or a rollback — is a server statement
+(a member that is present but malformed is not, and leaves the retained
+block alone, as the parser step below says), but one the page
 cannot order: absence carries no `g`, and a pre-upgrade frame the
 mailbox still holds can be 42 s older than the LAN block it would
 clear. So absence is ordered as a block with `g` 0 under the rule
@@ -337,7 +339,12 @@ room for**, because the build rate is unbounded — the panel, the relay
 publisher and any local `/api/agent-status` client each build — so no
 fixed restart increment could be proven larger than what a crash
 loses. The file holds a **reservation**, `gReserved`, and a build may
-serve only `g < gReserved`: on start the ledger reads `gReserved`, sets
+serve a generation only while the forward modular distance from the
+last served `g` to `gReserved` — `(gReserved − g) mod 10⁹` — is above
+zero, never by a raw `g < gReserved` comparison, which is false the
+moment a reservation straddles the modulus (`g` at 999 950 000 with
+`gReserved` wrapped to 50 000 still has 100 000 generations in hand):
+on start the ledger reads `gReserved`, sets
 `g` to it and persists `gReserved + WAIT_GEN_RESERVE` (proposed
 100 000) *before* the first build; while serving, the writer persists
 the next reservation once half of the current one is consumed, off the
@@ -620,9 +627,18 @@ paid for in both; there is no key left to shorten.
    and `nowS` is the largest elapsed among them. No new public API
    and nothing leaves the process; the method exists so the two sources
    are read together.
-5. The firmware's agent-status parser reads `waits` optionally (all
+5. The firmware's agent-status parser reads `waits` in **three
+   states**, never two: *missing* (no `waits` member), *valid* (all
    nine fields, `g` and `l` included, numeric and non-negative, `r`
-   absent, 0, 1 or 2, else the block is treated as absent), lets it
+   absent, 0, 1 or 2) and *malformed* (a `waits` member that fails any
+   of that). Only a missing member is the server's statement of absence
+   that the ordered-absence rule above may act on; a malformed member
+   is a broken frame, not a statement — a newer or buggy tokenserver
+   sending it every second must not clear the last valid totals — so
+   it leaves the retained block and its accept stamp untouched (the
+   block ages into `STALE` on its own budget), applies none of the
+   frame's `waits` and counts as a parse failure of that member alone,
+   the rest of the payload still applying. A valid block the parser lets
    replace the retained block only when its `l` matches, it is
    continuous with the retained block (no cumulative field, `m`
    included, lower on the same served day without `r`) and its `g` is
@@ -826,9 +842,12 @@ Regression tests must prove:
   keeps its block, nothing retreats), and a crash at any point followed
   by a restart serves a first `g` above every `g` the previous process
   served, at whatever build rate the test drives;
-- the firmware parser accepts the block, rejects a malformed one as absent
-  without dropping the rest of the payload, and older payloads without it
-  still parse (C host test);
+- the firmware parser accepts a valid block, treats a malformed one as
+  malformed rather than missing — the retained block and its stamp stay
+  untouched through any number of malformed frames and age into
+  `STALE`, never into the absent state — without dropping the rest of
+  the payload, and older payloads without the member still parse and
+  take the ordered-absence path (C host test);
 - the page's stale rule (C host test on the page model): a retained
   LAN snapshot older than `TK_WAITS_STALE_MS` minus its request duration
   renders `BLOCKED RIGHT NOW` as dashes and the totals with the stale
@@ -841,7 +860,8 @@ Regression tests must prove:
   zero renders the totals as dashes with `DAY ENDED` until a newer block
   arrives, a block with `r` 1 renders its totals under `CLOCK
   RESET`, one with `r` 2 under `LEDGER RESET`, and a `r` of 3 or
-  `true` makes the block absent; an accepted frame without `waits`
+  `true` makes the member malformed (the retained block stays); an
+  accepted frame without `waits`
   arriving 25 s after a LAN block's accept, over either transport,
   leaves that block on the glass, and one arriving `RELAY_AGE_BOUND_MS`
   plus its fetch after the accept renders the absent state; the relay
