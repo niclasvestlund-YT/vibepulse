@@ -299,9 +299,17 @@ credential beside it — a `/login` that has written the file for B and
 not yet replaced A's token would leave a session started in that torn
 moment able to bind A's quota to B. Only a **watched directory** can
 bind. The tokenserver watches the home config directory by default and
-every `CLAUDE_CONFIG_DIR` that setup was run with (setup records the
-directory in the tokenserver's configuration; the doctor lists them and
-warns about a directory it is run in that is not registered), each
+every `CLAUDE_CONFIG_DIR` that setup was run with — setup records the
+directory in the tokenserver's configuration with an atomic write
+through `state_files`, and the running tokenserver **picks it up
+without a restart**: the watcher `stat`s that configuration file on
+every tick and re-reads the directory list when its modification time
+moved, the same way it reads `.claude.json`, so a directory registered
+against a running service is watched within one `ACCOUNT_WATCH_S`;
+the doctor lists the registered directories, shows one the running
+service has not yet confirmed (per `GET /`) as `pending` for at most
+that interval, and warns about a directory it is run in that is not
+registered — each
 with its own credential store (`<dir>/.credentials.json`), `.claude.json`,
 profile resolution, mark and generation. A registered directory whose
 credential store the tokenserver cannot read — on macOS a non-default
@@ -668,11 +676,16 @@ window as "no observation", not zero.
    persisted file keys Claude's `days` and `weeks` by identity; Codex is
    unchanged), the tracker page reads the probe's current identity — B's
    tracker is empty until B's own observations arrive, and A's peaks
-   wait under A — and `usage_history.record_many` carries the identity
-   on Claude samples the same way. Existing Claude peaks without an
-   identity are the legacy case: kept, never re-keyed, shown only while
-   no identity is known, and left to age out, the same rule as legacy
-   cache records. The wire has no session-stale
+   wait under A — and the usage history is partitioned on **both**
+   sides: `record_many` carries the identity on Claude samples, and the
+   read paths `delta_since()` and `forecast()`, which today take only
+   provider, window and reset, gain the same identity argument and
+   consider only samples under it, so a switch from A at 10 % to B at
+   80 % inside one reset cycle reports no 70-point delta as B's usage
+   today and B's forecast starts from B's samples alone. Existing Claude
+   peaks and history samples without an identity are the legacy case:
+   kept, never re-keyed, read only while no identity is known, and left
+   to age out, the same rule as legacy cache records. The wire has no session-stale
    key the firmware would honour — `test/test_tokens.c` asserts that
    `claudeSessionStale` never sets provenance, and the card's only stale
    mark is `claudeWeekStale` — so a session value is sent only when the
@@ -975,8 +988,17 @@ Regression tests must prove:
 - after account A contributed an 80 % session peak, a switch to B at
   10 % shows B's tracker with 10 % and no 80 %, A's day peak stays under
   A and is shown again when A returns, the usage history carries the
-  identity on each Claude sample, and a legacy peak without an identity
-  is shown only while no identity is known and is never re-keyed;
+  identity on each Claude sample and `delta_since()` and `forecast()`
+  under B's identity see none of A's samples (a switch from A at 10 %
+  to B at 80 % inside one reset cycle yields no delta and a forecast
+  from B's samples alone), and a legacy peak or sample without an
+  identity is read only while no identity is known and is never
+  re-keyed;
+- registering a `CLAUDE_CONFIG_DIR` with setup while the tokenserver is
+  running makes the directory watched within one `ACCOUNT_WATCH_S` with
+  no restart, `GET /` lists it, the doctor shows it as `pending` until
+  then and as watched afterwards, and a session in it binds from the
+  watcher's first confirmed observation;
 - a bridge run with `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN` or
   `ANTHROPIC_API_KEY` set in its environment lands its payload in
   `unknown` and makes no binding even when its transcript postdates the
