@@ -79,8 +79,13 @@ file in the tokenserver's state directory, `claude-statusline-quota.json`.
 **Every retained field is validated strictly before it can touch the
 file**, in the spirit of `docs/lessons.md`'s hostile-input entry:
 `used_percentage` must be a finite number (not a bool) in `[0, 100]`,
-`resets_at` a finite integer epoch that is in the future and no more
-than eight days ahead, `version` a short printable string. Both windows
+`resets_at` a finite integer epoch that is in the future and no further
+ahead than its window can reach — five hours plus
+`STATUSLINE_RESET_SLACK_S` (proposed 15 minutes, for skew between the
+API's clock and the host's) for `five_hour`, eight days for `seven_day`
+— because a `five_hour` window claiming a reset a week out would
+otherwise win the later-reset arbitration below and hold the session
+ring on a bogus window for a week; `version` a short printable string. Both windows
 are validated **before** anything is merged, and if any window that is
 present fails, the **whole payload is rejected**: nothing is written,
 the stored entry stays exactly as it was, and the chained command still
@@ -197,10 +202,24 @@ runs continuously: every `ACCOUNT_WATCH_S` (proposed 30 s) it `stat`s
 `.claude.json` and the credential store (a read only when either
 changed, never an HTTP call) and, whenever the store's token — resolved
 through its profile as above — names the same account `.claude.json`
-names, it records `accountSeenSince` as the **later of the two files'
-modification times** at that observation: at that moment both files
-already held their current, mutually consistent values, so the pair has
-been in place at least since then. A `/login` whose two writes are
+names, it records `accountSeenSince` as the **later of the two stores'
+modification times** at that observation: at that moment both already
+held their current, mutually consistent values, so the pair has been in
+place at least since then. For the credentials file that time is its
+`mtime`; on macOS the home credential is a Keychain item, not a file,
+and `_read_keychain_oauth()` today asks `security find-generic-password
+-w` for the secret alone, so the watcher runs the same lookup **without
+`-w`** — which prints the item's attributes and never the secret — and
+takes the item's modification date from its `mdat` attribute, reading
+the secret only when `mdat` moved; that date is the Keychain's own
+record of the last write, the equivalent of the file's `mtime`, and is
+persisted beside the mark like the file times. A store whose
+modification time cannot be obtained — a `security` output without a
+parseable `mdat`, a credentials file that cannot be `stat`ed — yields
+no mark at all and the directory is `unproven_dir`; the watcher's
+observation time is never used in its place, because a mark set at
+observation time would leave a session started after the login and
+before the next poll `unknown` for its lifetime. A `/login` whose two writes are
 separated by a pause is therefore never a proof — until the second
 write lands the token resolves to one account and the file names
 another, no mark is recorded, and once it lands the mark is that
@@ -503,7 +522,18 @@ timestamp, not by which source it is:
    accounts and B's probe momentarily fails. A token refresh changes the
    credential fingerprint: with the account known nothing moves, and
    with it unknown the refresh costs one cache miss; that is the accepted
-   price of never crossing accounts. Every Claude record — probe- or
+   price of never crossing accounts. A credential-fingerprint partition
+   is a waiting room, not a dead end: when a token whose profile call
+   had failed resolves on a later cycle, the profile has proven exactly
+   which account authored every record under that token's credential
+   fingerprint, so the cache **re-keys them to the account fingerprint**
+   in that same cycle, before the usage call, merging by the same
+   rules as any two observations of one account (a later reset wins,
+   the higher percentage for the same reset), and the credential
+   partition is left empty — so a resolution followed by a failed or
+   429'd usage call still finds the session, weekly and model-pool
+   records the previous cycle persisted. This is the opposite case from
+   the legacy migration below: the provenance here is exact. Every Claude record — probe- or
    bridge-fed — is persisted under that identity, `latest` gains an
    identity argument the tokenserver always passes, records under
    another identity are never candidates, and `default-v1` is no longer
@@ -553,9 +583,13 @@ stale (no Claude Code turn on this computer for a while), the probe
 returns to its current cadence automatically. No probe code is deleted in
 this change; the interval rule is the whole difference.
 
-**Nothing is inferred.** A window absent from the bridge sample (the free
-tier, an API-key session, a window past its reset) is absent from the
-sample file too, and the merge treats it as "no observation", not zero.
+**Nothing is inferred.** A window absent from a bridge payload (the free
+tier, an API-key session, a session-start invocation, a window past its
+reset) is **no observation**: the merge leaves the stored window
+untouched until its own `resets_at` passes, never writes zero, and
+never invents a window; a window no valid run has ever reported is
+absent from the sample file, and the arbitration treats an absent
+window as "no observation", not zero.
 
 ## Data flow
 
@@ -599,7 +633,12 @@ sample file too, and the merge treats it as "no observation", not zero.
    does **not** — it is the weekly window's liveness inverted, computed
    from both sources as the source-order section says, so an older probe
    observation that wins on percentage never marks the card stale while
-   a matching bridge window is fresh; `claudeModelWeekPct`
+   a matching bridge window is fresh — **and it stays `false` whenever
+   `claudeWeekPct` is `null`**, today's `pct is not None` guard kept as
+   is, because the firmware's `optional_stale` rejects the whole
+   `/api/tokens` payload for a true flag beside a null percentage and an
+   unavailable Claude source must not freeze the Codex and usage
+   figures with it; `claudeModelWeekPct`
    keeps its probe-or-cache path. The Max Tracker records a bridge
    observation as live only under the same "fresh, live, with reset" gate
    the probe's observations pass today — and the session window gets
@@ -743,6 +782,17 @@ Regression tests must prove:
   fingerprint for any token — the identity is the credential fingerprint
   and `.claude.json` naming an account changes nothing — and the bridge
   is not accepted until the cooldown ends and a profile call succeeds;
+- a token whose profile call failed and whose usage call succeeded
+  leaves records under its credential fingerprint; when its profile
+  resolves on the next cycle and that cycle's usage call fails or takes
+  a 429, `latest` under the account fingerprint returns those records
+  (session, weekly and model pool), the credential partition is empty
+  afterwards, and a same-reset collision with an existing account record
+  keeps the higher percentage;
+- with no weekly window selected (fresh install, probe unavailable, no
+  cache) `/api/tokens` carries `claudeWeekPct` null with
+  `claudeWeekStale` false, never true, and the firmware parser accepts
+  the payload;
 - legacy `default-v1` Claude records are never re-keyed: with a legacy
   record present and a fingerprint known, the lookup returns nothing for
   the fingerprint, `GET /` names the unreadable records and their count,
@@ -844,7 +894,10 @@ Regression tests must prove:
 - the bridge rejects a non-object, oversized or non-UTF-8 stdin with exit 0
   and no file written; a payload in which any present window has a
   boolean, non-finite, negative or over-100 `used_percentage`, or a
-  `resets_at` that is a bool, in the past or more than eight days ahead,
+  `resets_at` that is a bool, in the past, more than five hours plus
+  `STATUSLINE_RESET_SLACK_S` ahead for `five_hour` or more than eight
+  days ahead for `seven_day` (a `five_hour` reset seven days out is
+  rejected, a `seven_day` reset seven days out accepted),
   is rejected whole — the other, valid-looking window is not merged
   either, the stored entry is byte-identical afterwards, and the chained
   command still runs;
