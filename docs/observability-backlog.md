@@ -265,8 +265,10 @@ Physical dedicated-power acceptance remains separate evidence.
 2026-09-06 over ~30 minutes of uptime on `torget-home-01`. Two distinct
 signals, which should not be conflated:
 
-**1. Memory.** The firmware's own guard fires essentially every 10 s sample
-from t=23 s onward — 76 occurrences and counting:
+**1. Memory.** The firmware's own guard fires on the low half of the block's
+normal oscillation — 76 of roughly 120 samples in the first 20 minutes, and
+1 083 of 2 527 (43 %) over the whole session, including hours when nothing was
+wrong (the correction further down has the detail):
 
 ```
 W (307120) torget: LÅGT DMA-block: 19456 byte (flush behöver 11520) — nära fryströskeln

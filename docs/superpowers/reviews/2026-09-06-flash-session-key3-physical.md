@@ -228,12 +228,16 @@ that is invisible to it and only shows up in `lägsta någonsin`. Any soak that
 watches the sampled figure alone will report "steady" through exactly this
 condition.
 
-This connects directly to the relay finding above. The old image did zero TLS
-and held a 40 960 B block with a 76 435 B internal-free low-water. The new image runs a
+**Discarded hypothesis, kept as written for the record.** The first reading
+tied this to the relay finding above: the old image did zero TLS and held a
+40 960 B block with a 76 435 B internal-free low-water, the new image runs a
 TLS handshake every 2.5 s, and mbedTLS session buffers are internal and
-DMA-capable — the churn fragments precisely the pool the display flush allocates
-from. The LVGL lock failures cluster near the low-water drops, which is
-consistent with contention while an allocation stalls.
+DMA-capable, so the churn would fragment the pool the display flush allocates
+from, with the LVGL lock failures clustering near the low-water drops. The
+interval analysis in OBS-37 refuted it the same night: the handshakes precede
+everything because they happen every 2.5 s, the lock failures and the memory
+figure are two separate signals, and no trigger was identified for any
+low-water step. Do not start from TLS.
 
 The overlays are not implicated: all three report `internt +0 B`, and the
 condition was already present before SETTINGS was ever opened.
