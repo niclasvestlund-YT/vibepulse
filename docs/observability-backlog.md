@@ -351,8 +351,11 @@ TLS client left running, a surviving failure says nothing about TLS.
 Two clients cannot be disabled this way and are traps for anyone trying:
 `TK_VIBEPULSE_INTERACTION_RELAY_URL` is read by CMake directly out of
 `secrets.h` (`components/app_tokens/CMakeLists.txt:26–41`) and its absence is a
-configure-time `FATAL_ERROR`, not a disabled client — the off switch is
-`TK_VIBEPULSE_INTERACTION_RELAY` in menuconfig. `SG_GLANCE_URL` has no `#ifdef`
+configure-time `FATAL_ERROR`, not a disabled client — the off switches are
+`TK_VIBEPULSE_INTERACTION_RELAY` **and** `TK_VIBEPULSE_AGENT_STATUS_RELAY` in
+menuconfig (`main/Kconfig.projbuild`): the live-status poller in
+`interaction_relay_net.c` keeps polling the same HTTPS relay on the second
+switch alone, so a build with only the first off is not TLS-free. `SG_GLANCE_URL` has no `#ifdef`
 anywhere and is referenced once, at
 `~/Solelkollen/components/app_solelkollen/net.c:59`, outside this repo;
 removing the define breaks that component's build, so Solelkollen is switched
