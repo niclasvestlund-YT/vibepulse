@@ -71,7 +71,7 @@ class DiscoveryAdvertiser:
             self.status = "unavailable"
             self.reason = "dependency-missing"
             self.logger.info(
-                "lokal VibePulse-upptäckt ej annonserad (zeroconf saknas)"
+                "local VibePulse discovery not advertised (zeroconf missing)"
             )
             return False
 
@@ -80,7 +80,7 @@ class DiscoveryAdvertiser:
             self.status = "unavailable"
             self.reason = "no-lan-address"
             self.logger.info(
-                "lokal VibePulse-upptäckt väntar (ingen LAN-adress hittad)"
+                "local VibePulse discovery waiting (no LAN address found)"
             )
             return False
 
@@ -103,12 +103,12 @@ class DiscoveryAdvertiser:
             if zc is not None:
                 try:
                     zc.close()
-                except Exception:
+                except Exception:  # noqa: S110 - already on the error path; the warning below carries the cause
                     pass
             self.status = "error"
             self.reason = type(exc).__name__
             self.logger.warning(
-                "lokal VibePulse-upptäckt kunde inte annonseras (%s)",
+                "local VibePulse discovery could not be advertised (%s)",
                 type(exc).__name__,
             )
             return False
@@ -117,7 +117,7 @@ class DiscoveryAdvertiser:
         self._service_info = info
         self.status = "ready"
         self.reason = None
-        self.logger.info("lokal VibePulse-upptäckt annonserad via mDNS")
+        self.logger.info("local VibePulse discovery advertised via mDNS")
         return True
 
     def stop(self) -> None:
@@ -130,9 +130,9 @@ class DiscoveryAdvertiser:
             if info is not None:
                 zc.unregister_service(info)
         except Exception:
-            self.logger.warning("kunde inte avregistrera VibePulse mDNS rent")
+            self.logger.warning("could not unregister VibePulse mDNS cleanly")
         finally:
             try:
                 zc.close()
             except Exception:
-                self.logger.warning("kunde inte stänga VibePulse mDNS rent")
+                self.logger.warning("could not close VibePulse mDNS cleanly")

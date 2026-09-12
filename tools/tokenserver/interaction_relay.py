@@ -666,5 +666,5 @@ class InteractionRelay:
             fields["status"] = status
         try:
             self._audit(event, fields)
-        except Exception:
+        except Exception:  # noqa: S110 - the audit trail must never break the relay loop
             pass

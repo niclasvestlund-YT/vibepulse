@@ -1,13 +1,13 @@
 """Aggregate Max Tracker daily activity into streaks, windows and the v1 payload.
 
-Ren funktionsyta: inget IO, ingen tidszonlogik. Varje funktion tar redan
-lokaliserade datumsträngar ("YYYY-MM-DD") och räknar enbart på kalenderdatum
-(:mod:`datetime.date`), aldrig på klockslag eller epoktid — DST-växlingar och
-årsskiften (inklusive ISO-veckoår med 53 veckor) hanteras därför korrekt utan
-någon särskild tidszonskod.
+Pure functions: no IO, no time-zone logic. Every function takes already
+localised date strings ("YYYY-MM-DD") and reasons about calendar dates only
+(:mod:`datetime.date`), never about clock times or epoch seconds -- so DST
+transitions and year boundaries (including ISO week-years with 53 weeks)
+come out right without any dedicated time-zone code.
 
-``build_payload`` konsumerar ett internt ``state``-dict som en framtida
-``MaxTrackerStore`` (backfill/persistens) förväntas mata:
+``build_payload`` consumes an internal ``state`` dict that
+``MaxTrackerStore`` (backfill/persistence) feeds it:
 
     state = {
         "claude": {
@@ -18,31 +18,32 @@ någon särskild tidszonskod.
         "stale": False,  # optional, defaults to False
     }
 
-``pct`` är kvot-procent för dagen (``None`` = ingen kvotmätning den dagen);
-alltid ett heltal eller ``None`` — enhetens parser har ett int8_t-fält och
-avvisar HELA svaret om en enda dag bär ett brutet tal, så avrundning sker
-här, inte device-side (se ``_round_day_pct``). ``act`` är sant om det fanns
-någon agentaktivitet den dagen (används för både den kombinerade
-STREAK-räkningen och som förutsättning för att räkna ut ``lvl`` — se
+``pct`` is the day's quota percentage (``None`` = no quota reading that
+day); always an integer or ``None`` -- the device parser has an int8_t
+field and rejects the WHOLE response if a single day carries a fraction,
+so rounding happens here, not device-side (see ``_round_day_pct``). ``act``
+is true if there was any agent activity that day (used both for the
+combined STREAK count and as the precondition for computing ``lvl`` -- see
 ``_provider_days``).
 
-``lvl`` (tercilnivå 0-2) har TVÅ separata källpopulationer, aldrig blandade:
-en dag med en RÅ ``vol`` (dagsvolym i tokens; blir aldrig en del av svaret,
-bara underlag) rankas via :func:`volume_levels` mot alla andra ``vol``-
-bärande dagar. En dag som istället bär ett explicit ``lvl``-fält direkt
-(så här matar :class:`MaxTrackerStore` in en tidigare SPARAD, redan
-klassificerad tercil efter en omstart) är AUKTORITATIV för sig själv —
-den används verbatim och deltar aldrig i rankningen, varken som kandidat
-eller som underlag för andras trösklar. Utan den uppdelningen skulle en
-sparad tercil (som per designen aldrig kan backa till rå volym igen)
-tyst räknas om varje gång den nya poolen av session-volymer ändras —
-[0,1,2] blir [0,0,1] efter en enda spara/läs-cykel, permanent, eftersom
-avslutade backfill-filer aldrig läses om.
+``lvl`` (tercile level 0-2) has TWO separate source populations, never
+mixed: a day with a RAW ``vol`` (day volume in tokens; never part of the
+response, only input) is ranked by :func:`volume_levels` against every
+other ``vol``-bearing day. A day that instead carries an explicit ``lvl``
+field (this is how :class:`MaxTrackerStore` feeds back a previously SAVED,
+already classified tercile after a restart) is AUTHORITATIVE for itself --
+it is used verbatim and never takes part in the ranking, neither as a
+candidate nor as input to anyone else's thresholds. Without that split a
+saved tercile (which by design can never return to raw volume) would be
+silently re-ranked every time the new pool of session volumes changes --
+[0,1,2] becomes [0,0,1] after a single save/load cycle, permanently, since
+finished backfill files are never re-read.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import tempfile
@@ -50,9 +51,16 @@ import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+try:
+    from .state_files import fsync_parent, quarantine_corrupt
+except ImportError:  # run as a script / from the directory itself
+    from state_files import fsync_parent, quarantine_corrupt
+
+log = logging.getLogger("tokenserver.state")
+
 if __package__:
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
-else:  # direktkörning: python3 tools/tokenserver/max_tracker.py
+else:  # run directly: python3 tools/tokenserver/max_tracker.py
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
 
 
@@ -496,6 +504,11 @@ class MaxTrackerStore:
         # resolved (parsed or discarded), so losing this cache just means
         # re-reading that one line's bytes from disk again.
         self._pending = {provider: {} for provider in PROVIDERS}
+        # Set when the file exists but could not be read (permissions, I/O):
+        # the store then starts empty AND refuses to save, because a rename
+        # needs only the directory's permission and would replace up to 400
+        # days of history with the empty state (Codex review of #105).
+        self._load_error: str | None = None
         self._load()
 
     # -- live rollup ---------------------------------------------------
@@ -1090,21 +1103,59 @@ class MaxTrackerStore:
                     del weeks[week]
 
     def _load(self) -> None:
+        """Populate from disk. A missing file is the normal first run; an
+        unreadable one is quarantined (OBS-11) rather than overwritten by
+        the next save -- this file holds up to 400 days of history."""
         try:
             raw = self.path.read_text(encoding="utf-8")
-        except OSError:
+        except FileNotFoundError:
+            return
+        except UnicodeError:
+            quarantine_corrupt(self.path, "not UTF-8")
+            return
+        except OSError as error:
+            self._load_error = type(error).__name__
+            log.warning("%s exists but could not be read (%s): starting "
+                        "empty and refusing to save over it until the "
+                        "service restarts with a readable file",
+                        self.path.name, self._load_error)
             return
         try:
             payload = json.loads(raw)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as error:
+            quarantine_corrupt(self.path, f"invalid JSON at byte {error.pos}")
             return
         if not isinstance(payload, dict):
+            quarantine_corrupt(self.path, "top level is not an object")
+            return
+        # save() always writes a dict section per provider, so a file
+        # missing one (`{}`, `{"claude": []}`) is not an older format but a
+        # damaged one: quarantine it rather than load nothing and let the
+        # next save overwrite it (the same shape smoke._tracker_state_shape
+        # already refuses).
+        if any(not self._valid_provider_section(payload.get(provider))
+               for provider in PROVIDERS):
+            quarantine_corrupt(
+                self.path, "a provider section (claude/codex) is missing or "
+                "not the {v, days, weeks, backfill} shape save() writes")
             return
         with self._lock:
             for provider in PROVIDERS:
-                section = payload.get(provider)
-                if isinstance(section, dict):
-                    self._load_provider(provider, section)
+                self._load_provider(provider, payload[provider])
+
+    @classmethod
+    def _valid_provider_section(cls, section) -> bool:
+        """The exact shape ``_provider_payload`` writes, nothing looser.
+
+        ``{}`` or ``{"days": []}`` parse fine and used to load nothing,
+        after which the next save overwrote the file. The format has had
+        all four keys since its first commit, so a section without them
+        is damage, not an older version.
+        """
+        return (isinstance(section, dict) and
+                section.get("v") == cls._SCHEMA_VERSION and
+                all(isinstance(section.get(key), dict)
+                    for key in ("days", "weeks", "backfill")))
 
     def _load_provider(self, provider: str, section: dict) -> None:
         """Populate ``self._state`` from one provider's persisted section.
@@ -1187,6 +1238,10 @@ class MaxTrackerStore:
         actual (potentially slow) disk write runs unlocked and never
         blocks a concurrent probe or HTTP snapshot.
         """
+        if self._load_error is not None:
+            raise OSError(
+                f"{self.path.name} was unreadable at startup "
+                f"({self._load_error}); refusing to overwrite it")
         with self._lock:
             self._prune_retention(today)
             payload = {provider: self._provider_payload(provider)
@@ -1253,6 +1308,10 @@ class MaxTrackerStore:
                 os.fsync(stream.fileno())
             os.replace(temp_path, self.path)
             temp_path = None
+            # The rename is not durable until the directory entry is
+            # (OBS-21): a power cut between here and the next directory
+            # flush could bring back the previous file, or none.
+            fsync_parent(self.path)
         finally:
             if temp_path is not None:
                 try:

@@ -51,7 +51,14 @@ the server already solved with `rev`/`startedAt` after it cost an hour
 `esp_reset_reason()` decoded to text. Cheapest line in this backlog.
 
 ### OBS-02 · Enable coredump to flash
-`firmware · M · open`
+`firmware · M · done in source (2026-09-10), physically unverified` —
+128K `coredump` partition, `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` (ELF,
+CRC32), `CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT` pinned, and
+`coredump_note()` in `app_main` logs when a dump is present and how to
+read it. CI builds it; the next flash session has to make it panic once
+(`CONFIG_TORGET_BOOT_HEALTH_FORCE_FAIL` is not a panic — an `assert(0)`
+behind a debug switch is the honest test). `test/test_firmware_diagnostics.py`
+pins the rows. Original problem:
 No `CONFIG_ESP_COREDUMP_*` anywhere, no coredump row in `partitions.csv`
 — a panic prints a backtrace to a console that is almost never attached,
 then reboots. The evidence never existed. `partitions.csv` documents 16 MB
@@ -62,7 +69,10 @@ coredump partition is free.
 document `idf.py coredump-info` retrieval in the runbook.
 
 ### OBS-03 · Reboot ledger in NVS
-`firmware · S · open`
+`firmware · S · done in source (2026-09-10), physically unverified` —
+`reboot_ledger_note()` in `main/main.c`: namespace `torget_boot`, keys
+`boots`, `panic`, `wdt`, `brownout`, one `omstartsliggare:` line after the
+banner, never a stop. Original problem:
 NVS is initialized (`main/main.c:378-383`) but never used for a single
 key. Persist per-reason reset counters + a boot counter, log them in the
 OBS-01 banner. Turns "did it reboot while I was away?" from unanswerable
@@ -179,7 +189,11 @@ event happens to re-mark dirty.
 cycle retry.
 
 ### OBS-11 · Corrupt state files are silently wiped — quarantine them instead
-`server · S · open`
+`server · S · done (2026-09-10)` — `state_files.quarantine_corrupt` moves
+the file to `<name>.corrupt-<UTC stamp>` and logs one WARNING (file and
+reason, never contents) before the store starts empty; all three loaders
+use it, for invalid JSON, non-UTF-8 bytes and wrong top-level shape alike.
+Tested per store. Original problem:
 All three state stores respond to a corrupt file by starting empty with
 no message: `max_tracker.py:1095-1102` (up to **400 days** of history
 plus backfill watermarks), `quota_cache.py:112`, `usage_history.py:81`.
@@ -190,7 +204,11 @@ log loudly before starting fresh. The data is usually 99 % intact —
 quarantining preserves the forensics and the option to hand-repair.
 
 ### OBS-12 · Fetch failures discard their own diagnosis
-`firmware · S · open`
+`firmware · S · done in source (2026-09-10)` — (a) `agent_net.c` logs the
+real three-valued fetch result (`IO-fel (öppna/läsa)` / `överflöde`), (b)
+was already a retry rather than task suicide by the time this was worked
+and now sits on the backoff ladder, (c) `torget_http.c` logs
+`kunde inte skapa HTTP-klient (<redacted target>)`. Original problem:
 Three related holes in the device's network error reporting:
 (a) `agent_net.c:120` collapses the three-valued fetch result to
 `ESP_OK/ESP_FAIL` before logging, so the log can only ever say
@@ -245,7 +263,15 @@ Physical dedicated-power acceptance remains separate evidence.
 ## P2 — stop making it worse
 
 ### OBS-13 · No backoff anywhere in the firmware
-`firmware · M · open`
+`firmware · M · done in source (2026-09-10) for the four service pollers,
+physically unverified` — `poll_backoff_policy.[ch]` (pure, host-tested):
+first miss free, then doubling to a cap, reset on success, transitions
+only in the log. Wired into agent-status (1 s → 30 s cap; a miss is any
+response that was not applied, so a 200 with a rejected body backs off
+too), tokens (30 s → 300 s), max-tracker (5 min → 30 min) and the
+optional GitHub feed (30 s → 300 s). The recovery task's notification
+still cuts a long tokens wait short. WiFi reconnect is OBS-14's, not
+done here. Original problem:
 Every device poller runs at a fixed cadence no matter what: tokens 30 s,
 max-tracker 300 s (`net.c:62,112`), agent-status **1 000 ms**
 (`agent_net.c:19,136`), WiFi reconnect 2 s (`main.c:165`). A dead
@@ -302,7 +328,13 @@ pin TWDT config in `sdkconfig.defaults` (OBS-28). With OBS-01, a WDT
 reset then becomes a *diagnosed* event instead of a mystery.
 
 ### OBS-18 · Probe backoff state is invisible, and stale probe data lingers
-`server · S · open`
+`server · S · done (2026-09-10)` — `GET /` carries `claudeProbeStreak`,
+`claudeProbeIntervalS`, `claudeProbeCooldownLeftS` and `claudeProbeAgeS`
+(smoke prints them beside a non-ok status); every cycle starts with
+empty header evidence and publishes only what it saw; the status string
+is assembled in a per-cycle outcome and swapped in once under
+`_limits_lock` (`_ProbeOutcome`, `_publish_probe_outcome`). Original
+problem:
 Three small holes in the probe's observability:
 (a) `_probe_failure_streak` and the slowed interval
 (`tokenserver.py:305,673-679`) appear in no payload — dashes can mean
@@ -316,7 +348,9 @@ can be served.
 headers on failure; assemble status into a local and publish once.
 
 ### OBS-19 · Slow-client and backfill blind spots
-`server · S · open`
+`server · S · in progress` — (b) done with OBS-25 (2026-09-10): the
+backfill loop logs one `max-tracker backfill step failed: <class>: <text>`
+line per ten minutes instead of swallowing. (a) still open.
 (a) No handler `timeout`/`protocol_version` on the HTTP handler
 (`tokenserver.py:1465`): a half-open LAN connection parks a worker
 thread in `readline()` forever, uncounted and unlogged.
@@ -327,7 +361,13 @@ spins silently forever.
 one-per-type-per-30 s pattern agent_status already uses).
 
 ### OBS-20 · Keychain failure is one undifferentiated shrug
-`server · S · open`
+`server · S · done (2026-09-10)` — `_read_keychain_oauth` catches
+narrowly: missing binary, timeout, exit 44 (no entry), any other exit
+(Deny on the prompt or a locked keychain), malformed record, record
+without a token. The word rides on `claudeProbe` after
+`no_claude_oauth_token:` and in `claudeCredential.reason`, the runbook
+table maps each to its fix, and `claude-keychain: X -> Y` logs the
+transitions (OBS-04). Original problem:
 A blanket `except Exception` around the `security` call
 (`tokenserver.py:357-368`) collapses four distinct situations — binary
 missing, **user clicked Deny on the keychain prompt**, malformed JSON,
@@ -338,7 +378,12 @@ through that prompt; if they deny it, the only trace is
 one logged transition (OBS-04).
 
 ### OBS-21 · Two of three state writers skip the directory fsync
-`server · S · open`
+`server · S · done (2026-09-10)` — `state_files.fsync_parent` (the
+quota_cache pattern, Windows no-op included) now runs after the rename in
+`max_tracker._atomic_write` and `usage_history._persist`; quota_cache
+delegates to the same helper. A failing parent fsync raises, so the Max
+Tracker writer re-marks dirty and retries and `record_many` restores its
+memory. Original problem:
 `quota_cache` does the full atomic dance — file fsync, rename, *parent
 directory fsync*, with rollback (`quota_cache.py:148-154`) — precisely
 because a rename can otherwise evaporate on power loss.
@@ -400,7 +445,20 @@ from the lessons log is guarded only on the maintainer's Mac. The
 **no such issue exists**.
 
 ### OBS-25 · No linting anywhere
-`hygiene · S · open`
+`hygiene · S · done (2026-09-10)` — `ruff` 0.15.8 pinned in
+`requirements-dev.txt`, configured in `pyproject.toml` with bug-shaped
+rules only (`F`, `E722`, `B`, `S110`, `PLE`, `PLW0602`; each explained in
+the file), run first in `test/run.sh` and therefore in CI's host gate. The
+sweep found 43 things: fourteen `try/except/pass` sites (every one is now
+a named boundary with a `# noqa: S110 - <why>`, and the Max Tracker
+backfill loop, which swallowed every error silently, now logs one line per
+ten minutes), sixteen loop-variable closures in tests, three `zip()` calls
+without `strict=`, three dead imports, one dead variable, one
+`assertRaises(Exception)`, one `raise` without `from`, and three names
+declared `global` that the function never assigns. `BLE001` (74 sites,
+all resilience boundaries) and `PLW0603` (the tokenserver's module-state
+style) are deliberately not enabled; see `pyproject.toml`. Original
+problem, for the record:
 No linter config exists for ~10 k lines of Python (the C side at least
 has `-Wall -Wextra -Werror` in the test gate). Several audit findings
 (bare `except`, swallowed exceptions) are exactly what `ruff` rules
@@ -446,7 +504,12 @@ load. Platform-dependent test assumptions are an established theme
 or forced verify schedule) instead of relying on wall-clock behavior.
 
 ### OBS-30 · Unmapped models reach the panel as raw ids
-`server · S · open`
+`server · S · done (2026-09-10)` — `agent_status.derive_model_label`
+typesets any id (family, version, variant; dated suffix dropped) and
+`normalize_model` bounds the raw id wide enough to keep a dated id whole
+before deriving, then bounds the label to the 24-byte column.
+`MODEL_LABELS` is exceptions only. A test walks every id in `prices.json`.
+Original problem:
 `MODEL_LABELS` (`agent_status.py:56`) names six models; `prices.json`
 prices roughly a hundred and ten. `normalize_model` falls through to the
 raw lowercase id for the rest, so the panel mixes typeset labels
@@ -481,7 +544,12 @@ Windows box before trusting either — a wire test asserting a security
 boundary must not be loosened blindly.
 
 ### OBS-28 · Pin logging config on purpose
-`firmware · S · open`
+`firmware · S · done (2026-09-10)` — `CONFIG_LOG_DEFAULT_LEVEL_INFO`,
+`CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT`, panic print+reboot, TWDT init and
+timeout, and `LV_USE_LOG` at WARN via printf, each with its reason in
+`sdkconfig.defaults`. Console routing deliberately NOT pinned: the board's
+console path (UART vs USB-Serial/JTAG) has not been confirmed on the unit
+and a wrong pin would silence the monitor. Original problem:
 `sdkconfig.defaults` deliberately pins flash, PSRAM, LVGL, and mbedTLS
 with reasoned comments — but nothing about logging: default level,
 console routing, panic behavior, TWDT are all inherited IDF defaults
@@ -493,8 +561,31 @@ valve currently fails silently.
 (with the same style of comment the file already uses), enable
 `LV_USE_LOG` routed to `ESP_LOG`.
 
+### OBS-36 · The glass shows placeholder zeros as measurements during the first scan
+`firmware · S · done in source (2026-09-10), physically unverified` —
+closed in the same PR as issue #62 after a Codex review made the point
+that a payload old firmware would apply is a payload old firmware WILL
+apply. Two halves: the service serves placeholder counters only to a
+request carrying `X-VibePulse-Accepts: usage-totals` and answers every
+other client with the contract's error form (503), so an already-flashed
+panel keeps its last values; firmware from this date sends the header,
+parses `usageTotals.placeholder`, applies the live quota rings and leaves
+the value page and the keep-awake burn rate untouched while the counters
+are placeholders. No new visual state was designed: the value page simply
+keeps what it last showed (the pre-data dashes on a cold boot). Original
+problem, for the record:
+Since issue #62 the tokenserver answers `/api/tokens` at once while its
+first history scan runs, with the four volume counters at zero and an
+additive `usageTotals` block saying so. The firmware contract requires
+numbers for the counters, so the server cannot send `null`, and a parser
+that ignores the block would print `0.00 Mtok idag` for the length of the
+scan.
+
 ### OBS-35 · A raised log level puts the relay secret back on the wire
-`firmware · S · open`
+`firmware · S · done (2026-09-10)` — `CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y`
+with INFO as default compiles `ESP_LOGD` out; the pin's comment and
+`docs/observability.md` say to clamp `HTTP_CLIENT` if anyone raises it.
+Original problem:
 The panel's own fetch logs are redacted: `torget_http.c` hands every
 failure line through `tg_net_log_target()`, which keeps scheme, host and
 route and drops the path — the relay's `/u/<secret>` is its whole access

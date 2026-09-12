@@ -64,6 +64,54 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(event.effort, "XHIGH")
         self.assertNotIn("OPUS", repr(event))
 
+    def test_claude_reads_effort_from_the_record_top_level(self):
+        """Where Claude Code actually writes it.
+
+        A real transcript puts ``effort`` beside ``type`` and ``version``
+        on the record, while ``model`` sits inside the API ``message``.
+        Reading only ``message.effort`` served ``effort: null`` for every
+        Claude job while the panel had a column for it.
+        """
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "effort": "max"})
+        entry["message"]["model"] = "claude-fable-5"
+        entry["effort"] = "high"
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.model, "FABLE 5")
+        self.assertEqual(event.effort, "HIGH")
+
+    def test_claude_nested_effort_still_wins_over_the_top_level(self):
+        entry = claude_event("assistant", tool_name="Bash")
+        entry["message"]["effort"] = "xhigh"
+        entry["effort"] = "low"
+
+        event = classify_claude(entry)
+
+        self.assertEqual(event.effort, "XHIGH")
+
+    def test_claude_top_level_effort_is_bounded_and_never_from_tool_input(self):
+        entry = claude_event(
+            "assistant", tool_name="Bash",
+            tool_input={"command": "git status", "effort": "max"})
+        entry["effort"] = "max\n" + "å" * 20
+
+        event = classify_claude(entry)
+
+        self.assertLessEqual(len(event.effort.encode("utf-8")), 12)
+        self.assertNotIn("\n", event.effort)
+        self.assertTrue(event.effort.startswith("MAX"))
+
+    def test_claude_non_string_top_level_effort_is_ignored(self):
+        entry = claude_event("assistant", tool_name="Bash")
+        entry["effort"] = {"level": "high"}
+
+        event = classify_claude(entry)
+
+        self.assertIsNone(event.effort)
+
     def test_claude_does_not_take_model_from_nested_tool_input(self):
         entry = claude_event(
             "assistant", tool_name="Bash",
@@ -257,9 +305,9 @@ class ClassificationTests(unittest.TestCase):
         self.assertNotIn("nested-private-model", repr(event))
 
     def test_every_gpt_5_6_variant_gets_a_screen_label(self):
-        """En fork på en T-Display-S3 visade `gpt-5.6-terra` rått bredvid
-        systrarnas typsatta etiketter: prislistan kände modellen, skärmen
-        inte. Alla tre 5.6-varianterna ska se likadana ut."""
+        """A fork on a T-Display-S3 showed `gpt-5.6-terra` raw beside its
+        siblings' typeset labels: the price list knew the model, the screen
+        did not. All three 5.6 variants must look alike."""
         self.assertEqual(agent_status.normalize_model("gpt-5.6-sol"),
                          "GPT-5.6 SOL")
         self.assertEqual(agent_status.normalize_model("gpt-5.6-terra"),
@@ -267,9 +315,74 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(agent_status.normalize_model("gpt-5.6-luna"),
                          "GPT-5.6 LUNA")
 
+    def test_unmapped_model_ids_are_typeset_on_arrival(self):
+        """OBS-30: the panel mixed `OPUS 5` with a raw, mid-string-clipped
+        `claude-haiku-4-5-2025100` depending on which model the agent
+        picked. The label is derived from the id now; the map is for
+        exceptions only."""
+        cases = {
+            "claude-opus-4-8": "OPUS 4.8",
+            "claude-haiku-4-5-20251001": "HAIKU 4.5",
+            "claude-haiku-4-5": "HAIKU 4.5",
+            "claude-3-7-sonnet-20250219": "SONNET 3.7",
+            "claude-sonnet-4-20250514": "SONNET 4",
+            "claude-fable-5-1": "FABLE 5.1",
+            "claude-mythos-preview": "MYTHOS PREVIEW",
+            "claude-mythos-5": "MYTHOS 5",
+            "gpt-5.4-mini": "GPT-5.4 MINI",
+            "gpt-5.2-pro-2025-12-11": "GPT-5.2 PRO",
+            "gpt-5-codex": "GPT-5 CODEX",
+            "gpt-4o": "GPT-4O",
+            "gpt-4.1-nano-2025-04-14": "GPT-4.1 NANO",
+            "o4-mini": "O4 MINI",
+            "codex-mini-latest": "CODEX MINI LATEST",
+            "ft:gpt-4o-2024-08-06": "GPT-4O",
+            "ft:gpt-4o-2024-08-06:acme:support-bot:abc123": "GPT-4O",
+            "ft:gpt-4.1-mini-2025-04-14:acme::xyz": "GPT-4.1 MINI",
+            # Compact MMDD snapshots, at the end and before a variant.
+            "gpt-4-0613": "GPT-4",
+            "gpt-3.5-turbo-0125": "GPT-3.5 TURBO",
+            "gpt-4-0125-preview": "GPT-4 PREVIEW",
+            "gpt-4-1106-preview": "GPT-4 PREVIEW",
+            "o1-2024-12-17": "O1",
+            "Claude-Opus-4-8 ": "OPUS 4.8",
+        }
+        for model_id, expected in cases.items():
+            with self.subTest(model_id=model_id):
+                self.assertEqual(agent_status.normalize_model(model_id),
+                                 expected)
+        # The hand-picked exceptions still win over derivation.
+        self.assertEqual(agent_status.normalize_model("claude-fable-5"),
+                         "FABLE 5")
+
+    def test_every_priced_model_derives_a_label_that_fits_the_panel(self):
+        prices = json.loads((Path(__file__).resolve().parent /
+                             "prices.json").read_text(encoding="utf-8"))
+        ids = set()
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "models" and isinstance(value, dict):
+                        ids.update(value)
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+        walk(prices)
+        self.assertGreater(len(ids), 100)
+        for model_id in sorted(ids):
+            with self.subTest(model_id=model_id):
+                label = agent_status.normalize_model(model_id)
+                self.assertIsNotNone(label)
+                self.assertLessEqual(len(label.encode("utf-8")), 24)
+                self.assertEqual(label, label.upper())
+                self.assertNotIn("CLAUDE", label)
+                self.assertFalse(label.startswith("-"))
+
     def test_screen_labels_fit_the_firmware_model_buffer(self):
-        """TK_AGENT_MODEL_CAP är 25 (24 tecken + NUL). En etikett som
-        spränger den klipps mitt i ordet på panelen."""
+        """TK_AGENT_MODEL_CAP is 25 (24 characters + NUL). A label that
+        overflows it is clipped mid-word on the panel."""
         header = Path(__file__).resolve().parents[2] / (
             "components/app_tokens/agent_status.h")
         cap = int(re.search(r"#define TK_AGENT_MODEL_CAP (\d+)",

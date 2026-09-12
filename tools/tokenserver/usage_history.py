@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import tempfile
@@ -11,6 +12,17 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+try:
+    from .state_files import fsync_parent, quarantine_corrupt
+except ImportError:  # run as a script / from the directory itself
+    from state_files import fsync_parent, quarantine_corrupt
+
+log = logging.getLogger("tokenserver.state")
+
+
+class _PostReplaceError(Exception):
+    """The new file is in place; only its directory entry's sync failed."""
 
 
 SAMPLE_INTERVAL_S = 15 * 60
@@ -22,11 +34,12 @@ RESET_QUANTUM_S = 5 * 60
 
 _PROVIDERS = {"claude", "codex"}
 _WINDOWS = {"session", "week", "model_week"}
-# Fönstrens cykellängder: ligger cykelstarten (reset_at - längd) EFTER
-# deltafrågans "since" började poolen bevisligen på noll inom perioden —
-# baslinjen är då 0 per definition och ingen provhistorik behövs. Utan den
-# härledningen underrapporterade "idag" varje gång historiken hade luckor
-# (429-mörkläggningen och den obenämnda Fable-poolen, båda 2026-08-14).
+# Cycle lengths per window: if the cycle start (reset_at - length) lies
+# AFTER the delta query's "since", the pool provably started at zero inside
+# the period -- the baseline is then 0 by definition and no sample history
+# is needed. Without that derivation "today" was under-reported every time
+# the history had gaps (the 429 blackout and the unnamed Fable pool, both
+# 2026-08-14).
 _WINDOW_LENGTH_S = {
     "session": 5 * 3600.0,
     "week": 7 * 86400.0,
@@ -64,6 +77,9 @@ class UsageHistory:
         # one instance; every state read/mutation plus its persist happens
         # under this lock so a batch stays atomic in memory and on disk.
         self._lock = threading.RLock()
+        # See MaxTrackerStore._load_error: an existing file that cannot be
+        # read is never overwritten by a store that started empty.
+        self._load_error: str | None = None
         self._records = self._load()
 
     @property
@@ -87,11 +103,27 @@ class UsageHistory:
 
     def _load(self) -> list:
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return []
+        except UnicodeError:
+            quarantine_corrupt(self.path, "not UTF-8")
+            return []
+        except OSError as error:
+            self._load_error = type(error).__name__
+            log.warning("%s exists but could not be read (%s): starting "
+                        "empty and refusing to save over it until the "
+                        "service restarts with a readable file",
+                        self.path.name, self._load_error)
+            return []
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as error:
+            quarantine_corrupt(self.path, f"invalid JSON at byte {error.pos}")
             return []
         if (not isinstance(payload, dict) or payload.get("v") != 1 or
                 not isinstance(payload.get("samples"), list)):
+            quarantine_corrupt(self.path, "not a {v: 1, samples: [...]} file")
             return []
         records = [dict(record) for record in payload["samples"]
                    if self._valid_record(record)]
@@ -100,6 +132,10 @@ class UsageHistory:
         return [record for record in records if record["at"] >= cutoff]
 
     def _persist(self) -> None:
+        if self._load_error is not None:
+            raise OSError(
+                f"{self.path.name} was unreadable at startup "
+                f"({self._load_error}); refusing to overwrite it")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
@@ -115,6 +151,10 @@ class UsageHistory:
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
             temporary = None
+            try:
+                fsync_parent(self.path)  # OBS-21: the rename is not durable
+            except OSError as error:
+                raise _PostReplaceError() from error
         finally:
             if temporary is not None:
                 try:
@@ -167,6 +207,17 @@ class UsageHistory:
             self._records.sort(key=lambda record: record["at"])
             try:
                 self._persist()
+            except _PostReplaceError as error:
+                # The replace landed: disk and memory agree, only the
+                # directory entry's durability is unproven. Rolling memory
+                # back here would make the next successful save drop a
+                # sample that is on disk (Codex review of #105); keep it
+                # and say so.
+                log.warning("%s was saved but its directory fsync failed "
+                            "(%s): the file may not survive power loss "
+                            "until the next save",
+                            self.path.name, type(error.__cause__).__name__)
+                return added
             except OSError:
                 self._records = old_records
                 return 0
@@ -210,7 +261,7 @@ class UsageHistory:
         if denominator <= 0:
             return Forecast(state="collecting")
         slope = sum((x - mean_x) * (y - mean_y)
-                    for x, y in zip(xs, ys)) / denominator
+                    for x, y in zip(xs, ys, strict=True)) / denominator
         if not math.isfinite(slope) or slope <= 0:
             return Forecast(state="unavailable")
 
@@ -259,9 +310,9 @@ class UsageHistory:
             return None
         latest = samples[-1]
 
-        # Började cykeln efter "since" är baslinjen 0 per definition — hela
-        # den aktuella procenten föll inom perioden, oavsett hur gles den
-        # inspelade historiken råkar vara.
+        # If the cycle started after "since" the baseline is 0 by
+        # definition -- the whole current percentage fell inside the period,
+        # however sparse the recorded history happens to be.
         cycle_start = reset_at - _WINDOW_LENGTH_S[window]
         if cycle_start >= since:
             return round(max(0.0, float(latest["pct"])), 1)
