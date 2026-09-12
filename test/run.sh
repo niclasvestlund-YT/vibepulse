@@ -45,6 +45,20 @@ then
   exit 1
 fi
 
+# Lint first: bug-shaped rules only (pyproject.toml explains each). ruff is
+# pinned in requirements-dev.txt, so a missing binary is a stale venv, and
+# the gate says so instead of silently skipping the lint (OBS-25). A venv
+# with another ruff release is refused by ruff itself: pyproject.toml's
+# `required-version` carries the same pin.
+if ! "$PYTHON_BIN" -m ruff --version >/dev/null 2>&1; then
+  printf '%s\n' \
+    'ERROR: ruff saknas i Python-miljön (pinnad i requirements-dev.txt).' \
+    '  .venv/bin/python -m pip install -r requirements-dev.txt' >&2
+  exit 1
+fi
+(cd .. && "$PYTHON_BIN" -m ruff check .)
+echo "OK: ruff hittade inget"
+
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_fmt/fmt_sv.c \
   ../components/torget_ticker/ticker.c \
@@ -199,6 +213,12 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-tokens-net-recovery-policy-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/poll_backoff_policy.c \
+  test_poll_backoff_policy.c \
+  -o /tmp/torget-poll-backoff-policy-test
+/tmp/torget-poll-backoff-policy-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/agent_status_source_policy.c \
   test_agent_status_source_policy.c \
   -o /tmp/torget-agent-status-source-policy-test
@@ -313,6 +333,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_vibepulse_layout_wiring.py
 "$PYTHON_BIN" test_preview_ui.py
 "$PYTHON_BIN" test_ota_partition.py
+"$PYTHON_BIN" test_firmware_diagnostics.py
 "$PYTHON_BIN" test_ota_reopen_wiring.py
 "$PYTHON_BIN" test_ota_sender_gates.py
 # Backupen AGENTS.md kräver före varje historikomskrivning. Testet bygger

@@ -21,6 +21,108 @@ point at the backlog item.
 
 ---
 
+## 2026-09-10 · A background scan still blocked every request through the lock
+
+**What happened:** after a restart on a Mac with a large Claude/Codex
+history, the light health endpoints answered but every `/api/tokens` request
+timed out for 211 s, and the panel went STALE two minutes into a restart of
+a perfectly healthy service (issue #62). **Root cause:** the first usage
+scan had been moved *off* the startup thread in August (lesson 2026-08-26),
+but `get_snapshot` still ran it inline, under `_cache_lock`, whenever no
+result existed yet. Every HTTP worker took the same lock to read the result
+and queued behind the one doing the scan. The warm-up thread did not help:
+it was just the first caller to take that lock. **The rule now:** a request
+handler never does the expensive thing under the lock that serves the
+cheap thing. If there is no result yet, say so in the response and let one
+background thread produce it; readers take the lock only to copy. And the
+"no result yet" state is *named* (`usageTotals.state`), so a placeholder
+never looks like a measurement to the doctor, the hook, the smoke test or
+the relay publisher. And a placeholder is only handed to a client that
+said it understands one (`X-VibePulse-Accepts: usage-totals`); the
+already-flashed firmware would have applied the zeros as fresh data, which
+a Codex review caught on the first draft, so everyone else gets the error
+form the old firmware already rejects. **Guards:** `StartupSnapshotTests`
+in `test_tokenserver.py` time the first request with the scan blocked,
+prove one scan for many requests, the cadence-bounded retry after a crash,
+that the block is captured under the lock with the counters it describes,
+and the header gate; `test_publisher.py` proves a placeholder is not sent;
+`test_tokens.c` proves the firmware flag; the doctor, hook and smoke suites
+each classify the state. **Watch for:** a new producer that computes under
+`_cache_lock`, and a new `/api/tokens` reader that forgets the header and
+mistakes the 503 for a dead service.
+## 2026-09-10 · A hand-written label map was a parser with six entries and a hundred inputs
+
+**What happened:** the agent rows on the panel typeset six model ids by
+hand (`MODEL_LABELS`) and let every other id in `prices.json` fall
+through as a raw lowercase string clipped at 24 bytes: `claude-fable-5-1`
+sat next to `OPUS 5`, and `claude-haiku-4-5-20251001` rendered as
+`claude-haiku-4-5-2025100` (OBS-30). **Root cause:** a lookup table is a
+parser whose grammar is "the cases someone remembered"; every new model
+was a silent miss with no test to fail. **The rule now:** derive the label
+from the id's own structure (family, version, variant; every snapshot
+date form dropped, including the compact `-0613` token before a variant)
+and keep the map for genuine exceptions only. **Guards:** a test walks
+every id in `prices.json` and every label fits the firmware column; the
+compact-snapshot forms are pinned after a Codex review found them.
+**Watch for:** an id shape neither grammar nor table knows — it lands
+uppercased, not clipped, but check it against Claude's own client before
+shipping a hand override.
+
+## 2026-09-10 · A store that starts over on a bad file destroys the evidence on its next save
+
+**What happened:** none of the three state files was ever corrupted in the
+field; this is an audit finding (OBS-11) made into a rule before it costs
+anyone 400 days of Max Tracker history. **Root cause:** each store handled
+"cannot read" the only way an unspecified case gets handled: return an
+empty state and carry on. The next `save()` then wrote the empty state over
+the corrupt bytes, which are usually 99 % intact. Recovery was impossible
+by design, and a non-UTF-8 `max-tracker.json` did not even reach that
+path: `read_text` raised out of the constructor and the service did not
+start. The parent-directory fsync (OBS-21) has the same shape: the quota
+cache had it, its two siblings did not, because each writer was written on
+its own day. **The rule now:** a state file that cannot be loaded is moved
+aside (`<name>.corrupt-<UTC stamp>`) with one WARNING naming file and
+reason, never contents, and only then does the store start empty; a
+parseable file that lacks the shape `save()` always writes counts as
+corrupt too, since a valid file cannot look like that. Durability and
+quarantine live in one helper (`state_files.py`) so a fourth store
+inherits both instead of re-deciding them. **Guards:** per-store tests for
+invalid JSON, non-UTF-8 bytes and wrong shape (`{}` included, after a
+Codex review caught that gap; a provider section that is a dict but not
+the `{v, days, weeks, backfill}` shape `save()` writes, after the next
+pass caught that one), and for the parent fsync after the rename. Two
+more rules from the same review: a file that exists but cannot be *read*
+(permissions, I/O) is not "empty" — the store starts empty but refuses to
+save, because a rename needs only the directory's permission and would
+have replaced the file on the first save; and when the replace has landed
+but the directory fsync fails, memory keeps the new state (disk and
+memory agree, only durability is unproven) instead of rolling back and
+letting the next save drop a sample that is on disk.
+**Watch for:** a new store that catches `OSError` broadly and returns
+empty, and a loader that accepts a partial shape "to be lenient".
+## 2026-09-10 · The parser read a field where the docs put it, not where the writer puts it
+
+**What happened:** `/api/agent-status` served `effort: null` for every
+Claude job since the field was added; the panel had a column for it and
+never a value. **Root cause:** `_claude_event` read `effort` inside the
+API `message` object, beside `model`. Claude Code writes it on the
+transcript *record*, beside `type` and `version`. Nobody had opened a real
+transcript and counted: measured on a live 2.1.267 session, 125 of 125
+assistant records carried `effort` at the top level and none nested, while
+`model` really does live inside `message`. **The rule now:** a new field
+in an upstream file is located by *measurement on a real file* (count the
+records, count where the key appears), never by analogy with a sibling
+field or by the API shape. Write the count into the commit. **Guards:**
+`test_claude_reads_effort_from_the_record_top_level` and its three
+siblings in `test_agent_status.py` (nested still wins, bounded, never from
+`tool_input`); the classifier reads the nested place first and falls back
+to the record, so either layout keeps working. **Watch for:** the same
+mistake on the next Claude Code field; `docs/companion-features-brainstorm.md`
+lists two more measured shapes (`result` records, Codex `payload.info`)
+that code must not assume.
+
+---
+
 ## 2026-09-06 · The panel logged the credential it was told never to print
 
 **What happened:** all three failure paths in `torget_http.c` logged the
