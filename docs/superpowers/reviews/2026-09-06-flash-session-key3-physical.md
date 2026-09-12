@@ -126,18 +126,22 @@ level, and the explanation is decisive:
 | `tokens: hämtning` | `stale claude=1`, 0.00 Mtok, 0 sessions | `stale claude=0`, 7.54 Mtok, 1 session |
 | `tokens: max tracker` | `stale=1`, streak 0 days | `stale=0`, streak 28 days |
 
-**The old image did no TLS at all.** Zero handshakes across its whole uptime,
-no encrypted interaction relay, and every payload marked stale. Its roomy heap
-was the heap of a panel that was not doing its job. The new image runs a
-continuous stream of TLS sessions — the encrypted interaction relay, the numbers
-relay, the tokenserver fetches that now succeed, and Solelkollen's HTTPS API —
-and mbedTLS session buffers are internal/DMA-capable, which is exactly where the
-~60 kB went and why the largest contiguous DMA block fell.
+**Initial reading, later discarded — see OBS-37.** The old image did no TLS at
+all: zero handshakes across its whole uptime, no encrypted interaction relay,
+and every payload marked stale. Its roomy heap was the heap of a panel that was
+not doing its job. The new image runs a continuous stream of TLS sessions — the
+encrypted interaction relay, the numbers relay, the tokenserver fetches that now
+succeed, and Solelkollen's HTTPS API — and mbedTLS session buffers are
+internal/DMA-capable, which was the first explanation offered for the ~60 kB
+difference. The interval analysis in OBS-37 later found the TLS correlation
+unsupported and identified no trigger for any low-water step, so this stays
+here as the discarded first hypothesis; what survives is the measured old/new
+comparison above.
 
-Conclusion: the drop is the cost of working relays, not a cost of the new
-overlays — which is consistent with all three overlays reporting `internt +0 B`.
-The number to watch in §5 is therefore the largest DMA block under repeated
-SETTINGS opens, which by the overlay accounting should not move at all.
+The one part that held: the drop is not a cost of the new overlays, which is
+consistent with all three reporting `internt +0 B`. The number to watch in §5
+is therefore the largest DMA block under repeated SETTINGS opens, which by the
+overlay accounting should not move at all.
 
 One item for the backlog falls out of this: **412 handshakes in 17 minutes, one
 every 2.5 seconds**, suggests TLS connections are not being reused across polls.
@@ -228,10 +232,12 @@ may have been gone at some instant, and that was before any manual test ran. (Th
 `LÅGT DMA-block` guard itself fires below twice the flush size, 23 040 B, so
 the 19 456 B it reports is not a block that is too small.)
 
-The 10 s `heap:` sampling never observes anything below 19 456; every dip below
-that is invisible to it and only shows up in `lägsta någonsin`. Any soak that
-watches the sampled figure alone will report "steady" through exactly this
-condition.
+The 10 s `heap:` sampling never observed a block below 19 456 in this period.
+`lägsta någonsin` advanced between those log lines, so the regional minima moved
+between samples — but as a sum of per-region minima it does not establish that
+any comparable total or DMA block dipped below 19 456, and transient DMA
+behaviour between samples remains unmeasured. Any soak that watches the sampled
+figure alone will not see the minima advance.
 
 **Discarded hypothesis, kept as written for the record.** The first reading
 tied this to the relay finding above: the old image did zero TLS and held a

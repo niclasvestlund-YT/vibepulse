@@ -469,8 +469,9 @@ Three results, and the first changes how serious this item is:
    window cycle, so hour 1 holds the cool-down after the interactive session but
    no interaction inside the bucket; its 14 cannot be attributed to UI activity
    with this data, and the interaction correlation rests on the interactive
-   period before the soak (17 failures in its first ~20 minutes) against hours
-   2–6. Nineteen in six hours, effectively none once the panel was left alone.
+   period before the soak (17 failures across the roughly half hour of uptime
+   the interval analysis covers, 10 of them inside its first 20 minutes)
+   against hours 2–6. Nineteen in six hours, effectively none once the panel was left alone.
    This supports the rotation outlier noted above and points the LVGL-lock
    question first at UI activity. It does not clear the background tasks: five failures (4 in
    hour 2, 1 in hour 5) happened with nobody at the panel, so the network
