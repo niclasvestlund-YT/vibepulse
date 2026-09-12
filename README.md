@@ -42,11 +42,12 @@ the room, no window to switch to, no menu bar to squint at.
 > a supported prompt on the glass. The Windows core, physical answer loop and
 > persistent sign-in/sleep/reboot lifecycle were verified at the v1.0.0 host
 > runtime and are not re-claimed for a later one. v1.1.0 adds SETTINGS on
-> the glass, an honest warm-up, and crash evidence in the firmware. SETTINGS
-> has been on `torget-home-01` since the 2026-09-06 USB flash of
-> `v1.0.0-67-ge51b79f`, with its static on-panel review still unrun; the
-> warm-up, coredump, ledger and backoff changes landed after that build and
-> are CI-built, waiting for the next flash session. Optional
+> the glass, an honest warm-up, and crash evidence in the firmware. The
+> v1.1.0 SETTINGS menu has been on `torget-home-01` since the 2026-09-06 USB
+> flash of `v1.0.0-67-ge51b79f`, with its static on-panel review still unrun;
+> the warm-up, coredump, ledger and backoff changes and the later LABS
+> addition landed after that build and are CI-built, waiting for the next
+> flash session. Optional
 > integrations remain opt-in, and every platform claim stays tied to its
 > recorded evidence.
 
@@ -92,8 +93,8 @@ directory now reads in English. Never a number it did not measure, still.
 |---|---|
 | Host gate (`./test/run.sh`), tokenserver suite on ubuntu, macOS and Windows, both Workers, snapshot tool | **PASS** on every merged PR and on merged `main` |
 | ESP32-S3 firmware build | **PASS** in CI — a build, not a flash |
-| SETTINGS on the physical panel | **FLASHED, NOT REVIEWED** — `torget-home-01` runs `v1.0.0-67-ge51b79f` (USB, 2026-09-06), which carries the menu; the static on-panel review, §3 of [`docs/manual-test-key3.md`](docs/manual-test-key3.md), has not been run |
-| Warm-up placeholders, coredump, reboot ledger, poller backoff on the physical panel | **NOT YET FLASHED** — all landed after `e51b79f`; the run sheet is [`docs/flash-session-2026-09.md`](docs/flash-session-2026-09.md) |
+| SETTINGS (UPDATE / WIFI / ABOUT) on the physical panel | **FLASHED, NOT REVIEWED** — `torget-home-01` runs `v1.0.0-67-ge51b79f` (USB, 2026-09-06), which carries the v1.1.0 menu; the static on-panel review, §3 of [`docs/manual-test-key3.md`](docs/manual-test-key3.md), has not been run |
+| Warm-up placeholders, coredump, reboot ledger, poller backoff, and the SETTINGS → LABS addition on the physical panel | **NOT YET FLASHED** — all landed after `e51b79f`; the run sheet is [`docs/flash-session-2026-09.md`](docs/flash-session-2026-09.md) |
 | Windows v1 host claim (core, physical answer loop, lifecycle) | **Pinned to v1.0.0's runtime `bee5d8c`** — not re-run for this release |
 
 The coredump partition is new in the table, and OTA never writes the table:

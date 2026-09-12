@@ -54,8 +54,9 @@ uppvärmning (`usageTotals`-platshållare i stället för STALE efter omstart),
 coredump till flash, omstartsliggare i NVS, backoff i panelens pollers,
 karantän av korrupta tillståndsfiler och en engelsk tokenserver-katalog.
 Firmwaredelen är bara delvis på glaset: `torget-home-01` kör
-`v1.0.0-67-ge51b79f` (USB 2026-09-06), som har SETTINGS men inte coredump,
-liggare, backoff eller platshållare — de är CI-byggda men **inte flashade**.
+`v1.0.0-67-ge51b79f` (USB 2026-09-06), som har SETTINGS-menyn men inte
+coredump, liggare, backoff, platshållare eller LABS — de är CI-byggda men
+**inte flashade**.
 SETTINGS statiska panelgranskning (§3 i `docs/manual-test-key3.md`) är inte
 körd, körschemat är `docs/flash-session-2026-09.md`, och coredump-partitionen
 kräver en engångs `partition-table-flash` över USB.
