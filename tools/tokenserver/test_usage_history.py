@@ -64,7 +64,8 @@ class UsageHistoryPersistenceTests(unittest.TestCase):
             })
             self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
-    def test_corrupt_file_starts_empty_without_touching_sibling(self):
+    def test_corrupt_file_is_quarantined_without_touching_sibling(self):
+        # OBS-11: start empty, but keep the bytes beside the file and say so.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             path = root / "usage-history.json"
@@ -72,11 +73,115 @@ class UsageHistoryPersistenceTests(unittest.TestCase):
             path.write_text("{broken", encoding="utf-8")
             sibling.write_text("unchanged", encoding="utf-8")
 
-            history = UsageHistory(path)
+            with self.assertLogs("tokenserver.state", level="WARNING") as captured:
+                history = UsageHistory(path)
 
             self.assertEqual(history.records, ())
             self.assertEqual(sibling.read_text(encoding="utf-8"),
                              "unchanged")
+            self.assertFalse(path.exists())
+            quarantined = list(root.glob("usage-history.json.corrupt-*"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual(quarantined[0].read_text(encoding="utf-8"),
+                             "{broken")
+            self.assertIn("quarantined", "\n".join(captured.output))
+
+            self.assertTrue(history.record(
+                "claude", "week", 10, reset_at=DAY, at=0))
+            self.assertTrue(path.exists())
+
+    def test_quarantine_rename_is_fsynced_like_a_save(self):
+        # Codex review of #105: the rename that keeps the corrupt bytes is
+        # only durable once its directory entry is, same as a save.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            path.write_text("{broken", encoding="utf-8")
+            with mock.patch(
+                    "tools.tokenserver.state_files.fsync_parent") as fsync, \
+                    self.assertLogs("tokenserver.state", level="WARNING"):
+                UsageHistory(path)
+            quarantined = list(path.parent.glob("usage-history.json.corrupt-*"))
+            self.assertEqual(len(quarantined), 1)
+            fsync.assert_called_once_with(quarantined[0])
+
+    def test_quarantine_survives_a_failed_directory_fsync(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            path.write_text("{broken", encoding="utf-8")
+            with mock.patch("tools.tokenserver.state_files.fsync_parent",
+                            side_effect=OSError("EIO")), \
+                    self.assertLogs("tokenserver.state",
+                                    level="WARNING") as captured:
+                history = UsageHistory(path)
+            self.assertEqual(history.records, ())
+            self.assertEqual(
+                len(list(path.parent.glob("usage-history.json.corrupt-*"))), 1)
+            self.assertIn("not yet durable", "\n".join(captured.output))
+
+    def test_post_replace_fsync_failure_keeps_memory_and_disk_together(self):
+        # Codex review of #105: the replace has landed when the directory
+        # fsync fails; rolling memory back made the next save drop the
+        # sample that was already on disk.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            history = UsageHistory(path)
+            with mock.patch("tools.tokenserver.usage_history.fsync_parent",
+                            side_effect=OSError("EIO")), \
+                    self.assertLogs("tokenserver.state",
+                                    level="WARNING") as captured:
+                self.assertTrue(history.record(
+                    "claude", "week", 10, reset_at=DAY, at=0))
+            self.assertEqual(len(history.records), 1)
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(on_disk["samples"]), 1)
+            self.assertIn("directory fsync failed", "\n".join(captured.output))
+            # The next save carries both samples: nothing was dropped.
+            self.assertTrue(history.record(
+                "claude", "week", 12, reset_at=DAY, at=usage_history_module.SAMPLE_INTERVAL_S))
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual([s["pct"] for s in on_disk["samples"]],
+                             [10.0, 12.0])
+
+    def test_an_unreadable_file_is_never_overwritten(self):
+        # Codex review of #105: a permission or I/O error is not "empty".
+        # The rename only needs the directory's permission, so a store
+        # that started empty would replace the file on its first save.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            UsageHistory(path).record("claude", "week", 10, reset_at=DAY, at=0)
+            original = path.read_bytes()
+            with mock.patch.object(Path, "read_text",
+                                   side_effect=PermissionError("denied")), \
+                    self.assertLogs("tokenserver.state",
+                                    level="WARNING") as captured:
+                history = UsageHistory(path)
+            self.assertEqual(history.records, ())
+            self.assertIn("refusing to save", "\n".join(captured.output))
+            self.assertFalse(history.record(
+                "claude", "week", 50, reset_at=DAY, at=usage_history_module.SAMPLE_INTERVAL_S))
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(history.records, ())
+
+    def test_wrong_shape_is_quarantined_too(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            path.write_text('{"v": 7, "samples": "no"}', encoding="utf-8")
+            with self.assertLogs("tokenserver.state", level="WARNING"):
+                history = UsageHistory(path)
+            self.assertEqual(history.records, ())
+            self.assertEqual(
+                len(list(path.parent.glob("usage-history.json.corrupt-*"))), 1)
+
+    def test_persist_fsyncs_the_parent_directory_after_the_rename(self):
+        # OBS-21.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "usage-history.json"
+            history = UsageHistory(path)
+            with mock.patch(
+                    "tools.tokenserver.usage_history.fsync_parent") as fsync:
+                self.assertTrue(history.record(
+                    "claude", "week", 10, reset_at=DAY, at=0))
+            fsync.assert_called_once_with(path)
 
     def test_rejects_unbounded_provider_or_window_names(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -193,15 +298,15 @@ class UsageHistoryForecastTests(unittest.TestCase):
 
 class UsageHistoryDeltaTests(unittest.TestCase):
     def test_delta_is_full_percent_when_cycle_started_inside_period(self):
-        """Verkligheten 2026-08-14: veckopoolen nollställdes 08:00 men
-        historiken började först 10:45 (429-mörkläggning) respektive vid
-        parserfixen (Fable). Börjar cykeln EFTER "since" är baslinjen 0
-        per definition — hela procenten föll inom perioden, och ett enda
-        prov räcker för att säga det ärligt."""
+        """Reality on 2026-08-14: the week pool reset at 08:00 but the
+        history only began at 10:45 (429 blackout) and at the parser fix
+        (Fable) respectively. If the cycle starts AFTER "since" the baseline
+        is 0 by definition -- the whole percentage fell inside the period,
+        and a single sample is enough to say so honestly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             history = UsageHistory(Path(temp_dir) / "history.json")
-            since = 24 * HOUR                       # midnatt
-            reset_at = (7 * 24 + 25) * HOUR         # cykelstart 25*HOUR
+            since = 24 * HOUR                       # midnight
+            reset_at = (7 * 24 + 25) * HOUR         # cycle start 25*HOUR
             history.record("claude", "model_week", 11,
                            reset_at=reset_at, at=26 * HOUR)
 

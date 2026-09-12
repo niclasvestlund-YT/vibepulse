@@ -99,7 +99,7 @@ def _write(value):
             encoded = (_compact(_error(None, -32603, "Internal error")) + "\n").encode()
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
-    except Exception:
+    except Exception:  # noqa: S110 - a broken stdout has no channel left to report on
         pass
 
 

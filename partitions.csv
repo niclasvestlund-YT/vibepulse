@@ -8,3 +8,8 @@ otadata,   data, ota,     ,       8K
 phy_init,  data, phy,     ,       4K
 ota_0,     app,  ota_0,   ,       5M
 ota_1,     app,  ota_1,   ,       5M
+# En panik skrev förut sin backtrace till en konsol som nästan aldrig är
+# inkopplad och startade om — beviset fanns aldrig (OBS-02). 128K rymmer en
+# ELF-dump med alla taskers stackar med marginal; hämtas med
+# `idf.py coredump-info` (docs/observability.md).
+coredump,  data, coredump,,       128K

@@ -133,7 +133,7 @@ def build_codex(canvas_size: int = CANVAS) -> bytes:
                palette_raw[i * 3 + 2]) for i in used]
     remap = {old: new + 1 for new, old in enumerate(used)}
     color_to_index = {}
-    for color, old_index in zip(cloud_pixels, quantized_pixels):
+    for color, old_index in zip(cloud_pixels, quantized_pixels, strict=True):
         color_to_index[color] = remap[old_index]
 
     palette = bytearray(16 * 4)

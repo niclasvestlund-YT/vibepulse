@@ -46,7 +46,12 @@ void tokens_apply(const tk_tokens *tokens) {
    * a delayed/starved timer must not leave old STALE copy over fresh values.
    * Do this unconditionally so app/ui bookkeeping can self-heal if they ever
    * drift apart. Source-level stale flags remain owned by each parsed quota. */
-  double rate = tokens->day_tokens_per_hour / 1e6;
+  /* En platshållares brinntakt är ingen mätning, och en frusen takt från
+   * en kraschande omräkning (`failing`) är ingen aktuell: väck inte
+   * panelen på någon av dem (issue #62). Färskheten gäller ändå — svaret
+   * kom fram och kvoten är live. */
+  double rate = (tokens->volume_placeholder || tokens->volume_failing)
+                    ? 0.0 : tokens->day_tokens_per_hour / 1e6;
 
   app.has_data = true;
   app.last_success_us = now_us;

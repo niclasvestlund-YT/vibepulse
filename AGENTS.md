@@ -24,7 +24,7 @@ Designsystemet: **spec/ui-spec.md**. Hårdvarusanningen routas under
 `Hardware-aware work` nedan; läs den kanoniska femfilslistan där före
 hårdvaruarbete.
 
-## Status (2026-08-28, v1.0.0)
+## Status (2026-09-10, v1.1.0)
 
 Plattformen bröts ut ur underhållarens tidigare solcells-firmware (den
 historiken ligger i ett privat repo och är inget du behöver) och stöptes om
@@ -48,6 +48,15 @@ verklig sign-out/sign-in, sleep/resume och reboot. Release-taggen `v1.0.0`
 pekar på `ab3ce92`; de åtta filerna mellan hostrevisionen och taggen är endast
 dokumentation/test, inte runtime. Se den fullständiga sanerade rapporten och
 ärv aldrig denna PASS till en senare runtime-revision utan en ny körning.
+
+`v1.1.0` (2026-09-10) lade till SETTINGS-menyn på KEY3-hållet, ärlig
+uppvärmning (`usageTotals`-platshållare i stället för STALE efter omstart),
+coredump till flash, omstartsliggare i NVS, backoff i panelens pollers,
+karantän av korrupta tillståndsfiler och en engelsk tokenserver-katalog.
+Firmwaredelen är CI-byggd men **inte flashad**: `torget-home-01` kör
+fortfarande `v1.0.0-25-g054db68`, körschemat är `docs/flash-session-2026-09.md`,
+och coredump-partitionen kräver en engångs `partition-table-flash` över USB.
+Windows-PASS:et ovan förblir bundet till `bee5d8c` och ärvs inte av v1.1.0.
 
 Solelkollen och Vibbe/Buddy är egna produkter i egna repon och dras in som
 companion-inputs när de finns utcheckade — `TORGET_SOLELKOLLEN_DIR`
