@@ -182,21 +182,48 @@ made it, because another process can complete a login to B between A's
 response and the bridge run, and the file the bridge reads is shared
 and mutable. A session's credential is fixed when the session starts,
 so the bridge binds a session only when the account value it reads has
-demonstrably been in place since before that session began: it keeps,
-in its state, `accountSeenSince` — the earliest time it has observed the
-current `accountUuid` value continuously, reset to now whenever the
-value it reads differs from the last one it recorded — **per config
-directory**, keyed by `sha256(CLAUDE_CONFIG_DIR path)[:16]`, because two
-concurrent sessions in two config directories are two accounts that
-each stay stable, not one account flapping; a single mark would reset
-on every alternating trigger and leave both unbindable. **Setup seeds
-the mark:** the install step reads `.claude.json` once and records the
-value and the install time as `accountSeenSince` for the home config
-directory (and for any `CLAUDE_CONFIG_DIR` it was run with), so the
-first session started after the install can bind — without the seed,
-that session's transcript would predate the bridge's first look at the
-file and a user's first or only session would never supply quota data.
-The doctor re-seeds the same way when it finds no mark. And it takes the
+demonstrably been in place since before that session began. The proof
+is `accountSeenSince`, kept **per config directory** (keyed by
+`sha256(CLAUDE_CONFIG_DIR path)[:16]`, because two concurrent sessions
+in two config directories are two accounts that each stay stable, not
+one account flapping; a single mark would reset on every alternating
+trigger and leave both unbindable), and it does not depend on the
+bridge having been invoked to witness the change — the session that is
+itself the first to run the bridge after a `/login` is the common case,
+and a mark set at that first invocation would postdate its transcript
+and leave the user's next and only session `unknown` for its lifetime.
+For the home config directory the mark is the **tokenserver's**, which
+runs continuously: every `ACCOUNT_WATCH_S` (proposed 30 s) it `stat`s
+`.claude.json` and the credential store (a read only when either
+changed, never an HTTP call) and, whenever the store's token — resolved
+through its profile as above — names the same account `.claude.json`
+names, it records `accountSeenSince` as the **later of the two files'
+modification times** at that observation: at that moment both files
+already held their current, mutually consistent values, so the pair has
+been in place at least since then. A `/login` whose two writes are
+separated by a pause is therefore never a proof — until the second
+write lands the token resolves to one account and the file names
+another, no mark is recorded, and once it lands the mark is that
+second write's time, so a session started inside the pause stays
+`unknown` while a session started right after it, before the
+tokenserver's next look, binds. The mark is kept while the pair stays
+the same, however many later writes bump either file (Claude Code
+rewrites `.claude.json` for many reasons, and a token refresh rewrites
+the store without changing the account), and an unresolved token
+(during a cooldown) neither confirms nor moves it; only an observed
+change of the account on either side clears it, and the next consistent
+observation records a new one. The bridge reads the mark from the
+tokenserver's state (the same directory its own state lives in, read
+only) and never derives one of its own for the home directory. For
+another `CLAUDE_CONFIG_DIR`, which the tokenserver does not watch, the
+mark is the bridge's own — the earliest time it has observed the
+current `accountUuid` value continuously, reset whenever the value it
+reads differs from the last recorded, seeded by setup and by the doctor
+run in that directory (they read `.claude.json` once and record the
+value and the run time) — and a login there followed by a session
+before any other bridge invocation leaves that session `unknown`; that
+gap is a stated boundary below, not a silent one: `GET /` reports such
+a directory as `bridge: unproven_dir`. And it takes the
 session's start time from the creation time of the `transcript_path`
 the payload names (a `stat`, never a read; `st_birthtime` on macOS,
 creation time on Windows), a file Claude Code creates when the session
@@ -504,7 +531,7 @@ sample file too, and the merge treats it as "no observation", not zero.
    a 30-minute schedule set while the bridge was fresh. `GET /`
    reports `claudeStatusline: {status, ageS, claudeCodeVersion, account}`
    with statuses `fresh`, `stale`, `missing`, `invalid`, `not_installed`,
-   `other_account`, `account_unknown`, where `ageS` is the age by `seen`
+   `other_account`, `account_unknown`, `unproven_dir`, where `ageS` is the age by `seen`
    of the youngest window in the probe's own entry and `account` is
    `match`, `mismatch` or `unknown`; the tokenserver reads only that
    entry and never the other accounts'.
@@ -524,8 +551,16 @@ sample file too, and the merge treats it as "no observation", not zero.
    completed probe but is not once a persisted session floor can be
    served after a restart with both sources stale. So a session value
    is recorded as an observation only when the session window is
-   **live** by the liveness rule above; a served-but-stale floor reaches
-   the ring, flagged, and never the tracker or the history.
+   **live** by the liveness rule above. The wire has no session-stale
+   key the firmware would honour — `test/test_tokens.c` asserts that
+   `claudeSessionStale` never sets provenance, and the card's only stale
+   mark is `claudeWeekStale` — so a session value is sent only when the
+   session window is live, or when `claudeWeekStale` is true and the
+   whole card, session ring included, is therefore marked stale (today's
+   stale card, unchanged); a stale session floor beside a live weekly
+   window is **withheld** — `claudeSessionPct` null, the ring's absent
+   state — rather than presented as live, and it reaches the tracker and
+   the history in no case.
 5. The doctor prints `PASS statusLine bridge: fresh (N s)` / `WAIT statusLine
    bridge: installed, no sample yet` / `FIX statusLine bridge: the
    configured command is not this checkout's bridge` / `OFF`. The smoke test
@@ -534,6 +569,13 @@ sample file too, and the merge treats it as "no observation", not zero.
 
 ## Failure and privacy boundaries
 
+- The account proof for the home config directory is the tokenserver's
+  watch; a non-default `CLAUDE_CONFIG_DIR` has only the bridge's own
+  observation mark, so a login there followed directly by a session
+  leaves that session `unknown` until a later session or a doctor run
+  in that directory re-seeds the mark. `GET /` and the doctor name the
+  directory as `unproven_dir` rather than letting the gap pass as
+  `account_unknown`.
 - The bridge reads stdin **once**, parses at most 64 KiB of it (the
   documented payload is a few kilobytes) and never logs it. A payload
   beyond the cap is not a sample — nothing is written — but it is still
@@ -662,10 +704,21 @@ Regression tests must prove:
   first observation of a session goes to `unknown` whether or not its
   values are unique and the session is bound at its first proving
   payload only if its transcript's creation time is later than the
-  `accountSeenSince` of its config directory — a fresh install seeds the
-  mark so the first post-install session binds, two concurrent sessions
-  in different `CLAUDE_CONFIG_DIR`s keep two independent marks and both
-  bind, a login to another account completed between the
+  `accountSeenSince` of its config directory — for the home directory
+  the tokenserver's mark: a `/login` followed by a session that is the
+  first bridge invocation afterwards binds that session, because the
+  mark is the later of the two files' modification times at the
+  tokenserver's first consistent observation, not the observation time;
+  a login whose credential write lands a minute after its `.claude.json`
+  write records no mark until it does and then one at the second write,
+  so a session started in between stays `unknown` and one started after
+  it binds; a token refresh and a `.claude.json` rewrite move neither
+  the mark nor the binding; a fresh install seeds the mark so the first
+  post-install session binds; two concurrent sessions in different
+  `CLAUDE_CONFIG_DIR`s keep two independent marks and both bind, while a
+  login in a non-default directory followed directly by a session leaves
+  that session `unknown` and `GET /` names the directory `unproven_dir`;
+  a login to another account completed between the
   session's response and the bridge run resets `accountSeenSince` and
   leaves that session `unknown` for its lifetime, as does a session that
   predates the bridge install, and a bound session loses its binding
@@ -760,8 +813,11 @@ Regression tests must prove:
 - a bridge observation reaches the Max Tracker only through the existing
   live gate, and a session value reaches the Max Tracker and the usage
   history only while the session window is live: a persisted session
-  floor served after a restart with the probe past its interval and no
-  fresh bridge is shown on the ring and recorded nowhere;
+  floor after a restart with the probe past its interval and no fresh
+  bridge is served with `claudeWeekStale` true (the stale card) and
+  recorded nowhere, and the same floor beside a live weekly window from
+  a fresh bridge payload without a session window is withheld
+  (`claudeSessionPct` null) because the firmware could not flag it;
 - with no bridge installed and the probe stale, a fresh matching
   plan-usage sample of the selected reset keeps `claudeWeekStale` false
   exactly as `test_snapshot_uses_fresh_local_claude_week_when_oauth_is_stale`
