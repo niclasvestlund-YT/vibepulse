@@ -365,7 +365,14 @@ organization hash comes from the same response. The call is made
 cycle: the resolved pairs `credentialFp → {accountFp, orgFp}` are kept
 in the probe state file (hashes only, never a token), so a cycle whose
 token is already resolved makes exactly the usage call it makes today,
-and a token refresh costs one profile call. **The profile call exists
+and a token refresh costs one profile call. The pairs are **bounded**:
+every refresh mints a credential fingerprint, so the file keeps at most
+`PROBE_PAIR_CAP` (proposed 8) pairs, evicting the least recently used
+on every save while never evicting a pair whose credential fingerprint
+is one of the current candidates (`_read_oauth_candidates()` lists at
+most a handful), and a pair carries the time it was last used so the
+eviction order is explicit; an evicted pair costs at most one profile
+call if its token ever returns. **The profile call exists
 for the bridge-enabled path only.** With the bridge declined or not
 installed the probe keeps today's path exactly — one usage call, no
 profile call, no cooldown it could not have had before — and keeps
@@ -588,7 +595,10 @@ timestamp, not by which source it is:
    one window, `GET /` reports `quotaCache: legacy_records_unreadable`
    with their count so the cause is stated rather than looking like a
    regression, and the first successful probe writes records under the
-   fingerprint. This happens whether or not the bridge is installed.
+   fingerprint. This window opens only on the bridge-enabled path:
+   with the bridge declined the probe keeps `default-v1` as its
+   identity, as above, and its legacy records stay readable exactly as
+   today.
 
 The heaviest-model weekly window keeps today's order: probe, then cache,
 under the same identity filter.
@@ -866,8 +876,9 @@ Regression tests must prove:
 - legacy `default-v1` Claude records are never re-keyed: with a legacy
   record present and a fingerprint known, the lookup returns nothing for
   the fingerprint, `GET /` names the unreadable records and their count,
-  and the first successful probe writes under the fingerprint, bridge
-  installed or not;
+  and the first successful probe writes under the fingerprint — on the
+  bridge-enabled path only: with the bridge declined the same legacy
+  record is served under `default-v1` exactly as today;
 - a session whose `rate_limits` are unchanged since its last run keeps
   its binding while its config directory's account value is unchanged —
   including after 36 idle hours, and including a session whose
@@ -1031,6 +1042,10 @@ Regression tests must prove:
   resolved after the upgrade and not by a later different one, and the
   tracker, usage-today and forecast values neither disappear nor move
   backward on upgrade;
+- the probe state file holds at most `PROBE_PAIR_CAP` resolved pairs
+  after any number of refreshes, the pair for every current candidate
+  survives every save, and a legacy state file with more pairs than the
+  cap is trimmed on load by the same rule;
 - with the bridge declined the probe makes no profile call, a token
   refresh causes no request the probe does not make today, a 429 on the
   usage call rests exactly as today, and the cache identity stays
