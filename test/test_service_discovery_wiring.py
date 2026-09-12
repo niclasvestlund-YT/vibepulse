@@ -29,6 +29,9 @@ assert "!path || !configured_url" not in discovery
 assert "return configured_url && bounded_copy(url, cap, configured_url);" in discovery
 assert "(configured_url && strcmp(discovered, configured_url) == 0)" in http
 assert "(!configured_url || strcmp(alternate, configured_url) != 0)" in http
+# ...and with nothing advertised, the relay is still tried before giving up.
+assert "return lan_url && torget_http_get(lan_url, buf, cap, len_out);" in http
+assert http.count("torget_http_get_failover(configured_url, relay_url") == 3
 
 assert "DiscoveryAdvertiser(log)" in tokenserver
 assert "discovery.start(args.port)" in tokenserver

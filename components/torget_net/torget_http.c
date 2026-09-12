@@ -180,7 +180,14 @@ static _Atomic int64_t s_last_local_try_us;
 bool torget_http_get_failover(const char *lan_url, const char *relay_url,
                               char *buf, size_t cap, size_t *len_out) {
   if (!relay_url || !relay_url[0])
-    return torget_http_get(lan_url, buf, cap, len_out);
+    return lan_url && torget_http_get(lan_url, buf, cap, len_out);
+  if (!lan_url) {
+    /* No LAN address at all (a feed switched on in LABS on a panel whose
+     * secrets.h never had its URL, and nothing advertised): the relay is
+     * the only way, so take it without touching the LAN/relay preference. */
+    return http_get_timeout(relay_url, buf, cap, len_out,
+                            TG_NET_LOCAL_TIMEOUT_MS, true);
+  }
 
   const int64_t now = esp_timer_get_time();
   tg_net_source_state state = {
@@ -216,7 +223,10 @@ bool torget_http_get_service(const char *path, const char *configured_url,
   tg_service_source source = TG_SERVICE_SOURCE_CONFIGURED;
   if (!torget_service_endpoint_url(path, configured_url, discovered,
                                    sizeof discovered, &source)) {
-    return false;
+    /* Nothing advertised and no compiled-in URL: the relay, if any, is the
+     * one route left. With neither this is a plain miss. */
+    return torget_http_get_failover(configured_url, relay_url,
+                                    buf, cap, len_out);
   }
   if (source == TG_SERVICE_SOURCE_CONFIGURED ||
       (configured_url && strcmp(discovered, configured_url) == 0)) {
