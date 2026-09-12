@@ -159,17 +159,21 @@ something is counted but no provider total is non-zero yet, never one
 provider's name over a combined total — and the split bar carries the
 per-provider share. Then
 the label `BLOCKED ON YOU · TODAY`, one dominant number in whole minutes
-(floored) — except that a total under 60 seconds while something was
-counted (`countToday > 0`) or is running (`blockedNowS > 0`) reads
-`<1 MIN` and never `0`. That covers 1 to 59 seconds, which a short
+(floored) — except that a total under 60 seconds while something is
+counted (`countToday > 0`) reads `<1 MIN` and never `0`. `countToday`
+counts a hold only once its marker is on disk, so for the writer window
+after a park (at most `WAIT_LEDGER_FLUSH_S`) the hero shows dashes while
+`BLOCKED RIGHT NOW` already runs: that is "no durable data yet", which
+dashes mean, and a crash in that window makes the restart show the same
+dashes rather than take back a `<1 MIN` the file never held. That covers 1 to 59 seconds, which a short
 completed wait or the first checkpoint of a live one produces, **and**
 the wire's own 0: a wait that ended in under a second has a positive
 monotonic `durationS`, counts once in `countToday`, and floors to 0 on
 the wire, so the presentation keys on `countToday`, not on the seconds.
 `LONGEST WAIT` follows suit: `<1s` when `countToday > 0` and
 `longestTodayS` is 0. A zero the measurement did not contain is the
-invented zero this spec forbids, and dashes are reserved for no data
-(`countToday` 0 and nothing blocked) —
+invented zero this spec forbids, and dashes are reserved for no durable
+data (`countToday` 0, whether or not something is blocked) —
 the bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
 (live, from `blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
 block is absent
@@ -194,10 +198,12 @@ panel cannot infer the host's calendar boundary from its own clock,
 least of all over the relay. `dayEndsInS` is relative to the moment the
 server built the block, so the page first subtracts the block's **age at
 accept** and only then counts down on its monotonic clock. On the LAN
-that age is the poll's own round trip, under a second, and the server's
-floor already rounds the value down, so the countdown starts at accept
-with nothing subtracted and the page can be late by less than a second
-at most. Over the relay a frame can be up to `STATUS_EXPIRY_S` (15 s)
+that age is the poll's own request duration, which the direct poller
+allows up to its 2 500 ms HTTP timeout (`agent_net.c`), so the page
+records the request on its monotonic clock from send to accept and
+starts the countdown at `dayEndsInS` minus that whole duration, rounded
+up to a whole second — the server's floor and the round-up both err
+early, never late. Over the relay a frame can be up to `STATUS_EXPIRY_S` (15 s)
 old when it is accepted — `decode_status_snapshot` takes any unexpired
 publication, and it checks the envelope's expiry against the panel's
 own `time(NULL)` without establishing that the two clocks agree, so an
@@ -453,13 +459,14 @@ Regression tests must prove:
   STATUS_EXPIRY_S` with no wall clock involved: a relay frame built one
   second before the host's midnight and accepted five seconds later
   renders day-ended on arrival, and so does one accepted with the panel
-  clock set 30 s behind the host's; a LAN block starts its countdown at
-  accept; a block with `dayEndsInS` 10 over the relay is day-ended on
-  arrival and at most 15 s early;
+  clock set 30 s behind the host's; a LAN block subtracts the measured
+  request duration rounded up (a 2 400 ms poll of a block with
+  `dayEndsInS` 2 renders day-ended on arrival); a block with `dayEndsInS`
+  10 over the relay is day-ended on arrival and at most 15 s early;
 - the hero reads `<1 MIN` and `LONGEST WAIT` reads `<1s` for a block
   with `countToday` 1 and every seconds field 0 (a sub-second wait
-  floored on the wire), and dashes only for `countToday` 0 with
-  `blockedNowS` 0;
+  floored on the wire), and dashes for `countToday` 0 even while
+  `blockedNowS` runs (the writer window after a park), never `0`;
 - `dayEndsInS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
 - the page's landmark captures match the seven frames above, and the header
