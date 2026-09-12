@@ -93,8 +93,20 @@ ledger keeps the latest local date it has served as today — **and
 persists it**, as `servedDay` in the same file as the rows and markers,
 written by the same writer, so a process started while the clock is
 still regressed initialises from `max(wall date, servedDay)` rather
-than from the regressed calendar — and when the wall clock regresses
-across midnight (00:05 back to 23:55) it keeps serving that later date
+than from the regressed calendar. **The advance is durable before it is
+shown:** a served day is only ever a day the file already names. The
+first snapshot after local midnight does not compute the new day; it
+queues the advance to the writer, which persists the later `servedDay`
+under the generation rule below, and until that generation's write is
+acknowledged every snapshot keeps serving the previous durable day —
+its totals with `dayEndS` 0, which the page renders as `DAY ENDED` for
+at most one writer window (`WAIT_LEDGER_FLUSH_S`, 2 s) — so a crash
+before the write and a restart with the clock regressed across midnight
+find the file, the last snapshot and `max(wall date, servedDay)` all
+naming the same day, and the counter cannot move backward. A failed
+write keeps the previous day served and is retried on the next snapshot;
+`GET /` shows it as `waits.saveOk` false. When the wall clock regresses
+across midnight (00:05 back to 23:55) the ledger keeps serving the later date
 — `dayEndS` then counts to the end of the held day, up to the 90 000
 clamp — until the clock passes it again, and `GET /` reports
 `waits.dayHeld` while it does. The hold is **bounded to one midnight**:
@@ -103,10 +115,22 @@ was wrong by a year. If the wall date falls more than one day behind
 `servedDay` — the clock jumped forward, served a snapshot dated in the
 future, and was then corrected — the ledger releases the hold: it resets
 `servedDay` to the wall date, logs the discontinuity once, and reports
-`waits.dayReset` on `GET /`; rows anchored to the future date simply
-never overlap a real day again and age out with retention, and the page
-shows the real day's waits from the next poll rather than an empty
-future day for as long as the clock error was large. The single wall anchor
+`waits.dayReset` on `GET /`. Rows anchored to the future date are
+**discarded, not left to age out**: retention prunes by a lower cutoff,
+so a row with a future `endedAt` would survive it and resurface as a
+real day's total once the calendar caught up with the bad clock. The
+release therefore drops every row whose `endedAt` lies after the end of
+the reset wall day, re-anchors an open-hold marker whose `startedAt`
+lies in the future to `now − elapsedS` so its checkpointed seconds land
+in the real day rather than a future one, counts both in the
+discontinuity log line, and persists the drops, the re-anchoring and
+the reset `servedDay` in one write; and retention prunes on both sides
+of the window in general — rows older than the cutoff and rows ending
+after the served day's end plus one day, the most a legitimate midnight
+overlap can reach — so a future-dated row never survives a prune even
+when a reset was missed. The page then shows the real day's waits from
+the next poll rather than an empty future day for as long as the clock
+error was large. The single wall anchor
 keeps rows from relocating; this rule keeps "today" itself from
 relocating, so `todayS` cannot change on a backward step even though
 the host's calendar briefly says an earlier date. **Open holds count too, but only what is on disk:** `todayS`, the
@@ -542,9 +566,21 @@ Regression tests must prove:
   returns "shutting down" and adds no second row, and the file after the
   final flush has exactly one row per hold; a restart while the clock is
   still regressed across midnight initialises today from the persisted
-  `servedDay` and leaves `todayS` unchanged; a clock that jumped a year
+  `servedDay` and leaves `todayS` unchanged; the first snapshot after
+  midnight keeps serving the previous day with `dayEndS` 0 until the
+  write that carries the advanced `servedDay` is acknowledged (a test
+  blocks the file lock and asserts the day does not advance on the glass
+  before it is on disk), and a crash before that write followed by a
+  restart with the clock regressed across midnight serves the same day
+  the last snapshot did; a clock that jumped a year
   forward, served a snapshot and was corrected releases the hold on the
-  next snapshot (`waits.dayReset`) and today's waits reappear; a close
+  next snapshot (`waits.dayReset`) and today's waits reappear, the rows
+  the future day accumulated are absent from the file after the write
+  that persists the reset, an open hold parked under the bad clock keeps
+  its checkpointed seconds in the real day, and advancing the clock to
+  the once-future date afterwards shows no trace of them; a future-dated
+  row planted in the file without a reset is pruned by retention rather
+  than kept until its date; a close
   that lands while the atomic write is blocked (a test holds the file
   lock) stays unsaved through that write's completion and is
   acknowledged only by the trailing write; a close followed by a simulated crash inside the
@@ -594,7 +630,10 @@ Regression tests must prove:
   zero renders the totals as dashes with `DAY ENDED` until a newer block
   arrives; the header reads `AGENTS` for a block with `count` 1 and
   both provider totals 0; the hero reads `<1 MIN` for `todayS` 1 to 59,
-  dashes for 0 with nothing blocked, and whole floored minutes above;
+  `<1 MIN` for 0 as well whenever `count` is above 0 (a completed
+  sub-second wait floors to `todayS` 0 with `count` 1 and is still a
+  measurement), dashes for 0 only when `count` is 0, and whole floored
+  minutes above;
 - the day countdown over the relay starts at `dayEndS -
   RELAY_AGE_BOUND_MS/1000 - request duration` with no wall clock
   involved: a relay frame built one second before the host's midnight
