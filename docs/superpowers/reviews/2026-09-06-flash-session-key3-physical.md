@@ -72,6 +72,8 @@ Companion: Solelkollen
                  is no .git anywhere in the chain up to /
   Contents:      8 files, 48 KB, modified 2026-08-12..13
   sha256:        0b14f6bfea1390b7b7550384424d656aef2e6a4ec27e249a1ba16d75d6418869
+                 (method not recorded by the session that computed it — see
+                 the source record's note; a fingerprint, not yet reproducible)
   In spec/hardware-sources.yaml: yes, since this PR
 ```
 
@@ -381,8 +383,8 @@ Nothing in `docs/manual-test-key3.md` was walked as written. Specifically:
   completed with no alarm. It is **not** the run sheet's §5, which also requires
   a dozen SETTINGS opens under watch; those were done earlier as part of the
   OBS-37 investigation, not as §5. Results are in OBS-37: the low-water
-  plateaued at 9 355 (36 bytes of movement in six hours, against 34 576 bytes in
-  the first 45 minutes), lock failures fell to effectively zero once the panel
+  plateaued at 9 355 (268 bytes from the last measured cycle's 9 623, 36 bytes
+  across the six hourly readings, against 34 576 bytes in the first 45 minutes), lock failures fell to effectively zero once the panel
   was left alone, and the block range held at 19 456–31 744. The panel was still
   drawing at ~7.2 hours uptime.
 

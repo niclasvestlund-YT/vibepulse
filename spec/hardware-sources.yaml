@@ -90,7 +90,13 @@ sources:
     note: >-
       The image running on torget-home-01 as v1.0.0-67-ge51b79f was built with
       TORGET_SOLELKOLLEN_DIR pointing at this directory, which is not a git
-      checkout; the content hash is the only exact identifier. Recorded in
+      checkout; the content hash is the only identifier. The session that
+      computed it did not record how the files were ordered and serialized,
+      so until it is recomputed on the same tree with a stated command
+      (for example: cd into the directory, then
+      `find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum`) and the
+      command is recorded here, treat the digest as a fingerprint that
+      cannot yet be checked against another tree. Recorded in
       docs/superpowers/reviews/2026-09-06-flash-session-key3-physical.md.
 
   - id: torget-main-1fad449

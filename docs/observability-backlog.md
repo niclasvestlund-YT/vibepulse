@@ -459,8 +459,11 @@ Passive reading only; no interaction at the panel, no build, no window opened.
 
 Three results, and the first changes how serious this item is:
 
-1. **The walk stops.** The low-water moved **36 bytes across six hours**
-   (9 391 -> 9 355), against **34 576 bytes in the first 45 minutes**
+1. **The walk stops.** The low-water column is each hour's closing value; the
+   soak's own 02:03 baseline was not logged separately. From the last measured
+   cycle (9 623, minutes before the soak) to hour 6 is **268 bytes**; within
+   the six hourly readings the movement is **36 bytes** (9 391 -> 9 355).
+   Either figure stands against **34 576 bytes in the first 45 minutes**
    (44 199 -> 9 623). It settled at 9 355 by hour 4 and did not move again. The
    descent was a warm-up and settling phenomenon, not ongoing degradation, and
    nothing is heading toward zero. The summed low-water settled at 9 355 B,
