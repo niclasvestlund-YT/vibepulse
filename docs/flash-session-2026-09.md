@@ -177,7 +177,7 @@ companion's `git describe --tags --always --dirty` from its own checkout
 in the review — and for a companion that is not a git checkout, which
 Solelkollen is on this Mac, its deterministic fingerprint instead:
 `cd ~/Solelkollen/components/app_solelkollen && find . -type f | LC_ALL=C sort
-| xargs sha256sum | sha256sum`, recorded in the review and in the
+| xargs shasum -a 256 | shasum -a 256`, recorded in the review and in the
 `spec/hardware-sources.yaml` companion record together with that command,
 so the next session can tell whether the tree changed (the 2026-09-06 digest
 was computed with an unrecorded method and cannot be compared; this run

@@ -96,7 +96,7 @@ sources:
       computed it did not record how the files were ordered and serialized,
       so until it is recomputed on the same tree with a stated command
       (for example: cd into the directory, then
-      `find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum`) and the
+      `find . -type f | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256`) and the
       command is recorded here, treat the digest as a fingerprint that
       cannot yet be checked against another tree. Recorded in
       docs/superpowers/reviews/2026-09-06-flash-session-key3-physical.md.
