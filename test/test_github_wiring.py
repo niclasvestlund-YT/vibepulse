@@ -29,8 +29,6 @@ class GitHubWiringTests(unittest.TestCase):
             net)
 
     def test_github_is_one_optional_seventh_view(self):
-        header = read("components/app_tokens/usage_screen.h")
-        app = read("components/app_tokens/app_tokens.h")
         ui = read("components/app_tokens/usage_screen.c")
         # Semantic IDs are stable. The pure C test exhausts all 32 dense maps.
         policy = read("components/app_tokens/labs_features.h")
