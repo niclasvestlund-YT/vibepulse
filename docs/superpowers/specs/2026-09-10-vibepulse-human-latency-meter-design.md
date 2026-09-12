@@ -79,8 +79,11 @@ happening and not only once it closes — a page saying `0` over a
 `BLOCKED RIGHT NOW` of several minutes would be the invented-zero the
 honesty rule forbids. `longestTodayS` is the same: it is the largest
 in-day part over closed rows **and** open holds, so `LONGEST WAIT`
-can never read less than `BLOCKED RIGHT NOW` while the day's longest
-wait is the one still running. The provider header names the providers
+can never read less than the **in-day part** of the current hold. It
+can legitimately read less than `BLOCKED RIGHT NOW`, which is the
+hold's whole age: at 00:10 a hold parked at 23:50 shows `blockedNowS`
+1200 and contributes 600 to `longestTodayS`, because the other 600
+belong to yesterday, and the page shows exactly that. The provider header names the providers
 of open holds as well. When an open hold closes, its row replaces its
 live contribution; the total never steps back at that moment. Closed rows
 contribute only the part of their measured duration that falls in the
@@ -131,26 +134,45 @@ sits idle at a prompt with nothing parked (unknown to the server), time
 spent by the agent itself. Holds that were open when the tokenserver
 restarted **are** counted, because they already counted live: the
 number the panel showed must not step back when the process comes up
-again. `InteractionStore._pending` is memory-only, so the ledger keeps a
+again — but only for the time actually observed, never for the outage.
+`InteractionStore._pending` is memory-only, so the ledger keeps a
 durable, privacy-safe **open-hold marker**: an `open` list in the same
-persisted file with one `{provider, kind, startedAt}` per parked
-interaction, rewritten (through the same writer) at every park and every
-ending. On load, the new process turns each marker into a row with
-outcome `restart`, `endedAt` = its own first wall-clock reading and
-`durationS` = `max(0, endedAt - startedAt)` — the one place a duration
-is wall-derived, because the monotonic clock did not survive — then
-clears the list. That row is never smaller than the live contribution
-the old process last showed (it ran until at least the moment it died),
-except after a backward wall-clock step, where the clamp to 0 is named
-in the row and on `GET /` rather than hidden. A marker written inside
-the writer window before a crash can be lost, the same bound as a row.
-An `expired` wait counts in full: the human was needed for the whole
-hold.
+persisted file with one `{provider, kind, startedAt, elapsedS}` per
+parked interaction, where `elapsedS` is a **monotonic-derived
+checkpoint** of the hold's elapsed time as of the last write. The writer
+rewrites the list at every park and every ending, and, while any hold is
+open, at least every `WAIT_MARKER_CHECKPOINT_S` (proposed 30 s), so the
+checkpoint is never more than that far behind the live figure. A hold
+open at a **clean** shutdown is closed by the final flush as a `restart`
+row with its exact monotonic elapsed. After an **unclean** stop the new
+process closes each surviving marker as a `restart` row with
+`durationS` = the marker's `elapsedS` and `endedAt` = `startedAt +
+elapsedS`, then clears the list: the row stops at the last durable
+observation, so a process that dies with a hold parked and stays down
+for hours charges the human the seconds it measured before it died and
+nothing of the outage (the hook connection ended at the crash, and so
+did the wait). The bound runs the other way: the panel may have shown up
+to `WAIT_MARKER_CHECKPOINT_S` more live than the checkpoint holds, and a
+crash then steps the total back by at most that, named beside the
+lost-row bound rather than hidden. A stale marker left by a close that
+happened inside the writer window before a crash resolves the same way:
+its checkpoint is at most the hold's true length, so a short completed
+wait can be recorded short or absent, never long. No wall-clock
+arithmetic produces a duration anywhere. An `expired` wait counts in
+full: the human was needed for the whole hold.
 
 **Same data across the relay.** The numbers relay carries `/api/tokens`
 and `/api/max-tracker`; `/api/agent-status` rides the encrypted status
 relay when enabled. The `waits` block travels with it unchanged; a
-relay-fed panel sees the same page. No new relay endpoint.
+relay-fed panel sees the same page. No new relay endpoint. The relay's
+frame is the tighter budget: `_prepare_status` rejects a canonical
+payload over `MAX_STATUS_BYTES` (2560) outright, and the field-wise full
+agent snapshot already measures 2 394 bytes, so the block is serialized
+as **bounded integers**: every seconds field is a whole number of
+seconds (floored) clamped to 999 999, `countToday` is clamped to 9 999,
+never a float, never scientific notation. The worst-case block is then
+132 bytes and the worst-case relay payload 2 526 bytes; the fixed-frame
+test proves it rather than the spec assuming it (below).
 
 ## Data flow
 
@@ -173,9 +195,11 @@ relay-fed panel sees the same page. No new relay endpoint.
    hook's thread, and `GET /` reports `waits.rows` so the doctor can show
    the file's state. The open-hold live contribution above is recomputed
    from `_pending` on every poll; what is persisted for an open hold is
-   only its marker (provider, kind, `startedAt`), rewritten by the same
-   writer at park and at ending, so a restart can close it as `restart`
-   rather than forget it.
+   only its marker (provider, kind, `startedAt`, checkpointed
+   `elapsedS`), rewritten by the same writer at park, at ending and on
+   the checkpoint cadence while anything is open, and closed by the final
+   flush on a clean stop, so a restart closes it at the last observation
+   rather than forgetting it or extending it to the next boot.
 4. `AgentStatusService.snapshot()` calls one method,
    `InteractionStore.wait_aggregates(now)`, in two steps. Under the
    store's own lock it takes one coherent **snapshot** — the ledger's
@@ -223,9 +247,9 @@ relay-fed panel sees the same page. No new relay endpoint.
 - The block is additive. The `/api/agent-status` `v` stays 2; the pending
   block, the digest binding and the relay encryption are untouched.
 - Clock regression on the host makes `blockedNowS` clamp at 0 and a
-  negative duration is dropped rather than written; the one exception is
-  a `restart` row, whose wall-derived duration clamps at 0 and is kept so
-  the marker is not silently lost.
+  negative duration is dropped rather than written; a `restart` row's
+  duration is the checkpoint, monotonic-derived like every other, so a
+  wall step between two processes moves only where its seconds land.
 
 ## Visual gate
 
@@ -243,18 +267,25 @@ Regression tests must prove:
 - every ending path produces exactly one ledger row with the right
   outcome: direct `approve` and `deny` → `panel`, direct `leave_it` and
   relay `terminal` → `computer`, relay `approve`/`deny` → `panel`, expiry
-  → `expired`, panic → `panic`, other removal → `removed`; and a store
+  → `expired`, panic → `panic`, other removal → `removed`; a store
   constructed fresh over a file whose `open` list has two markers (the
-  restart case) produces exactly two `restart` rows, each no shorter
-  than the live contribution the previous process last reported, clears
-  the list, and a backward wall step between the two processes yields a
-  0-duration row named on `GET /` rather than a dropped marker;
-- a park writes its marker within the writer window and an ending
-  removes it, so the persisted `open` list always mirrors `_pending`
-  after the writer has run;
+  unclean-restart case) produces exactly two `restart` rows whose
+  `durationS` equals each marker's checkpoint — not the time to the new
+  process's start, so a simulated three-hour outage adds nothing — and
+  clears the list; a clean shutdown with a hold open writes its
+  `restart` row with the exact monotonic elapsed and no marker; and a
+  wall step between the two processes changes only the row's day
+  placement;
+- a park writes its marker within the writer window, an ending removes
+  it, and an open hold's checkpoint advances at least every
+  `WAIT_MARKER_CHECKPOINT_S`, so the persisted `open` list mirrors
+  `_pending` and a crash steps the total back by at most that interval
+  (the test names the bound);
 - an open hold is counted live in `todayS`, its provider total,
   `countToday` and `longestTodayS` (the first hold of the day makes
-  `LONGEST WAIT` equal `BLOCKED RIGHT NOW`, never 0); three concurrent
+  `LONGEST WAIT` equal `BLOCKED RIGHT NOW`, never 0; at 00:10 a hold
+  parked at 23:50 makes `blockedNowS` 1200 and `longestTodayS` 600, and
+  the two are allowed to diverge exactly there); three concurrent
   holds across both providers are all counted and `blockedNowS` is the
   oldest; and closing one does not step the total back — including a
   close that races the 1 s snapshot, which a test drives by interleaving
@@ -280,7 +311,12 @@ Regression tests must prove:
 - the persisted file and the payload carry no content fields (the
   denylist test above);
 - the `/api/agent-status` body stays inside the device budget with `waits`
-  plus a full pending block and agent list;
+  plus a full pending block and agent list, and
+  `test_encrypted_status_strips_pending_and_fits_fixed_frame` gains the
+  worst-case `waits` block (every seconds field 999 999, `countToday`
+  9 999) beside the field-wise full agent snapshot and still fits
+  `MAX_STATUS_BYTES`; a float or an over-clamp value never reaches the
+  wire;
 - a corrupt ledger is quarantined and a failing save shows on `GET /`;
 - the firmware parser accepts the block, rejects a malformed one as absent
   without dropping the rest of the payload, and older payloads without it
