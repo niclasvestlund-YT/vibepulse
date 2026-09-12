@@ -579,9 +579,17 @@ paid for in both; there is no key left to shorten.
 1. A hook parks an interaction; the store records `created_at` from its
    monotonic clock as today, and additionally `started_wall` from its
    wall clock (`self._wall()`, already read there for the relay expiry).
-2. The interaction ends. In the one place each ending already passes
-   through (`resolve`, `resolve_relay`, `panic`, expiry sweep, computer
-   fallback removal), the store calls `ledger.close(entry, outcome, now)`.
+2. The interaction ends. In every place an ending passes through —
+   `resolve`, `resolve_relay`, `panic`, the expiry sweep, computer
+   fallback removal, **and the direct timeout pop in
+   `InteractionStore.await_result()`**, which today removes an expired
+   hold itself without going through `_sweep_locked` and is the normal
+   ending while the panel is disconnected with the relay off — the
+   store calls `ledger.close(entry, outcome, now)` exactly once per
+   hold: the close is issued by whichever path wins the pop under the
+   store lock, and a path that finds the entry already gone issues
+   none, so the await path and the sweep can never both record a
+   `timeout` row for one hold.
 3. `WaitLedger` inserts the row in memory **in `endedAt` order**
    (`bisect.insort` on the derived `endedAt`, not an append: a clock
    regression between two parks makes a later close carry an earlier
@@ -651,9 +659,15 @@ paid for in both; there is no key left to shorten.
    are read together.
 5. The firmware's agent-status parser reads `waits` in **three
    states**, never two: *missing* (no `waits` member), *valid* (all
-   nine fields, `g` and `l` included, numeric and non-negative, `r`
-   absent, 0, 1 or 2) and *malformed* (a `waits` member that fails any
-   of that). Only a missing member is the server's statement of absence
+   nine fields, `g` and `l` included, present as **exact integer
+   tokens** — no fraction, exponent or sign — each within its stated
+   wire maximum: the seconds fields at most 999 999, `n` at most 9 999,
+   `endS` at most 90 000, `g` and `l` below 10⁹, `r` absent, 0, 1 or 2)
+   and *malformed* (a `waits` member that fails any of that — a
+   fractional `d`, a `nowS` of 1 000 000, a value the broad-number frame
+   never validated a layout for, or an oversized cumulative field that
+   would poison the continuity ordering against every later valid
+   block). Only a missing member is the server's statement of absence
    that the ordered-absence rule above may act on; a malformed member
    is a broken frame, not a statement — a newer or buggy tokenserver
    sending it every second must not clear the last valid totals — so
@@ -849,6 +863,10 @@ Regression tests must prove:
   same as its sorted form;
 - `nowS` follows the oldest open interaction and drops to 0 on
   close;
+- a hold that expires in `await_result()` with the panel disconnected
+  and the relay off gets exactly one `timeout` row from that pop, the
+  sweep that runs afterwards adds none, and the day's total counts its
+  seconds;
 - the persisted file and the payload carry no content fields (the
   denylist test above);
 - the `/api/agent-status` body stays inside the device budget with `waits`
@@ -876,8 +894,10 @@ Regression tests must prove:
   keeps its block, nothing retreats), and a crash at any point followed
   by a restart serves a first `g` above every `g` the previous process
   served, at whatever build rate the test drives;
-- the firmware parser accepts a valid block, treats a malformed one as
-  malformed rather than missing — the retained block and its stamp stay
+- the firmware parser accepts a valid block and treats as malformed a
+  block with a fractional `d`, a `nowS` of 1 000 000, a negative or
+  signed field, an exponent token, an `n` above 9 999 or an `endS`
+  above 90 000, exactly as it treats one with a bad `r` — the retained block and its stamp stay
   untouched through any number of malformed frames and age into
   `STALE`, never into the absent state — without dropping the rest of
   the payload, and older payloads without the member still parse and
