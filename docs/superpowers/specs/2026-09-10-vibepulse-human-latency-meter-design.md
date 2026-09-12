@@ -88,7 +88,15 @@ so the contract is sized to the gate rather than the gate loosened.
 
 `nowS` is the age of the oldest still-parked interaction, or 0.
 "Today" is the host's local calendar day, the same rule the Max Tracker
-uses. **Open holds count too, but only what is on disk:** `todayS`, the
+uses, with one addition: **the served day never moves backward**. The
+ledger keeps the latest local date it has served as today, and when the
+wall clock regresses across midnight (00:05 back to 23:55) it keeps
+serving that later date — `dayEndS` then counts to the end of the held
+day, up to the 90 000 clamp — until the clock passes it again, and
+`GET /` reports `waits.dayHeld` while it does. The single wall anchor
+keeps rows from relocating; this rule keeps "today" itself from
+relocating, so `todayS` cannot change on a backward step even though
+the host's calendar briefly says an earlier date. **Open holds count too, but only what is on disk:** `todayS`, the
 provider totals and `count` include, for every still-parked
 interaction, the in-day part of its **last persisted checkpoint**
 (`elapsedS` in the open-hold marker, below), computed the same way as a
@@ -201,9 +209,9 @@ answer, not a claim about now. The relay-fed variant follows the same
 rule with the same debit the day countdown makes below: exact relay age
 is unavailable, so the stale budget for a relay-fed block starts at
 `TK_WAITS_STALE_RELAY_MS - RELAY_AGE_BOUND_MS` from accept, where
-`RELAY_AGE_BOUND_MS` is the clock-independent 35 000 ms derived below
-and `TK_WAITS_STALE_RELAY_MS` is proposed at 45 000 — a relay-fed live
-label therefore lasts at most 10 s past accept and never more than 45 s
+`RELAY_AGE_BOUND_MS` is the clock-independent 42 000 ms derived below
+and `TK_WAITS_STALE_RELAY_MS` is proposed at 60 000 — a relay-fed live
+label therefore lasts at most 18 s past accept and never more than 60 s
 past the snapshot's build, and the spec says so rather than promising
 the LAN's 20 s over a path that cannot deliver it; on the LAN the budget
 starts at `TK_WAITS_STALE_MS` (20 000 ms) minus the measured request
@@ -231,19 +239,25 @@ and the retry path can re-upload the same aged bytes, which this spec
 changes: an envelope older than `STATUS_EXPIRY_S` (15 s) on the
 tokenserver's own monotonic clock is discarded and rebuilt with fresh
 `expires_at` and fresh `dayEndS` before it is sent, so a frame is at
-most 15 s old at upload. Second, the mailbox serves a frame for at most
-`STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) after upload on the
-worker's clock. An accepted frame is therefore at most 35 s old at the
-moment the fetch completes, plus the fetch itself, which the panel
-measures on its monotonic clock. The countdown starts at
+most 15 s old when the PUT *starts*. Second, the PUT itself takes time
+that the worker's clock does not see: the transport allows a connect
+timeout plus a read timeout (`RELAY_PUT_BOUND_MS`, the sum of the two
+constants the tokenserver passes to `_default_transport`, 7 000 ms
+today), and `index.ts` starts the mailbox TTL only once it has received
+and hashed the body. Third, the mailbox serves a frame for at most
+`STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) after that on the worker's
+clock. An accepted frame is therefore at most 15 + 7 + 20 = 42 s old at
+the moment the panel's fetch completes, plus the fetch itself, which
+the panel measures on its monotonic clock. The countdown starts at
 `dayEndS - RELAY_AGE_BOUND_MS/1000 - request duration` with
-`RELAY_AGE_BOUND_MS` = 35 000, needs no clock but the panel's monotonic
+`RELAY_AGE_BOUND_MS` = 42 000, needs no clock but the panel's monotonic
 one, and can only end early, never late — at worst the page shows
-`DAY ENDED` 35 s before the host's midnight, and the next accepted block
+`DAY ENDED` 42 s before the host's midnight, and the next accepted block
 (the relay publishes every second or so) replaces it within seconds.
-The two server-side constants are pinned by tests (`STATUS_EXPIRY_S`
-and `STATUS_TTL_MS` must sum to `RELAY_AGE_BOUND_MS`) so a later change
-to either cannot silently loosen the bound. A result of zero or less means the host's
+The three server-side constants are pinned by a test
+(`STATUS_EXPIRY_S * 1000 + RELAY_PUT_BOUND_MS + STATUS_TTL_MS ==
+RELAY_AGE_BOUND_MS`) so a later change to any of them cannot silently
+loosen the bound. A result of zero or less means the host's
 day may have ended in transit and the block is rendered as day-ended on
 arrival, never as today. Once the countdown reaches zero a
 retained block is no longer rendered as today's measurement: the totals
@@ -366,12 +380,14 @@ both.
    stamps the accepted block with the monotonic clock, and the page
    renders it, or its stale form once `TK_WAITS_STALE_MS` has passed
    without a newer accepted block.
-6. `GET /` reports `waits: {rows, unsaved, open, oldestDay, saveOk}` —
-   rows on disk, rows closed but not yet written, open-hold markers, the
-   oldest retained day, the last save's outcome — the one schema the
-   durability section refers to, for the doctor and the smoke test; a
-   failing save uses the same FIX/VARN language as `maxTrackerSaveOk`,
-   and the smoke test asserts all five keys are present.
+6. `GET /` reports `waits: {rows, unsaved, open, oldestDay, saveOk,
+   dayHeld}` — rows on disk, rows closed but not yet written, open-hold
+   markers, the oldest retained day, the last save's outcome, and
+   whether the served day is currently held past a regressed clock —
+   the one schema the durability and day-policy sections refer to, for
+   the doctor and the smoke test; a failing save uses the same FIX/VARN
+   language as `maxTrackerSaveOk`, and the smoke test asserts all six
+   keys are present.
 
 ## Failure and privacy boundaries
 
@@ -463,8 +479,10 @@ Regression tests must prove:
   `[startedAt, startedAt + durationS]`: a wall-clock jump of an hour
   during a hold changes neither the total nor the longest wait nor the
   day placement, a backward step across local midnight between a
-  checkpoint and the close leaves `todayS` exactly where it was (the
-  open-to-closed handoff test), `endedAt` equals `startedAt + durationS`
+  checkpoint and the close leaves `todayS` exactly where it was because
+  the served day is held (the open-to-closed handoff test, which also
+  asserts `waits.dayHeld` on `GET /` and a `dayEndS` counting to the
+  held day's end), `endedAt` equals `startedAt + durationS`
   on every row, and the day parts of every row always sum to its
   `durationS`;
 - aggregates roll over at local midnight, a wait spanning midnight is
@@ -492,7 +510,7 @@ Regression tests must prove:
   renders `BLOCKED RIGHT NOW` as dashes and the totals with the stale
   marker, a relay-fed block does so `TK_WAITS_STALE_RELAY_MS -
   RELAY_AGE_BOUND_MS` after accept, so no live label outlives 20 s (LAN)
-  or 45 s (relay) from the snapshot's build — a newer accepted block
+  or 60 s (relay) from the snapshot's build — a newer accepted block
   clears it, a snapshot that was never accepted shows the absent state,
   not stale, and a retained block whose `dayEndS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
@@ -505,13 +523,15 @@ Regression tests must prove:
   and accepted five seconds later renders day-ended on arrival, and so
   does one accepted with the panel clock set 30 s behind the host's, and
   so does a frame that sat in the mailbox for its full `STATUS_TTL_MS`;
-  the tokenserver never uploads an envelope older than `STATUS_EXPIRY_S`
-  on its monotonic clock (a retry after the window rebuilds it with a
-  fresh `dayEndS`); `STATUS_EXPIRY_S * 1000 + STATUS_TTL_MS ==
+  the tokenserver never starts a PUT with an envelope older than
+  `STATUS_EXPIRY_S` on its monotonic clock (a retry after the window
+  rebuilds it with a fresh `dayEndS`), and a PUT that ran to its full
+  connect-plus-read timeout still lands inside the bound;
+  `STATUS_EXPIRY_S * 1000 + RELAY_PUT_BOUND_MS + STATUS_TTL_MS ==
   RELAY_AGE_BOUND_MS` is asserted; a LAN block subtracts the measured
   request duration rounded up (a 2 400 ms poll of a block with `dayEndS`
-  2 renders day-ended on arrival); a block with `dayEndS` 30 over the
-  relay is day-ended on arrival and at most 35 s early;
+  2 renders day-ended on arrival); a block with `dayEndS` 40 over the
+  relay is day-ended on arrival and at most 42 s early;
 - the hero reads `<1 MIN` and `LONGEST WAIT` reads `<1s` for a block
   with `count` 1 and every seconds field 0 (a sub-second wait
   floored on the wire), and dashes for `count` 0 even while
