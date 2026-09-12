@@ -406,7 +406,7 @@ and after each:
 | internal free, stable while open | ~47 970 | ~47 960 | ~47 970 |
 | largest block while open | 17 408–18 432 | 16 384–23 552 | 17 408–21 504 |
 | low-water before -> after | 10 179 -> 9 623 | 9 623 -> 9 623 | 9 623 -> 9 623 |
-| memory returned on close | full | full | full |
+| memory returned on close | full | full | not measured (no post-close reading) |
 
 What the listener actually does is now measured rather than inferred: while the
 window is open, internal free sits at **~47 965 in all three cycles, within ten
