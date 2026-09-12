@@ -210,9 +210,10 @@ and leave the user's next and only session `unknown` for its lifetime.
 For the home config directory the mark is the **tokenserver's**, which
 runs continuously: every `ACCOUNT_WATCH_S` (proposed 30 s) it `stat`s
 `.claude.json` and the credential store (a read only when either
-changed, never an HTTP call) and, whenever the store's token — resolved
-through its profile as above — names the same account `.claude.json`
-names, it records `accountSeenSince` as the **later of the two stores'
+changed; the watcher's tick itself never makes an HTTP call) and,
+whenever the store's token — resolved through its profile as above —
+names the same account `.claude.json` names, it records
+`accountSeenSince` as the **later of the two stores'
 modification times** at that observation: at that moment both already
 held their current, mutually consistent values, so the pair has been in
 place at least since then. For the credentials file that time is its
@@ -321,7 +322,24 @@ service has not yet confirmed (per `GET /`) as `pending` for at most
 that interval, and warns about a directory it is run in that is not
 registered — each
 with its own credential store (`<dir>/.credentials.json`), `.claude.json`,
-profile resolution, mark and generation. A registered directory whose
+profile resolution, mark and generation. **A registered directory's
+token gets resolved like the home directory's:** `_read_oauth_candidates()`
+today lists only the home store, so a token the watcher first sees in
+a registered directory's store is not a probe candidate and would never
+meet the profile call. The watcher therefore hands every newly observed
+credential fingerprint from a registered directory that is absent from
+the resolved pairs to the probe's resolver, which makes the profile
+call on the probe's own cadence and under its own rules (never during
+a cooldown, one call per credential fingerprint, a 429 resting exactly
+as a usage 429 does) — the registered directory's token is a
+*resolution* candidate only, never a usage candidate, so the panel's
+figures still come from the home directory's token — and the watcher
+records the directory's mark at its next tick after the pair resolves,
+at the two stores' modification times as for the home directory. Until
+then `GET /` shows the directory as `pending`, never as `unproven_dir`,
+and a session started there before the resolution still binds at its
+first proving payload after it, because the mark is dated by the
+stores' modification times, not by the resolution. A registered directory whose
 credential store the tokenserver cannot read — on macOS a non-default
 directory may keep its token in a keychain item the tokenserver does
 not read — and an unregistered directory are `unproven_dir`: their
@@ -1063,7 +1081,13 @@ Regression tests must prove:
   running makes the directory watched within one `ACCOUNT_WATCH_S` with
   no restart, `GET /` lists it, the doctor shows it as `pending` until
   then and as watched afterwards, and a session in it binds from the
-  watcher's first confirmed observation;
+  watcher's first confirmed observation; a registered directory whose
+  credentials file holds a token the tokenserver has never seen gets
+  that token resolved by the probe's next cycle (one profile call, no
+  usage call for it, none during a cooldown), the directory shows as
+  `pending` until then and as watched afterwards, and a session started
+  in it before the resolution binds at its first proving payload after
+  it; the watcher's own tick makes no HTTP call in any of this;
 - a bridge run with `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN` or
   `ANTHROPIC_API_KEY` set in its environment lands its payload in
   `unknown` and makes no binding even when its transcript postdates the
