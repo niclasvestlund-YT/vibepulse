@@ -200,11 +200,14 @@ that stopped answering), so the reader sees a number *as of* the last
 answer, not a claim about now. The relay-fed variant follows the same
 rule with the same debit the day countdown makes below: exact relay age
 is unavailable, so the stale budget for a relay-fed block starts at
-`TK_WAITS_STALE_MS - STATUS_EXPIRY_S * 1000` (5 000 ms) from accept,
-and on the LAN at `TK_WAITS_STALE_MS` minus the measured request
-duration — otherwise a frame accepted just before its 15 s expiry could
-keep `BLOCKED RIGHT NOW` live for roughly 35 s after the snapshot was
-built, well past the boundary the rule promises. **Yesterday is never shown as
+`TK_WAITS_STALE_RELAY_MS - RELAY_AGE_BOUND_MS` from accept, where
+`RELAY_AGE_BOUND_MS` is the clock-independent 35 000 ms derived below
+and `TK_WAITS_STALE_RELAY_MS` is proposed at 45 000 — a relay-fed live
+label therefore lasts at most 10 s past accept and never more than 45 s
+past the snapshot's build, and the spec says so rather than promising
+the LAN's 20 s over a path that cannot deliver it; on the LAN the budget
+starts at `TK_WAITS_STALE_MS` (20 000 ms) minus the measured request
+duration. **Yesterday is never shown as
 today:** the block carries `dayEndS`, the whole seconds until the
 host's next local midnight (DST-correct, at most 90 000), because the
 panel cannot infer the host's calendar boundary from its own clock,
@@ -216,18 +219,31 @@ allows up to its 2 500 ms HTTP timeout (`agent_net.c`), so the page
 records the request on its monotonic clock from send to accept and
 starts the countdown at `dayEndS` minus that whole duration, rounded
 up to a whole second — the server's floor and the round-up both err
-early, never late. Over the relay a frame can be up to `STATUS_EXPIRY_S` (15 s)
-old when it is accepted — `decode_status_snapshot` takes any unexpired
-publication, and it checks the envelope's expiry against the panel's
-own `time(NULL)` without establishing that the two clocks agree, so an
-age *estimated* from `expires_at` would be wrong by the host–panel skew
-and a lagging panel would keep yesterday on the glass. The page
-therefore subtracts no estimate but the **whole lifetime**: the
-countdown starts at `dayEndS - STATUS_EXPIRY_S`, which needs no
-clock but the panel's monotonic one and can only end early, never late
-— at worst the page shows `DAY ENDED` 15 s before the host's midnight,
-and the next accepted block (the relay publishes every second or so)
-replaces it within seconds. A result of zero or less means the host's
+early, never late. Over the relay the age of an accepted frame is
+bounded **by server clocks only**, never by the panel's:
+`decode_status_snapshot` checks the envelope's expiry against the
+panel's own `time(NULL)` without establishing that the two clocks
+agree, so neither `expires_at` nor an age estimated from it is a bound
+a lagging panel can trust. The bound comes from the two ends the panel
+does not control. First, the tokenserver **rebuilds** a status envelope
+before every upload attempt — `_prepare_status` today builds it once
+and the retry path can re-upload the same aged bytes, which this spec
+changes: an envelope older than `STATUS_EXPIRY_S` (15 s) on the
+tokenserver's own monotonic clock is discarded and rebuilt with fresh
+`expires_at` and fresh `dayEndS` before it is sent, so a frame is at
+most 15 s old at upload. Second, the mailbox serves a frame for at most
+`STATUS_TTL_MS` (20 000 ms in `mailbox.ts`) after upload on the
+worker's clock. An accepted frame is therefore at most 35 s old at the
+moment the fetch completes, plus the fetch itself, which the panel
+measures on its monotonic clock. The countdown starts at
+`dayEndS - RELAY_AGE_BOUND_MS/1000 - request duration` with
+`RELAY_AGE_BOUND_MS` = 35 000, needs no clock but the panel's monotonic
+one, and can only end early, never late — at worst the page shows
+`DAY ENDED` 35 s before the host's midnight, and the next accepted block
+(the relay publishes every second or so) replaces it within seconds.
+The two server-side constants are pinned by tests (`STATUS_EXPIRY_S`
+and `STATUS_TTL_MS` must sum to `RELAY_AGE_BOUND_MS`) so a later change
+to either cannot silently loosen the bound. A result of zero or less means the host's
 day may have ended in transit and the block is rendered as day-ended on
 arrival, never as today. Once the countdown reaches zero a
 retained block is no longer rendered as today's measurement: the totals
@@ -472,11 +488,11 @@ Regression tests must prove:
   without dropping the rest of the payload, and older payloads without it
   still parse (C host test);
 - the page's stale rule (C host test on the page model): a retained
-  snapshot older than `TK_WAITS_STALE_MS` renders `BLOCKED RIGHT NOW` as
-  dashes and the totals with the stale marker — a relay-fed block goes
-  stale `STATUS_EXPIRY_S` earlier and a LAN block the measured request
-  duration earlier, so no live label outlives 20 s from the snapshot's
-  build — a newer accepted block
+  LAN snapshot older than `TK_WAITS_STALE_MS` minus its request duration
+  renders `BLOCKED RIGHT NOW` as dashes and the totals with the stale
+  marker, a relay-fed block does so `TK_WAITS_STALE_RELAY_MS -
+  RELAY_AGE_BOUND_MS` after accept, so no live label outlives 20 s (LAN)
+  or 45 s (relay) from the snapshot's build — a newer accepted block
   clears it, a snapshot that was never accepted shows the absent state,
   not stale, and a retained block whose `dayEndS` has counted down to
   zero renders the totals as dashes with `DAY ENDED` until a newer block
@@ -484,13 +500,18 @@ Regression tests must prove:
   both provider totals 0; the hero reads `<1 MIN` for `todayS` 1 to 59,
   dashes for 0 with nothing blocked, and whole floored minutes above;
 - the day countdown over the relay starts at `dayEndS -
-  STATUS_EXPIRY_S` with no wall clock involved: a relay frame built one
-  second before the host's midnight and accepted five seconds later
-  renders day-ended on arrival, and so does one accepted with the panel
-  clock set 30 s behind the host's; a LAN block subtracts the measured
-  request duration rounded up (a 2 400 ms poll of a block with
-  `dayEndS` 2 renders day-ended on arrival); a block with `dayEndS`
-  10 over the relay is day-ended on arrival and at most 15 s early;
+  RELAY_AGE_BOUND_MS/1000 - request duration` with no wall clock
+  involved: a relay frame built one second before the host's midnight
+  and accepted five seconds later renders day-ended on arrival, and so
+  does one accepted with the panel clock set 30 s behind the host's, and
+  so does a frame that sat in the mailbox for its full `STATUS_TTL_MS`;
+  the tokenserver never uploads an envelope older than `STATUS_EXPIRY_S`
+  on its monotonic clock (a retry after the window rebuilds it with a
+  fresh `dayEndS`); `STATUS_EXPIRY_S * 1000 + STATUS_TTL_MS ==
+  RELAY_AGE_BOUND_MS` is asserted; a LAN block subtracts the measured
+  request duration rounded up (a 2 400 ms poll of a block with `dayEndS`
+  2 renders day-ended on arrival); a block with `dayEndS` 30 over the
+  relay is day-ended on arrival and at most 35 s early;
 - the hero reads `<1 MIN` and `LONGEST WAIT` reads `<1s` for a block
   with `count` 1 and every seconds field 0 (a sub-second wait
   floored on the wire), and dashes for `count` 0 even while
