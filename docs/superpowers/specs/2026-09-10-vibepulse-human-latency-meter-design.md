@@ -62,14 +62,22 @@ corruption), retains 8 days like `usage-history.json`, and loads on start.
 
 `blockedNowS` is the age of the oldest still-parked interaction, or 0.
 "Today" is the host's local calendar day, the same rule the Max Tracker
-uses, and a row contributes only the part of `[startedAt, endedAt]` that
-overlaps that day: a wait parked at 23:50 and answered at 00:10 puts ten
+uses, and a row contributes only the part of its measured duration that
+falls in that day. The split is made on the interval
+`[endedAt - durationS, endedAt]`, not on `[startedAt, endedAt]`: the
+monotonic `durationS` is the measurement, `endedAt` is the one wall-clock
+reading taken at the moment the row is written, and a wall-clock
+correction during the hold (an NTP step, a manual change) can therefore
+shift *where* the seconds land but never *how many* there are — a
+ten-second hold across a one-hour forward step contributes ten seconds,
+not 3 610. `startedAt` is kept for the record and is not used in
+aggregation. A wait parked at 23:50 and answered at 00:10 puts ten
 minutes in yesterday and ten in today, in `todayS`, the provider totals
 and `countToday` alike (a split row counts once, in the day it ended).
-`longestTodayS` is the longest overlap, not the longest whole row. Day
-boundaries are local wall-clock midnights (`datetime.astimezone()`), so
-a DST day is 23 or 25 hours and the overlap follows it; nothing is
-assigned by `startedAt` or `endedAt` alone. The block is about 110 bytes;
+`longestTodayS` is the longest in-day part, not the longest whole row.
+Day boundaries are local wall-clock midnights (`datetime.astimezone()`),
+so a DST day is 23 or 25 hours and the split follows it. The block is
+about 110 bytes;
 it must stay inside the device's
 4096-byte body budget with the pending block and a full agent list
 (`test/test_agent_status_body_capacity.py` is the gate). The firmware
@@ -78,10 +86,16 @@ ignores unknown root keys, so already-flashed panels are unaffected.
 **One optional page, "Blocked on you".** Chosen through SETTINGS → LABS
 (the mechanism PR #98 introduces; this page is not built until that lands)
 and off by default. Layout per the approved mockup
-`docs/img/mockups/latency-meter.png`: the provider header row, the label
-`BLOCKED ON YOU · TODAY`, one dominant number in minutes, a bar split by
-provider, and the two secondary figures `BLOCKED RIGHT NOW` (live, from
-`blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the block is absent
+`docs/img/mockups/latency-meter.png`, with one correction the mockup
+needs before it becomes a frame: its header row reads `CLAUDE`, but the
+dominant number is the sum over both providers. The header must name what
+the number measures — `CLAUDE + CODEX` when both contributed today,
+`CLAUDE` or `CODEX` when only one did, never one provider's name over a
+combined total — and the split bar carries the per-provider share. Then
+the label `BLOCKED ON YOU · TODAY`, one dominant number in minutes, the
+bar split by provider, and the two secondary figures `BLOCKED RIGHT NOW`
+(live, from `blockedNowS`, mm:ss) and `LONGEST WAIT`. Dashes when the
+block is absent
 (older server) or `countToday` is 0 and nothing is blocked now. The number
 is **never framed as waste**: the label is what it measures, not a verdict
 on the reader.
@@ -159,9 +173,10 @@ Regression tests must prove:
   panic) produces exactly one ledger row with the right outcome, and a
   store constructed fresh (the restart case) produces none for holds the
   previous process had open;
-- a row's `durationS` comes from the monotonic pair and its day from the
-  wall-clock pair: a wall-clock jump of an hour during a hold changes
-  neither;
+- a row's `durationS` comes from the monotonic pair and its days from
+  `[endedAt - durationS, endedAt]`: a wall-clock jump of an hour during a
+  hold changes neither the total nor the longest wait, and the day parts
+  of every row always sum to its `durationS`;
 - aggregates roll over at local midnight, a wait spanning midnight is
   split by overlap into both days, a wait spanning a DST change is placed
   by local wall-clock boundaries, and the 8-day retention prunes;
@@ -175,7 +190,9 @@ Regression tests must prove:
 - the firmware parser accepts the block, rejects a malformed one as absent
   without dropping the rest of the payload, and older payloads without it
   still parse (C host test);
-- the page's landmark captures match the six frames above.
+- the page's landmark captures match the six frames above, and the header
+  reads `CLAUDE + CODEX` in the both-providers frame and the single name
+  in the one-provider frame.
 
 ## Acceptance
 
