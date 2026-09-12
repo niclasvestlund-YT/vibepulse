@@ -304,7 +304,7 @@ t=605 s   18451
 t=625 s   18371
 ```
 
-Eight downward steps over roughly 45 minutes, ending at a summed low-water of
+Twelve readings, eleven downward steps, over roughly 45 minutes, ending at a summed low-water of
 9 623 B, under the 11 520 B a display flush needs — a comparison that, per the
 note above, is not a statement about any single instant. No trigger is identified for any single step. The
 sampled `heap:` figure never went below 16 384 across the whole session, so none

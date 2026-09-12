@@ -17,7 +17,11 @@ firmware row below is on the glass since then, unverified (the last row is
 host-side behaviour, not panel image), and the starting state for §1 is an
 image that *has* the SETTINGS menu. What is still missing from the
 glass is everything that landed after `e51b79f`: coredump, the reboot ledger,
-poller backoff and the warm-up placeholders. **One of those needs USB even
+poller backoff, the warm-up placeholders, and SETTINGS → LABS (#98, `8d53c69`),
+whose physical selector review `CHANGELOG.md` still lists as pending — the
+KEY3 manual test has no LABS checks, so before calling LABS reviewed walk
+SETTINGS → LABS, flip each choice, restart, and compare the glass against the
+frames in `docs/superpowers/reviews/2026-09-09-labs-static-simulator.md`. **One of those needs USB even
 though the app goes over the air:** the coredump partition is new in the
 partition table, and OTA never writes the table, so before the first dump can
 land the operator runs a one-time `idf.py -p <port> partition-table-flash`
