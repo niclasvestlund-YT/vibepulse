@@ -372,8 +372,11 @@ a live blocked state with a running mm:ss and the hero at `<1 MIN` (the
 first checkpoint of the day's first wait), a day with both providers, a
 day with one provider (bar is one colour), the relay-fed variant, the
 stale state (totals with the `STALE` marker, `BLOCKED RIGHT NOW` as
-dashes), and the Labs off state (page absent, tiles dense). Static
-physical review before any motion. No frame here authorizes a flash.
+dashes), the day-ended state (every total dashed under the wider `DAY
+ENDED` marker, a different layout from stale that must be seen to fit
+before it ships), and the Labs off state (page absent, tiles dense).
+Static physical review before any motion. No frame here authorizes a
+flash.
 
 ## Tests
 
@@ -469,7 +472,7 @@ Regression tests must prove:
   `blockedNowS` runs (the writer window after a park), never `0`;
 - `dayEndsInS` is the whole seconds to the host's next local midnight,
   23 or 25 hours across a DST change, never more than 90 000;
-- the page's landmark captures match the seven frames above, and the header
+- the page's landmark captures match the eight frames above, and the header
   reads `CLAUDE + CODEX` in the both-providers frame and the single name
   in the one-provider frame.
 
