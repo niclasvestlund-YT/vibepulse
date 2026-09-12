@@ -209,7 +209,16 @@ static void net_task(void *arg) {
 #define MT_FETCH_CAP_MS 1800000  /* OBS-13: 5 -> 10 -> 20 -> 30 min cap */
 #define MT_BODY_MAX 8192
 
-#ifdef TK_MAX_TRACKER_URL
+/* LABS can switch the tracker pages on without a rebuild, so a secrets.h
+ * that never had TK_MAX_TRACKER_URL is a normal state: the poller then lives
+ * on the advertised tokenserver, or the relay, alone (same shape as the
+ * GitHub feed). The task is always compiled; the URL is only the fallback. */
+#ifndef TK_MAX_TRACKER_URL
+#define TK_MAX_TRACKER_URL NULL
+#define TK_MAX_TRACKER_URL_CONFIGURED 0
+#else
+#define TK_MAX_TRACKER_URL_CONFIGURED 1
+#endif
 
 static void max_tracker_task(void *arg) {
   (void)arg;
@@ -253,8 +262,6 @@ static void max_tracker_task(void *arg) {
   }
 }
 
-#endif /* TK_MAX_TRACKER_URL */
-
 void tokens_net_start(void) {
 #ifdef TK_TOKENS_URL
   atomic_store(&s_tokens_has_success, false);
@@ -275,11 +282,11 @@ void tokens_net_start(void) {
   ESP_LOGW(TAG, "TK_TOKENS_URL saknas i secrets.h — VibePulse visar streck");
 #endif
 
-#ifdef TK_MAX_TRACKER_URL
-  if (tk_labs_active(TK_LABS_TRACKER))
-    xTaskCreate(max_tracker_task, "max-tracker", 6144, NULL, 5, NULL);
-#else
-  ESP_LOGW(TAG,
-           "TK_MAX_TRACKER_URL saknas i secrets.h — Max Tracker visar streck");
+  if (tk_labs_active(TK_LABS_TRACKER)) {
+#if !TK_MAX_TRACKER_URL_CONFIGURED
+    ESP_LOGI(TAG, "TK_MAX_TRACKER_URL saknas i secrets.h — Max Tracker hämtas "
+                  "bara från en annonserad tokenserver eller reläet");
 #endif
+    xTaskCreate(max_tracker_task, "max-tracker", 6144, NULL, 5, NULL);
+  }
 }

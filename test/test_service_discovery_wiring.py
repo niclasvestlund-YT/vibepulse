@@ -32,6 +32,12 @@ assert "(!configured_url || strcmp(alternate, configured_url) != 0)" in http
 # ...and with nothing advertised, the relay is still tried before giving up.
 assert "return lan_url && torget_http_get(lan_url, buf, cap, len_out);" in http
 assert http.count("torget_http_get_failover(configured_url, relay_url") == 3
+# The two LABS-switchable pollers compile without their URL and poll anyway.
+for poller, macro in (("components/app_tokens/github_net.c", "TK_GITHUB_URL"),
+                      ("components/app_tokens/net.c", "TK_MAX_TRACKER_URL")):
+    source = read(poller)
+    assert f"#define {macro} NULL" in source, poller
+    assert f"#ifdef {macro}" not in source, poller
 
 assert "DiscoveryAdvertiser(log)" in tokenserver
 assert "discovery.start(args.port)" in tokenserver
