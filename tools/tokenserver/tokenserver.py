@@ -2714,15 +2714,26 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     if session_pct is not None:
         cached_session = cache.latest("claude", "general_session",
                                       now=current_ts)
-        if (cached_session is not None
-                and cached_session.reset_at == int(session_reset_at)
-                and cached_session.pct > session_pct):
+        reset_int = int(session_reset_at)
+        if cached_session is not None and cached_session.reset_at > reset_int:
+            # A later window was already observed (before a restart, say):
+            # the live reading is a replay of an older one and must not
+            # move the ring backward nor replace the newer cache row.
+            session_pct = round(float(cached_session.pct), 1)
+            session_reset_at = cached_session.reset_at
+            session_reset_min = _reset_minutes(session_reset_at, current_ts)
+        elif (cached_session is not None
+                and cached_session.reset_at == reset_int
+                and cached_session.pct >= session_pct):
+            # Same window, nothing new: the cached floor stands, and an
+            # unchanged reading is not a new observation to restamp and
+            # rewrite the cache file with on every 30 s poll.
             session_pct = round(float(cached_session.pct), 1)
         else:
             session_record = CachedQuota(
                 provider="claude", scope="general_session",
                 identity=_quota_identity("claude", "general_session"),
-                pct=float(session_pct), reset_at=int(session_reset_at),
+                pct=float(session_pct), reset_at=reset_int,
                 observed_at=int(current_ts), label=None)
     result["claudeSessionPct"] = session_pct
     result["claudeSessionResetMin"] = session_reset_min

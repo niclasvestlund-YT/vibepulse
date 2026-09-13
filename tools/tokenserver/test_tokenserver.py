@@ -494,9 +494,34 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
             self.assertEqual([(r.scope, r.pct, r.reset_at)
                               for r in persisted],
                              [("general_session", 70.0, reset)])
+            # An unchanged reading is not restamped: no cache rewrite.
+            session_cache.put(CachedQuota(
+                provider="claude", scope="general_session",
+                identity=tokenserver._quota_identity(
+                    "claude", "general_session"),
+                pct=70.0, reset_at=reset, observed_at=self.NOW - 30))
+            snapshot, persisted = self._snapshot(
+                claude={"sessionPct": 70.0, "sessionResetAt": reset})
+            self.assertEqual(snapshot["claudeSessionPct"], 70.0)
+            self.assertEqual([r.scope for r in persisted], [])
+            # A newer window from the live source is served and persisted.
             snapshot, persisted = self._snapshot(
                 claude={"sessionPct": 5.0, "sessionResetAt": reset + 7200})
             self.assertEqual(snapshot["claudeSessionPct"], 5.0)
+            self.assertEqual([(r.scope, r.reset_at) for r in persisted],
+                             [("general_session", reset + 7200)])
+            # ... and once cached, an older window replayed by a source
+            # that restarted behind it neither shows nor overwrites it.
+            session_cache.put(CachedQuota(
+                provider="claude", scope="general_session",
+                identity=tokenserver._quota_identity(
+                    "claude", "general_session"),
+                pct=5.0, reset_at=reset + 7200, observed_at=self.NOW - 10))
+            snapshot, persisted = self._snapshot(
+                claude={"sessionPct": 90.0, "sessionResetAt": reset})
+            self.assertEqual(snapshot["claudeSessionPct"], 5.0)
+            self.assertEqual(snapshot["claudeSessionResetMin"], 180)
+            self.assertEqual([r.scope for r in persisted], [])
             snapshot, persisted = self._snapshot()
             self.assertIsNone(snapshot["claudeSessionPct"])
 
