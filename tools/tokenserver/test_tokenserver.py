@@ -462,10 +462,13 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
             # The live reading still wins, as before.
             self.assertEqual(resolved["pct"], 40.0)
             self.assertTrue(resolved["live"])
-            view = tokenserver._quota_regressions_view()
+            view = tokenserver._quota_regressions_view(now_ts=self.NOW)
             self.assertEqual(view[0]["livePct"], 40.0)
             self.assertEqual(view[0]["cachedPct"], 60.0)
             self.assertEqual(view[0]["scope"], "general_weekly")
+            # Read after the window reset: pruned, not served forever.
+            self.assertEqual(tokenserver._quota_regressions_view(
+                now_ts=self.NOW + 86400), [])
             # A higher live reading is not a regression.
             with self.assertNoLogs("tokenserver", level="WARNING"):
                 tokenserver._resolve_weekly_quota(
@@ -517,11 +520,18 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
                 identity=tokenserver._quota_identity(
                     "claude", "general_session"),
                 pct=5.0, reset_at=reset + 7200, observed_at=self.NOW - 10))
+            store = mock.Mock()
+            history = StubHistory()
             snapshot, persisted = self._snapshot(
-                claude={"sessionPct": 90.0, "sessionResetAt": reset})
+                claude={"sessionPct": 90.0, "sessionResetAt": reset},
+                store=store, history=history)
             self.assertEqual(snapshot["claudeSessionPct"], 5.0)
             self.assertEqual(snapshot["claudeSessionResetMin"], 180)
             self.assertEqual([r.scope for r in persisted], [])
+            # The cache's own window is shown, not re-observed.
+            store.observe_quota.assert_not_called()
+            self.assertEqual([c for c in history.record_calls
+                              if c[:2] == ("claude", "session")], [])
             snapshot, persisted = self._snapshot()
             self.assertIsNone(snapshot["claudeSessionPct"])
 

@@ -2428,8 +2428,14 @@ def _note_quota_regression(provider, scope, live_pct, cached, now_ts):
                 cached.reset_at)
 
 
-def _quota_regressions_view():
+def _quota_regressions_view(now_ts=None):
+    """The unexpired entries, pruned at read time too: a quiet service
+    must not keep serving evidence about a window that has reset."""
+    now_ts = time.time() if now_ts is None else now_ts
     with _quota_regressions_lock:
+        for stale_key in [k for k, v in _quota_regressions.items()
+                          if v["resetAt"] <= now_ts]:
+            _quota_regressions.pop(stale_key, None)
         return sorted((dict(v) for v in _quota_regressions.values()),
                       key=lambda v: v["at"])
 
@@ -2711,6 +2717,11 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     # session-stale flag), so a restart during a probe outage cannot let a
     # lagging sample pull the figure below what was already observed.
     session_record = None
+    # True when the served session is the cache's own later window rather
+    # than a live reading: shown, but not a new observation for Max
+    # Tracker or the history (it would be stamped with a new time on
+    # every poll, and could cross midnight into a new day's peak).
+    session_from_cache = False
     if session_pct is not None:
         cached_session = cache.latest("claude", "general_session",
                                       now=current_ts)
@@ -2722,6 +2733,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
             session_pct = round(float(cached_session.pct), 1)
             session_reset_at = cached_session.reset_at
             session_reset_min = _reset_minutes(session_reset_at, current_ts)
+            session_from_cache = True
         elif (cached_session is not None
                 and cached_session.reset_at == reset_int
                 and cached_session.pct >= session_pct):
@@ -2741,7 +2753,8 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     # or that reading lifted to the same window's cached floor -- the
     # honest gate Task 6 requires before anything reaches Max Tracker's
     # day peaks.
-    if max_tracker_store is not None and session_pct is not None:
+    if (max_tracker_store is not None and session_pct is not None
+            and not session_from_cache):
         max_tracker_store.observe_quota(
             "claude", MAX_TRACKER_CLAUDE_SESSION_MINUTES, session_pct,
             current_ts)
@@ -2824,7 +2837,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         (provider, window, pct, reset_at)
         for provider, window, pct, reset_at, is_live in (
             ("claude", "session", result["claudeSessionPct"],
-             claude_session_reset, True),
+             claude_session_reset, not session_from_cache),
             ("claude", "week", result["claudeWeekPct"],
              claude_week_reset, claude_week["live"]),
             ("claude", "model_week", result["claudeModelWeekPct"],
