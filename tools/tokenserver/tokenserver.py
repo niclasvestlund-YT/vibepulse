@@ -2739,7 +2739,10 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
                 and cached_session.pct >= session_pct):
             # Same window, nothing new: the cached floor stands, and an
             # unchanged reading is not a new observation to restamp and
-            # rewrite the cache file with on every 30 s poll.
+            # rewrite the cache file with on every 30 s poll. A strictly
+            # higher floor is the cache's figure, not this poll's: shown,
+            # not rolled up again.
+            session_from_cache = cached_session.pct > session_pct
             session_pct = round(float(cached_session.pct), 1)
         else:
             session_record = CachedQuota(

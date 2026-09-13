@@ -487,10 +487,17 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
             identity=tokenserver._quota_identity("claude", "general_session"),
             pct=60.0, reset_at=reset, observed_at=self.NOW - 600))
         with mock.patch.object(self, "cache", return_value=session_cache):
+            store = mock.Mock()
+            history = StubHistory()
             snapshot, persisted = self._snapshot(
-                claude={"sessionPct": 40.0, "sessionResetAt": reset})
+                claude={"sessionPct": 40.0, "sessionResetAt": reset},
+                store=store, history=history)
             self.assertEqual(snapshot["claudeSessionPct"], 60.0)
             self.assertEqual([r.scope for r in persisted], [])
+            # The lifted floor is the cache's figure: shown, not rolled up.
+            store.observe_quota.assert_not_called()
+            self.assertEqual([c for c in history.record_calls
+                              if c[:2] == ("claude", "session")], [])
             snapshot, persisted = self._snapshot(
                 claude={"sessionPct": 70.0, "sessionResetAt": reset})
             self.assertEqual(snapshot["claudeSessionPct"], 70.0)
@@ -503,10 +510,14 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
                 identity=tokenserver._quota_identity(
                     "claude", "general_session"),
                 pct=70.0, reset_at=reset, observed_at=self.NOW - 30))
+            store = mock.Mock()
             snapshot, persisted = self._snapshot(
-                claude={"sessionPct": 70.0, "sessionResetAt": reset})
+                claude={"sessionPct": 70.0, "sessionResetAt": reset},
+                store=store)
             self.assertEqual(snapshot["claudeSessionPct"], 70.0)
             self.assertEqual([r.scope for r in persisted], [])
+            # ... but an equal reading is genuinely live and still observed.
+            store.observe_quota.assert_any_call("claude", 300, 70.0, self.NOW)
             # A newer window from the live source is served and persisted.
             snapshot, persisted = self._snapshot(
                 claude={"sessionPct": 5.0, "sessionResetAt": reset + 7200})
