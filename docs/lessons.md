@@ -1277,3 +1277,27 @@ translated page shell as the header, so burn-in drift cannot make it appear
 pasted above a page or takeover. **Watch for:** approving tiny rounded shapes
 from enlarged simulator previews or testing only bounding boxes and total lit
 pixels.
+
+## 2026-09-13 · A test suite paid for a poll it never needed
+
+**What happened:** the tokenserver suite took 92 s and the plugin suite 48 s on
+a Linux runner, on three tokenserver CI jobs plus the host gate, for tests that
+do almost no work. **Root cause:** two idle waits, not slow code. Every test
+HTTP server ran `serve_forever()` with the stdlib default `poll_interval=0.5`,
+and `shutdown()` only returns once the serve loop wakes and sees the flag, so
+each fixture's tearDown idled up to half a second; about a hundred servers are
+created per run. The abandoned-hook tests paid the product's `ALIVE_POLL_S`
+(2 s) per abandoned wait because `await_result` checks liveness only after a
+full poll, and the zombie test does that `MAX_PENDING` times: 16 s for one
+test. **The rule:** measure per-test wall clock before assuming a suite is slow
+because it is large; a hosted server in a fixture needs an explicit short poll
+interval, and a test that exercises a product timing constant patches it for
+its own duration and states its bounds against the constant, never against a
+literal, so shortening it changes nothing the test asserts. **Guards:** the
+four hosting fixtures poll every 20 ms with a comment saying why;
+`AbandonedHookTests.setUp` and the wire-level reap test patch `ALIVE_POLL_S`
+via `addCleanup`, so the product default is untouched and restored. Suite went
+to 22 s and 11 s. **Watch for:** a new fixture copying
+`threading.Thread(target=server.serve_forever)` without the interval, a wait
+bound written as `assertLess(elapsed, 4)` instead of against the constant, and
+"the suite is just big" as an explanation nobody measured.
