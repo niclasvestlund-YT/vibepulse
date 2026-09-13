@@ -544,6 +544,22 @@ recovery sequence is in
 After the first USB flash, day-to-day updates go over the air — the full
 workflow, consent model and troubleshooting live in [ota.md](ota.md).
 
+**Reading the logs.** Every log the system writes, what a healthy one looks
+like and the comb routine for odd behaviour are in
+[observability.md](observability.md). The three you reach for first:
+
+- `curl -s localhost:8737/ | python3 -m json.tool` — the tokenserver's own
+  diagnostics (`rev`, `claudeProbe`, `claudeCredential`,
+  `claudeStatusline`, `quotaRegressions`, discovery); the table under
+  Step 4 reads `claudeProbe`.
+- The tokenserver log: `~/Library/Logs/torget-tokenserver.log` on macOS,
+  `%LOCALAPPDATA%\VibePulse\Logs\torget-tokenserver.log` on Windows. Lines
+  are transitions, so a healthy week is a handful of them.
+- The firmware's serial console, the only firmware log there is:
+  `idf.py -p /dev/cu.usbmodem101 monitor` with the ESP-IDF environment
+  sourced (Ctrl+] exits). Only over USB, and mind that a Mac USB port
+  keeps the log valid while it starves the radio — see the last row below.
+
 | Symptom | Cause | Fix |
 |---|---|---|
 | Screen boots, everything is dashes, forever | `DIN-MAC` never replaced in `secrets.h`, the Windows LAN IP changed, or the `TK_*` defines were removed | Set the reachable host (Bonjour on macOS; reserved LAN IPv4 on Windows), rebuild, reflash |

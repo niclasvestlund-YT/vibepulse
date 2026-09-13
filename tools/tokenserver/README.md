@@ -339,9 +339,12 @@ curl http://127.0.0.1:8738/api/max-tracker
 When Claude Desktop is running its fresh process token is used without a
 dialog. With standalone Claude Code the first run may ask macOS for keychain
 access ("security wants to use ... Claude Code-credentials") -- choose
-"Always Allow" so the service can probe without asking again. The startup
-log also prints the exact `anthropic-ratelimit-*` headers at the first probe
--- the answer key if the mapping ever needs adjusting.
+"Always Allow" so the service can probe without asking again. The exact
+`anthropic-ratelimit-*` header names are logged once (`ratelimit-header:`)
+the first time the header fallback runs -- not on a healthy server, whose
+usage endpoint answers with a body instead. `GET /` lists the same names
+as `ratelimitHeaders` whenever that fallback has run, and the header
+mapping's answer key is the parser test fixtures in `test_tokenserver.py`.
 
 ### Windows
 

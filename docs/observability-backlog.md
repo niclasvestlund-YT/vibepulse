@@ -756,7 +756,12 @@ but a contract change for the session field: its own PR.
 ## P3 — process & hygiene
 
 ### OBS-23 · The best diagnostics are undocumented; one documented one is wrong
-`docs · S · open`
+`docs · S · done (2026-09-13)` — (a) `docs/agent-setup.md` gained a
+"Reading the logs" block under "When it does not work" pointing at
+observability.md, `GET /`, the log file and the serial console; (b) the
+tokenserver README now says the header names are logged only when the
+header fallback runs, and where the mapping's answer key really lives;
+(c) `idf.py monitor` and the Mac-USB caveat are in the English runbook.
 (a) `GET /` — rev, startedAt, claudeProbe, unknown buckets — appears in
 no runbook; `docs/agent-setup.md` never mentions it even while its
 symptom table depends on `claudeProbe`. (b)
@@ -814,7 +819,8 @@ has `-Wall -Wextra -Werror` in the test gate). Several audit findings
 bug-shaped rules, not the style ones.
 
 ### OBS-26 · design-qa.md contradicts the physical review
-`docs · S · open`
+`docs · S · done (#51, 2026-08-29)` — the file was retired with the
+Windows v1 ledger; `docs/superpowers/reviews/` is the live QA record.
 `design-qa.md` still says the physical AMOLED gate is outstanding and
 points at `work/design-qa/…`, a path that doesn't exist —
 contradicting `AGENTS.md` and the 2026-08-13 review that marked the
@@ -838,7 +844,14 @@ groundwork for a later on-device diagnostics view (which would go
 through the AMOLED gate).
 
 ### OBS-29 · An agent-status tailer test is load-flaky
-`test · S · open`
+`test · S · done (2026-09-13)` — the real cause was not the clock: the
+test replaced files in place, which frees inodes, and Linux hands freed
+inodes straight back, so the 60 identities it meant to create collapsed
+to about a dozen and the cap was never reached; what ran was the
+reuse/reset path, with the outcome depending on which inodes the kernel
+and every other process on a loaded runner recycled. The test now keeps
+every superseded file alive (a new identity per replacement on every
+platform, eviction always exercised) and injects a fixed clock.
 During this branch's runs, `test_inode_churn_enforces_identity_cap_before_next_discovery`
 (`test_agent_status.py`) failed once in six full-suite runs on a loaded
 Linux container — `base-secret` survived in `tailer._identities` past the
@@ -871,7 +884,11 @@ dated suffix dropped) and keep the map for exceptions only — then a new
 model is styled on arrival instead of on the next hand edit.
 
 ### OBS-31 · A codex wire test is RST-flaky on Windows CI
-`test · S · open`
+`test · S · done (#69, 2026-09-04)` — the server drains an announced
+body before every early rejection (`_drain_request_body`), and the
+early-rejection tests send headers only (`headers_first_request`) so no
+timing window decides the outcome; a separate test keeps the body-written
+path green through the product-side drain.
 `test_every_json_post_route_rejects_text_plain_before_parsing`
 (`test_codex_interactions.py`, subtest `/api/codex/permission`) failed
 once on the `windows-latest` tokenserver job with `None != 415` — the

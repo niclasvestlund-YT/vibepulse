@@ -924,9 +924,19 @@ class JsonlTailerTests(unittest.TestCase):
                     self.assertNotIn("cold-secret", repr(state))
 
     def test_inode_churn_enforces_identity_cap_before_next_discovery(self):
+        # OBS-29: this test used to replace each file in place, which frees
+        # the old inode, and Linux hands freed inodes straight back to the
+        # next file. On such a filesystem the 60 identities it means to
+        # create collapse to about a dozen, the cap is never reached, and
+        # what it really exercised was the reuse/reset path -- with the
+        # outcome depending on which inodes the kernel (and every other
+        # process on a loaded runner) happened to recycle. Keeping every
+        # superseded file alive makes each replacement a new identity on
+        # every platform, so the eviction the name promises always runs;
+        # the fixed clock keeps the periodic verification out of it.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            tailer = JsonlTailer()
+            tailer = JsonlTailer(now=lambda: 0.0)
             paths = [root / f"active-{index:02d}.jsonl"
                      for index in range(12)]
             for index, path in enumerate(paths):
@@ -935,19 +945,26 @@ class JsonlTailerTests(unittest.TestCase):
                     encoding="utf-8")
                 tailer.read(path)
 
+            identities = set()
             for wave in range(4):
                 for index, path in enumerate(paths):
+                    path.rename(root / f"superseded-{wave}-{index}.jsonl")
                     replacement = root / f"replacement-{wave}-{index}.tmp"
                     replacement.write_text(
                         '{"private":"wave-' + str(wave) + "-secret-" +
                         str(index), encoding="utf-8")
                     os.replace(replacement, path)
+                    identities.add(path.stat().st_ino)
                     tailer.read(path)
 
-            self.assertLessEqual(len(tailer._identities),
-                                 tailer._MAX_TRACKED_IDENTITIES)
+            self.assertEqual(len(identities), 4 * len(paths))
+            self.assertEqual(len(tailer._identities),
+                             tailer._MAX_TRACKED_IDENTITIES)
             self.assertLessEqual(len(tailer._files), len(paths))
             self.assertNotIn("base-secret", repr(tailer._identities))
+            # Exactly the twelve oldest identities went: the base files.
+            # The first wave, next in line, is still tracked.
+            self.assertIn("wave-0-secret", repr(tailer._identities))
 
     def test_truncation_resets_only_that_files_offset_and_buffer(self):
         with tempfile.TemporaryDirectory() as temp_dir:

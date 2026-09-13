@@ -27,6 +27,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   statusLine bridge slows the probe only when its figures are at least the
   probe's for the same reset.
 
+- Docs and test hygiene from the observability backlog: a "Reading the
+  logs" block in `docs/agent-setup.md` with the serial-console command
+  (OBS-23), the tokenserver README no longer claims header names are logged
+  on a healthy first probe (OBS-23), and the tailer identity-cap test forces
+  the eviction path instead of depending on inode reuse (OBS-29).
+  OBS-26 and OBS-31 were already fixed and are marked done.
+
 - SETTINGS → LABS stores independent choices for burn rate, Max Tracker,
   API-equivalent Value, the GitHub page and star popups. Choices apply after
   restart. Fresh sample configurations start with quotas/activity; upgrades
