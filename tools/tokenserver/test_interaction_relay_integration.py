@@ -160,7 +160,8 @@ class _LocalWorker:
         self.server.verdicts_by_id = OrderedDict()
         self.server.state_lock = threading.Lock()
         self.thread = threading.Thread(
-            target=self.server.serve_forever, daemon=True)
+            target=lambda: self.server.serve_forever(poll_interval=0.02),
+            daemon=True)
 
     @property
     def port(self):
@@ -212,7 +213,8 @@ class RelayIntegrationTests(unittest.TestCase):
             ("127.0.0.1", 0), handler)
         self.hook_port = self.hook_server.server_address[1]
         self.hook_thread = threading.Thread(
-            target=self.hook_server.serve_forever, daemon=True)
+            target=lambda: self.hook_server.serve_forever(poll_interval=0.02),
+            daemon=True)
         self.hook_thread.start()
         self.keys = derive_keys(decode_device_key(DEVICE_KEY), MAILBOX)
 

@@ -659,8 +659,11 @@ class CodexRouteTests(unittest.TestCase):
         self.server = server_module.BoundedThreadingHTTPServer(
             ("127.0.0.1", 0), self.handler)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever,
-                                       daemon=True)
+        # A short poll so tearDown's shutdown() returns at once instead of
+        # after the default 0.5 s -- per test, across the whole module.
+        self.thread = threading.Thread(
+            target=lambda: self.server.serve_forever(poll_interval=0.02),
+            daemon=True)
         self.thread.start()
 
     def tearDown(self):

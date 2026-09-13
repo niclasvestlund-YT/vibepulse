@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 import unittest
+import unittest.mock
 from dataclasses import replace
 
 from tools.tokenserver import interactions
@@ -1263,6 +1264,14 @@ class AbandonedHookTests(unittest.TestCase):
 
     def setUp(self):
         self.store = InteractionStore(secret=SECRET, reveal_detail=True)
+        # The product polls liveness every ALIVE_POLL_S (2 s) and the first
+        # check happens only after a full poll, so each abandoned wait here
+        # cost 2 s -- the zombie test alone MAX_PENDING x 2 s = 16 s. A short
+        # poll keeps every assertion (all are stated against the constant)
+        # and turns the class from ~22 s into a blink.
+        patcher = unittest.mock.patch.object(interactions, "ALIVE_POLL_S", 0.02)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_dead_client_frees_its_slot_immediately(self):
         entry = self.store.park("approval", approval_event(), 600)
@@ -1389,8 +1398,11 @@ class HttpEndToEndTests(unittest.TestCase):
         self.server = server_module.BoundedThreadingHTTPServer(
             ("127.0.0.1", 0), self.handler)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever,
-                                       daemon=True)
+        # A short poll so tearDown's shutdown() returns at once instead of
+        # after the default 0.5 s -- per test, across the whole module.
+        self.thread = threading.Thread(
+            target=lambda: self.server.serve_forever(poll_interval=0.02),
+            daemon=True)
         self.thread.start()
 
     def tearDown(self):
@@ -1657,6 +1669,14 @@ class HttpEndToEndTests(unittest.TestCase):
         not at the 30 s timeout."""
         import socket as socket_module
         from tools.tokenserver import interactions as interactions_module
+
+        # Same reasoning as AbandonedHookTests.setUp: the first liveness
+        # check comes after a full ALIVE_POLL_S, so a short poll makes the
+        # wire-level reap sub-second without touching the bound asserted.
+        patcher = unittest.mock.patch.object(
+            interactions_module, "ALIVE_POLL_S", 0.02)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         raw = json.dumps(approval_event()).encode()
         client = socket_module.create_connection(("127.0.0.1", self.port),

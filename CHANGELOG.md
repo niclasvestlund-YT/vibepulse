@@ -34,6 +34,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   the eviction path instead of depending on inode reuse (OBS-29).
   OBS-26 and OBS-31 were already fixed and are marked done.
 
+- The host test suites run about four times faster with no product change:
+  every test HTTP server now polls its shutdown flag every 20 ms instead of
+  the stdlib's 0.5 s (about a hundred servers per run), and the
+  abandoned-hook tests shorten the liveness poll they assert against. The
+  tokenserver suite went from about 92 s to 22 s and the plugin suite from
+  48 s to 11 s on one Linux runner.
+
 - SETTINGS → LABS stores independent choices for burn rate, Max Tracker,
   API-equivalent Value, the GitHub page and star popups. Choices apply after
   restart. Fresh sample configurations start with quotas/activity; upgrades

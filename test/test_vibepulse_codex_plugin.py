@@ -153,7 +153,11 @@ class LocalServer:
         self.httpd.behavior = behavior
         self.httpd.requests = []
         self.httpd.request_times = []
-        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        # A short poll so stop()'s shutdown() returns at once instead of
+        # after the default 0.5 s -- per server, across the whole module.
+        self.thread = threading.Thread(
+            target=lambda: self.httpd.serve_forever(poll_interval=0.02),
+            daemon=True)
 
     @property
     def port(self):
@@ -3797,7 +3801,8 @@ class RelaySetupTests(unittest.TestCase):
 
         proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
         proxy.requests = []
-        thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=lambda: proxy.serve_forever(poll_interval=0.02), daemon=True)
         thread.start()
         try:
             with tempfile.TemporaryDirectory() as tmp:

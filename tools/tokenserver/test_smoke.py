@@ -63,7 +63,10 @@ def canned_server(payloads, status=200):
             pass
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    # A short poll so shutdown() returns at once: the default 0.5 s per
+    # server was most of this module's wall clock.
+    thread = threading.Thread(
+        target=lambda: srv.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     try:
         yield f"http://127.0.0.1:{srv.server_address[1]}"

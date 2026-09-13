@@ -3288,7 +3288,8 @@ class BoundedHTTPServerTests(unittest.TestCase):
         server = tokenserver.BoundedThreadingHTTPServer(
             ("127.0.0.1", 0), BlockingHandler, max_workers=2)
         server_thread = threading.Thread(
-            target=server.serve_forever, daemon=True)
+            target=lambda: server.serve_forever(poll_interval=0.02),
+            daemon=True)
         server_thread.start()
 
         def request():
