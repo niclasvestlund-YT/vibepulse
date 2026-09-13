@@ -220,6 +220,12 @@ Returns live server state, added after real debugging nights:
   `bridged` (a fresh sample covers both windows, so the probe runs every
   1800 s) and `account: "assumed-single"` — the install consent, not a
   measurement.
+- `quotaRegressions` — OBS-39 evidence: every (provider, scope, reset)
+  where a live reading came in BELOW the cached figure for the same,
+  unexpired reset, with both figures. The live reading still wins; the
+  list exists so a comb can tell "the API lags" from "the API
+  re-baselined" before the cache is made an arbitration participant.
+  The log carries the same as a one-per-window WARNING.
 - `claudeProbeStreak` / `claudeProbeIntervalS` / `claudeProbeCooldownLeftS`
   / `claudeProbeAgeS` — the backoff behind `claudeProbe` (OBS-18):
   consecutive failed cycles, the current gap between cycles (240 s,

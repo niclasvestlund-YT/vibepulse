@@ -712,7 +712,11 @@ rejection. Enough to aim the next question, cheap enough for an ESP32.
 ---
 
 ### OBS-39 · A live probe can pull the cached week down within one window
-`tokenserver · S · open` — raised by Codex on #116 (2026-09-12); pre-existing.
+`tokenserver · S · in progress` — raised by Codex on #116 (2026-09-12);
+pre-existing. Evidence step landed 2026-09-13: a live reading below the
+cache for the same reset is logged once per window and listed as
+`quotaRegressions` on `GET /`. The arbitration change waits for one such
+line from a real probe.
 
 **Symptom:** the quota cache holds 60 % for a general-week reset and a
 later probe reports 40 % for the same, unexpired reset. `_resolve_weekly_quota`
@@ -730,7 +734,10 @@ may legitimately re-baseline a window, and that would be a different bug.
 ---
 
 ### OBS-40 · The session floor does not survive a tokenserver restart
-`tokenserver · S · open` — raised by Codex on #116 (2026-09-12); by design so far.
+`tokenserver · S · done (2026-09-13)` — raised by Codex on #116 (2026-09-12).
+The session is cached in `general_session` as a floor only: a live
+reading of the same, unexpired reset is lifted to a higher cached figure,
+and a cached session is never served on its own.
 
 **Symptom:** the probe observed 60 % for the 5 h window, the statusLine
 sample holds 40 % for the same reset, and the service restarts while the

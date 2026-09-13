@@ -45,6 +45,24 @@ class GitHubWiringTests(unittest.TestCase):
         self.assertIn("TK_PROJECT_STAR_COLOR_HEX 0xF2B84B", style)
         self.assertIn("TK_PROJECT_STAR_COLOR_HEX", ui)
 
+    def test_host_gate_compiles_the_view_policy_with_github_off_and_on(self):
+        """Issue #94: CI must exercise the layout with the GitHub page both
+        disabled and enabled, not only the enabled build the simulator and
+        the firmware job use. The pure C test asserts dense columns, Value
+        in the last valid slot and next/prev navigation for every Labs mask;
+        this guard keeps run.sh compiling it under both defaults."""
+        run = read("test/run.sh")
+        self.assertIn("for github_default in 0 1 2 3; do", run)
+        self.assertIn("-DTK_GITHUB_SCREEN_ENABLED=$((github_default & 1))", run)
+        self.assertIn("test_labs_features.c", run)
+        workflow = read(".github/workflows/ci.yml")
+        self.assertIn("./test/run.sh", workflow)
+        test = read("test/test_labs_features.c")
+        self.assertIn("for (unsigned mask = 0; mask <= TK_LABS_ALL; mask++)", test)
+        self.assertIn("assert(at == pos++);", test)
+        self.assertIn("assert(tk_labs_next_view(previous, 1) == view);", test)
+        self.assertIn("assert(tk_labs_view_position(VIEW_VALUE) == 3);", test)
+
     def test_popup_is_app_local_static_and_below_agent_attention(self):
         ui = read("components/app_tokens/usage_screen.c")
         popup = read("components/app_tokens/project_star_popup.c")

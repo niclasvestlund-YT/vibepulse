@@ -332,6 +332,19 @@ def _window_wins(candidate_reset, candidate_pct, incumbent_reset,
     return candidate_pct > incumbent_pct
 
 
+def _covers(window, probe_valid, probe_reset, probe_pct) -> bool:
+    """May this fresh bridge window stand in for the probe's reading of
+    it?  Only when it is at least as new: a later reset, or the same reset
+    with a figure no lower -- a lower replay of the same window is older
+    by the arbitration's own rule, and letting it slow the probe would
+    hide usage from another device for up to 30 minutes."""
+    if not probe_valid:
+        return True
+    if window["resets_at"] != probe_reset:
+        return window["resets_at"] > probe_reset
+    return window["pct"] >= probe_pct
+
+
 def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
     """Let the statusLine sample stand in for -- or ahead of -- the OAuth
     probe's session and general week figures.
@@ -366,8 +379,8 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
     probe_session = (_valid_epoch_after(probe_reset, now_ts)
                      and _valid_pct(probe_pct))
     if five is not None:
-        if five["fresh"] and (not probe_session
-                              or five["resets_at"] >= probe_reset):
+        if five["fresh"] and _covers(five, probe_session, probe_reset,
+                                     probe_pct):
             covered += 1
         wins = (not probe_session or _window_wins(
             five["resets_at"], five["pct"], probe_reset, probe_pct))
@@ -389,8 +402,8 @@ def _merge_claude_statusline(claude, quota_cache, now_ts, path=None):
                   and _valid_pct(probe_pct)
                   and isinstance(claude.get("weekIdentity"), str))
     if week is not None:
-        if week["fresh"] and (not probe_week
-                              or week["resets_at"] >= probe_reset):
+        if week["fresh"] and _covers(week, probe_week, probe_reset,
+                                     probe_pct):
             covered += 1
         cached = quota_cache.latest("claude", "general_weekly", now=now_ts)
         wins = (not probe_week or _window_wins(
@@ -2383,6 +2396,44 @@ def _valid_window_minutes(value):
             and math.isfinite(value) and value > 0)
 
 
+# OBS-39 evidence: a live reading that is LOWER than the cached one for the
+# same, unexpired reset. Usage only accumulates within a window, so either
+# the live source lags or the API re-baselined the window -- which of the
+# two decides whether the cache may become an arbitration participant
+# against the probe. Logged once per (provider, scope, reset) and listed
+# on GET / so the comb routine can count them; the live reading still
+# wins, as before.
+_quota_regressions = {}
+_quota_regressions_lock = threading.Lock()
+
+
+def _note_quota_regression(provider, scope, live_pct, cached, now_ts):
+    key = (provider, scope, cached.reset_at)
+    with _quota_regressions_lock:
+        if key in _quota_regressions:
+            return
+        _quota_regressions[key] = {
+            "provider": provider, "scope": scope,
+            "livePct": round(float(live_pct), 1),
+            "cachedPct": round(float(cached.pct), 1),
+            "resetAt": cached.reset_at, "at": int(now_ts),
+        }
+        # Windows that have reset are no evidence anyone can still check.
+        for stale_key in [k for k, v in _quota_regressions.items()
+                          if v["resetAt"] <= now_ts]:
+            _quota_regressions.pop(stale_key, None)
+    log.warning("%s %s: live %.1f%% is below the cached %.1f%% for the "
+                "same reset (%d) -- OBS-39 evidence, the live reading "
+                "still wins", provider, scope, live_pct, cached.pct,
+                cached.reset_at)
+
+
+def _quota_regressions_view():
+    with _quota_regressions_lock:
+        return sorted((dict(v) for v in _quota_regressions.values()),
+                      key=lambda v: v["at"])
+
+
 def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
                           now_ts, label_key=None):
     """Resolve authoritative live truth, otherwise an unexpired cache row."""
@@ -2415,6 +2466,10 @@ def _resolve_weekly_quota(source, provider, scope, prefix, quota_cache,
             "cache_record": None,
         }
     if live:
+        cached = quota_cache.latest(provider, scope, now=now_ts)
+        if (cached is not None and cached.reset_at == int(reset_at)
+                and cached.pct > float(pct)):
+            _note_quota_regression(provider, scope, pct, cached, now_ts)
         label = source.get(label_key) if label_key else None
         record = CachedQuota(
             provider=provider,
@@ -2650,12 +2705,31 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
         session_pct = None
         session_reset_at = None
         session_reset_min = None
+    # OBS-40: the session window is cached only as a FLOOR for a live
+    # reading of the same, unexpired reset -- never served on its own (a
+    # cached session after its reset is meaningless, and the wire has no
+    # session-stale flag), so a restart during a probe outage cannot let a
+    # lagging sample pull the figure below what was already observed.
+    session_record = None
+    if session_pct is not None:
+        cached_session = cache.latest("claude", "general_session",
+                                      now=current_ts)
+        if (cached_session is not None
+                and cached_session.reset_at == int(session_reset_at)
+                and cached_session.pct > session_pct):
+            session_pct = round(float(cached_session.pct), 1)
+        else:
+            session_record = CachedQuota(
+                provider="claude", scope="general_session",
+                identity=_quota_identity("claude", "general_session"),
+                pct=float(session_pct), reset_at=int(session_reset_at),
+                observed_at=int(current_ts), label=None)
     result["claudeSessionPct"] = session_pct
     result["claudeSessionResetMin"] = session_reset_min
-    # Never disk-cached (a Claude session window resets every 5h, so a
-    # fallback would be meaningless) -- a non-None reading here is always a
-    # genuinely fresh probe result, the honest gate Task 6 requires before
-    # anything reaches Max Tracker's day peaks.
+    # A non-None reading here is a live probe or fresh statusLine result,
+    # or that reading lifted to the same window's cached floor -- the
+    # honest gate Task 6 requires before anything reaches Max Tracker's
+    # day peaks.
     if max_tracker_store is not None and session_pct is not None:
         max_tracker_store.observe_quota(
             "claude", MAX_TRACKER_CLAUDE_SESSION_MINUTES, session_pct,
@@ -2670,6 +2744,7 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     codex_week = _resolve_weekly_quota(
         codex, "codex", "general_weekly", "codexWeek", cache, current_ts)
     _persist_quota_records_async(cache, (
+        session_record,
         claude_week["cache_record"],
         claude_model["cache_record"],
         codex_week["cache_record"],
@@ -3528,6 +3603,7 @@ class Handler(BaseHTTPRequestHandler):
                 "claudeStatusline": {**_claude_statusline_view,
                                      "bridged": _claude_statusline_bridged,
                                      "account": "assumed-single"},
+                "quotaRegressions": _quota_regressions_view(),
                 # GET / is never parsed by the screen -- fields can be
                 # added without contract risk.
                 "usageComputeOk": failing_since is None,

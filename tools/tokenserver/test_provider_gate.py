@@ -20,6 +20,8 @@ from pathlib import Path
 from unittest import mock
 
 from tools.tokenserver import codex_usage, tokenserver
+from tools.tokenserver.quota_cache import QuotaCache
+from tools.tokenserver.usage_history import UsageHistory
 
 
 def setUpModule():
@@ -197,6 +199,11 @@ class CodexOnlyEndToEndTest(unittest.TestCase):
         handler.agent_status = mock.Mock()
         handler._send = mock.Mock()
 
+        # The handler resolves the quota cache and the usage history
+        # itself. Without these seams the test read the developer's real
+        # ``quota-cache.json`` and served a cached week as the answer
+        # (green on CI's empty runner, red on the maintainer's Mac).
+        root = Path(self._tmp.name)
         with mock.patch.object(codex_usage, "DEFAULT_SESSIONS_DIR",
                                self.codex_sessions), \
                 mock.patch.object(tokenserver, "CODEX_SESSIONS",
@@ -205,6 +212,12 @@ class CodexOnlyEndToEndTest(unittest.TestCase):
                                   return_value={}), \
                 mock.patch.object(tokenserver, "_read_codex_limits",
                                   return_value={}), \
+                mock.patch.object(
+                    tokenserver, "_get_quota_cache",
+                    return_value=QuotaCache(root / "quota-cache.json")), \
+                mock.patch.object(
+                    tokenserver, "_get_usage_history",
+                    return_value=UsageHistory(root / "usage-history.json")), \
                 mock.patch.object(tokenserver,
                                   "_persist_quota_records_async"):
             tokenserver._last_result = None

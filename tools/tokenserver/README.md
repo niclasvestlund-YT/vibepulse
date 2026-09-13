@@ -483,8 +483,11 @@ The latest authoritative Claude and Codex values for the general week and
 the model week are saved atomically in
 `~/Library/Application Support/VibePulse/quota-cache.json`. The identities
 in the file are local SHA-256 values; raw provider ids, session paths,
-projects, chats and content are not saved. The session/5 h window is not
-cached.
+projects, chats and content are not saved. The session/5 h window is
+cached too, but only as a floor: a live reading of the same, unexpired
+reset is lifted to a higher cached figure (OBS-40), and a cached session
+is never served on its own -- after its reset it is meaningless, and the
+wire has no session-stale flag.
 
 - A successful current observation has a percentage and an absolute reset,
   is written to the cache and served with `*Stale: false`.

@@ -423,6 +423,83 @@ class ClaudeStatuslineBridgeTests(unittest.TestCase):
                                       "usage_http_200 + ok"):
                 self.assertEqual(tokenserver._probe_interval_s(), 240)
 
+    def test_bridged_requires_the_bridge_figure_to_cover_the_probe(self):
+        # Codex on #116: a fresh replay LOWER than the probe for the same
+        # reset is older by the arbitration's own rule and must not slow
+        # the probe; equal or higher may.
+        probe = {"sessionPct": 50.0, "sessionResetAt": self.NOW + 3600,
+                 "weekPct": 20.0, "weekResetAt": self.NOW + 86400,
+                 "weekObservedAt": self.NOW - 100,
+                 "weekIdentity": self.IDENTITY}
+        self.write(five=(49.0, self.NOW + 3600), week=(20.0, self.NOW + 86400))
+        self.merge(probe)
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+        self.write(five=(50.0, self.NOW + 3600), week=(19.0, self.NOW + 86400))
+        self.merge(probe)
+        self.assertFalse(tokenserver._claude_statusline_bridged)
+        self.write(five=(50.0, self.NOW + 3600), week=(20.0, self.NOW + 86400))
+        self.merge(probe)
+        self.assertTrue(tokenserver._claude_statusline_bridged)
+        self.write(five=(1.0, self.NOW + 7200), week=(21.0, self.NOW + 86400))
+        self.merge(probe)
+        self.assertTrue(tokenserver._claude_statusline_bridged)
+
+    def test_live_reading_below_the_cache_is_logged_once_as_obs39_evidence(self):
+        cache = self.cache(pct=60.0, reset=self.NOW + 86400)
+        source = {"weekPct": 40.0, "weekResetAt": self.NOW + 86400,
+                  "weekObservedAt": self.NOW, "weekIdentity": self.IDENTITY}
+        with mock.patch.dict(tokenserver._quota_regressions, clear=True):
+            with self.assertLogs("tokenserver", level="WARNING") as captured:
+                resolved = tokenserver._resolve_weekly_quota(
+                    source, "claude", "general_weekly", "week", cache,
+                    self.NOW)
+                # The same window again: no second line.
+                tokenserver._resolve_weekly_quota(
+                    source, "claude", "general_weekly", "week", cache,
+                    self.NOW + 30)
+            self.assertEqual(len([line for line in captured.output
+                                  if "OBS-39" in line]), 1)
+            # The live reading still wins, as before.
+            self.assertEqual(resolved["pct"], 40.0)
+            self.assertTrue(resolved["live"])
+            view = tokenserver._quota_regressions_view()
+            self.assertEqual(view[0]["livePct"], 40.0)
+            self.assertEqual(view[0]["cachedPct"], 60.0)
+            self.assertEqual(view[0]["scope"], "general_weekly")
+            # A higher live reading is not a regression.
+            with self.assertNoLogs("tokenserver", level="WARNING"):
+                tokenserver._resolve_weekly_quota(
+                    dict(source, weekPct=61.0), "claude", "general_weekly",
+                    "week", cache, self.NOW)
+
+    def test_session_floor_survives_a_restart_through_the_cache(self):
+        # OBS-40: a cached session for the same, unexpired reset lifts a
+        # lagging live reading; a higher live reading is persisted; a
+        # cached session for another reset is ignored and never served.
+        reset = self.NOW + 3600
+        session_cache = QuotaCache(self.dir / "quota.json",
+                                   now=lambda: self.NOW)
+        session_cache.put(CachedQuota(
+            provider="claude", scope="general_session",
+            identity=tokenserver._quota_identity("claude", "general_session"),
+            pct=60.0, reset_at=reset, observed_at=self.NOW - 600))
+        with mock.patch.object(self, "cache", return_value=session_cache):
+            snapshot, persisted = self._snapshot(
+                claude={"sessionPct": 40.0, "sessionResetAt": reset})
+            self.assertEqual(snapshot["claudeSessionPct"], 60.0)
+            self.assertEqual([r.scope for r in persisted], [])
+            snapshot, persisted = self._snapshot(
+                claude={"sessionPct": 70.0, "sessionResetAt": reset})
+            self.assertEqual(snapshot["claudeSessionPct"], 70.0)
+            self.assertEqual([(r.scope, r.pct, r.reset_at)
+                              for r in persisted],
+                             [("general_session", 70.0, reset)])
+            snapshot, persisted = self._snapshot(
+                claude={"sessionPct": 5.0, "sessionResetAt": reset + 7200})
+            self.assertEqual(snapshot["claudeSessionPct"], 5.0)
+            snapshot, persisted = self._snapshot()
+            self.assertIsNone(snapshot["claudeSessionPct"])
+
     def test_fresh_plan_usage_lifts_the_stale_floor_flag(self):
         usage = self.dir / "plan-usage-history.json"
         usage.write_text(json.dumps({"version": 2, "samples": [{
@@ -3288,6 +3365,7 @@ class HandlerPrivacyTests(unittest.TestCase):
         self.assertEqual(payload["claudeLocalUsage"], "fresh_applied")
         self.assertEqual(payload["claudeStatusline"]["account"],
                          "assumed-single")
+        self.assertIsInstance(payload["quotaRegressions"], list)
         for key in ("status", "ageS", "claudeCodeVersion", "bridged"):
             self.assertIn(key, payload["claudeStatusline"])
         self.assertEqual(payload["claudeCredential"], {

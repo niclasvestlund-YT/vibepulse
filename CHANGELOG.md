@@ -21,6 +21,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   it. Single-account slice of the 2026-09-10 spec; account binding is not
   implemented, and install is macOS-only for now.
 
+- The Claude session window is cached as a same-window floor (OBS-40), a
+  live week reading below the cached figure for the same reset is logged
+  and listed as `quotaRegressions` on `GET /` (OBS-39 evidence), and the
+  statusLine bridge slows the probe only when its figures are at least the
+  probe's for the same reset.
+
 - SETTINGS → LABS stores independent choices for burn rate, Max Tracker,
   API-equivalent Value, the GitHub page and star popups. Choices apply after
   restart. Fresh sample configurations start with quotas/activity; upgrades
