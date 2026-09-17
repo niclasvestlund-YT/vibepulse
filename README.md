@@ -674,7 +674,12 @@ Countdown clocks and coding quotes remain concepts for a later Labs addition.
 
 ## One button, one menu
 
-**KEY3** is the panel's one user button — BOOT and reset are recovery
+**2.41 V2:** hold **BOOT for three seconds** to open SETTINGS, then choose
+WIFI, LABS or ABOUT. Use the [V2 guide](docs/waveshare-241-v2.md) for USB
+updates; OTA is not validated on this model.
+
+The details and 480×480 captures below describe the **original 2.16**.
+**KEY3** is that panel's one user button — BOOT and reset are recovery
 controls, not part of normal use. Hold KEY3 for three seconds and
 **SETTINGS** opens on the glass.
 
@@ -737,6 +742,9 @@ cannot keep.
 > review is the next gate.
 
 ## Over-the-air updates
+
+This section describes **2.16**. The **2.41 V2** port currently uses
+[board-specific USB updates](docs/waveshare-241-v2.md#4-back-up-and-install-over-usb).
 
 After the first USB flash, the screen updates itself over WiFi. The consent
 chain is deliberate and three-factor: a **physical 3-second hold on KEY3**
@@ -833,7 +841,8 @@ tokenserver reachability, or relay health. During setup the complete symbol mean
 successful destination join.
 
 The setup window opens on its own after 90 seconds without a network, or
-at once from a 3-second KEY3 hold followed by **WIFI** in SETTINGS. Before
+at once from a 3-second button hold (**KEY3 on 2.16, BOOT on 2.41 V2**)
+followed by **WIFI** in SETTINGS. Before
 that, at 60 seconds, the glass stops being coy: it names the network it is
 hunting and what the radio actually answered ("NOT SEEN - 2.4 GHZ ONLY", "WRONG PASSWORD") instead of
 showing dashes and letting you guess.
@@ -901,9 +910,12 @@ Without a display, run the simulator and its tests with
 
 Same code, same fonts, same pixels as the device — it builds the real
 platform and VibePulse against the real LVGL, and feeds it the recorded
-fixtures in `sim-fixtures/` through the same parsers the board runs. Every
-device screenshot in this README is an unmodified simulator frame (the
-banner just places three of them side by side). The
+fixtures in `sim-fixtures/` through the same parsers the board runs. The
+flat UI captures in this README are unmodified simulator frames (the
+banner places three of them side by side). The separately captioned 2.41 V2
+photograph shows the owner's real panel; its evidence is recorded in the
+[V2 physical report](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md).
+For the original 2.16, the
 [2026-08-13 physical review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)
 covered the quota pages, agent monitor states and Max Tracker pages in that
 build. It does not verify later screenshots or firmware: the v1.1.0 SETTINGS
@@ -1042,10 +1054,11 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
   `main` still needs XDG paths, Linux credential selection, systemd user
   service lifecycle, and a real-host + panel validation report. See
   [Host platform support](docs/platform-support.md).
-- **Other boards or panel sizes?** Not yet. The platform is pinned to this
-  exact panel so one pixel-perfect build stays pixel-perfect, but a port is
-  a contained job (BSP, layout constants, fonts) —
-  [#5](https://github.com/niclasvestlund-YT/vibepulse/issues/5).
+- **Other boards or panel sizes?** Current source supports Waveshare **2.16**
+  and **2.41 V2**, each with its own build profile and native layout. AMOLED
+  1.75, 1.8 and 1.91 are [planned ports](#coming-soon--hardware-on-the-workbench),
+  without firmware support yet. See [adding a display](docs/adding-a-display.md)
+  and [#5](https://github.com/niclasvestlund-YT/vibepulse/issues/5).
 - **Cursor, Gemini CLI, other providers?** Not yet —
   [#4](https://github.com/niclasvestlund-YT/vibepulse/issues/4).
 - **Just Claude, no Codex (or vice versa)?** Works. The other half shows
