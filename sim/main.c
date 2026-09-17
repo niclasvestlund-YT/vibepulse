@@ -1,3 +1,4 @@
+#include "display_geometry.h"
 /*
  * Torgets värdlager på Macen: hela plattformen + båda apparna i ett
  * SDL-fönster, månader/timmar före hårdvaran. Läser de RIKTIGA fixture-
@@ -1797,8 +1798,8 @@ int main(int argc, char **argv) {
   /* Radbuffrat även vid pipe: fixtureloggen ska överleva en kill. */
   setvbuf(stdout, NULL, _IOLBF, 0);
   lv_init();
-  lv_display_t *disp = lv_sdl_window_create(480, 480);
-  lv_sdl_window_set_title(disp, "Torget 480x480 — G GitHub-star, S agentstatus, T VibePulse, M Max Tracker, [ och ] vy, N nästa app, L launcher");
+  lv_display_t *disp = lv_sdl_window_create(TG_DISPLAY_WIDTH, TG_DISPLAY_HEIGHT);
+  lv_sdl_window_set_title(disp, "Torget — G GitHub-star, S agentstatus, T VibePulse, M Max Tracker, [ och ] vy, N nästa app, L launcher");
   lv_sdl_mouse_create();
 
   const char *labs_mask = getenv("TORGET_LABS_MASK");

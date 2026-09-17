@@ -7,7 +7,10 @@ symptom→fix table. This file is maintainer context for working *on* the
 platform, and it is mostly Swedish.
 
 Det här repot är **VibePulse**: appen som visar Claude Code- och
-Codex-kvoter på en Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480). Appen kör
+Codex-kvoter på en Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480) och **2.41 V2** i liggande 600×450. V2 väljs uttryckligen med
+`-DTORGET_BOARD=waveshare_241_v2`; samma val gäller firmware och simulator.
+[Installera V2](docs/waveshare-241-v2.md), [nästa display](docs/adding-a-display.md).
+Appen kör
 på **Torget**, en liten LVGL-appplattform som bor i samma repo och äger
 panelen, WiFi, ljuset och launchern — därav alla `torget_*`-namn i koden och
 `torget.bin` som byggresultat. En skärm = en binär = ett bygge här.
@@ -105,6 +108,10 @@ AMOLED-skillen och mäts på panelen.
 
 ## Over-the-air-uppdateringar
 
+Det här arbetsflödet gäller originalmodellen 2.16. 2.41 V2 uppdateras tills
+vidare via USB enligt `docs/waveshare-241-v2.md`; OTA och modellkontroll i
+uppdateringskedjan är inte verifierade för V2.
+
 Vardagsfirmware går över luften: `idf.py build && tools/ota-flash.sh`
 (enhetens IP i den git-ignorerade `.ota-device`). Hela loopen, samtyckes-
 modellen och felsökningen bor i `docs/ota.md` — läs den innan du rör något
@@ -141,7 +148,8 @@ OTA. Icke förhandlingsbart, och skälen står i filen:
 ## Releaser och utåtriktad dokumentation
 
 - En viktig användarfunktion är inte klar förrän `README.md` visar den i
-  tagline/intro och i en egen aktuell sektion med riktiga 480×480-bilder.
+  tagline/intro och i en egen aktuell sektion med riktiga bilder i modellens
+  nativa storlek (480×480 eller 600×450).
 - När en tagg skapas flyttas innehållet från `Unreleased` till en daterad
   rubrik i `CHANGELOG.md`, en ny tom `Unreleased` lämnas överst och README:ns
   `Latest release` uppdateras i samma arbete.
@@ -154,7 +162,7 @@ OTA. Icke förhandlingsbart, och skälen står i filen:
 ## AMOLED visual work
 
 Use `.claude/skills/iterating-esp32-amoled-ui/SKILL.md` for AMOLED work. Show
-exact 480 x 480 output at meaningful stages. Review the static physical AMOLED
+exact native output at meaningful stages (2.16: 480 x 480; 2.41 V2: 600 x 450). Review the static physical AMOLED
 before motion. Studio approval never authorizes a flash; obtain explicit user
 authorization for the physical install.
 
@@ -194,7 +202,8 @@ firmware-enabled genom det build-inputet; exakt revision och evidens finns i
 `spec/hardware-sources.yaml`. Fysisk mikrofon-/högtalarfunktion är fortfarande
 overifierad.
 
-- Responsiv layout för andra Waveshare-storlekar — trigger: andra skärmtypen.
+- Fler skärmar: triggern slog med 2.41 V2. Följ `docs/adding-a-display.md`;
+  nytt kortval, egen evidens och nativa raster före supportpåstående.
 - Butiks-/paketmaskineri och appar i egna repon via Espressifs registry —
   trigger: bevisad traktion efter open source.
 - Röststyrning för befintliga Vibbe/Buddy är kandidat/senare tills privacy-UI,
@@ -203,6 +212,11 @@ overifierad.
   molntjänst och betalningsmodell är separata produktbeslut.
 
 ## Hardware-aware work
+
+Select the board first. The five root files below describe **2.16 only**.
+For **2.41 V2**, read the same five filenames under
+`spec/boards/waveshare_241_v2/`; validate that directory separately. Never
+transfer installed firmware or physical verification between board registries.
 
 Before proposing external hardware, declaring a device limitation, or designing
 a hardware-dependent feature, read `spec/hardware.md`,

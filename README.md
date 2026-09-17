@@ -24,6 +24,10 @@ current across ordinary internet WiFi. Every cloud feature is off by default;
 only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
+Current source supports the original **2.16-inch square panel** and the
+**Waveshare 2.41 V2 in 600 × 450 landscape**. For V2 revision checks, build
+selection and phone Wi-Fi setup, use the [2.41 V2 guide](docs/waveshare-241-v2.md).
+
 ## The problem
 
 When you run coding agents all day, two things are invisible:
@@ -466,11 +470,28 @@ installer is planned so that this step disappears.
 
 | Board | Display | Status |
 |---|---|---|
-| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Every frame in this README is an exact 480×480 render of the pixels it shows. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) (~$30) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Its simulator frames are exact 480×480 renders. No soldering. Same board Clawdmeter uses, so if you already own one you are 10 minutes away. |
+| Waveshare ESP32-S3-Touch-AMOLED-2.41 **V2 / Rev2.0** | 600×450 AMOLED in fixed landscape, capacitive touch; BOOT opens settings | **Supported in current source.** Display bring-up, portrait corner touch, Wi-Fi and owner-visible Codex/Claude usage verified. [Install guide](docs/waveshare-241-v2.md) · [exact evidence](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md). V1, automatic rotation, OTA and physical answer replies are not validated by this port. |
 
-More boards are added here as they pass on a real unit, never from a
-datasheet. What the current board can and cannot do is recorded in
-[`spec/hardware.md`](spec/hardware.md).
+The v1.1.0 tag predates the V2 port. Use current source and the explicit
+`waveshare_241_v2` build profile; firmware images are board-specific.
+More boards are added after physical verification, following
+[Adding a display](docs/adding-a-display.md). The 2.16 registry remains under
+[`spec/`](spec/hardware.md); V2 has its own
+[hardware registry](spec/boards/waveshare_241_v2/hardware.md).
+
+#### 2.41 V2 landscape
+
+<p align="center">
+  <img src="docs/img/241-v2/codex.png" width="48%" alt="V2 Codex fixture at native 600 by 450">
+  <img src="docs/img/241-v2/settings.png" width="48%" alt="V2 settings with BOOT button hint">
+</p>
+
+These are exact 600×450 captures from the shared LVGL renderer with test data.
+The native fonts/icons are retained; margins, frames and footers fit the
+shorter display. Hold **BOOT** for three seconds for SETTINGS, then **WIFI**
+to provision locally. The [V2 guide](docs/waveshare-241-v2.md) includes backup,
+recovery, sources and troubleshooting.
 
 ### Supported computers
 
@@ -528,6 +549,10 @@ Reading rather than running? That runbook is also the fastest way to
 understand how the pieces fit together.
 
 ## Setup, the manual way
+
+**Select the board first.** The commands below build the original 2.16 profile.
+For 2.41 V2 use the separate [V2 build/flash sequence](docs/waveshare-241-v2.md);
+do not flash the default image to it.
 
 The commands below show the macOS path. Windows is supported for the host
 service too; use the Windows ESP-IDF environment and the OS-specific

@@ -1,0 +1,176 @@
+schema_version: 1
+board: waveshare-esp32-s3-touch-amoled-2.41-v2
+capabilities:
+- id: display.amoled
+  name: 2.41-inch RM690B0 AMOLED
+  width: 600
+  height: 450
+  color_format: RGB565
+  byte_order: big_endian
+  bus: QSPI
+  bus_mhz: 40
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - SPI2 QSPI at 40 MHz
+  - GPIO9 CS; GPIO10 CLK; GPIO11/12/13/14 data
+  - TCA9554 EXIO0 reset
+  - RGB565 partial double buffers in PSRAM
+  constraints:
+  - V2 only; V1 reset wiring is incompatible
+  - Fixed landscape MADCTL 0x30 and gap x=0/y=16
+  - Native panel portrait coordinates are 450x600
+  - 8 flush rows = 9600 bytes; no larger buffer budget is approved
+  - Physical evidence covers the named local build; no motion/TLS stress or long soak was performed
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-241-v2-source-0eaf16c
+  - vibepulse-241-v2-port
+  - vibepulse-241-v2-physical-2026-09-17
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  - field: unit_verified
+    value: 'yes'
+    source: vibepulse-241-v2-physical-2026-09-17
+  last_verified: '2026-09-17'
+  verification:
+    unit: vibepulse-241-v2-01
+    test: landscape-boot-and-owner-usage-confirmation
+- id: touch.controller
+  name: FT6336 via FT5x06 driver
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - I2C0 SDA47/SCL48 at 400 kHz
+  - GPIO3 interrupt
+  - TCA9554 EXIO1 reset
+  constraints:
+  - Native x_max=449/y_max=599; mirror Y then swap XY
+  - Four-corner touch verified in portrait diagnostic; no separate landscape corner sweep recorded
+  - No multitouch or gesture performance claim
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-241-v2-source-0eaf16c
+  - vibepulse-241-v2-port
+  - vibepulse-241-v2-physical-2026-09-17
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  - field: unit_verified
+    value: 'yes'
+    source: vibepulse-241-v2-physical-2026-09-17
+  last_verified: '2026-09-17'
+  verification:
+    unit: vibepulse-241-v2-01
+    test: portrait-colors-and-four-touch-corners
+- id: radio.wifi-24
+  name: 2.4 GHz Wi-Fi and local provisioning
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - ESP32-S3 Wi-Fi
+  - NVS remembered networks
+  - Temporary setup access point
+  constraints:
+  - 2.4 GHz only
+  - Owner confirmed Codex and Claude usage visible; source freshness and subscription entitlement are
+    separate
+  - Cross-network relay and long-term reconnect behavior not tested on this unit
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-241-v2-source-0eaf16c
+  - vibepulse-241-v2-port
+  - vibepulse-241-v2-physical-2026-09-17
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  - field: unit_verified
+    value: 'yes'
+    source: vibepulse-241-v2-physical-2026-09-17
+  last_verified: '2026-09-17'
+  verification:
+    unit: vibepulse-241-v2-01
+    test: wifi-onboarding-and-usage-visible
+- id: controls.settings
+  name: BOOT settings button
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: unknown
+  confidence: source_inspected
+  resources:
+  - GPIO0 active-low with pull-up
+  constraints:
+  - Hold 3 seconds for SETTINGS; GPIO18 is an expander interrupt on V2
+  - Release BOOT at power-on/reset to avoid download mode
+  - The menu gesture has no separately recorded physical timing test
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-241-v2-source-0eaf16c
+  - vibepulse-241-v2-port
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-241-v2-source-0eaf16c
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-241-v2-port
+  last_verified: '2026-09-17'

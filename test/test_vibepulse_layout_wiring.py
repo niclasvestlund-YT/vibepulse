@@ -367,8 +367,8 @@ assert phase_check < cache_guard < first_overlay_mutation, (
     "that precedes all overlay LVGL mutation"
 )
 
-assert "lv_obj_set_pos(view->outline, 8, 8);" in monitor
-assert "lv_obj_set_size(view->outline, 464, 464);" in monitor
+assert "lv_obj_set_pos(view->outline, 8, 8 + TG_VIEWPORT_INSET_Y);" in monitor
+assert "lv_obj_set_size(view->outline, 464, 464 - 2 * TG_VIEWPORT_INSET_Y);" in monitor
 assert "lv_obj_set_style_border_width(view->outline, 6, 0);" in monitor
 assert "lv_obj_set_style_radius(view->outline, 36, 0);" in monitor
 assert "lv_obj_set_pos(view->icon_ring, 172, 77);" in monitor

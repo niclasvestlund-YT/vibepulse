@@ -1,3 +1,4 @@
+#include "display_geometry.h"
 #include "wifi_setup_ui.h"
 
 #include <stdio.h>
@@ -103,8 +104,7 @@ void torget_wifi_ui_create(void) {
    * under anroparens UI-lås. */
   ui.overlay = lv_obj_create(lv_layer_top());
   lv_obj_remove_style_all(ui.overlay);
-  lv_obj_set_size(ui.overlay, 480, 480);
-  lv_obj_set_pos(ui.overlay, 0, 0);
+  tg_position_viewport(ui.overlay);
   lv_obj_set_style_bg_color(ui.overlay, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(ui.overlay, LV_OPA_COVER, 0);
   /* Slukar touch: fingret ska inte nå apparna bakom svart glas. Den enda
@@ -206,7 +206,7 @@ static bool update_qr(const char *ssid, const char *password) {
 static void render_open_view(void) {
   const bool qr_open = ui.qr_available && !ui.manual_details;
   position(ui.word, WIFI_OPEN_WORD_Y);
-  position(ui.foot, WIFI_OPEN_FOOTER_Y);
+  position(ui.foot, WIFI_OPEN_FOOTER_Y - TG_FOOTER_LIFT);
   lv_obj_set_pos(ui.action, WIFI_OPEN_ACTION_X, WIFI_OPEN_ACTION_Y);
 
   if (qr_open && !ui.manual_details) {
@@ -347,19 +347,19 @@ void torget_wifi_ui_set(tg_wifi_ui_state state, const char *primary,
   if (state == TG_WIFI_UI_STARTING) {
     lv_label_set_text(ui.foot, "PLEASE WAIT");
   } else if (state == TG_WIFI_UI_FAILED) {
-    lv_label_set_text(ui.foot, "KEY3 CLOSES");
+    lv_label_set_text(ui.foot, TG_SETTINGS_CLOSE_TEXT);
   } else if (seconds_left > 0) {
     char foot[48];
     bool closable = open || state == TG_WIFI_UI_JOINING ||
                     state == TG_WIFI_UI_JOINED;
-    snprintf(foot, sizeof foot, closable ? "%02d:%02d   KEY3 CLOSES" : "%02d:%02d",
+    snprintf(foot, sizeof foot, closable ? "%02d:%02d   " TG_SETTINGS_CLOSE_TEXT : "%02d:%02d",
              seconds_left / 60, seconds_left % 60);
     lv_label_set_text(ui.foot, foot);
   } else {
     bool closable = open || state == TG_WIFI_UI_JOINING ||
                     state == TG_WIFI_UI_JOINED;
-    lv_label_set_text(ui.foot, closable ? "KEY3 CLOSES"
-                                        : "HOLD KEY3 FOR SETUP");
+    lv_label_set_text(ui.foot, closable ? TG_SETTINGS_CLOSE_TEXT
+                                        : TG_SETTINGS_HOLD_TEXT);
   }
 
   lv_obj_remove_flag(ui.overlay, LV_OBJ_FLAG_HIDDEN);

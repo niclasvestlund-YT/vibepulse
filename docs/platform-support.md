@@ -2,7 +2,7 @@
 
 VibePulse has two different platform surfaces:
 
-1. the ESP32-S3 firmware, which runs on the one supported Waveshare panel;
+1. the ESP32-S3 firmware, which runs on the supported Waveshare board profiles listed in [the README](../README.md#supported-screens);
 2. the tokenserver, setup tools, and optional Codex bridge running on your
    computer.
 

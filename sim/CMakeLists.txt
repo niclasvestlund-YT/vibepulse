@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 project(torget-sim C)
 
 set(CMAKE_C_STANDARD 11)
+include(../cmake/torget_board.cmake)
 
 include(FetchContent)
 # P20: samma minor som targetets BSP löser till (dependencies.lock) — en

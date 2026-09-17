@@ -5,7 +5,12 @@
 > hårdvarufällorna.
 
 Appplattformen för hyllskärmen (Waveshare ESP32-S3-Touch-AMOLED-2.16,
-480×480). Torget äger den fysiska skärmen och producerar DEN enda
+480×480) och Waveshare 2.41 **V2** i liggande 600×450.
+[Installationsguide för V2](docs/waveshare-241-v2.md),
+[kortregister](spec/boards/waveshare_241_v2/hardware.md) och
+[lärdomar inför nästa modell](docs/adding-a-display.md).
+V1 stöds inte; V2 har fast rotation och BOOT som inställningsknapp.
+Torget äger den fysiska skärmen och producerar DEN enda
 firmware-binär som flashas; appar pluggar in som ESP-IDF-komponenter och
 kan bo i egna repon. En skärm = en binär = ett bygge här. MIT-licens.
 

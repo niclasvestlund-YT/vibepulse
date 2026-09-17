@@ -41,7 +41,7 @@ For Windows changes, follow
 unsupported until [issue #2](https://github.com/niclasvestlund-YT/vibepulse/issues/2)
 and every gate in the platform matrix are complete.
 
-UI changes must use the exact 480×480 simulator captures and the AMOLED review
+UI changes must use exact native simulator captures (480×480 for 2.16, 600×450 for 2.41 V2) and the AMOLED review
 workflow described in `AGENTS.md`. Simulator approval never authorizes a flash.
 
 ## Pull requests

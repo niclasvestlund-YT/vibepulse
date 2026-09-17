@@ -1,3 +1,4 @@
+#include "display_geometry.h"
 #include "settings_menu.h"
 
 #include <stdio.h>
@@ -196,8 +197,7 @@ void torget_settings_create(void) {
    * setupfönstret. Kallas under anroparens UI-lås. */
   ui.overlay = lv_obj_create(lv_layer_top());
   lv_obj_remove_style_all(ui.overlay);
-  lv_obj_set_size(ui.overlay, 480, 480);
-  lv_obj_set_pos(ui.overlay, 0, 0);
+  tg_position_viewport(ui.overlay);
   lv_obj_set_style_bg_color(ui.overlay, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(ui.overlay, LV_OPA_COVER, 0);
   /* Slukar touch: fingret ska inte nå apparna bakom svart glas. */
@@ -208,9 +208,9 @@ void torget_settings_create(void) {
                  SETTINGS_WORD_Y);
   lv_label_set_text(ui.word, "SETTINGS");
 
-  ui.foot = line(ui.overlay, &plex_ui_21, COL_MUTED, SETTINGS_FOOTER_Y);
+  ui.foot = line(ui.overlay, &plex_ui_21, COL_MUTED, SETTINGS_FOOTER_Y - TG_FOOTER_LIFT);
   lv_obj_set_style_text_letter_space(ui.foot, 2, 0);
-  lv_label_set_text(ui.foot, "KEY3 CLOSES");
+  lv_label_set_text(ui.foot, TG_SETTINGS_CLOSE_TEXT);
 
   for (int i = 0; i < TG_SETTINGS_ROW_COUNT; i++) {
     int y = SETTINGS_FIRST_ROW_Y + i * (SETTINGS_ROW_HEIGHT + SETTINGS_ROW_GAP);
@@ -244,7 +244,7 @@ static void render(void) {
   lv_label_set_text(ui.word, labs ? "LABS" : "SETTINGS");
   lv_label_set_text(ui.foot,
       labs && ui.labs.storage_error() ? "COULD NOT SAVE" :
-      labs && ui.labs.pending() ? "RESTART TO APPLY" : "KEY3 CLOSES");
+      labs && ui.labs.pending() ? "RESTART TO APPLY" : TG_SETTINGS_CLOSE_TEXT);
 
   for (int i = 0; i < TG_SETTINGS_ROW_COUNT; i++) {
     show(ui.rows[i], !about);

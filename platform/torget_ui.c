@@ -1,4 +1,5 @@
 #include "torget.h"
+#include "display_geometry.h"
 
 #include <string.h>
 
@@ -239,11 +240,12 @@ void torget_ui_create(void) {
   tg.active = -1;
 
   lv_obj_t *scr = lv_screen_active();
+  lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
   tg.shift = bare(scr);
-  lv_obj_set_size(tg.shift, 480, 480);
+  tg_position_viewport(tg.shift);
 
   for (int i = 0; i < torget_app_count; i++) {
     const torget_app_t *app = torget_apps[i];

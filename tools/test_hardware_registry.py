@@ -529,10 +529,11 @@ class RepositoryRegistryTests(unittest.TestCase):
                     normalized,
                 )
                 routed_paths = set(re.findall(
-                    r"spec/[a-z0-9./-]+", block
+                    r"spec/[a-z0-9._/-]+", block
                 ))
                 self.assertEqual(
                     routed_paths, self.CANONICAL_HARDWARE_PATHS
+                    | {"spec/boards/waveshare_241_v2/"}
                 )
 
     def test_root_docs_match_registered_app_set(self):

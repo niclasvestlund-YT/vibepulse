@@ -4,6 +4,13 @@ Extraherad ur webbänken `/device` (app/components/device/DeviceScreen.tsx +
 app/globals.css) 2026-07-17. Bänken är specen: ändra aldrig här utan att ändra
 webben först. Alla mått i panelpixlar på 480 × 480.
 
+VibePulse's current app composition remains 480 × 480. Physical displays are
+selected separately in `platform/display_geometry.h`: 2.41 V2 renders a native
+600 × 450 viewport with adjusted margins/footer/frame positions and no runtime
+image/font scaling. Its authority is the native LVGL preview and
+[physical report](../docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md).
+This does not certify companion-app layouts on the new board.
+
 ## Grund
 
 - Botten: `#000000`, äkta svart (släckta pixlar på AMOLED).

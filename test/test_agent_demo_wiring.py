@@ -45,6 +45,13 @@ assert "tk_agent_monitor_create_footer" not in usage_source
 # En QSPI-flush måste fortfarande rymmas när TLS tillfälligt fragmenterar
 # internminnet. Tolv rader är 11 520 byte och samma gräns ska styra både
 # SPI-bussen och LVGL-adaptern.
-assert "#define DISPLAY_FLUSH_ROWS 12" in platform_source
+assert "#define DISPLAY_FLUSH_ROWS TG_DISPLAY_FLUSH_ROWS" in platform_source
+geometry = (Path(__file__).resolve().parents[1] / "platform" / "display_geometry.h").read_text(encoding="utf-8")
+# Every board must stay within the measured 11,520-byte DMA budget.
+for board_config in geometry.split("#else", 1):
+    width = int(re.search(r"#define TG_DISPLAY_WIDTH (\d+)", board_config)[1])
+    rows = int(re.search(r"#define TG_DISPLAY_FLUSH_ROWS (\d+)", board_config)[1])
+    assert width > 0 and rows > 0 and width % 2 == rows % 2 == 0
+    assert width * rows * 2 <= 11520
 assert ".buffer_height = DISPLAY_FLUSH_ROWS" in platform_source
-assert "BSP_LCD_H_RES * DISPLAY_FLUSH_ROWS" in platform_source
+assert "TG_DISPLAY_WIDTH * DISPLAY_FLUSH_ROWS" in platform_source

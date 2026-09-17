@@ -9,6 +9,7 @@ __pycache__/
 
 # Byggträd är regenererbara.
 build/
+build-*/
 sim/build*/
 managed_components/
 sdkconfig
@@ -31,3 +32,7 @@ platform/fonts/src/
 # tools/mockups/gen_concept_mockups.py och gen_needsyou_v2.py. Dokumenten
 # länkar alltid .png; SVG:erna var spårad utdata ingen läste.
 docs/img/mockups/*.svg
+
+# Private board backups and generated V2 configuration.
+/backups/
+/sdkconfig.241-v2*

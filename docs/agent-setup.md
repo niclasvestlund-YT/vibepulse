@@ -59,8 +59,11 @@ cannot determine yourself.
    finds no Claude token at all — there is no keychain and the credential
    file is read only on Windows
    ([#2](https://github.com/niclasvestlund-YT/vibepulse/issues/2)).
-2. **Do they have the board?** Waveshare ESP32-S3-Touch-AMOLED-2.16. No
-   board → skip to [Simulator only](#simulator-only-no-board).
+2. **Which exact board and revision?** The default is Waveshare 2.16.
+   **2.41 V2 / Rev2.0** requires the explicit `waveshare_241_v2` profile and
+   [its build/backup/flash guide](waveshare-241-v2.md), replacing Steps 2–3
+   below. V1 is not supported. Do not infer the model from USB chip identity.
+   No board → skip to [Simulator only](#simulator-only-no-board).
 3. **Is their WiFi 2.4 GHz?** The ESP32-S3 cannot see 5 GHz at all. This is
    the single most common "it won't connect" cause. Ask; don't assume.
 4. **ESP-IDF 5.5 installed?** `idf.py --version`. If missing, point them at
@@ -71,16 +74,17 @@ cannot determine yourself.
 ## Step 1 — secrets.h
 
 ```sh
-cp secrets.h.example secrets.h
+test -f secrets.h || cp secrets.h.example secrets.h
 ```
 
 Then edit `secrets.h`. Two separate things must be right:
 
-- `TG_WIFI_SSID` / `TG_WIFI_PASS` — their 2.4 GHz network. This one still
-  belongs here: it is the **immutable floor** the panel falls back to, and
-  the only network it knows before it has ever been anywhere. Every network
-  *after* the first is taught to the panel at the place itself, with no
-  rebuild — see [wifi.md](wifi.md).
+- `TG_WIFI_SSID` / `TG_WIFI_PASS` — optional compiled 2.4 GHz fallback.
+  Both may stay empty: the panel opens local phone provisioning after about
+  90 seconds, or via SETTINGS → WIFI (KEY3 on 2.16, BOOT on 2.41 V2).
+  Learned networks live in that panel's NVS, not automatically in a Mac's
+  header. Missing credentials are not proof of an open network. See
+  [wifi.md](wifi.md); never ask users to paste passwords into public logs.
 - **Replace `DIN-MAC` in `TK_VIBEPULSE_BASE_URL`** with a reachable fallback.
   On macOS, use the Mac's Bonjour name. On Windows, use an active LAN IPv4
   address and reserve it in the router. Current firmware first discovers
@@ -113,8 +117,8 @@ exactly as before. With it, several computers may advertise simultaneously;
 the panel pins one healthy origin and changes only after failure. On Windows,
 `ipconfig` plus a DHCP reservation still makes the compiled fallback durable.
 
-**Verify:** `secrets.h` has a non-empty SSID and no `DIN-MAC` placeholder
-left in the URL:
+**Verify:** either configure a Wi-Fi fallback or plan local phone provisioning.
+There must be no `DIN-MAC` placeholder left in the URL:
 
 ```sh
 grep -q '://DIN-MAC' secrets.h && echo "PLACEHOLDER STILL THERE" || echo "host set"
@@ -133,10 +137,16 @@ document the DHCP reservation that keeps the fallback IPv4 stable. A stale
 compiled address cost an entire evening of network debugging before anyone read the URL
 (`docs/lessons.md` 2026-08-17).
 
-Ask the user for the WiFi password. Do not guess it, and do not commit
-`secrets.h` — it is gitignored, keep it that way.
+For phone provisioning, the user enters the password locally in the portal.
+Do not guess credentials, and do not commit `secrets.h` — it is gitignored,
+keep it that way.
 
 ## Step 2 — build
+
+These default commands are for **2.16**. For **2.41 V2** follow
+[the V2 guide](waveshare-241-v2.md#3-build-the-exact-board-profile) using
+`build-241` and a separate SDK config. Use the same build directory when
+flashing; never switch to an older default `build/` image.
 
 ```sh
 . ~/esp/esp-idf/export.sh      # their install path may differ
@@ -608,6 +618,9 @@ For a non-interactive check — useful in CI or over SSH — this writes the ful
 ```sh
 TORGET_CAPTURE_DIR=/tmp/caps ./sim/build/torget-sim --vibepulse-static-qa
 ```
+
+For 2.41 V2, `tools/preview-ui.sh vibepulse waveshare_241_v2` builds a separate
+simulator and validates its complete capture set at 600 × 450.
 
 ## Changing things afterwards
 

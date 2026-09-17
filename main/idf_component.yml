@@ -4,6 +4,8 @@
 ## ../README.md och reconen i ../spec/hardware.md.
 dependencies:
   idf: ">=5.5"
+  # Match the shared LVGL raster used by sim/CMakeLists.txt.
+  lvgl/lvgl: "9.5.0"
   waveshare/esp32_s3_touch_amoled_2_16: "^2.0.1"
   ## IMU:n för auto-rotationen (P24) — samma leverantör som BSP:n.
   waveshare/qmi8658: "^2.0.0"

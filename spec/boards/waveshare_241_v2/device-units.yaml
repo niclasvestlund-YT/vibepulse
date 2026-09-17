@@ -1,0 +1,15 @@
+schema_version: 1
+units:
+- id: vibepulse-241-v2-01
+  friendly_name: VibePulse 2.41 V2 validation unit
+  board: waveshare-esp32-s3-touch-amoled-2.41-v2
+  sku_evidence: owner-confirmed V2 marking and successful V2 pin/reset bring-up
+  board_revision: V2
+  enclosure: unknown
+  speaker: unknown
+  battery: unknown
+  microsd: unknown
+  antenna: unknown
+  installed_firmware: 241-v2-7ca27a2-local
+  last_physical_verification: '2026-09-17'
+  secrets: false

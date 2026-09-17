@@ -36,8 +36,7 @@
 
 #include "esp_heap_caps.h"
 
-#include "bsp/esp-bsp.h"
-#include "bsp/touch.h"
+#include "torget_board.h"
 #include "driver/gpio.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -66,7 +65,7 @@
 static const char *TAG = "torget";
 
 #define TICK_EVERY_MS 100 /* ~10 Hz: ljusrampen är mjuk, CPU:n sover */
-#define DISPLAY_FLUSH_ROWS 12
+#define DISPLAY_FLUSH_ROWS TG_DISPLAY_FLUSH_ROWS
 
 /* Nattläge: AMOLED tål mörker bäst av allt, och skärmen står i ett hem.
  * Aktivitet är villkoret, inte klockan: apparna rapporterar liv via
@@ -534,7 +533,7 @@ static void hook_ip_acquired(void) {
 static const tg_wifi_setup_hooks s_setup_hooks = {
   /* Flushens DMA-behov: golvet setupfönstrets grindar mäter mot —
    * samma tal som heap-larmet i tick_cb vaktar. */
-  .flush_dma_bytes = (size_t)DISPLAY_FLUSH_ROWS * 480u * 2u,
+  .flush_dma_bytes = (size_t)DISPLAY_FLUSH_ROWS * TG_DISPLAY_WIDTH * 2u,
   .have_ip = hook_have_ip,
   .ip_acquired = hook_ip_acquired,
   .sta_pause = hook_sta_pause,
@@ -662,7 +661,7 @@ static void tick_cb(lv_timer_t *t) {
      * ritpipen fastnar tyst (frysjakten 2026-08-16: LVGL:s interna pool
      * svalt blocket → låst render). Larmet gör en framtida regression
      * högljudd i stället för tyst. Marginal ×2 = andrum för TLS/WiFi-spikar. */
-    const unsigned flush_dma = (unsigned)DISPLAY_FLUSH_ROWS * 480u * 2u;
+    const unsigned flush_dma = (unsigned)DISPLAY_FLUSH_ROWS * TG_DISPLAY_WIDTH * 2u;
     if (dma_largest < flush_dma * 2u)
       ESP_LOGW(TAG, "LÅGT DMA-block: %u byte (flush behöver %u) — nära fryströskeln",
                dma_largest, flush_dma);
@@ -698,7 +697,7 @@ static void tick_cb(lv_timer_t *t) {
    * Körs i LVGL-tasken — därför bara atomära tjänsteanrop här, aldrig
    * torget_ota_ui_set (som tar UI-låset). */
   static tg_button_policy key3;
-  bool key3_down = gpio_get_level(GPIO_NUM_18) == 0;
+  bool key3_down = gpio_get_level(TG_SETTINGS_GPIO) == 0;
   if (key3_down)
     s_last_touch_us = now; /* knappkontakt är aktivitet, precis som touch */
 
@@ -776,7 +775,7 @@ static void tick_cb(lv_timer_t *t) {
     /* kliv aldrig förbi målet, i någondera riktningen */
     if ((step > 0 && s_brightness > target) || (step < 0 && s_brightness < target))
       s_brightness = target;
-    bsp_display_brightness_set(s_brightness);
+    tg_board_brightness_set(s_brightness);
   }
 }
 
@@ -863,11 +862,8 @@ static void display_start(void) {
   adapter_cfg.task_stack_size = 16 * 1024;
   ESP_ERROR_CHECK(esp_lv_adapter_init(&adapter_cfg));
 
-  const bsp_display_config_t disp_config = {
-    .max_transfer_sz = BSP_LCD_H_RES * DISPLAY_FLUSH_ROWS *
-                       BSP_LCD_BITS_PER_PIXEL / 8,
-  };
-  ESP_ERROR_CHECK(bsp_display_new(&disp_config, &s_panel, &s_panel_io));
+  ESP_ERROR_CHECK(tg_board_display_new(TG_DISPLAY_WIDTH * DISPLAY_FLUSH_ROWS * 2,
+                                     &s_panel, &s_panel_io));
 
   esp_lv_adapter_display_config_t disp_cfg = {
     .panel = s_panel,
@@ -875,8 +871,8 @@ static void display_start(void) {
     .profile = {
       .interface = ESP_LV_ADAPTER_PANEL_IF_OTHER,
       .rotation = ESP_LV_ADAPTER_ROTATE_0,
-      .hor_res = BSP_LCD_H_RES,
-      .ver_res = BSP_LCD_V_RES,
+      .hor_res = TG_DISPLAY_WIDTH,
+      .ver_res = TG_DISPLAY_HEIGHT,
       .buffer_height = DISPLAY_FLUSH_ROWS,
       .use_psram = true,
       .enable_ppa_accel = false,
@@ -888,14 +884,11 @@ static void display_start(void) {
   assert(disp);
   lv_display_add_event_cb(disp, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
 
-  ESP_ERROR_CHECK(bsp_display_brightness_init());
+  ESP_ERROR_CHECK(tg_board_brightness_init());
 
-  /* Touchparet hör ihop med MADCTL 0xA0 — ändra aldrig ena sidan ensam. */
-  bsp_display_cfg_t touch_cfg = {
-    .touch_flags = { .swap_xy = 1, .mirror_x = 0, .mirror_y = 1 },
-  };
+  /* Board code keeps panel MADCTL and touch transformation as a pair. */
   esp_lcd_touch_handle_t tp = NULL;
-  ESP_ERROR_CHECK(bsp_touch_new(&touch_cfg, &tp));
+  ESP_ERROR_CHECK(tg_board_touch_new(&tp));
   esp_lv_adapter_touch_config_t adapter_touch =
     ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
   s_touch = esp_lv_adapter_register_touch(&adapter_touch);
@@ -916,6 +909,7 @@ static void display_start(void) {
  * fotoforensik. Ser du en ljus kantlinje i ett läge: justera det lägets
  * par (6 på den axel linjen sitter, spegelvänt om den flyttar till
  * motsatt kant). */
+#ifndef TORGET_BOARD_241_V2
 esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation) {
   static const uint8_t MADCTL[4] = { 0x00, 0x60, 0xC0, 0xA0 };
   static const int GAP[4][2] = { /* {x_gap, y_gap} per läge */
@@ -931,6 +925,7 @@ esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation) {
   esp_lcd_panel_set_gap(s_panel, GAP[rotation][0], GAP[rotation][1]);
   return esp_lcd_panel_io_tx_param(s_panel_io, lcd_cmd, &MADCTL[rotation], 1);
 }
+#endif
 
 /* ------------------------------------------------------------------- start */
 
@@ -1113,14 +1108,14 @@ void app_main(void) {
   torget_boot_health_mark(TG_HEALTH_DISPLAY);
   /* Börja släckt: tick_cb:s ramp lyfter till dagsläge på ~1,3 s. Det är
    * bootens fade-in — samma ramp som nattväckningen använder. */
-  bsp_display_brightness_set(0);
+  tg_board_brightness_set(0);
   /* s_touch sattes i display_start — BSP:ns accessor vet inget om vår start. */
   sg_rotation_start(s_touch); /* P24: bilden följer med när enheten vrids */
 
-  /* KEY3 (GPIO18, aktiv låg enligt spec/hardware.md): intern pullup,
-   * pollas av tick_cb som appväxlare. */
+  /* Board settings input: KEY3/GPIO18 on 2.16, BOOT/GPIO0 on 2.41 V2.
+   * Active-low with internal pull-up, polled by tick_cb. */
   gpio_config_t key3 = {
-    .pin_bit_mask = 1ULL << GPIO_NUM_18,
+    .pin_bit_mask = 1ULL << TG_SETTINGS_GPIO,
     .mode = GPIO_MODE_INPUT,
     .pull_up_en = GPIO_PULLUP_ENABLE,
   };
@@ -1165,8 +1160,8 @@ void app_main(void) {
   /* Fysisk sanning i loggen: KEY3:s råa nivå vid boot. Låg utan finger =
    * pinnen är inte att lita på förrän knappolicyns väpning släppt igenom
    * den (så hände 2026-08-14, då ett fönster öppnade sig självt). */
-  ESP_LOGI(TAG, "KEY3 rå nivå vid boot: %d (1 = släppt)",
-           gpio_get_level(GPIO_NUM_18));
+  ESP_LOGI(TAG, "settings GPIO%d raw level at boot: %d (1 = released)",
+           TG_SETTINGS_GPIO, gpio_get_level(TG_SETTINGS_GPIO));
 
   wifi_start();
   /* Nättasken FÖRE OTA-vakten: apparnas dataväg är plattformens kritiska

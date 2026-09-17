@@ -1301,3 +1301,45 @@ to 22 s and 11 s. **Watch for:** a new fixture copying
 `threading.Thread(target=server.serve_forever)` without the interval, a wait
 bound written as `assertLess(elapsed, 4)` instead of against the constant, and
 "the suite is just big" as an explanation nobody measured.
+
+
+## 2026-09-17 · A second display is a board port, not a resolution change
+
+**What happened:** the working 2.16 VibePulse image could not be used on a
+Waveshare 2.41 V2. Panel/touch/reset pins, controller initialization, address
+gap, settings button and aspect ratio differed; even V1 and V2 of the same
+2.41 product require different reset wiring. The first native landscape
+preview revealed footer/frame overlap that square screenshots concealed.
+**The rule:** identify model plus revision, isolate the board boundary, keep
+panel and touch orientation paired, and inspect every surface at native size.
+The V2 portrait diagnostic passed real color/corner checks before the full
+landscape application was installed with separate permission. Source-specific
+registries keep that result from being inherited by another unit or model.
+
+**Build lessons:** `9.*` resolved LVGL 9.6 while the simulator was 9.5; after
+pinning 9.5, a stale generated config retained an empty assert-header include.
+Regenerate a board-specific SDK config, not device NVS. Target and simulator
+must use the same pinned release. Limit build workers on a small-memory Mac;
+concurrent C++ compilation caused heavy swap pressure. Expected simulator
+captures must follow its CMake companion configuration, not merely a folder
+found under the operator's home directory.
+
+**Device/setup lessons:** the vendor factory/Arduino code supplied the
+16-pixel gap missing from an LVGL demo. It moves axes in landscape. GPIO18 is
+an expander interrupt on V2, so settings moved to BOOT/GPIO0 and all button
+hints followed. Eight 600-pixel flush rows stay within the existing DMA budget;
+PSRAM capacity alone does not guarantee a contiguous internal DMA block.
+An empty Mac header cannot supply another panel's remembered networks, and
+an unavailable keychain password is not an open-network credential. Local
+phone provisioning worked. Reopening serial correlated with a USB reset even
+with DTR/RTS deasserted: stop calling it passive until the actual setup proves
+that. Visible provider numbers do not establish source freshness or billing
+entitlement.
+
+**Guards and handoff:** common board selection, native raster/document-image
+tests, both firmware profiles in CI, isolated hardware registries, the
+[reusable porting checklist](adding-a-display.md), and the
+[exact physical report](superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md).
+Automatic rotation, board-safe OTA, physical answer replies and sustained
+motion/network stress remain separate follow-ups; they were not established
+by displaying usage.

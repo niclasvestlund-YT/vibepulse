@@ -7,6 +7,7 @@
 # Det som delas mellan dem är platform/, components/app_* (utom net.c) och
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
+include(cmake/torget_board.cmake)
 # third_party/ innehåller vendrade komponenter (cjson) som apparna delar.
 # Vibbe (app_buddy) bor i sitt eget repo (~/Buddy) och delas in härifrån —
 # EN källa, ingen kopiedrift (inflyttsbeslutet 2026-08-07: "alla tre ska bo

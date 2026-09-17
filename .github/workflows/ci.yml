@@ -224,3 +224,11 @@ jobs:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
           command: idf.py build
+      - name: Build the 2.41 V2 profile with its own SDK config
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-241 -D TORGET_BOARD=waveshare_241_v2
+            -D SDKCONFIG=sdkconfig.241-v2 build

@@ -10,6 +10,10 @@ table. Never flash the board without the user explicitly asking you to.
 
 ## Over-the-air updates
 
+This workflow applies to the original 2.16 board. Update 2.41 V2 over USB
+using `docs/waveshare-241-v2.md`; OTA and board identification in the update
+chain are not validated for V2.
+
 Day-to-day firmware goes over the air: `idf.py build && tools/ota-flash.sh`
 (device IP from git-ignored `.ota-device`). The full loop, consent model and
 troubleshooting live in `docs/ota.md` — read it before touching anything
@@ -38,7 +42,7 @@ shows the gap.
 ## AMOLED visual work
 
 Use `.claude/skills/iterating-esp32-amoled-ui/SKILL.md` for AMOLED work. Show
-exact 480 x 480 output at meaningful stages. Review the static physical AMOLED
+exact native output at meaningful stages (2.16: 480 x 480; 2.41 V2: 600 x 450). Review the static physical AMOLED
 before motion. Studio approval never authorizes a flash; obtain explicit user
 authorization for the physical install.
 
@@ -52,6 +56,11 @@ host-service setup: most sharp edges here have a story, and fixes with a
 root-cause story add an entry there.
 
 ## Hardware-aware work
+
+Select the board first. The five root files below describe **2.16 only**.
+For **2.41 V2**, read the same five filenames under
+`spec/boards/waveshare_241_v2/`; validate that directory separately. Never
+transfer installed firmware or physical verification between board registries.
 
 Before proposing external hardware, declaring a device limitation, or designing
 a hardware-dependent feature, read `spec/hardware.md`,
@@ -68,7 +77,7 @@ Two rules, learned 2026-08-16, not optional:
 
 - **When an important feature ships, update `README.md` in the same effort** —
   headline it at the top (tagline + intro) AND add/refresh its own section with
-  current 480 x 480 simulator frames. A feature nobody can see in the README is
+  current native simulator frames (480 x 480 or 600 x 450). A feature nobody can see in the README is
   a feature nobody adopts.
 - **Every GitHub release gets real feature images and a clean card.** Embed the
   feature's simulator frames in the release body via absolute

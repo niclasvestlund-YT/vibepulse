@@ -201,11 +201,11 @@ class PreviewWiringTests(unittest.TestCase):
         self.assertIn('mkdir -m 0700 "$capture_dir"', self.script)
         self.assertIn(
             'TORGET_CAPTURE_DIR="$capture_dir" '
-            '"$repo/sim/build/torget-sim" --vibepulse-static-qa',
+            '"$build_dir/torget-sim" --vibepulse-static-qa',
             self.script,
         )
         self.assertIn('cmake -S "$repo/sim"', self.script)
-        self.assertIn('cmake --build "$repo/sim/build"', self.script)
+        self.assertIn('cmake --build "$build_dir"', self.script)
         self.assertNotIn('Path("/tmp").glob', self.script)
         self.assertNotIn("captures-before.json", self.script)
         self.assertNotIn("rm -f /tmp/torget-vibepulse", self.script)
@@ -215,7 +215,7 @@ class PreviewWiringTests(unittest.TestCase):
         self.assertRegex(
             self.script,
             r'(?m)^"\$PYTHON_BIN" - "\$repo" "\$output_dir" '
-            r'"\$capture_dir" <<\'PREVIEW_CONVERTER_PY\'$',
+            r'"\$capture_dir" "\$spec_dir" "\$build_dir" <<\'PREVIEW_CONVERTER_PY\'$',
         )
         self.assertIn("from PIL import Image", self.script)
         self.assertIn(

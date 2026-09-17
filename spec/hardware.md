@@ -5,6 +5,9 @@ Viktigast: gamla wikin (www.waveshare.com/wiki/...) är en tom platshållare —
 den riktiga dokumentationen är **docs.waveshare.com**, och demokoden ligger på
 GitHub, inte i en zip. Varje sektion är märkt verifierad eller ej.
 
+For **2.41 V2**, use [its separate registry](boards/waveshare_241_v2/hardware.md).
+This file and its root YAML files remain specific to the original 2.16 board.
+
 ## How to read hardware truth
 
 This file explains verified traps and context. Machine-readable state lives in

@@ -1,3 +1,4 @@
+#include "display_geometry.h"
 #include "usage_screen.h"
 
 #include <stdio.h>
@@ -54,7 +55,7 @@ _Static_assert(VP_PERCENT_FONT_PX == 164,
                "plex_num_164 must match the Studio percent token");
 
 #define HEADER_LINE_Y 63
-#define PAGER_Y 456
+#define PAGER_Y (456 - (TG_VIEWPORT_INSET_Y ? 4 : 0))
 #define STAT_VALUE_Y VP_RESET_Y
 #define STAT_LABEL_Y 396
 #define RIGHT_STAT_X 240

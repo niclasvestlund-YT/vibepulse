@@ -1,14 +1,20 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 1 ] || [ "$1" != "vibepulse" ]; then
-  printf 'usage: %s vibepulse\n' "$0" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || [ "$1" != "vibepulse" ]; then
+  printf 'usage: %s vibepulse [waveshare_216|waveshare_241_v2]\n' "$0" >&2
   exit 2
 fi
 
 repo=$(CDPATH= cd -P "$(dirname "$0")/.." && pwd)
 PYTHON_BIN=${PYTHON_BIN:-python3}
 output_dir=
+board=${2:-waveshare_216}
+case "$board" in
+  waveshare_216) build_dir="$repo/sim/build"; spec_dir="$repo/spec" ;;
+  waveshare_241_v2) build_dir="$repo/sim/build-241"; spec_dir="$repo/spec/boards/waveshare_241_v2" ;;
+  *) printf 'Unsupported board: %s\n' "$board" >&2; exit 2 ;;
+esac
 
 cleanup_preview() {
   cleanup_status=$?
@@ -63,12 +69,12 @@ chmod 0700 "$output_dir"
 capture_dir="$output_dir/captures"
 mkdir -m 0700 "$capture_dir"
 
-cmake -S "$repo/sim" -B "$repo/sim/build" -G Ninja
-cmake --build "$repo/sim/build"
-TORGET_CAPTURE_DIR="$capture_dir" "$repo/sim/build/torget-sim" --vibepulse-static-qa
-TORGET_CAPTURE_DIR="$capture_dir" "$repo/sim/build/torget-sim" --vibepulse-labs-captures
+cmake -S "$repo/sim" -B "$build_dir" -G Ninja -DTORGET_BOARD="$board"
+cmake --build "$build_dir" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+TORGET_CAPTURE_DIR="$capture_dir" "$build_dir/torget-sim" --vibepulse-static-qa
+TORGET_CAPTURE_DIR="$capture_dir" "$build_dir/torget-sim" --vibepulse-labs-captures
 
-"$PYTHON_BIN" - "$repo" "$output_dir" "$capture_dir" <<'PREVIEW_CONVERTER_PY'
+"$PYTHON_BIN" - "$repo" "$output_dir" "$capture_dir" "$spec_dir" "$build_dir" <<'PREVIEW_CONVERTER_PY'
 import os
 import stat
 import sys
@@ -82,7 +88,7 @@ sys.path.insert(0, str(repo))
 from PIL import Image
 from tools.hardware_registry import load_registry
 
-registry = load_registry(repo / "spec")
+registry = load_registry(Path(sys.argv[4]) if len(sys.argv) > 4 else repo / "spec")
 display = registry.capabilities["display.amoled"]
 expected = (display["width"], display["height"])
 expected_names = {
@@ -215,7 +221,16 @@ expected_names = {
 wifi_global_surfaces = [
     "launcher", "claude", "codex", "value", "github", "needs-you"
 ]
-if (Path.home() / "Solelkollen/components/app_solelkollen").is_dir():
+# Inspect the configured build, not a directory that merely exists on this host.
+# Tests may run the converter alone, without a CMake cache.
+companion = Path.home() / "Solelkollen/components"
+if len(sys.argv) > 5:
+    cache = (Path(sys.argv[5]) / "CMakeCache.txt").read_text()
+    for line in cache.splitlines():
+        if line.startswith("TORGET_SOLELKOLLEN_DIR:PATH="):
+            companion = Path(line.split("=", 1)[1])
+            break
+if (companion / "app_solelkollen").is_dir():
     wifi_global_surfaces.append("companion")
 expected_names.update(
     f"torget-wifi-global-{surface}-{bars}.bmp"

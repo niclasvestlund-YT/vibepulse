@@ -7,6 +7,15 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **Waveshare ESP32-S3-Touch-AMOLED-2.41 V2 support**, selected with
+  `TORGET_BOARD=waveshare_241_v2`: fixed 600×450 landscape, V2 QSPI/I2C/reset
+  wiring, paired touch rotation, BOOT settings input and native UI margins.
+  [Setup and recovery](docs/waveshare-241-v2.md), [physical evidence](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md),
+  a separate hardware registry and [next-display checklist](docs/adding-a-display.md)
+  record the boundaries. V1, auto-rotation, OTA and physical interaction replies
+  are not claimed validated. Firmware CI builds both board profiles and native
+  preview/raster tests protect the second layout. Target LVGL now pins 9.5.0
+  to match the simulator rather than resolving a newer 9.x release.
 - **Claude Code's statusLine as a quota source (host side).**
   `python3 tools/vibepulse_setup.py statusline install --yes-single-account`
   points Claude Code's `statusLine` at a generated launcher; the bridge

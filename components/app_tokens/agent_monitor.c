@@ -1,3 +1,4 @@
+#include "display_geometry.h"
 #include "agent_monitor.h"
 
 #include <stdio.h>
@@ -329,8 +330,8 @@ static void create_completion(lv_obj_t *app_root) {
                       LV_EVENT_LONG_PRESSED, NULL);
 
   view->outline = bare(view->root);
-  lv_obj_set_pos(view->outline, 8, 8);
-  lv_obj_set_size(view->outline, 464, 464);
+  lv_obj_set_pos(view->outline, 8, 8 + TG_VIEWPORT_INSET_Y);
+  lv_obj_set_size(view->outline, 464, 464 - 2 * TG_VIEWPORT_INSET_Y);
   lv_obj_set_style_bg_opa(view->outline, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_opa(view->outline, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(view->outline, 6, 0);
@@ -725,8 +726,8 @@ static void create_needs_you(lv_obj_t *app_root) {
   lv_obj_add_event_cb(v->root, needs_you_root_event, LV_EVENT_CLICKED, NULL);
 
   v->frame = bare(v->root);
-  lv_obj_set_pos(v->frame, 14, 14);
-  lv_obj_set_size(v->frame, 452, 452);
+  lv_obj_set_pos(v->frame, 14, 14 + TG_NEEDS_FRAME_INSET_Y);
+  lv_obj_set_size(v->frame, 452, 452 - 2 * TG_NEEDS_FRAME_INSET_Y);
   lv_obj_set_style_bg_opa(v->frame, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_color(v->frame, COL_CLAUDE, 0);
   lv_obj_set_style_border_opa(v->frame, LV_OPA_COVER, 0);

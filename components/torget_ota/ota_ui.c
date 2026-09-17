@@ -1,3 +1,4 @@
+#include "display_geometry.h"
 #include "ota_ui.h"
 
 #include <stdatomic.h>
@@ -98,8 +99,7 @@ void torget_ota_ui_create(void) {
    * under anroparens UI-lås (samma mönster som torget_ui_create). */
   ui.overlay = lv_obj_create(lv_layer_top());
   lv_obj_remove_style_all(ui.overlay);
-  lv_obj_set_size(ui.overlay, 480, 480);
-  lv_obj_set_pos(ui.overlay, 0, 0);
+  tg_position_viewport(ui.overlay);
   lv_obj_set_style_bg_color(ui.overlay, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(ui.overlay, LV_OPA_COVER, 0);
   /* Overlayn SLUKAR touch: annars når fingret apparna bakom svart glas. */
@@ -215,7 +215,7 @@ static const char *state_word(tg_ota_ui_state state) {
  * sitt ord och sin siffra — en dominerande siffra, inga bihang. */
 static const char *state_detail(tg_ota_ui_state state) {
   switch (state) {
-    case TG_OTA_UI_OPEN:      return "KEY3 CLOSES";
+    case TG_OTA_UI_OPEN:      return TG_SETTINGS_CLOSE_TEXT;
     case TG_OTA_UI_VERIFYING: return "SHA-256";
     case TG_OTA_UI_NOTICE:    return "";
     default:                  return "";

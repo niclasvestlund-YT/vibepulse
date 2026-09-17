@@ -1,5 +1,11 @@
 #include "rotation.h"
 
+#ifdef TORGET_BOARD_241_V2
+/* The square board's measured IMU calibration does not transfer to this
+ * rectangular board. The first V2 port deliberately uses fixed landscape. */
+void sg_rotation_start(lv_indev_t *touch) { (void)touch; }
+#else
+
 #include <math.h>
 
 #include "freertos/FreeRTOS.h"
@@ -171,3 +177,5 @@ void sg_rotation_start(lv_indev_t *touch) {
   xTaskCreate(rotation_task, "rotation", 3072, NULL, 3, NULL);
   ESP_LOGI(TAG, "IMU igång (fast kalibrering: kvadrant %d = rättvänt)", SG_QUAD_UP);
 }
+
+#endif /* TORGET_BOARD_241_V2 */

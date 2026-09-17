@@ -195,6 +195,14 @@ DISPLAY_METADATA = ("icc_profile", "exif", "gamma", "srgb", "chromaticity")
 # this file and CI would stay green. Named, a stray file fails; skipped, it
 # is invisible. The distinction is the whole difference between a filter and
 # a blind spot.
+# These are native simulator captures checked against the V2 renderer in
+# test_board_profiles.py, also called by test/run.sh. They are not exceptions.
+BOARD_241_FRAMES = {
+    "241-v2/codex.png": "vibepulse-codex-weekly-live-46.png",
+    "241-v2/claude.png": "vibepulse-claude-all.png",
+    "241-v2/settings.png": "settings-menu.png",
+}
+
 NOT_FRAMES = {
     "github/glass-live.png": "a photograph of the physical panel",
     "hero.png": "the README banner, a composed graphic",
@@ -235,7 +243,7 @@ def docs_frames():
     missed by hand.
     """
     for name, path in docs_images():
-        if name in NOT_FRAMES or path.suffix != ".png":
+        if name in NOT_FRAMES or name in BOARD_241_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -516,10 +524,11 @@ class DocsFrameDriftTests(unittest.TestCase):
             if name in NOT_FRAMES or path.suffix != ".png":
                 continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
-                if im.size != (480, 480):
+                expected = (600, 450) if name in BOARD_241_FRAMES else (480, 480)
+                if im.size != expected:
                     wrong.append(f"{name} is {im.size[0]}x{im.size[1]}")
         self.assertEqual(wrong, [], "\n".join(
-            ["not a 480x480 panel capture. If it is not a screenshot, add it "
+            ["not a native-size panel capture. If it is not a screenshot, add it "
              "to NOT_FRAMES with the reason; if it is, re-capture it:"]
             + wrong))
 

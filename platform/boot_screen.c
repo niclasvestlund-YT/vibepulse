@@ -1,3 +1,4 @@
+#include "display_geometry.h"
 #include "boot_screen.h"
 
 #include "lvgl.h"
@@ -22,8 +23,7 @@ static const char *const STEP_WORDS[3] = { "WIFI", "TIME", "DATA" };
 void torget_boot_screen_create(void) {
   ui.overlay = lv_obj_create(lv_layer_top());
   lv_obj_remove_style_all(ui.overlay);
-  lv_obj_set_size(ui.overlay, 480, 480);
-  lv_obj_set_pos(ui.overlay, 0, 0);
+  tg_position_viewport(ui.overlay);
   lv_obj_set_style_bg_color(ui.overlay, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(ui.overlay, LV_OPA_COVER, 0);
   /* Slukar touch precis som OTA-overlayn: fingret ska inte nå halvbyggda

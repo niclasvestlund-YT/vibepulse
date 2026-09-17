@@ -1,0 +1,39 @@
+schema_version: 1
+sources:
+- id: vibepulse-241-v2-physical-2026-09-17
+  kind: physical-test
+  rank: 1
+  title: 2.41 V2 bring-up and owner-confirmed usage
+  publisher: VibePulse
+  locator: docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md
+  revision: 241-v2-7ca27a2-local; app sha256 ddc24f2d88395e26751b86d483ddf7f5025a4c1e8a2d51c76dfd38b9c76d63b5
+  accessed: '2026-09-17'
+  unit: vibepulse-241-v2-01
+  tests:
+  - portrait-colors-and-four-touch-corners
+  - landscape-boot-and-owner-usage-confirmation
+  - wifi-onboarding-and-usage-visible
+- id: waveshare-241-v2-source-0eaf16c
+  kind: source-code
+  rank: 3
+  title: Waveshare ESP32-S3-Touch-AMOLED-2.41-V2 examples
+  publisher: Waveshare
+  locator: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.41-V2/tree/0eaf16c
+  revision: 0eaf16c
+  accessed: '2026-09-17'
+- id: vibepulse-241-v2-port
+  kind: source-code
+  rank: 3
+  title: VibePulse 2.41 V2 board and display geometry
+  publisher: VibePulse
+  locator: components/torget_board/board.c
+  revision: 2.41 V2 port on 7ca27a2; physical binary identified in review
+  accessed: '2026-09-17'
+- id: waveshare-241-docs
+  kind: vendor-documentation
+  rank: 4
+  title: Waveshare 2.41 V1/V2 documentation
+  publisher: Waveshare
+  locator: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.41
+  revision: accessed-2026-09-17
+  accessed: '2026-09-17'
