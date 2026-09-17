@@ -7,6 +7,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
+  product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).
+  AMOLED 1.75/1.8/1.91 ports are planned; RGB matrix hardware is experimental.
+  Neither listing claims additional firmware support.
 - **Waveshare ESP32-S3-Touch-AMOLED-2.41 V2 support**, selected with
   `TORGET_BOARD=waveshare_241_v2`: fixed 600×450 landscape, V2 QSPI/I2C/reset
   wiring, paired touch rotation, BOOT settings input and native UI margins.

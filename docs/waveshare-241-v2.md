@@ -6,6 +6,12 @@ USB installation, Wi-Fi and visible Claude/Codex usage passed on a real unit.
 See the [physical report](superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md)
 for the exact build and limits. The older v1.1.0 tag does not contain this port.
 
+<p align="center">
+  <img src="img/241-v2/glass-codex-detail.jpg" width="420" alt="Owner photograph of Codex usage on the installed Waveshare 2.41 V2">
+</p>
+
+*The owner's physical panel, photo supplied September 18, 2026.*
+
 ![Codex quota in the 600 × 450 renderer](img/241-v2/codex.png)
 
 *Native LVGL simulator capture with fixture data, not a photograph or live account data.*
@@ -15,6 +21,11 @@ for the exact build and limits. The older v1.1.0 tag does not contain this port.
 Waveshare identifies V2 by **Rev2.0 on the PCB or V2 on the enclosure's QC
 label**. V1 and V2 have different reset wiring. **V1 is not supported by this
 profile.** Neither the old 2.16 image nor a generic ESP32-S3 image is suitable.
+
+[Waveshare product page — affiliate link](https://www.waveshare.com/esp32-s3-touch-amoled-2.41.htm?&aff_id=179337).
+Niclas Vestlund may earn a commission from this link. Waveshare supplied the
+development unit. The product name alone does not establish its revision;
+check the V2 marking before choosing firmware.
 
 The board has 16 MB flash, 8 MB octal PSRAM, an RM690B0 AMOLED controller and
 FT6336 touch. The vendor uses the SH8601 transport and FT5x06 touch drivers;

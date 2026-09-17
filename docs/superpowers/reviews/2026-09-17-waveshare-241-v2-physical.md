@@ -6,8 +6,9 @@
 The owner confirmed the diagnostic image and all four touch corners, then
 confirmed after the VibePulse installation that usage was visible for Codex
 and Claude Code. This is not a physical approval-reply, motion/stress or
-long-term reliability certification. No photograph was captured; physical
-visual evidence is the owner's direct confirmation.
+long-term reliability certification. The initial visual evidence was the
+owner's direct confirmation; two owner-supplied photographs were added on
+2026-09-18 below.
 
 Unit: `vibepulse-241-v2-01`, owner-confirmed V2 marking. ESP32-S3 revision 0.2,
 16 MB flash and 8 MB PSRAM were identified locally. USB installation was on
@@ -61,12 +62,26 @@ and stale Claude week fields, while Codex week data were fresh. Cancellation
 of a subscription and presence of a cached quota display are separate facts;
 no billing or entitlement conclusion was drawn.
 
+### Owner photographs added 2026-09-18
+
+<p>
+  <img src="../../img/241-v2/glass-codex.jpg" width="320" alt="Physical 2.41 V2 showing the Codex weekly quota">
+  <img src="../../img/241-v2/glass-codex-detail.jpg" width="320" alt="Closer photograph of the same Codex quota display">
+</p>
+
+Both photographs show Codex at 91% on the physical panel. They add visual
+evidence of the installation; they do not record Claude, a new firmware
+version, a touch sweep or motion testing. Web copies preserve the photographed
+scene and have their orientation applied, size reduced and camera metadata
+removed. The original HEIC files remain private.
+
 ## Automated evidence before installation
 
 - Shared LVGL native previews: 154 frames at 600 × 450, including live/stale/
   missing data, wide values, activity, attention, settings, Labs and Wi-Fi.
 - Exact footer edge clearance and provider accents checked; important states
-  visually inspected. README pictures are fixture renders, not panel photos.
+  visually inspected. These captures are fixture renders; the subsequently
+  added owner photographs are identified separately.
 - Original 480 × 480 preview passed; original-board driver/main/rotation C
   compilation paths passed after introducing the board wrapper.
 - Full `test/run.sh` passed, including 927 tokenserver tests, C/policy suites,

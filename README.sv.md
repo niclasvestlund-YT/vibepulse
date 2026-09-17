@@ -10,6 +10,13 @@ Appplattformen för hyllskärmen (Waveshare ESP32-S3-Touch-AMOLED-2.16,
 [kortregister](spec/boards/waveshare_241_v2/hardware.md) och
 [lärdomar inför nästa modell](docs/adding-a-display.md).
 V1 stöds inte; V2 har fast rotation och BOOT som inställningsknapp.
+
+Se [stödda modeller](README.md#supported-screens) och
+[kommande modeller och experiment](README.md#coming-soon--hardware-on-the-workbench).
+AMOLED 1.75, 1.8 och 1.91 finns på arbetsbänken men stöds ännu inte.
+**Reklam/affiliatelänkar:** Märkta köplänkar kan ge Niclas Vestlund provision.
+Waveshare har tillhandahållit hårdvara för utveckling och test.
+
 Torget äger den fysiska skärmen och producerar DEN enda
 firmware-binär som flashas; appar pluggar in som ESP-IDF-komponenter och
 kan bo i egna repon. En skärm = en binär = ett bygge här. MIT-licens.
@@ -199,7 +206,8 @@ Vibbe/Buddy är redan app 3 via companion-inputen `~/Buddy/components`.
 firmware-enabled i build-inputet. Fysisk mikrofon-/högtalarfunktion är
 fortfarande overifierad.
 
-- Responsiv layout för andra Waveshare-storlekar — trigger: andra skärmtypen.
+- Fler skärmar: 2.41 V2 är den andra stödda modellen. Nästa port följer
+  [displaychecklistan](docs/adding-a-display.md) och får egen fysisk verifiering.
 - Appbutik/paketmaskineri — trigger: bevisad traktion efter open source.
 - Röststyrning för befintliga Vibbe/Buddy är kandidat/senare i väntan på
   fysisk mikrofon-/högtalarverifiering, privacy-UI samt full-duplex-, audio-

@@ -204,6 +204,8 @@ BOARD_241_FRAMES = {
 }
 
 NOT_FRAMES = {
+    "241-v2/glass-codex.jpg": "owner photograph of the physical 2.41 V2 panel",
+    "241-v2/glass-codex-detail.jpg": "owner close-up photograph of the physical 2.41 V2 panel",
     "github/glass-live.png": "a photograph of the physical panel",
     "hero.png": "the README banner, a composed graphic",
     "qr-repo.png": "a QR code, not a screen",
