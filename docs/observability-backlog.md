@@ -8,6 +8,14 @@ around them (2026-08-13). How these get found and worked is described in
 
 **Last combed: 2026-08-30 (persistent panel HTTP-stall incident).**
 
+2026-09-20 targeted relay quota audit: Cloudflare status PUTs were observed
+roughly every two seconds. The host publication ceiling is reduced to five
+seconds with a full-day regression. Historical account quota exhaustion is
+confirmed by notification, but attribution by service on those days remains
+open. Dashboard invocation counts and notification percentages disagree; do
+not claim the discrepancy is resolved or sum counters with different scopes.
+Live installation and a sustained post-change measurement remain required.
+
 Rules of the file:
 
 - IDs are stable; never renumber. New items append to the matching tier.

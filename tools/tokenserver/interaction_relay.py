@@ -55,7 +55,9 @@ DELETE_CAPACITY = 8
 MIN_BACKOFF_S = 0.5
 MAX_BACKOFF_S = 5.0
 POLL_INTERVAL_S = 0.5
-STATUS_PUBLISH_INTERVAL_S = 2.0
+# Bound continuously changing snapshots too: 17,280 successful publications
+# per day per host. Keep the signed 15-second expiry and approval polling intact.
+STATUS_PUBLISH_INTERVAL_S = 5.0
 STATUS_EXPIRY_S = 15
 
 

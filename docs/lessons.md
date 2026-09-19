@@ -1,5 +1,15 @@
 # Lessons log
 
+## 2026-09-20 · A two-second status heartbeat consumes a daily request budget
+
+Cloudflare logs showed successful encrypted status PUTs roughly every two
+seconds. A continuously running publisher can use 43,200 requests/day even
+without approvals. Status publication now has a five-second success interval
+(17,280/day); snapshot changes cannot bypass it. A simulated full-day regression
+checks the budget and signed expiry. Approval publication and verdict polling
+keep their separate paths. This reduces one source, not an account-wide cap:
+panel polls, retries, other hosts, and other sites must also be counted.
+
 What has bitten this project, why, and the rule each bite taught. The
 full narratives live in the commit messages (keep writing them there —
 that practice is the best thing this repo does); this file is the index

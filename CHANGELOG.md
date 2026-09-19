@@ -5,6 +5,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Changed
+
+- Encrypted live-status publishing runs at most every five seconds instead of
+  two, reducing normal host status uploads by 60%. Changed activity can appear
+  up to three seconds later; approval delivery and signed expiry are unchanged.
+
 ### Added
 
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
