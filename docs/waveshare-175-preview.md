@@ -105,3 +105,17 @@ SDA15/SCL14, reset40/IRQ11, native no-swap mirrored X/Y. LCD and touch use
 VCC3V3; the vendor display path does not reprogram AXP2101. PCB revision stays
 unknown. The vendor-derived panel sequence's Apache-2.0 license is retained
 in `components/torget_board/LICENSE.vendor-175`.
+
+
+## First diagnostic installation
+
+Private double reads of the complete 16 MB flash matched. The authorized
+static diagnostic `v1.1.0-17-gf71534f` was installed with all four written
+segments hash-verified. Its app file SHA-256 is
+`fc1857fea87a1f27afbc4a766d234b3faf0a68462b5b6d89fed9d92fd5dd1960`.
+USB boot logs identify the selected 1.75 profile, and CST9217 reports 466 × 466,
+chip 0x9217. At the diagnostic screen, the largest internal DMA block was
+237,568 B for a 7,456 B transfer; free internal memory was 327,659 B.
+These are unloaded diagnostic measurements, not network/TLS stress results.
+Owner verification of visible pixels and N/E/S/W/C mapping is pending.
+Full VibePulse application support remains unfinished.

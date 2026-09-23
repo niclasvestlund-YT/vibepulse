@@ -10,6 +10,6 @@ units:
   battery: not connected (owner confirmed USB-only)
   microsd: unknown
   antenna: unknown
-  installed_firmware: wrong-board 1.91 recovery v1.1.0-24-g4d78592 (private flash-read identification)
+  installed_firmware: static diagnostic v1.1.0-17-gf71534f (USB boot identity verified; physical review pending)
   last_physical_verification: unknown
   secrets: false

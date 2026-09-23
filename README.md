@@ -1090,6 +1090,6 @@ Built by [Niclas Vestlund](https://niclasvestlund.se).
 This 466 × 466 image is native LVGL output with sample data. The bright
 end of the ring is today’s contribution to the total usage; the small
 countdown shows days, hours and minutes. The 1.75 board remains unsupported.
-[Preview, evidence and remaining work](docs/waveshare-175-preview.md).
+[Preview, initial hardware diagnostic and remaining work](docs/waveshare-175-preview.md).
 
 ![Round 1.75 native LVGL design preview, sample Codex quota](docs/img/round-175-codex.png)
