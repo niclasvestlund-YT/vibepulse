@@ -32,3 +32,6 @@ sources:
   locator: docs/superpowers/reviews/2026-09-24-waveshare-175-round.md
   revision: usb-down-trial-2026-09-24
   accessed: '2026-09-24'
+  unit: vibepulse-175-01
+  tests:
+  - owner-photographed-codex-quota-page
