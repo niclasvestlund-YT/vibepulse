@@ -109,6 +109,10 @@ idf.py build
 idf.py -p /dev/cu.usbmodem101 flash monitor
 ```
 
+Kommandona ovan bygger standardprofilen för 2.16. För 1.91 Touch ska du
+följa [kortets installationsguide](docs/waveshare-191-touch.md) och välja
+`waveshare_191_touch` samt dess separata `sdkconfig.191` före flashning.
+
 Hittas inget `/dev/cu.usbmodem*`: håll BOOT (GPIO0) nere, tryck och släpp
 RESET, släpp BOOT — då räknas kortet upp i nedladdningsläge. `idf.py monitor`
 avslutas med Ctrl+].
