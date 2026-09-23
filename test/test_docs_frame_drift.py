@@ -218,6 +218,9 @@ BOARD_191_FRAMES = {
 }
 
 NOT_FRAMES = {
+    "175-round/glass-codex-angle.jpg": "owner photograph of the physical round 1.75 panel at an angle",
+    "175-round/glass-codex-front.jpg": "owner photograph of the physical round 1.75 Codex quota page",
+    "175-round/glass-codex-held.jpg": "owner photograph of the physical round 1.75 panel held in hand",
     "191-touch/glass-boot-logo.jpg": "owner photograph of the physical 1.91 Touch boot logo",
     "191-touch/glass-boot-stages.jpg": "owner photograph of the physical 1.91 Touch boot stages",
     "191-touch/glass-codex-close.jpg": "owner close-up of Codex on the physical 1.91 Touch",
