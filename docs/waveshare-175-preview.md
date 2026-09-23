@@ -169,3 +169,21 @@ and touch alignment is pending. The QMI8658 is vendor-listed on this board,
 but automatic rotation remains disabled until its axes are calibrated on
 this unit and a four-pose physical test is complete; the 2.16 constants do
 not transfer.
+
+## Empty quota on first boot
+
+An unset round LVGL label showed its default `Text` on the owner's photo;
+the number-only font rendered those letters as four outlined boxes. The
+USB-down build initializes all three quota pages with unavailable values
+before the first network reply. Those initial dashes mean **no reading yet**,
+not zero usage. A valid quota response then replaces them.
+
+The panel does not persist its last quota in its own flash. Without Wi-Fi
+after a cold start it therefore cannot reconstruct an old percentage. While
+running, a previous value can remain visible but is marked stale after two
+minutes without a successful fetch.
+The Mac-side token service has a separate expiring quota cache that can supply
+a stale-marked reading after reconnection. A successful HTTP parse and
+`stale codex=0` log line alone do not prove that `codexWeekPct` is present:
+check the response's percentage and reset fields, then compare the actual
+glass. Keep LAN addresses and raw responses out of public reports.
