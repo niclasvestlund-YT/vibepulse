@@ -12,7 +12,7 @@ import unittest
 
 from PIL import Image
 
-from test_docs_frame_drift import BOARD_241_FRAMES
+from test_docs_frame_drift import BOARD_191_FRAMES, BOARD_241_FRAMES
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -96,7 +96,10 @@ class NativeV2RasterTests(unittest.TestCase):
     def test_provider_accents_and_native_qr_size(self):
         for name, accent in [("vibepulse-claude-all", (217, 119, 87)),
                              ("vibepulse-codex-weekly-live-46", (111, 120, 255))]:
-            count = sum(pixel == accent for pixel in self.frame(name).get_flattened_data())
+            frame = self.frame(name)
+            pixels = (frame.get_flattened_data() if hasattr(frame, "get_flattened_data")
+                      else frame.getdata())
+            count = sum(pixel == accent for pixel in pixels)
             self.assertGreater(count, 100, name)
         qr = self.frame("wifi-setup-qr")
         # 196px source QR translated by (60,-15), never stretched to fit.
@@ -116,6 +119,32 @@ class NativeV2RasterTests(unittest.TestCase):
                     self.assertEqual(image.tobytes(), current.convert("RGB").tobytes())
         self.assertIn('"$PYTHON_BIN" test/test_board_profiles.py',
                       (ROOT / "test/run.sh").read_text())
+
+
+class Native191RasterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        run(["cmake", "-S", "sim", "-B", "sim/build-191", "-G", "Ninja",
+             "-DTORGET_BOARD=waveshare_191_touch",
+             f"-DTORGET_SOLELKOLLEN_DIR={ROOT}/no-companion"])
+        result = run(["tools/preview-ui.sh", "vibepulse", "waveshare_191_touch"],
+                     env={**os.environ, "PYTHON_BIN": sys.executable,
+                          "CMAKE_BUILD_PARALLEL_LEVEL": "2"})
+        cls.output = Path(result.stdout.split("Preview directory: ")[-1].strip())
+        if not cls.output.is_dir() or not cls.output.name.startswith("vibepulse-preview."):
+            raise AssertionError("1.91 preview did not return its capture directory")
+        cls.addClassCleanup(shutil.rmtree, cls.output)
+
+    def test_documented_frames_are_exact_current_native_renders(self):
+        self.assertGreater(len(list(self.output.glob("*.png"))), 100)
+        for document, capture in BOARD_191_FRAMES.items():
+            with self.subTest(document=document), Image.open(ROOT / "docs/img" / document) as image:
+                self.assertEqual(image.size, (536, 240))
+                self.assertEqual(image.mode, "RGB")
+                self.assertEqual(getattr(image, "n_frames", 1), 1)
+                self.assertFalse(set(image.info) & {"transparency", "gamma", "icc_profile", "exif"})
+                with Image.open(self.output / capture) as current:
+                    self.assertEqual(image.tobytes(), current.convert("RGB").tobytes())
 
 
 if __name__ == "__main__":
