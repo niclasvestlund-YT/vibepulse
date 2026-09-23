@@ -1,9 +1,12 @@
-# Round 1.75 design preview — not installable support
+# Round 1.75 bring-up and native preview
 
-The owner chose to test a circular quota ring, USED TODAY and a D:H:M
-countdown. The native LVGL preview uses the same quota presenter and the
-same daily-usage validation as the existing screens. It is a design test,
-not a completed board port, release or physical-review report.
+The owner chose a circular quota ring, USED TODAY and a D:H:M countdown.
+The native LVGL view uses the same quota presenter and daily-usage validation
+as the existing screens. The `waveshare_175` firmware profile now builds and
+has booted on the named round unit. The owner photographed the quota page,
+and the unit has joined Wi-Fi and fetched token data. Final visual/touch
+review, the USB-down angle and live value accuracy are still pending,
+so this is a bring-up guide, not a supported release or physical-review report.
 
 ```sh
 PYTHON_BIN=.venv/bin/python tools/preview-ui.sh vibepulse waveshare_175
@@ -13,7 +16,9 @@ The returned private directory contains 466 × 466 PNGs: live and cached/stale
 with identical values; missing total, today or reset; contradictory today;
 zero and full usage; longest countdown; early exhaustion; wide quota copy;
 five-target touch diagnostics; settings/about/Labs; and QR/manual/searching/failed
-Wi-Fi states. All twenty fixtures are checked against the circular mask.
+Wi-Fi states. All twenty fixtures are checked against the circular mask. The
+host gate also renders more than 100 complete app/overlay states and checks
+that visible pixels remain within the 466px disk.
 
 ## Design and semantics
 
@@ -26,8 +31,9 @@ Wi-Fi states. All twenty fixtures are checked against the circular mask.
   TO RESET or TO EMPTY, preserving the presenter's forecast decision.
 - Unknown deadlines show a dash. Durations above 99 days display >99D;
   normal minute-resolution data is not replaced with a fabricated timestamp.
-- The first preview follows supplied fixture minutes. Wall-clock countdown
-  integration and post-deadline refresh behaviour remain firmware work.
+- The preview follows supplied fixture minutes. The normal firmware keeps its
+  existing live presenter and refresh path; physical reset timing remains to
+  be checked against a connected host.
 
 ## Recovery and physical test plan
 
@@ -39,24 +45,23 @@ report private. Check secure-boot/flash-encryption status before assuming a
 raw backup can be restored. Do not erase NVS or flash when identity or recovery
 is uncertain. Record exact bootloader-entry and restore commands for this unit.
 
-Only then prepare a low-brightness static diagnostic using the vendor-native
-orientation and paired touch transform. The owner must verify RGB/provider
-swatches and independently tap N/E/S/W/C, checking each count. Simulator clicks
-do not prove wiring or physical mapping. Quota layout comes after the
-diagnostic; motion comes after static physical review and measured stress.
+The low-brightness static diagnostic used the vendor-native orientation and
+paired touch transform. Its serial log recorded N/E/S/W/C touches, but the owner
+must still confirm the visible image, colors and matching counters. Simulator
+clicks and serial counts alone do not prove the visual mapping. Motion remains
+behind static physical review and measured stress.
 
 ## Remaining work before public support
 
-The normal application build remains blocked: attention, completion and
-analytics surfaces still need the full round-port review. Settings and Wi-Fi
-surfaces now have native previews and circular pixel checks, but their physical
-flows are not yet verified. An explicitly selected
-`TORGET_ROUND_DIAGNOSTIC=ON` build now uses the 1.75 vendor panel sequence,
-GPIO mapping and paired touch transform. It starts at 20% brightness, before
-NVS/network initialization, and displays only the five-target static test.
-This exception is for hardware diagnosis, not installable VibePulse support. Finish those surfaces, driver/power bring-up, recovery,
-touch orientation, service-to-panel/reply verification, full-surface regression
-coverage and a named-unit physical report before claiming support.
+The normal application profile now builds and renders quota, attention,
+completion, analytics, settings, Wi-Fi and OTA at native resolution. The
+separate `TORGET_ROUND_DIAGNOSTIC=ON` profile remains available for bench
+recovery. The named unit has booted the normal profile, saved a Wi-Fi network,
+received an IP address and fetched tokens. Confirm the USB-down angle and
+touch locations, compare the values on glass to the source, verify the reply
+loop, and record a
+named-unit physical report before claiming public support. Other boards do
+not confer OTA or motion approval on this one.
 
 Publish the verified guide and captures in VibePulse open source, then update
 the VibeOnChip presentation with the same support boundary and guide link.
@@ -122,4 +127,45 @@ chip 0x9217. At the diagnostic screen, the largest internal DMA block was
 237,568 B for a 7,456 B transfer; free internal memory was 327,659 B.
 These are unloaded diagnostic measurements, not network/TLS stress results.
 Owner verification of visible pixels and N/E/S/W/C mapping is pending.
-Full VibePulse application support remains unfinished.
+Full VibePulse application support was still pending at this diagnostic stage.
+
+## First normal application boot
+
+The owner then authorized VibePulse installation on the same unit. The normal
+`waveshare_175` app was built separately from the diagnostic and its image
+checksum was valid. The writer checked the ROM identity, two matching private
+flash backups, the normal-app board marker and disabled flash protections
+before writing. Bootloader, partition table, OTA selection and the 2.0 MB app
+were each hash-verified; NVS was preserved. The installed app file SHA-256 is
+`1c4a05780a0b15eb4932f218326c33432ee607b043aff70dd98f56a158018274`.
+
+Serial boot identifies the **normal** board-175 VibePulse profile, CO5300
+466 × 466/gap6/0, and no saved Wi-Fi credentials. The local setup portal
+opened automatically after roughly 90 seconds without an IP address; the
+largest DMA block stayed above 51 KB after portal start, versus a 7,456 B
+display transfer. This proves firmware boot and portal startup, not what the
+owner can see on the glass or a live quota reading. A phone can scan the QR on
+the panel or join its local setup network and visit `http://192.168.4.1/`;
+enter Wi-Fi credentials there, not in an issue or chat. The first portal scan
+listed only one printer although the boot scan had seen the owner's 2.4 GHz
+network. The form now offers **My network isn't listed**, which accepts an
+exact typed SSID with a required password and still saves it only after a
+successful connection. The reason for the inconsistent scan is unconfirmed.
+Owner review and a service-to-panel reading remain the next acceptance checks.
+
+## USB-down orientation trial (2026-09-24)
+
+The owner confirmed that the native image was upright with USB at the left,
+and requested USB at the bottom for the initial fixed mounting. The trial
+firmware applies one clockwise hardware quarter-turn (CO5300 MADCTL `0x60`)
+under the LVGL lock and applies the inverse 466px touch-coordinate transform.
+It also initializes the quota labels before the first network payload;
+otherwise LVGL's default `Text` appeared, with letters rendered as boxes in
+numeric fonts. The installed app SHA-256 is
+`854d92e9e64da72d5dd745af7100b6d636ef764ac41ab125d43707ae90f073ff`.
+All four flash segments verified, and the normal app rebooted, joined the
+saved Wi-Fi and fetched tokens. Owner visual confirmation of the new angle
+and touch alignment is pending. The QMI8658 is vendor-listed on this board,
+but automatic rotation remains disabled until its axes are calibrated on
+this unit and a four-pose physical test is complete; the 2.16 constants do
+not transfer.

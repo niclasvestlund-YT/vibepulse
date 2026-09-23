@@ -99,6 +99,11 @@ capabilities unchanged.
   no-reset serial recipe was verified in this session.
 - Visible quota values and provider freshness are distinct. A stale source or
   cancelled subscription is not evidence of a broken display driver.
+- A USB serial endpoint can survive a cross-flash. The round 1.75 unit stayed
+  black with a valid USB/ROM connection because its flash contained the 1.91
+  panel app. The transient port path did not identify the board. Read the app
+  descriptor before assuming hardware damage; bind the recovery writer to ROM
+  MAC and the exact profile, then verify the write without erasing NVS.
 
 Do not inherit motion, OTA, Windows physical-loop or long-soak approval from
 another model. Board-safe OTA identification is follow-up work; the V2 guide

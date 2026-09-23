@@ -13,11 +13,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
-- Preview-only round 1.75 layout at 466 × 466: one quota ring with today’s
+- Round 1.75 bring-up profile at 466 × 466: one quota ring with today’s
   contribution, USED TODAY and a D:H:M reset/exhaustion countdown. Native
-  boundary-state captures, circle/spacing checks and a five-target touch
-  diagnostic prepare the design for hardware work. No firmware or physical
-  support is claimed; the target build refuses this unfinished board profile.
+  boundary-state and full-app captures now cover quota, attention, analytics,
+  settings, Wi-Fi and OTA. A five-target diagnostic and the normal app have
+  booted on the named unit. Visual owner review, Wi-Fi provisioning and live
+  quota/reply verification remain before public support is claimed.
 
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
   product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).

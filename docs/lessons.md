@@ -1,5 +1,46 @@
 # Lessons log
 
+## 2026-09-24 · A round display still has a physical up direction
+
+**What happened:** the native VibePulse image looked upright on the 1.75-inch
+panel, but USB pointed left. The owner wants the connector at the bottom.
+The first photograph also exposed LVGL's default `Text` labels; a numeric
+font rendered those letters as empty boxes before the first token payload.
+**The rule:** record the desired physical landmark, rotate the panel and touch
+together, and initialize every visible label to an honest no-data state before
+the network starts. Do not copy another board's IMU axis calibration. **Guard:**
+the fixed quarter-turn and inverse touch transform are paired in the round
+profile; native raster tests still cover the quota states. On-glass angle,
+touch and four-pose motion review remain separate acceptance evidence.
+
+## 2026-09-23 · A one-shot portal scan hid a network the radio had seen
+
+**What happened:** the round unit's boot scan logged six access points,
+including the owner's 2.4 GHz network, but the Wi-Fi setup page listed only a
+printer. **Root cause:** the portal trusted one later scan and rejected every
+SSID not in that snapshot; the reason that later scan returned only one record
+is not yet established. **The rule now:** offer an exact-name fallback for
+incomplete scans. Treat a typed SSID as secured, require its password, validate
+both fields, and save nothing until the panel gets an IP from that trial.
+**Guards:** portal form binding and ESP-IDF build checks, existing trial-before-
+NVS policy, and a physical retry on the round unit. **Watch for:** APSTA scans
+returning fewer networks than boot-time STA scans.
+
+## 2026-09-23 · A shared USB port concealed the wrong board image
+
+**What happened:** a round 1.75 panel stayed black after swapping displays,
+although USB still enumerated. **Root cause:** its flash held the recovery app
+for a 1.91 panel; the port name had been reused, so the port alone did not
+identify the hardware. A private full-flash read and the app descriptor tied
+the installed binary to the 1.91 build. **The rule now:** bind every install to
+the intended unit's ROM MAC and the built board profile in the same serial
+connection; verify the written segments, then inspect the real display and
+touch mapping. Treat a working USB endpoint as evidence only for the USB
+interface. **Guards:** the 1.75 installer checks board markers, ROM identity,
+security state and a matching double-read backup before writing; native
+466 × 466 full-app captures check the circular boundary. **Watch for:**
+cross-flashing when several ESP32-S3 panels share a cable or port name.
+
 ## 2026-09-20 · A two-second status heartbeat consumes a daily request budget
 
 Cloudflare logs showed successful encrypted status PUTs roughly every two

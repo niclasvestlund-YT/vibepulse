@@ -14,8 +14,6 @@ if(TORGET_ROUND_DIAGNOSTIC)
     message(FATAL_ERROR "The round diagnostic requires waveshare_175")
   endif()
   add_compile_definitions(TORGET_ROUND_DIAGNOSTIC=1)
-elseif(TORGET_BOARD STREQUAL "waveshare_175")
-  message(FATAL_ERROR "waveshare_175 application surfaces are unfinished; use the explicitly selected static hardware diagnostic only.")
 endif()
 # third_party/ innehåller vendrade komponenter (cjson) som apparna delar.
 # Vibbe (app_buddy) bor i sitt eget repo (~/Buddy) och delas in härifrån —

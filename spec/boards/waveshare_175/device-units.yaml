@@ -10,6 +10,6 @@ units:
   battery: not connected (owner confirmed USB-only)
   microsd: unknown
   antenna: unknown
-  installed_firmware: static diagnostic v1.1.0-17-gf71534f (USB boot identity verified; physical review pending)
+  installed_firmware: round VibePulse USB-down trial; app SHA-256 854d92e9e64da72d5dd745af7100b6d636ef764ac41ab125d43707ae90f073ff (boot and Wi-Fi verified; angle/touch review pending)
   last_physical_verification: unknown
   secrets: false

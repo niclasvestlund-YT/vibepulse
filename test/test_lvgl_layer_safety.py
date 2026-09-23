@@ -133,10 +133,13 @@ assert "sim_wifi_signal_bars" in sim_main
 assert "ny_physical_fit_of" in agent_monitor
 assert agent_monitor.count("ny_physical_fit_of(p") >= 3
 assert "lv_font_get_glyph_dsc" in agent_monitor
-assert "300, 68" in agent_monitor
-assert "392, 34" in agent_monitor
-assert "392, 20" in agent_monitor
-assert "432, 62" in agent_monitor
+assert "const int prompt_w = 300, prompt_h = 68" in agent_monitor
+assert "const int title_w = 392, subtitle_w = 392" in agent_monitor
+assert "const int command_w = 432, command_h = 62" in agent_monitor
+assert "const int prompt_w = 346, prompt_h = 52" in agent_monitor
+assert "const int command_w = 352, command_h = 48" in agent_monitor
+assert "ny_text_fits(p->title, &plex_body_27, title_w, 34" in agent_monitor
+assert "ny_text_fits(p->subtitle, &plex_ui_16, subtitle_w, 20" in agent_monitor
 assert "24, 182, 432" in agent_monitor
 assert "payoff_provider" in agent_monitor
 

@@ -6,15 +6,15 @@ capabilities:
   states:
     soc_capable: 'yes'
     board_wired: 'yes'
-    bsp_support: unknown
-    firmware_enabled: 'no'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
     unit_verified: unknown
   confidence: vendor_claimed
   resources:
   - QSPI; vendor 466x466 geometry
-  - Native LVGL preview only
+  - Native LVGL and ESP-IDF application profile; 7456-byte flush
   constraints:
-  - No authorized installation or physical verification
+  - Normal application booted on one unit; owner-visible review and live quota path pending
   - PCB revision unknown; verify exact schematic and BSP before enabling pins
   conflicts: []
   opportunities: []
@@ -29,8 +29,11 @@ capabilities:
   - field: board_wired
     value: 'yes'
     source: waveshare-175-docs
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-175-reference
   - field: firmware_enabled
-    value: 'no'
+    value: 'yes'
     source: vibepulse-175-preview
   last_verified: unknown
   width: 466
@@ -43,14 +46,14 @@ capabilities:
   states:
     soc_capable: 'yes'
     board_wired: 'yes'
-    bsp_support: unknown
-    firmware_enabled: 'no'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
     unit_verified: unknown
   confidence: vendor_claimed
   resources:
   - Vendor I2C 0x5A; reset40, IRQ11
   constraints:
-  - No authorized installation or physical verification
+  - Diagnostic logged all five touch targets; owner-visible mapping review pending
   - PCB revision unknown; verify exact schematic and BSP before enabling pins
   conflicts: []
   opportunities: []
@@ -65,8 +68,11 @@ capabilities:
   - field: board_wired
     value: 'yes'
     source: waveshare-175-docs
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-175-reference
   - field: firmware_enabled
-    value: 'no'
+    value: 'yes'
     source: vibepulse-175-preview
   last_verified: unknown
 - id: controls.settings
@@ -74,14 +80,14 @@ capabilities:
   states:
     soc_capable: 'yes'
     board_wired: 'yes'
-    bsp_support: unknown
-    firmware_enabled: 'no'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
     unit_verified: unknown
   confidence: vendor_claimed
   resources:
   - Vendor GPIO0 active-low boot strap
   constraints:
-  - No authorized installation or physical verification
+  - BOOT settings control is compiled but physical hold/open/close review is pending
   - PCB revision unknown; verify exact schematic and BSP before enabling pins
   conflicts: []
   opportunities: []
@@ -96,7 +102,10 @@ capabilities:
   - field: board_wired
     value: 'yes'
     source: waveshare-175-docs
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-175-reference
   - field: firmware_enabled
-    value: 'no'
+    value: 'yes'
     source: vibepulse-175-preview
   last_verified: unknown

@@ -19,8 +19,8 @@ sources:
 - id: vibepulse-175-preview
   kind: source-code
   rank: 3
-  title: Native round quota preview and firmware-build refusal
+  title: Native round preview and physical bring-up record
   publisher: VibePulse
   locator: docs/waveshare-175-preview.md
-  revision: round-preview-on-3ce0e73
+  revision: round-usb-down-trial-2026-09-24
   accessed: '2026-09-23'

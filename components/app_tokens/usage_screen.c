@@ -69,11 +69,19 @@ _Static_assert(VP_PERCENT_FONT_PX == 164,
 /* Max Tracker geometry — approved 2026-08-12 mocks, matches the studio
  * design tokens: content safe X 22/width 436, grid indented a further
  * 9-10 px each side so the heatmap reads as its own object. */
+#ifdef TORGET_BOARD_175
+#define MT_EYEBROW_Y 133
+#define MT_GRID_X 51
+#define MT_GRID_Y 163
+#define MT_CELL 16
+#define MT_GAP 3
+#else
 #define MT_EYEBROW_Y (VP_QUOTA_Y + 4)
 #define MT_GRID_X 31
 #define MT_GRID_Y 112
 #define MT_CELL 18
 #define MT_GAP 3
+#endif
 #define MT_PITCH (MT_CELL + MT_GAP)
 #define MT_ROWS 7
 #define MT_GRID_W (TK_MT_WEEKS * MT_PITCH - MT_GAP)  /* 417 */
@@ -84,12 +92,19 @@ _Static_assert(VP_PERCENT_FONT_PX == 164,
 #define MT_LEGEND_BLOCK_W (5 * MT_LEGEND_SWATCH + 4 * MT_LEGEND_GAP) /* 72 */
 #define MT_LEGEND_LABEL_W 40
 #define MT_LEGEND_LABEL_GAP 8
-#define MT_LEGEND_Y (MT_GRID_Y + MT_GRID_H + 10)      /* 266 */
+#define MT_LEGEND_Y (MT_GRID_Y + MT_GRID_H + 10)
 #define MT_DRAW_H (MT_LEGEND_Y - MT_GRID_Y + MT_LEGEND_SWATCH) /* 166 */
+#ifdef TORGET_BOARD_175
+#define MT_STAT_LINE_Y (MT_LEGEND_Y + MT_LEGEND_SWATCH + 16)
+#define MT_STAT_LABEL_Y (MT_STAT_LINE_Y + 12)
+#define MT_STAT_VALUE_Y (MT_STAT_LABEL_Y + 27)
+#define MT_STAT_COL_W 76
+#else
 #define MT_STAT_LINE_Y (MT_LEGEND_Y + MT_LEGEND_SWATCH + 20)   /* 298 */
 #define MT_STAT_LABEL_Y (MT_STAT_LINE_Y + 16)
 #define MT_STAT_VALUE_Y (MT_STAT_LABEL_Y + 34)
 #define MT_STAT_COL_W (MT_GRID_W / 4)
+#endif
 
 typedef struct {
   lv_obj_t *tile;
@@ -241,8 +256,15 @@ static void create_claude_icon(lv_obj_t *parent, int x, int y) {
 
 static void create_hairline_span(lv_obj_t *parent, int y, int width) {
   lv_obj_t *line = bare(parent);
+#ifdef TORGET_BOARD_175
+  /* A 360px chord remains visible at every divider used by round pages. */
+  (void)width;
+  lv_obj_set_pos(line, 60, y);
+  lv_obj_set_size(line, 360, 1);
+#else
   lv_obj_set_pos(line, VP_SAFE_X, y);
   lv_obj_set_size(line, width, 1);
+#endif
   lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(line, COL_HAIRLINE, 0);
 }
@@ -255,7 +277,11 @@ static void create_header_hairline(lv_obj_t *parent) {
   /* The platform-owned Wi-Fi mark starts at x=418.  Stop the page chrome at
    * x=408 so its fixed ten-pixel black breathing lane is real on every view,
    * including the header divider itself. */
+#ifdef TORGET_BOARD_175
+  create_hairline_span(parent, 128, 360);
+#else
   create_hairline_span(parent, HEADER_LINE_Y, 408 - VP_SAFE_X);
+#endif
 }
 
 static void create_provider_identity(lv_obj_t *tile,
@@ -279,6 +305,24 @@ static void create_provider_identity(lv_obj_t *tile,
 static void create_live_header_widgets(lv_obj_t *tile, usage_provider provider,
                                        lv_obj_t **halo_out,
                                        lv_obj_t **context_out) {
+#ifdef TORGET_BOARD_175
+  lv_color_t accent = provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX;
+  lv_obj_t *name = label(tile, &plex_ui_21, accent, 90, 76, 300, 30);
+  lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(name, 3, 0);
+  lv_label_set_text(name, provider == USAGE_PROVIDER_CLAUDE ? "CLAUDE" : "CODEX");
+  lv_obj_t *context = label(tile, &plex_ui_14, COL_META, 80, 104, 320, 20);
+  lv_obj_set_style_text_align(context, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_t *halo = bare(tile);
+  lv_obj_set_pos(halo, 236, 71);
+  lv_obj_set_size(halo, 8, 8);
+  lv_obj_set_style_radius(halo, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(halo, accent, 0);
+  lv_obj_set_style_bg_opa(halo, LV_OPA_COVER, 0);
+  lv_obj_add_flag(halo, LV_OBJ_FLAG_HIDDEN);
+  *halo_out = halo;
+  *context_out = context;
+#else
   lv_obj_t *halo = bare(tile);
   lv_obj_set_pos(halo, 18, 14);
   lv_obj_set_size(halo, 40, 40);
@@ -300,6 +344,7 @@ static void create_live_header_widgets(lv_obj_t *tile, usage_provider provider,
 
   *halo_out = halo;
   *context_out = context;
+#endif
 }
 
 static void create_quota_header(quota_page *page) {
@@ -330,6 +375,22 @@ static void create_quota_header(quota_page *page) {
 static void create_analytics_header(lv_obj_t *tile, const char *title,
                                     const char *top_right,
                                     const char *bottom_right) {
+#ifdef TORGET_BOARD_175
+  lv_obj_t *heading = label(tile, &plex_ui_21, COL_WHITE, 90, 65, 300, 30);
+  lv_obj_set_style_text_align(heading, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(heading, 2, 0);
+  lv_label_set_text(heading, title);
+  lv_obj_t *top = label(tile, &plex_ui_14, COL_META, 90, 91, 300, 18);
+  lv_obj_set_style_text_align(top, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(top, 1, 0);
+  lv_label_set_text(top, top_right);
+  lv_obj_t *bottom = label(tile, &plex_ui_12, COL_MUTED,
+                           90, 110, 300, 16);
+  lv_obj_set_style_text_align(bottom, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(bottom, 2, 0);
+  lv_label_set_text(bottom, bottom_right);
+  create_hairline(tile, 130);
+#else
   lv_obj_t *heading = label(tile, &plex_ui_21, COL_WHITE,
                             VP_SAFE_X, 23, 240, 30);
   lv_obj_set_style_text_letter_space(heading, 2, 0);
@@ -344,6 +405,7 @@ static void create_analytics_header(lv_obj_t *tile, const char *title,
   lv_obj_set_style_text_letter_space(bottom, 2, 0);
   lv_label_set_text(bottom, bottom_right);
   create_header_hairline(tile);
+#endif
 }
 
 /* Centred from the dot geometry rather than a hard-coded origin: the row
@@ -435,7 +497,11 @@ static void create_github_page(void) {
   lv_obj_set_style_text_letter_space(page->stars, -7, 0);
   lv_label_set_text(page->stars, "–");
 
+#ifdef TORGET_BOARD_175
+  create_hairline(page->tile, 334);
+#else
   create_hairline(page->tile, 354);
+#endif
   lv_obj_t *forks_label = label(page->tile, &plex_ui_14, COL_MUTED,
                                 VP_SAFE_X, 378, VP_CONTENT_W, 20);
   lv_obj_set_style_text_align(forks_label, LV_TEXT_ALIGN_CENTER, 0);
@@ -445,6 +511,25 @@ static void create_github_page(void) {
                       VP_SAFE_X, 407, VP_CONTENT_W, 43);
   lv_obj_set_style_text_align(page->forks, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_text(page->forks, "–");
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(heading, 90, 65);
+  lv_obj_set_width(heading, 300);
+  lv_obj_set_style_text_align(heading, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(page->project, 100, 91);
+  lv_obj_set_width(page->project, 280);
+  lv_obj_set_style_text_align(page->project, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(page->provenance, 100, 110);
+  lv_obj_set_width(page->provenance, 280);
+  lv_obj_set_style_text_align(page->provenance, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(stars_label, 90, 138);
+  lv_obj_set_width(stars_label, 300);
+  lv_obj_set_pos(page->stars, 48, 163);
+  lv_obj_set_width(page->stars, 384);
+  lv_obj_set_pos(forks_label, 90, 343);
+  lv_obj_set_width(forks_label, 300);
+  lv_obj_set_pos(page->forks, 95, 368);
+  lv_obj_set_width(page->forks, 290);
+#endif
   create_pager(page->tile, VIEW_GITHUB);
 }
 
@@ -663,11 +748,30 @@ static void create_forecast_row(lv_obj_t *tile, forecast_row *row,
 static void create_burn_rate_page(void) {
   lv_obj_t *tile = new_tile(VIEW_BURN_RATE);
   create_analytics_header(tile, "BURN RATE", "WEEKLY", "FORECAST");
+#ifdef TORGET_BOARD_175
+  create_forecast_row(tile, &ui.forecast_rows[0], 139,
+                      USAGE_PROVIDER_CLAUDE);
+  create_hairline(tile, 263);
+  create_forecast_row(tile, &ui.forecast_rows[1], 284,
+                      USAGE_PROVIDER_CODEX);
+  for (int i = 0; i < 2; i++) {
+    forecast_row *row = &ui.forecast_rows[i];
+    lv_obj_set_pos(row->root, 72, i == 0 ? 139 : 284);
+    lv_obj_set_width(row->root, 336);
+    lv_obj_set_width(row->label, 336);
+    lv_obj_set_width(row->headline, 336);
+    lv_obj_set_width(row->detail, 336);
+    lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_align(row->headline, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_align(row->detail, LV_TEXT_ALIGN_CENTER, 0);
+  }
+#else
   create_forecast_row(tile, &ui.forecast_rows[0], 82,
                       USAGE_PROVIDER_CLAUDE);
   create_hairline(tile, 251);
   create_forecast_row(tile, &ui.forecast_rows[1], 270,
                       USAGE_PROVIDER_CODEX);
+#endif
   create_pager(tile, VIEW_BURN_RATE);
 }
 
@@ -759,6 +863,27 @@ static void create_value_page(void) {
   lv_label_set_text(page->cap_api, "VIA API");
   lv_label_set_text(page->cap_break, "BREAK EVEN");
   lv_label_set_text(page->cap_paid, "YOU PAID");
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(page->verdict, 60, 142);
+  lv_obj_set_width(page->verdict, 360);
+  lv_obj_set_style_text_align(page->verdict, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(page->attribution, 60, 274);
+  lv_obj_set_width(page->attribution, 360);
+  lv_obj_set_style_text_align(page->attribution, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(page->track, 55, 302);
+  lv_obj_set_width(page->track, 370);
+  lv_obj_set_pos(page->marker, 239, 298);
+  lv_obj_set_pos(page->stat_api, 68, 344);
+  lv_obj_set_width(page->stat_api, 160);
+  lv_obj_set_pos(page->stat_paid, 252, 344);
+  lv_obj_set_width(page->stat_paid, 160);
+  lv_obj_set_pos(page->cap_api, 84, 389);
+  lv_obj_set_width(page->cap_api, 105);
+  lv_obj_set_pos(page->cap_break, 180, 389);
+  lv_obj_set_width(page->cap_break, 120);
+  lv_obj_set_pos(page->cap_paid, 291, 389);
+  lv_obj_set_width(page->cap_paid, 105);
+#endif
   create_pager(page->tile, VIEW_VALUE);
 }
 
@@ -777,6 +902,12 @@ static void apply_value_hero(value_page *page,
                  word ? VALUE_WORD_HERO_Y
                       : money ? VALUE_MONEY_HERO_Y : VALUE_HERO_Y);
   lv_label_set_text(page->hero, view->hero_text);
+#ifdef TORGET_BOARD_175
+  lv_obj_update_layout(page->hero);
+  lv_obj_set_pos(page->hero,
+                 (VP_SCREEN_W - lv_obj_get_width(page->hero)) / 2,
+                 word ? 190 : 157);
+#endif
 }
 
 static void apply_value(const tk_tokens *tokens) {
@@ -789,8 +920,12 @@ static void apply_value(const tk_tokens *tokens) {
   lv_label_set_text(page->attribution, view.attribution);
   apply_value_hero(page, &view);
 
-  int width = (int)(view.bar_fraction * VP_CONTENT_W + 0.5);
-  if (width > VP_CONTENT_W) width = VP_CONTENT_W;
+  int bar_width = VP_CONTENT_W;
+#ifdef TORGET_BOARD_175
+  bar_width = 370;
+#endif
+  int width = (int)(view.bar_fraction * bar_width + 0.5);
+  if (width > bar_width) width = bar_width;
   if (view.show_bar && width < 6) width = 6;
 
   /* Segments in provider order, each sized by its share of the counted
@@ -1068,6 +1203,10 @@ static void create_tracker_page(tracker_page *page, int index, bool codex) {
 
   lv_obj_t *eyebrow = label(page->tile, &plex_text_21, COL_MUTED,
                             VP_SAFE_X, MT_EYEBROW_Y, 240, 26);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(eyebrow, 65, MT_EYEBROW_Y);
+  lv_obj_set_width(eyebrow, 250);
+#endif
   lv_obj_set_style_text_letter_space(eyebrow, 2, 0);
   lv_label_set_text(eyebrow, "MAX TRACKER");
 
@@ -1076,6 +1215,10 @@ static void create_tracker_page(tracker_page *page, int index, bool codex) {
    * (IBM Plex Sans SemiBold 16 px) med bredare glyftäckning. */
   page->plan_badge = label(page->tile, &plex_ui_16, COL_MUTED,
                            298, MT_EYEBROW_Y, 160, 20);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(page->plan_badge, 332, MT_EYEBROW_Y);
+  lv_obj_set_width(page->plan_badge, 82);
+#endif
   lv_obj_set_style_text_align(page->plan_badge, LV_TEXT_ALIGN_RIGHT, 0);
   lv_label_set_text(page->plan_badge, "");
 
@@ -1097,11 +1240,21 @@ static void create_tracker_page(tracker_page *page, int index, bool codex) {
     "STREAK", "MAX WEEKS", "AVG PEAK", "MAX DAYS",
   };
   for (int i = 0; i < 4; i++) {
+#ifdef TORGET_BOARD_175
+    int x = 88 + i * 78;
+#else
     int x = MT_GRID_X + (i * MT_GRID_W) / 4;
+#endif
     /* -8 px gutter (samma marginal som RIGHT_STAT_X/RIGHT_STAT_W lämnar
      * mellan kvotsidornas kolumner) så "MAX WEEKS" aldrig rör vid
      * "AVG PEAK" — fyra jämnbreda kolumner, inte fyra sammanhängande. */
-    lv_obj_t *caption = label(page->tile, &plex_text_16, COL_MUTED,
+    lv_obj_t *caption = label(page->tile,
+#ifdef TORGET_BOARD_175
+                              &plex_ui_12,
+#else
+                              &plex_text_16,
+#endif
+                              COL_MUTED,
                               x, MT_STAT_LABEL_Y, MT_STAT_COL_W - 6, 16);
     lv_label_set_text(caption, captions[i]);
 
@@ -1118,6 +1271,13 @@ static void create_tracker_page(tracker_page *page, int index, bool codex) {
 }
 
 static void position_stat_unit(lv_obj_t *value_obj, lv_obj_t *unit_obj) {
+#ifdef TORGET_BOARD_175
+  /* Four narrow round columns cannot carry inline units. The captions give
+   * each unit; keeping the unit object hidden also avoids overlap at 47 days. */
+  (void)value_obj;
+  lv_obj_add_flag(unit_obj, LV_OBJ_FLAG_HIDDEN);
+  return;
+#endif
   if (lv_label_get_text(unit_obj)[0] == '\0') {
     lv_obj_add_flag(unit_obj, LV_OBJ_FLAG_HIDDEN);
     return;
@@ -1177,6 +1337,12 @@ void usage_screen_create(lv_obj_t *root) {
     tk_project_star_popup_create(root);
   }
   tk_agent_monitor_create(root);
+#ifdef TORGET_BOARD_175
+  /* LVGL labels otherwise show their default "Text" until the first network
+   * payload arrives; number-only fonts render those letters as boxes. */
+  tk_tokens empty = {0};
+  for (int i = 0; i < 3; i++) apply_quota(&ui.quotas[i], &empty);
+#endif
 }
 
 void usage_screen_apply_tokens(const tk_tokens *tokens) {

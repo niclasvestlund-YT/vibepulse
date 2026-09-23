@@ -188,10 +188,15 @@ static const char PAGE_HEAD[] =
     "<form method=\"POST\" action=\"/join\" "
     "onsubmit=\"this.querySelector('button').disabled=true\">"
     "<label for=\"ssid\">Wi-Fi network</label>"
-    "<select id=\"ssid\" name=\"ssid\">";
+    "<select id=\"ssid\">";
 
 static const char PAGE_TAIL[] =
     "</select>"
+    "<div id=\"manual-wrap\" hidden><label for=\"manual\">"
+    "Network name</label><input id=\"manual\" type=\"text\" maxlength=\"32\" "
+    "autocapitalize=\"off\" autocorrect=\"off\" autocomplete=\"off\" "
+    "placeholder=\"Type the 2.4 GHz network name\"></div>"
+    "<input id=\"ssid-value\" name=\"ssid\" type=\"hidden\">"
     "<div id=\"pass-wrap\"><label id=\"pass-label\" for=\"pass\">"
     "Wi-Fi password</label>"
     "<input id=\"pass\" name=\"pass\" type=\"password\" autocapitalize=\"off\" "
@@ -200,20 +205,29 @@ static const char PAGE_TAIL[] =
     "<p id=\"open-note\" hidden>No password required</p>"
     "<button id=\"join\" type=\"submit\">Join</button></form><script>"
     "const ssid=document.getElementById('ssid'),pass=document.getElementById('pass'),"
+    "manual=document.getElementById('manual'),"
+    "manualWrap=document.getElementById('manual-wrap'),"
+    "ssidValue=document.getElementById('ssid-value'),"
     "passWrap=document.getElementById('pass-wrap'),"
     "passLabel=document.getElementById('pass-label'),"
     "openNote=document.getElementById('open-note'),"
     "join=document.getElementById('join');"
     "function syncPassword(){const option=ssid.options[ssid.selectedIndex],"
-    "hasNetwork=!!option&&!option.disabled;join.disabled=!hasNetwork;"
+    "typed=!!option&&option.value==='__manual__',"
+    "hasNetwork=typed?manual.value.trim().length>0:!!option&&!option.disabled;"
+    "manualWrap.hidden=!typed;manual.required=typed;"
+    "ssidValue.value=typed?manual.value:(option&&!option.disabled?option.value:'');"
+    "join.disabled=!hasNetwork;"
     "if(!hasNetwork){passWrap.hidden=true;openNote.hidden=true;"
     "pass.required=false;pass.disabled=true;pass.value='';return;}"
-    "const secured=option.dataset.secured==='1';"
+    "const secured=typed||option.dataset.secured==='1';"
     "passWrap.hidden = !secured;openNote.hidden=secured;"
     "pass.required = secured;pass.disabled=!secured;"
-    "passLabel.textContent=secured?'Password for '+option.text:'Wi-Fi password';"
+    "passLabel.textContent=secured?'Password for '+"
+    "(typed?manual.value:option.text):'Wi-Fi password';"
     "if(!secured)pass.value='';}"
-    "ssid.addEventListener('change',syncPassword);syncPassword();"
+    "ssid.addEventListener('change',syncPassword);"
+    "manual.addEventListener('input',syncPassword);syncPassword();"
     "</script></body></html>";
 
 static const char JOIN_PAGE[] =
@@ -260,6 +274,9 @@ static esp_err_t page_get(httpd_req_t *req) {
         req,
         "<option disabled selected>No 2.4 GHz networks found</option>",
         HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req,
+      "<option value=\"__manual__\">My network isn't listed</option>",
+      HTTPD_RESP_USE_STRLEN);
 
   httpd_resp_send_chunk(req, PAGE_TAIL, HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, NULL, 0);
@@ -297,11 +314,11 @@ static esp_err_t join_post(httpd_req_t *req) {
       break;
     }
   }
-  if (scan_index < 0) {
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "network not scanned");
-    return ESP_FAIL;
-  }
-  bool secured = authmode_requires_password(s_scan.authmode[scan_index]);
+  /* A single scan can miss a real 2.4 GHz AP. Typed names are allowed but
+   * treated as secured until a successful connection proves them; only a
+   * scanned open/OWE record may omit the password. NVS is written after IP. */
+  bool secured = scan_index < 0 ||
+      authmode_requires_password(s_scan.authmode[scan_index]);
   if (secured && pass[0] == '\0') {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "password required");
     return ESP_FAIL;
