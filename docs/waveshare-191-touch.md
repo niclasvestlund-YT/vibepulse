@@ -1,6 +1,6 @@
 # Install VibePulse on Waveshare 1.91 Touch AMOLED
 
-**USB-installed development port:** phone provisioning, saving the network, reconnecting after reset, visible Codex usage and page swipes pass on one physical unit. The FT3168 can still intermittently NACK; a later full USB power cycle restored touch after a persistent failure. See [the physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact evidence and remaining checks.
+**USB-installed development port:** phone provisioning, saving the network, reconnecting after reset, visible Codex usage and page swipes pass on one physical unit. The FT3168 can still intermittently NACK; a later full USB power cycle restored touch after a persistent failure. The final touch-recovery build has only a display-only boot observation, not a physical swipe check. See [the physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact evidence and remaining checks.
 
 ![Owner photo of Codex weekly usage on the real 1.91-inch panel, held in a hand](img/191-touch/glass-codex-held.jpg)
 

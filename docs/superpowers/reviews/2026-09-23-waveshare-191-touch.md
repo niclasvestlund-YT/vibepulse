@@ -1,9 +1,11 @@
 # Waveshare 1.91 Touch AMOLED — installation evidence
 
 Date: 2026-09-23. Unit: `vibepulse-191-touch-01`. PCB revision unknown.
-Firmware: `v1.1.0-16-g6b05e53-dirty`, ESP-IDF 5.5.2, built September 23 at
-19:34:25. Source is the 1.91 port plus bounded FT3168 retry handling.
-App SHA256: `1906f4317c0c6f13d5d6b2e1391187c7d40961bea7dc29983e85037d773135f0`.
+Last observed firmware after the owner power cycle: `v1.1.0-16-g6b05e53-dirty`,
+ESP-IDF 5.5.2, built September 23 at 19:34:25. App SHA256:
+`1906f4317c0c6f13d5d6b2e1391187c7d40961bea7dc29983e85037d773135f0`.
+A later recovery image was flashed and observed booting once, but the next
+sampled boot reported this older image again. The reason is not established.
 
 ## Observed passes
 
@@ -23,10 +25,14 @@ App SHA256: `1906f4317c0c6f13d5d6b2e1391187c7d40961bea7dc29983e85037d773135f0`.
 - Five owner-supplied photographs show the real panel during boot and on the
   Codex weekly page. The 9% quota, reset time, header and footer appear readable
   within the glass on these static views. See `docs/img/191-touch/glass-*.jpg`.
-- A later USB-installed recovery build (`dafbbc1a7f3d50f1a1a3fa8caeb456b2a7c8ea0bd92a1c868d97f967a438765b`)
-  booted without a panic after a persistent touch NACK. After unplugging USB
-  power for about ten seconds, the unit rejoined its saved network. The owner
-  confirmed that real values were visible and page swipes worked.
+- A later USB-installed recovery build (`v1.1.0-24-g4d78592`, app SHA256
+  `dafbbc1a7f3d50f1a1a3fa8caeb456b2a7c8ea0bd92a1c868d97f967a438765b`)
+  booted display-only without a panic after a persistent touch NACK. Its
+  first trace showed no saved Wi-Fi slot. After unplugging USB power for about
+  ten seconds, the unit rejoined its saved network and the owner confirmed
+  real values and working page swipes; that later trace identified the older
+  `v1.1.0-16-g6b05e53-dirty` image. Do not attribute those checks to the
+  recovery build.
 
 ## Defects found and corrected
 
@@ -52,9 +58,10 @@ solve the observed NACKs and must not be described as proven fixes.
 A later USB reflash produced persistent normal-mode NACKs and repeated aborts
 at the fatal touch-startup check. The recovery build resets the I²C bus between
 bounded init attempts and continues display-only when touch is unavailable.
-This prevents that particular boot loop; it does not repair a controller that
-remains unresponsive until power is removed. Intermittent read NACKs were still
-logged after the power cycle. A sampled LAN fetch also timed out despite Wi-Fi
+This prevented that particular boot loop in the observed recovery boot; it
+does not repair a controller that remains unresponsive until power is removed.
+Intermittent read NACKs were still logged after the power cycle on the older
+image. A sampled LAN fetch also timed out despite Wi-Fi
 association and the computer service listening on its LAN address; the owner
 subsequently saw real values, so this does not establish a permanent data loss.
 
@@ -72,7 +79,9 @@ checks and firmware build passed after the connection fix.
 The photographs are static and were taken under strong red room lighting, so they
 do not establish calibrated colors or an exhaustive physical visual acceptance.
 BOOT menu operation needs a separate final owner check. Long-running touch and
-LAN reliability need further observation. Motion/stress testing,
+LAN reliability need further observation. A fresh physical check of the final
+source is needed: the final 90 px Wi-Fi buttons and recovery behavior have
+only native-raster and single-boot evidence, respectively. Motion/stress testing,
 OTA, battery, SD, audio and IMU are not verified. On-glass approvals and denials
 are disabled on this profile until the 90 px touch-target rule and a physical
 round trip can be satisfied. This is a

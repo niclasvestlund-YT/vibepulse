@@ -85,11 +85,14 @@ Phone onboarding, credential persistence and automatic rejoin passed after the f
 Later USB reflashing reproduced a stronger FT3168 failure: the normal-mode
 write NACKed on every try, and the old fatal startup check reset the ESP
 repeatedly. The board now resets the I²C bus between bounded attempts and,
-if touch is still absent, boots display-only instead of panicking. A later
-USB power cycle brought the controller back: the owner saw real values and
-confirmed page swipes. The serial trace still contained intermittent touch
-read NACKs and one LAN fetch timeout, so long-running touch and transport
-stability remain open. A saved Wi-Fi profile was present after the power cycle.
+if touch is still absent, boots display-only instead of panicking. That build
+was observed booting once with touch absent. A later USB power cycle brought
+the controller back: the owner saw real values and confirmed page swipes, but
+that boot reported an older firmware image. Why the older image reappeared is
+unresolved, so the owner swipe check does not verify the recovery build. The
+later trace still contained intermittent touch read NACKs and one LAN fetch
+timeout; long-running touch and transport stability remain open. A saved
+Wi-Fi profile was present after the power cycle.
 
 Five owner-supplied photographs now document startup and the real Codex weekly
 page on this unit. They live in `docs/img/191-touch/glass-*.jpg`; the 9% quota
