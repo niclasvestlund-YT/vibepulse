@@ -23,6 +23,10 @@ App SHA256: `1906f4317c0c6f13d5d6b2e1391187c7d40961bea7dc29983e85037d773135f0`.
 - Five owner-supplied photographs show the real panel during boot and on the
   Codex weekly page. The 9% quota, reset time, header and footer appear readable
   within the glass on these static views. See `docs/img/191-touch/glass-*.jpg`.
+- A later USB-installed recovery build (`dafbbc1a7f3d50f1a1a3fa8caeb456b2a7c8ea0bd92a1c868d97f967a438765b`)
+  booted without a panic after a persistent touch NACK. After unplugging USB
+  power for about ten seconds, the unit rejoined its saved network. The owner
+  confirmed that real values were visible and page swipes worked.
 
 ## Defects found and corrected
 
@@ -42,6 +46,15 @@ mode write previously aborted startup. Board-specific bounded retries now handle
 that response. Disabling monitor mode and lowering I2C to 100 kHz alone did not
 solve the observed NACKs and must not be described as proven fixes.
 
+A later USB reflash produced persistent normal-mode NACKs and repeated aborts
+at the fatal touch-startup check. The recovery build resets the I²C bus between
+bounded init attempts and continues display-only when touch is unavailable.
+This prevents that particular boot loop; it does not repair a controller that
+remains unresponsive until power is removed. Intermittent read NACKs were still
+logged after the power cycle. A sampled LAN fetch also timed out despite Wi-Fi
+association and the computer service listening on its LAN address; the owner
+subsequently saw real values, so this does not establish a permanent data loss.
+
 Opening this board's USB serial port can reset it. Reopening the logger during
 phone provisioning contributed to disruption. Use one persistent monitor and
 inspect its saved output; distinguish explicit USB resets from actual panics.
@@ -55,7 +68,8 @@ checks and firmware build passed after the connection fix.
 
 The photographs are static and were taken under strong red room lighting, so they
 do not establish calibrated colors or an exhaustive physical visual acceptance.
-BOOT menu operation needs a separate final owner check. Motion/stress testing,
+BOOT menu operation needs a separate final owner check. Long-running touch and
+LAN reliability need further observation. Motion/stress testing,
 OTA, battery, SD, audio and IMU are not verified. On-glass approvals and denials
 are disabled on this profile until the 90 px touch-target rule and a physical
 round trip can be satisfied. This is a

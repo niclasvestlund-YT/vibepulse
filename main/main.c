@@ -893,10 +893,22 @@ static void display_start(void) {
 
   /* Board code keeps panel MADCTL and touch transformation as a pair. */
   esp_lcd_touch_handle_t tp = NULL;
+#ifdef TORGET_BOARD_191_TOUCH
+  esp_err_t touch_err = tg_board_touch_new(&tp);
+  if (touch_err == ESP_OK && tp) {
+    esp_lv_adapter_touch_config_t adapter_touch =
+      ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
+    s_touch = esp_lv_adapter_register_touch(&adapter_touch);
+  } else {
+    ESP_LOGW(TAG, "1.91 touch unavailable (%s); continuing display-only",
+             esp_err_to_name(touch_err));
+  }
+#else
   ESP_ERROR_CHECK(tg_board_touch_new(&tp));
   esp_lv_adapter_touch_config_t adapter_touch =
     ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
   s_touch = esp_lv_adapter_register_touch(&adapter_touch);
+#endif
 
   ESP_ERROR_CHECK(esp_lv_adapter_start());
 }

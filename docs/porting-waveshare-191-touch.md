@@ -82,6 +82,15 @@ A real phone attempt exposed a shared onboarding bug: after NO_AP_FOUND (201), t
 
 Phone onboarding, credential persistence and automatic rejoin passed after the fix. Bounded touch retries recovered transient NACKs in 7 ms in two boot samples, without incrementing the panic counter. See [the final physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact firmware and remaining limits; it supersedes earlier pending statuses in this investigation narrative.
 
+Later USB reflashing reproduced a stronger FT3168 failure: the normal-mode
+write NACKed on every try, and the old fatal startup check reset the ESP
+repeatedly. The board now resets the I²C bus between bounded attempts and,
+if touch is still absent, boots display-only instead of panicking. A later
+USB power cycle brought the controller back: the owner saw real values and
+confirmed page swipes. The serial trace still contained intermittent touch
+read NACKs and one LAN fetch timeout, so long-running touch and transport
+stability remain open. A saved Wi-Fi profile was present after the power cycle.
+
 Five owner-supplied photographs now document startup and the real Codex weekly
 page on this unit. They live in `docs/img/191-touch/glass-*.jpg`; the 9% quota
 is a dated account reading, not a fixture. The red ambient light limits color

@@ -1,6 +1,6 @@
 # Install VibePulse on Waveshare 1.91 Touch AMOLED
 
-**USB-installed development port:** phone provisioning, saving the network, reconnecting after reset and visible Codex usage now pass on one physical unit. Transient touch NACKs recovered with bounded retries in the final boot samples. See [the physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact evidence and remaining checks.
+**USB-installed development port:** phone provisioning, saving the network, reconnecting after reset, visible Codex usage and page swipes pass on one physical unit. The FT3168 can still intermittently NACK; a later full USB power cycle restored touch after a persistent failure. See [the physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact evidence and remaining checks.
 
 ![Owner photo of Codex weekly usage on the real 1.91-inch panel, held in a hand](img/191-touch/glass-codex-held.jpg)
 
@@ -12,7 +12,7 @@ builds the 2.16-inch board. This port is not part of the v1.1.0 release.
 
 The September 23, 2026 installation established USB programming and a working
 four-corner touch diagnostic. The owner reported `1:1 2:1 3:1 4:1`, confirming
-one correctly mapped touch in each corner. Wi-Fi provisioning, NVS persistence, automatic reconnection and local usage fetch also passed. PCB revision, full physical UI review and optional peripherals remain unverified.
+one correctly mapped touch in each corner. Wi-Fi provisioning, NVS persistence, automatic reconnection, local usage fetch and page swipes also passed. PCB revision, long-running touch stability, full physical UI review and optional peripherals remain unverified.
 
 ## Prepare
 
@@ -79,6 +79,14 @@ forget that network and use the password currently shown on the panel. A first
 `NO_AP_FOUND` message can be transient; allow the retry to finish and confirm
 that the screen joins the home network. Then check for real Claude/Codex usage
 and reset information. Missing data must remain a dash, never a fabricated zero.
+
+If the serial log says `1.91 touch unavailable`, the display continues to boot
+without touch instead of restarting in a loop. Disconnect USB power for about
+ten seconds, reconnect, and check touch again. Wi-Fi setup can still open after
+its normal wait because it is operated from the phone; touch-dependent swipes
+and menu taps will not work until the touch controller responds. If the saved
+network does not reappear after a flash, repeat phone setup rather than
+assuming the old credentials survived.
 
 ## Controls and current limits
 

@@ -38,10 +38,13 @@ static esp_err_t touch_read_diagnosed(esp_lcd_touch_handle_t touch) {
 }
 static esp_err_t touch_write(esp_lcd_panel_io_handle_t io, int reg, uint8_t value) {
     esp_err_t err = ESP_FAIL;
-    for (unsigned attempt = 0; attempt < 4; ++attempt) {
+    for (unsigned attempt = 0; attempt < 6; ++attempt) {
         err = esp_lcd_panel_io_tx_param(io, reg, &value, 1);
         if (err != ESP_ERR_INVALID_STATE) return err;
-        vTaskDelay(pdMS_TO_TICKS(20));
+        /* USB resetting the ESP need not power-cycle the FT3168. Recover the
+         * controller before another bounded try instead of boot-looping. */
+        (void)i2c_master_bus_reset(bus);
+        vTaskDelay(pdMS_TO_TICKS(30));
     }
     return err;
 }
