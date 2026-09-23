@@ -1,0 +1,15 @@
+schema_version: 1
+units:
+- id: vibepulse-175-01
+  friendly_name: Round 1.75 design and bring-up unit
+  board: waveshare-esp32-s3-touch-amoled-1.75
+  sku_evidence: Owner can read 1.75; PCB revision and suffix not independently verified
+  board_revision: unknown
+  enclosure: unknown
+  speaker: unknown
+  battery: unknown
+  microsd: unknown
+  antenna: unknown
+  installed_firmware: unknown
+  last_physical_verification: unknown
+  secrets: false

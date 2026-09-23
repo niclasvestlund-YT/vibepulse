@@ -59,6 +59,7 @@ else()
 endif()
 add_executable(torget-sim
   main.c
+  ../platform/round_diagnostic.c
   ../platform/torget_ui.c
   ../platform/wifi_status_assets.c
   ../platform/boot_screen.c

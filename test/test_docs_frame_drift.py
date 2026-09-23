@@ -203,6 +203,11 @@ BOARD_241_FRAMES = {
     "241-v2/settings.png": "settings-menu.png",
 }
 
+BOARD_175_FRAMES = {
+    "round-175-codex.png": "round-codex-live.png",
+    "round-175-claude.png": "round-claude-live.png",
+}
+
 NOT_FRAMES = {
     "241-v2/glass-codex.jpg": "owner photograph of the physical 2.41 V2 panel",
     "241-v2/glass-codex-detail.jpg": "owner close-up photograph of the physical 2.41 V2 panel",
@@ -245,7 +250,7 @@ def docs_frames():
     missed by hand.
     """
     for name, path in docs_images():
-        if name in NOT_FRAMES or name in BOARD_241_FRAMES or path.suffix != ".png":
+        if name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -526,7 +531,8 @@ class DocsFrameDriftTests(unittest.TestCase):
             if name in NOT_FRAMES or path.suffix != ".png":
                 continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
-                expected = (600, 450) if name in BOARD_241_FRAMES else (480, 480)
+                expected = ((600, 450) if name in BOARD_241_FRAMES else
+                            (466, 466) if name in BOARD_175_FRAMES else (480, 480))
                 if im.size != expected:
                     wrong.append(f"{name} is {im.size[0]}x{im.size[1]}")
         self.assertEqual(wrong, [], "\n".join(

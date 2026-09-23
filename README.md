@@ -28,6 +28,10 @@ Current source supports the original **2.16-inch square panel** and the
 **Waveshare 2.41 V2 in 600 × 450 landscape**. For V2 revision checks, build
 selection and phone Wi-Fi setup, use the [2.41 V2 guide](docs/waveshare-241-v2.md).
 
+The round **1.75-inch model has a [native design preview](docs/waveshare-175-preview.md)**
+with a quota ring, USED TODAY and D:H:M countdown. It is not installable
+firmware or physically verified support.
+
 ## The problem
 
 When you run coding agents all day, two things are invisible:
@@ -1080,3 +1084,12 @@ This is my first open source release. Issues and PRs are very welcome, and
 if VibePulse ends up on your shelf, a ⭐ helps others find it.
 
 Built by [Niclas Vestlund](https://niclasvestlund.se).
+
+## Round 1.75 design preview
+
+This 466 × 466 image is native LVGL output with sample data. The bright
+end of the ring is today’s contribution to the total usage; the small
+countdown shows days, hours and minutes. The 1.75 board remains unsupported.
+[Preview, evidence and remaining work](docs/waveshare-175-preview.md).
+
+![Round 1.75 native LVGL design preview, sample Codex quota](docs/img/round-175-codex.png)

@@ -36,6 +36,23 @@ static int64_t local_epoch(int year, int month, int day, int hour, int minute) {
 }
 
 int main(void) {
+  char clock[24];
+  usage_presenter_format_dhm(2549, 1, clock, sizeof clock);
+  check("round clock preserves days hours and minutes", strcmp(clock, "01:18:29") == 0);
+  usage_presenter_format_dhm(59, 1, clock, sizeof clock);
+  check("round sub-hour clock has explicit zero fields", strcmp(clock, "00:00:59") == 0);
+  usage_presenter_format_dhm(60, 1, clock, sizeof clock);
+  check("round hour boundary", strcmp(clock, "00:01:00") == 0);
+  usage_presenter_format_dhm(1440, 1, clock, sizeof clock);
+  check("round day boundary", strcmp(clock, "01:00:00") == 0);
+  usage_presenter_format_dhm(0, 1, clock, sizeof clock);
+  check("known zero is distinct from unavailable", strcmp(clock, "00:00:00") == 0);
+  usage_presenter_format_dhm(0, 0, clock, sizeof clock);
+  check("missing deadline is not midnight", strcmp(clock, "–") == 0);
+  usage_presenter_format_dhm(-1, 1, clock, sizeof clock);
+  check("negative deadline is unavailable", strcmp(clock, "–") == 0);
+  usage_presenter_format_dhm(144000, 1, clock, sizeof clock);
+  check("wide duration stays bounded", strcmp(clock, ">99D") == 0);
   tk_tokens tokens = {0};
   tokens.claude_model_week = limit(73, 3120, 12);
   tokens.claude_week = limit(47, 249, 4);
@@ -78,6 +95,7 @@ int main(void) {
      reset, exactly as before -- the caption is what says so. */
   usage_presenter_build_quota_page(&tokens, USAGE_QUOTA_CODEX_WEEK, &page);
   check("no forecast leaves the stat counting to the reset",
+        page.has_countdown && page.countdown_minutes == 2210 &&
         strcmp(page.countdown_text, "1D 12H") == 0 &&
         strcmp(page.countdown_caption, "TO RESET") == 0 &&
         !page.counts_to_empty);
@@ -88,6 +106,7 @@ int main(void) {
   deadline.codex_forecast.has_offset_min = 1;
   usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CODEX_WEEK, &page);
   check("an early exhaustion counts down to the wall, not the reset",
+        page.has_countdown && page.countdown_minutes == 1670 &&
         strcmp(page.countdown_text, "1D 3H") == 0 &&
         strcmp(page.countdown_caption, "TO EMPTY") == 0 &&
         page.counts_to_empty);
@@ -123,6 +142,7 @@ int main(void) {
   deadline.codex_forecast.offset_min = -2210;
   usage_presenter_build_quota_page(&deadline, USAGE_QUOTA_CODEX_WEEK, &page);
   check("a deadline already passed falls back to the reset",
+        page.has_countdown && page.countdown_minutes == 2210 &&
         strcmp(page.countdown_text, "1D 12H") == 0 &&
         strcmp(page.countdown_caption, "TO RESET") == 0 &&
         !page.counts_to_empty);
@@ -138,6 +158,7 @@ int main(void) {
   usage_presenter_build_quota_page(&missing, USAGE_QUOTA_CLAUDE_MODEL,
                                    &page);
   check("a page without usage counts down to nothing",
+        !page.has_countdown &&
         strcmp(page.countdown_text, "–") == 0 &&
         strcmp(page.countdown_caption, "TO RESET") == 0 &&
         !page.counts_to_empty);

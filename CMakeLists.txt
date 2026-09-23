@@ -8,6 +8,9 @@
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
 include(cmake/torget_board.cmake)
+if(TORGET_BOARD STREQUAL "waveshare_175")
+  message(FATAL_ERROR "waveshare_175 is a native UI preview only. The 1.75 BSP, recovery image and physical diagnostic are not ready; refusing to use another board's driver.")
+endif()
 # third_party/ innehåller vendrade komponenter (cjson) som apparna delar.
 # Vibbe (app_buddy) bor i sitt eget repo (~/Buddy) och delas in härifrån —
 # EN källa, ingen kopiedrift (inflyttsbeslutet 2026-08-07: "alla tre ska bo

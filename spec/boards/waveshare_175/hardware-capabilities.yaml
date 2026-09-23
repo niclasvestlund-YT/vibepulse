@@ -1,0 +1,102 @@
+schema_version: 1
+board: waveshare-esp32-s3-touch-amoled-1.75
+capabilities:
+- id: display.amoled
+  name: 1.75-inch CO5300 round AMOLED
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: unknown
+    firmware_enabled: 'no'
+    unit_verified: unknown
+  confidence: vendor_claimed
+  resources:
+  - QSPI; vendor 466x466 geometry
+  - Native LVGL preview only
+  constraints:
+  - No authorized installation or physical verification
+  - PCB revision unknown; verify exact schematic and BSP before enabling pins
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-175-docs
+  - waveshare-175-reference
+  - vibepulse-175-preview
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: firmware_enabled
+    value: 'no'
+    source: vibepulse-175-preview
+  last_verified: unknown
+  width: 466
+  height: 466
+  color_format: RGB565
+  byte_order: big_endian
+  bus: QSPI
+- id: touch.controller
+  name: CST9217 touch
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: unknown
+    firmware_enabled: 'no'
+    unit_verified: unknown
+  confidence: vendor_claimed
+  resources:
+  - Vendor I2C 0x5A; reset40, IRQ11
+  constraints:
+  - No authorized installation or physical verification
+  - PCB revision unknown; verify exact schematic and BSP before enabling pins
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-175-docs
+  - waveshare-175-reference
+  - vibepulse-175-preview
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: firmware_enabled
+    value: 'no'
+    source: vibepulse-175-preview
+  last_verified: unknown
+- id: controls.settings
+  name: BOOT input
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: unknown
+    firmware_enabled: 'no'
+    unit_verified: unknown
+  confidence: vendor_claimed
+  resources:
+  - Vendor GPIO0 active-low boot strap
+  constraints:
+  - No authorized installation or physical verification
+  - PCB revision unknown; verify exact schematic and BSP before enabling pins
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-175-docs
+  - waveshare-175-reference
+  - vibepulse-175-preview
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: firmware_enabled
+    value: 'no'
+    source: vibepulse-175-preview
+  last_verified: unknown

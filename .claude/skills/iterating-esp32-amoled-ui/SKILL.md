@@ -70,3 +70,17 @@ stress run. Prefer fewer frames when bandwidth is limited.
 | Flash requested implicitly | Stop and ask for explicit authorization. |
 | Motion requested early | Complete the static physical AMOLED review first. |
 | Motion feels slow across apps | Instrument the shared pipeline before changing UI code. |
+
+## Round-board lessons
+
+- Confirm the full board marking; `1.75` does not establish `1.75C` or a PCB revision.
+- Use an explicit preview-only selector while the BSP is incomplete, and reject
+  target builds rather than inheriting another board’s power/reset pins.
+- Validate actual native pixels against the circular mask. A square bounding
+  box is insufficient for text and touch targets near the rim.
+- A daily usage segment is part of the total quota, never a separate daily
+  allowance. Keep missing, contradictory and zero values distinct.
+- Test countdown units visibly and preserve the presenter’s TO RESET/TO EMPTY
+  decision. A fixture clock does not prove wall-clock deadline updates.
+- Position dependent labels from measured text width or updated layout; lazy
+  coordinates of an offscreen page can misplace its percent unit.

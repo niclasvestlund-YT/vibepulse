@@ -19,6 +19,11 @@
 #include "usage_live_policy.h"
 #include "usage_presenter.h"
 #include "vibepulse_layout.generated.h"
+#include "usage_round_layout.h"
+
+#ifdef TORGET_BOARD_175
+extern const lv_font_t plex_round_32;
+#endif
 
 extern const lv_font_t plex_num_164;
 extern const lv_font_t plex_num_118;
@@ -99,6 +104,10 @@ typedef struct {
   lv_obj_t *today;
   lv_obj_t *reset;
   lv_obj_t *reset_caption;
+#ifdef TORGET_BOARD_175
+  lv_obj_t *percent_unit;
+  usage_today_bar_view round_bar;
+#endif
   usage_quota_scope scope;
   usage_provider provider;
   char rendered_context[64];
@@ -294,8 +303,27 @@ static void create_live_header_widgets(lv_obj_t *tile, usage_provider provider,
 }
 
 static void create_quota_header(quota_page *page) {
+#ifdef TORGET_BOARD_175
+  lv_color_t accent = page->provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX;
+  lv_obj_t *name = label(page->tile, &plex_ui_21, accent, 90,
+                        VP_ROUND_PROVIDER_Y, 300, 30);
+  lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(name, 3, 0);
+  lv_label_set_text(name, page->provider == USAGE_PROVIDER_CLAUDE ? "CLAUDE" : "CODEX");
+  page->context = label(page->tile, &plex_ui_14, COL_META, 90,
+                        VP_ROUND_STATUS_Y, 300, 22);
+  lv_obj_set_style_text_align(page->context, LV_TEXT_ALIGN_CENTER, 0);
+  page->halo = bare(page->tile);
+  lv_obj_set_pos(page->halo, 236, 367);
+  lv_obj_set_size(page->halo, 8, 8);
+  lv_obj_set_style_radius(page->halo, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(page->halo, accent, 0);
+  lv_obj_set_style_bg_opa(page->halo, LV_OPA_COVER, 0);
+  lv_obj_add_flag(page->halo, LV_OBJ_FLAG_HIDDEN);
+#else
   create_live_header_widgets(page->tile, page->provider, &page->halo,
                              &page->context);
+#endif
   page->halo_initialized = true;
 }
 
@@ -333,7 +361,11 @@ static void create_pager(lv_obj_t *tile, int active) {
   for (int i = 0; i < tk_labs_view_count(); i++) {
     int width = i == active ? PAGER_DOT_ACTIVE : PAGER_DOT;
     lv_obj_t *dot = bare(tile);
+#ifdef TORGET_BOARD_175
+    lv_obj_set_pos(dot, x, VP_ROUND_PAGER_Y);
+#else
     lv_obj_set_pos(dot, x, PAGER_Y);
+#endif
     lv_obj_set_size(dot, width, PAGER_DOT);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
@@ -475,6 +507,76 @@ static void create_stat(lv_obj_t *tile, lv_obj_t **value_out,
   if (caption_out) *caption_out = name;
 }
 
+#ifdef TORGET_BOARD_175
+static void round_ring_draw(lv_event_t *event) {
+  quota_page *page = lv_event_get_user_data(event);
+  lv_layer_t *layer = lv_event_get_layer(event);
+  lv_area_t coords;
+  lv_obj_get_coords(page->track, &coords);
+  lv_draw_arc_dsc_t arc;
+  lv_draw_arc_dsc_init(&arc);
+  arc.center.x = coords.x1 + VP_ROUND_RING_SIZE / 2;
+  arc.center.y = coords.y1 + VP_ROUND_RING_SIZE / 2;
+  arc.radius = VP_ROUND_RING_SIZE / 2;
+  arc.width = VP_ROUND_RING_WIDTH;
+  arc.opa = LV_OPA_COVER;
+  arc.start_angle = 270;
+  arc.end_angle = 630;
+  arc.color = COL_TRACK;
+  lv_draw_arc(layer, &arc);
+  usage_today_bar_view *bar = &page->round_bar;
+  if (!bar->has_total || bar->total_px == 0) return;
+  bool claude = page->provider == USAGE_PROVIDER_CLAUDE;
+  lv_color_t accent = claude ? COL_CLAUDE : COL_CODEX;
+  arc.end_angle = 270 + bar->total_px;
+  arc.color = bar->has_today ? (claude ? COL_CLAUDE_MUTED : COL_CODEX_MUTED) : accent;
+  lv_draw_arc(layer, &arc);
+  if (bar->has_today && bar->today_px > 0) {
+    arc.start_angle = 270 + bar->baseline_px;
+    arc.color = accent;
+    lv_draw_arc(layer, &arc);
+    if (bar->baseline_px > 0) {
+      arc.start_angle = 269 + bar->baseline_px;
+      arc.end_angle = 270 + bar->baseline_px;
+      arc.color = COL_WHITE;
+      arc.width = 13;
+      lv_draw_arc(layer, &arc);
+    }
+  }
+}
+
+static void create_round_quota(quota_page *page, int index) {
+  lv_color_t accent = page->provider == USAGE_PROVIDER_CLAUDE ? COL_CLAUDE : COL_CODEX;
+  page->track = bare(page->tile);
+  lv_obj_set_pos(page->track, VP_ROUND_RING_X, VP_ROUND_RING_Y);
+  lv_obj_set_size(page->track, VP_ROUND_RING_SIZE, VP_ROUND_RING_SIZE);
+  lv_obj_add_event_cb(page->track, round_ring_draw, LV_EVENT_DRAW_MAIN, page);
+  lv_obj_move_to_index(page->track, 0);
+  page->quota = label(page->tile, &plex_ui_16, COL_LABEL, 70,
+                      VP_ROUND_QUOTA_Y, 340, 24);
+  lv_obj_set_style_text_align(page->quota, LV_TEXT_ALIGN_CENTER, 0);
+  page->percent = label(page->tile, &plex_num_118, COL_WHITE, 70,
+                        VP_ROUND_PERCENT_Y, 340, 115);
+  lv_obj_set_width(page->percent, LV_SIZE_CONTENT);
+  page->percent_unit = label(page->tile, &plex_stat_35, COL_MUTED, 0, 0, 42, 42);
+  lv_label_set_text(page->percent_unit, "%");
+  lv_obj_t *today_caption = label(page->tile, &plex_ui_14, COL_LABEL,
+                                  80, VP_ROUND_STAT_CAPTION_Y, 128, 21);
+  lv_label_set_text(today_caption, "USED TODAY");
+  lv_obj_set_style_text_align(today_caption, LV_TEXT_ALIGN_CENTER, 0);
+  page->today = label(page->tile, &plex_round_32, accent,
+                      80, VP_ROUND_STAT_VALUE_Y, 128, 40);
+  lv_obj_set_style_text_align(page->today, LV_TEXT_ALIGN_CENTER, 0);
+  page->reset_caption = label(page->tile, &plex_ui_14, COL_LABEL,
+                              215, VP_ROUND_STAT_CAPTION_Y, 190, 21);
+  lv_obj_set_style_text_align(page->reset_caption, LV_TEXT_ALIGN_CENTER, 0);
+  page->reset = label(page->tile, &plex_round_32, COL_WHITE,
+                      215, VP_ROUND_STAT_VALUE_Y, 190, 40);
+  lv_obj_set_style_text_align(page->reset, LV_TEXT_ALIGN_CENTER, 0);
+  create_pager(page->tile, index);
+}
+#endif
+
 static void create_quota_page(quota_page *page, int index,
                               usage_quota_scope scope,
                               usage_provider provider) {
@@ -483,6 +585,11 @@ static void create_quota_page(quota_page *page, int index,
   page->provider = provider;
   page->tile = new_tile(index);
   create_quota_header(page);
+
+#ifdef TORGET_BOARD_175
+  create_round_quota(page, index);
+  return;
+#endif
 
   page->quota = label(page->tile, &plex_ui_21, COL_LABEL,
                       VP_SAFE_X, VP_QUOTA_Y, VP_CONTENT_W, 30);
@@ -792,6 +899,13 @@ static void refresh_tracker_header(tracker_page *page, int64_t now_us) {
 
 static bool apply_today_bar(quota_page *page,
                             const usage_card_view *quota) {
+#ifdef TORGET_BOARD_175
+  bool available = usage_live_build_today_bar(
+      quota->pct, quota->has_pct, quota->delta_pct, quota->has_delta,
+      360, &page->round_bar);
+  lv_obj_invalidate(page->track);
+  return available;
+#else
   usage_today_bar_view bar = {0};
   bool available = usage_live_build_today_bar(
       quota->pct, quota->has_pct, quota->delta_pct, quota->has_delta,
@@ -826,6 +940,7 @@ static bool apply_today_bar(quota_page *page,
   lv_obj_set_x(page->marker, marker_x);
   lv_obj_remove_flag(page->marker, LV_OBJ_FLAG_HIDDEN);
   return available;
+#endif
 }
 
 static void apply_quota(quota_page *page, const tk_tokens *tokens) {
@@ -842,6 +957,31 @@ static void apply_quota(quota_page *page, const tk_tokens *tokens) {
                         ? quota->delta_text : "–");
   lv_label_set_text(page->reset, view.countdown_text);
   lv_label_set_text(page->reset_caption, view.countdown_caption);
+#ifdef TORGET_BOARD_175
+  char text[40];
+  snprintf(text, sizeof text, "%s%s", quota->label, " · USED");
+  lv_label_set_text(page->quota, text);
+  if (quota->has_pct) snprintf(text, sizeof text, "%.0f", quota->pct);
+  else snprintf(text, sizeof text, "–");
+  lv_label_set_text(page->percent, text);
+  lv_point_t measured;
+  lv_text_get_size(&measured, text, &plex_num_118, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  int width = measured.x;
+  int percent_x = (480 - width - (quota->has_pct ? 40 : 0)) / 2;
+  lv_obj_set_x(page->percent, percent_x);
+  lv_obj_set_pos(page->percent_unit, percent_x + width + 3,
+                VP_ROUND_PERCENT_Y + 60);
+  if (quota->has_pct) lv_obj_remove_flag(page->percent_unit, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(page->percent_unit, LV_OBJ_FLAG_HIDDEN);
+  if (quota->has_delta && bar_available) {
+    snprintf(text, sizeof text, "%.0f%%", quota->delta_pct);
+    lv_label_set_text(page->today, text);
+  }
+  usage_presenter_format_dhm(view.countdown_minutes, view.has_countdown, text, sizeof text);
+  lv_label_set_text(page->reset, text);
+  snprintf(text, sizeof text, "%s · D:H:M", view.countdown_caption);
+  lv_label_set_text(page->reset_caption, text);
+#endif
   refresh_header(page, ui.last_now_us);
 }
 

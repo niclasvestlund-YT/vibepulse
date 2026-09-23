@@ -13,6 +13,12 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- Preview-only round 1.75 layout at 466 × 466: one quota ring with today’s
+  contribution, USED TODAY and a D:H:M reset/exhaustion countdown. Native
+  boundary-state captures, circle/spacing checks and a five-target touch
+  diagnostic prepare the design for hardware work. No firmware or physical
+  support is claimed; the target build refuses this unfinished board profile.
+
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
   product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).
   AMOLED 1.75/1.8/1.91 ports are planned; RGB matrix hardware is experimental.

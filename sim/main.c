@@ -1794,6 +1794,73 @@ static int run_vibepulse_labs_qa(bool catalogue) {
   return capture_failures == 0 ? 0 : 1;
 }
 
+#ifdef TORGET_BOARD_175
+#include "round_diagnostic.h"
+static int run_round_quota_qa(void) {
+  capture_failures = 0;
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
+  torget_app_show(SIM_APP_VIBEPULSE);
+  tk_tokens data = {0};
+  data.codex_week = forecast_limit(43, 2549);
+  data.codex_week.has_delta = 1;
+  data.codex_week.delta_pct = 8;
+  data.claude_model_week = forecast_limit(73, 3129);
+  data.claude_model_week.has_delta = 1;
+  data.claude_model_week.delta_pct = 12;
+  tokens_apply(&data);
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("round-codex-live");
+  data.codex_week.stale = 1;
+  tokens_apply(&data);
+  dump_frame("round-codex-stale");
+  data.codex_week.stale = 0;
+  data.codex_forecast.state = TK_FORECAST_EXHAUSTS;
+  data.codex_forecast.has_offset_min = 1;
+  data.codex_forecast.offset_min = -540;
+  tokens_apply(&data);
+  dump_frame("round-codex-to-empty");
+  memset(&data.codex_forecast, 0, sizeof data.codex_forecast);
+  data.codex_week.stale = 0;
+  data.codex_week.has_delta = 0;
+  tokens_apply(&data);
+  dump_frame("round-codex-today-missing");
+  data.codex_week.has_delta = 1;
+  data.codex_week.delta_pct = 44;
+  tokens_apply(&data);
+  dump_frame("round-codex-today-invalid");
+  data.codex_week.pct = 100;
+  data.codex_week.delta_pct = 100;
+  data.codex_week.reset_min = 59;
+  tokens_apply(&data);
+  dump_frame("round-codex-full");
+  data.codex_week.reset_min = 143999;
+  tokens_apply(&data);
+  dump_frame("round-codex-long-reset");
+  data.codex_week.reset_min = 59;
+  data.codex_week.pct = 0;
+  data.codex_week.delta_pct = 0;
+  tokens_apply(&data);
+  dump_frame("round-codex-zero");
+  memset(&data.codex_week, 0, sizeof data.codex_week);
+  tokens_apply(&data);
+  dump_frame("round-codex-missing");
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("round-claude-live");
+  data.claude_week = data.claude_model_week;
+  tokens_apply(&data);
+  tokens_show_view(VIEW_CLAUDE_ALL);
+  dump_frame("round-claude-wide-label");
+  data.claude_week.has_reset = 0;
+  tokens_apply(&data);
+  dump_frame("round-claude-reset-missing");
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_HIDDEN);
+  lv_obj_t *probe = tg_round_diagnostic_create(lv_layer_top());
+  dump_frame("round-diagnostic");
+  lv_obj_delete(probe);
+  return capture_failures ? 1 : 0;
+}
+#endif
+
 int main(int argc, char **argv) {
   /* Radbuffrat även vid pipe: fixtureloggen ska överleva en kill. */
   setvbuf(stdout, NULL, _IOLBF, 0);
@@ -1820,6 +1887,11 @@ int main(int argc, char **argv) {
    * så READY-takeovern vinner över menyn på båda. */
   torget_settings_create();
   torget_ota_ui_create();
+
+#ifdef TORGET_BOARD_175
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-round-qa") == 0)
+    return run_round_quota_qa();
+#endif
 
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-qa") == 0)
     return run_vibepulse_labs_qa(false);

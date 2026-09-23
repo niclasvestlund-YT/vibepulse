@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || [ "$1" != "vibepulse" ]; then
-  printf 'usage: %s vibepulse [waveshare_216|waveshare_241_v2]\n' "$0" >&2
+  printf 'usage: %s vibepulse [waveshare_216|waveshare_241_v2|waveshare_175]\n' "$0" >&2
   exit 2
 fi
 
@@ -10,6 +10,9 @@ repo=$(CDPATH= cd -P "$(dirname "$0")/.." && pwd)
 PYTHON_BIN=${PYTHON_BIN:-python3}
 output_dir=
 board=${2:-waveshare_216}
+if [ "$board" = "waveshare_175" ]; then
+  exec "$PYTHON_BIN" "$repo/tools/preview_round_ui.py"
+fi
 case "$board" in
   waveshare_216) build_dir="$repo/sim/build"; spec_dir="$repo/spec" ;;
   waveshare_241_v2) build_dir="$repo/sim/build-241"; spec_dir="$repo/spec/boards/waveshare_241_v2" ;;
