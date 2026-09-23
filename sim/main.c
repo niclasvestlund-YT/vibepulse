@@ -1880,6 +1880,7 @@ static int run_round_quota_qa(void) {
   return capture_failures ? 1 : 0;
 }
 #endif
+#include "board_diagnostic.h"
 
 int main(int argc, char **argv) {
   /* Radbuffrat även vid pipe: fixtureloggen ska överleva en kill. */
@@ -1889,6 +1890,11 @@ int main(int argc, char **argv) {
   lv_sdl_window_set_title(disp, "Torget — G GitHub-star, S agentstatus, T VibePulse, M Max Tracker, [ och ] vy, N nästa app, L launcher");
   lv_sdl_mouse_create();
 
+  if (argc == 2 && strcmp(argv[1], "--board-diagnostic") == 0) {
+    tg_board_diagnostic_create();
+    dump_frame("board-diagnostic");
+    return 0;
+  }
   const char *labs_mask = getenv("TORGET_LABS_MASK");
   if (labs_mask) {
     char *end;

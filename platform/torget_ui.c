@@ -156,7 +156,7 @@ static void icon_clicked(lv_event_t *e) {
  * proportioner som bänkens ikon (96-platta, radie 22). */
 static void launcher_build(void) {
   tg.launcher = bare(tg.shift);
-  lv_obj_set_size(tg.launcher, 480, 480);
+  lv_obj_set_size(tg.launcher, 480, TG_DISPLAY_HEIGHT < 480 ? TG_DISPLAY_HEIGHT : 480);
   lv_obj_set_flex_flow(tg.launcher, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(tg.launcher, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                         LV_FLEX_ALIGN_CENTER);
@@ -268,7 +268,11 @@ void torget_ui_create(void) {
 
   launcher_build();
   wifi_status_create();
+#ifndef TORGET_BOARD_191_TOUCH
   lv_timer_create(drift_timer, 60000, NULL);
+#else
+  (void)drift_timer;
+#endif
 
   /* Boota rakt in i första appen — skärmen på hyllan ska visa data, inte en
    * meny. Launchern är ett långtryck bort. */

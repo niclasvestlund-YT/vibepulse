@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || [ "$1" != "vibepulse" ]; then
-  printf 'usage: %s vibepulse [waveshare_216|waveshare_241_v2|waveshare_175]\n' "$0" >&2
+  printf 'usage: %s vibepulse [waveshare_216|waveshare_241_v2|waveshare_191_touch|waveshare_175]\n' "$0" >&2
   exit 2
 fi
 
@@ -16,6 +16,7 @@ fi
 case "$board" in
   waveshare_216) build_dir="$repo/sim/build"; spec_dir="$repo/spec" ;;
   waveshare_241_v2) build_dir="$repo/sim/build-241"; spec_dir="$repo/spec/boards/waveshare_241_v2" ;;
+  waveshare_191_touch) build_dir="$repo/sim/build-191"; spec_dir="$repo/spec/boards/waveshare_191_touch" ;;
   *) printf 'Unsupported board: %s\n' "$board" >&2; exit 2 ;;
 esac
 

@@ -1,0 +1,165 @@
+schema_version: 1
+board: waveshare-esp32-s3-touch-amoled-1.91
+capabilities:
+- id: display.amoled
+  name: 1.91-inch RM67162 AMOLED
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - 'SPI2: CS6 CLK47 DATA0/1/2/3=18/7/48/5; reset GPIO17'
+  - 536x240 landscape; QSPI 40 MHz RGB565
+  constraints:
+  - MADCTL 0xF0; zero address gap
+  - 8 rows x 536 pixels x 2 = 8576 bytes per flush
+  - Static Codex quota page readable in owner photos; red light prevents color judgment
+  - Full menu, animation and long-running physical review pending
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-191-1986f380
+  - vibepulse-191-port
+  - owner-191-display-20260923
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-191-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-191-port
+  - field: unit_verified
+    value: 'yes'
+    source: owner-191-display-20260923
+  last_verified: '2026-09-23'
+  verification:
+    unit: vibepulse-191-touch-01
+    test: visible-codex-static
+  width: 536
+  height: 240
+  color_format: RGB565
+  byte_order: big_endian
+  bus: QSPI
+  bus_mhz: 40
+- id: touch.controller
+  name: FT3168 via FT5x06 register-compatible driver
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - I2C0 SDA40 SCL39 at 100 kHz (vendor reference 300 kHz); address 0x38
+  - Polled input; no reset or interrupt GPIO configured
+  constraints:
+  - Raw portrait bounds 239/535; mirror X then swap XY
+  - Four corners verified on vibepulse-191-touch-01; no claim for other revisions
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-191-1986f380
+  - vibepulse-191-port
+  - owner-191-corners-20260923
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-191-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-191-port
+  - field: unit_verified
+    value: 'yes'
+    source: owner-191-corners-20260923
+  last_verified: '2026-09-23'
+  verification:
+    unit: vibepulse-191-touch-01
+    test: four-corner-touch
+- id: radio.wifi-24
+  name: 2.4 GHz Wi-Fi
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - ESP32-S3 radio; existing VibePulse local setup portal
+  constraints:
+  - 2.4 GHz only; local DHCP and usage fetch verified, no new relay claim
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-191-1986f380
+  - vibepulse-191-port
+  - bench-191-wifi-20260923
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-191-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-191-port
+  - field: unit_verified
+    value: 'yes'
+    source: bench-191-wifi-20260923
+  last_verified: '2026-09-23'
+  verification:
+    unit: vibepulse-191-touch-01
+    test: wifi-local-onboarding
+- id: controls.settings
+  name: BOOT settings button
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: unknown
+  confidence: source_inspected
+  resources:
+  - GPIO0 active-low pull-up
+  constraints:
+  - GPIO18 is LCD DATA0, never KEY3
+  - Hold BOOT at reset only to enter ROM download mode
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-191-1986f380
+  - vibepulse-191-port
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-191-1986f380
+  - field: bsp_support
+    value: 'yes'
+    source: vibepulse-191-port
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-191-port
+  last_verified: '2026-09-23'

@@ -30,6 +30,7 @@ idf_component_register(
        "registry.c"
        "../platform/torget_ui.c"
        "../platform/wifi_status_assets.c"
+       "../platform/board_diagnostic.c"
        "../platform/boot_screen.c"
        "../platform/round_diagnostic.c"
        "../platform/settings_menu.c"

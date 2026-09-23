@@ -17,12 +17,21 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   contribution, USED TODAY and a D:H:M reset/exhaustion countdown. Native
   boundary-state and full-app captures now cover quota, attention, analytics,
   settings, Wi-Fi and OTA. A five-target diagnostic and the normal app have
-  booted on the named unit. Visual owner review, Wi-Fi provisioning and live
-  quota/reply verification remain before public support is claimed.
+  booted on the named unit. Its quota page has been photographed, and Wi-Fi
+  and token fetches work. A fixed USB-down orientation is installed; its
+  angle, touch alignment, value accuracy and reply flow need physical review
+  before public support is claimed.
+- Development port for Waveshare 1.91 Touch AMOLED: native 536 × 240 layout,
+  QSPI display, mapped touch, BOOT settings and a USB installation guide. One
+  real unit passed four-corner touch, phone Wi-Fi setup, saved-network
+  reconnect and visible Codex usage. Owner photographs and the physical report
+  show the result and remaining checks. Needs You decisions stay on the
+  computer until a compact 90 px touch-target layout passes physical review;
+  full menu acceptance is separate.
 
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
   product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).
-  AMOLED 1.75/1.8/1.91 ports are planned; RGB matrix hardware is experimental.
+  AMOLED 1.75/1.8 ports are planned; RGB matrix hardware is experimental.
   Neither listing claims additional firmware support.
 - **Waveshare ESP32-S3-Touch-AMOLED-2.41 V2 support**, selected with
   `TORGET_BOARD=waveshare_241_v2`: fixed 600×450 landscape, V2 QSPI/I2C/reset

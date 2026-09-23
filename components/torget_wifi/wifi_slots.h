@@ -83,6 +83,11 @@ bool tg_wifi_join_should_apply(uint32_t submitted, uint32_t applied);
  * portalstatus. Noll betyder att radion fortfarande försöker. */
 tg_wifi_join_status tg_wifi_disconnect_status(int reason);
 
+/* A transient disconnect is not terminal while the same trial keeps retrying.
+ * Accept fresh IP proof once, never an old IP or an abandoned/failed-start trial. */
+bool tg_wifi_join_should_accept(tg_wifi_join_status status, bool trial_started,
+                               bool applied_now, bool have_ip);
+
 /* Alla synliga faser äger KEY3. STARTING slukar däremot den utlösande
  * knappens släpp i stället för att omedelbart stänga eller växla app. */
 bool tg_wifi_setup_owns_input(tg_wifi_setup_phase phase);

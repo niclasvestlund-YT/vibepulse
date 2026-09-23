@@ -33,7 +33,7 @@ void torget_boot_screen_create(void) {
   lv_obj_t *wordmark = lv_label_create(ui.overlay);
   lv_obj_set_style_text_font(wordmark, &plex_attention_52, 0);
   lv_obj_set_style_text_color(wordmark, lv_color_white(), 0);
-  lv_obj_align(wordmark, LV_ALIGN_TOP_MID, 0, 170);
+  lv_obj_align(wordmark, LV_ALIGN_TOP_MID, 0, TG_DISPLAY_HEIGHT == 240 ? 62 : 170);
   lv_label_set_text(wordmark, "VIBEPULSE");
 
   /* Tre steg med jämn luft, optiskt centrerade som grupp. */
@@ -43,7 +43,7 @@ void torget_boot_screen_create(void) {
     lv_obj_set_style_text_font(ui.steps[i], &plex_ui_21, 0);
     lv_obj_set_style_text_color(ui.steps[i], COL_MUTED, 0);
     lv_obj_set_style_text_letter_space(ui.steps[i], 2, 0);
-    lv_obj_align(ui.steps[i], LV_ALIGN_TOP_MID, STEP_X[i], 268);
+    lv_obj_align(ui.steps[i], LV_ALIGN_TOP_MID, STEP_X[i], TG_DISPLAY_HEIGHT == 240 ? 152 : 268);
     lv_label_set_text(ui.steps[i], STEP_WORDS[i]);
   }
 }

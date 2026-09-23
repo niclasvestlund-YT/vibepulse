@@ -246,7 +246,7 @@ static const char JOIN_PAGE[] =
     "async function check(){try{const r=await fetch('/status',{cache:'no-store'});"
     "const s=await r.json(),p=document.getElementById('result'),"
     "a=document.getElementById('retry');"
-    "if(s.state==='connected'){p.textContent='Connected. This Wi-Fi is saved.';}"
+    "if(s.state==='connected'){p.textContent='Connected. This Wi-Fi is saved.';a.style.display='none';}"
     "else if(s.state==='retry'){p.textContent=s.reason==='password'?"
     "'That password did not work.':s.reason==='not-found'?"
     "'Network not found. Check that it has 2.4 GHz Wi-Fi.':"
@@ -255,6 +255,7 @@ static const char JOIN_PAGE[] =
     "</script></body></html>";
 
 static esp_err_t page_get(httpd_req_t *req) {
+  ESP_LOGI(TAG, "setup page requested");
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send_chunk(req, PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
 
@@ -621,6 +622,7 @@ static void guard_task(void *arg) {
   int64_t got_ip_us = 0;
   tg_wifi_slot active_trial = {0};
   uint32_t applied_seq = 0;
+  bool trial_started = false;
 
   for (;;) {
     /* Ett KEY3-håll väcker oss direkt. Timeouten behåller den vanliga
@@ -659,6 +661,7 @@ static void guard_task(void *arg) {
         opened_us = now;
         got_ip_us = 0;
         applied_seq = 0;
+        trial_started = false;
         memset(&active_trial, 0, sizeof active_trial);
         atomic_store(&s_phase, TG_WIFI_PHASE_STARTING);
         torget_wifi_ui_set(TG_WIFI_UI_STARTING, NULL, NULL, NULL, 0);
@@ -695,15 +698,16 @@ static void guard_task(void *arg) {
         got_ip_us = 0;
         atomic_store(&s_join_status, TG_WIFI_JOIN_CONNECTING);
         atomic_store(&s_phase, TG_WIFI_PHASE_JOINING);
-        if (!s_hooks->try_credentials ||
-            !s_hooks->try_credentials(active_trial.ssid, active_trial.pass)) {
+        trial_started = s_hooks->try_credentials &&
+            s_hooks->try_credentials(active_trial.ssid, active_trial.pass);
+        if (!trial_started) {
           atomic_store(&s_join_status, TG_WIFI_JOIN_RETRY_CONNECTION);
         }
       }
 
       tg_wifi_join_status join_status = atomic_load(&s_join_status);
-      if (join_status == TG_WIFI_JOIN_CONNECTING) {
-        if (!applied_now && have_ip) {
+      if (trial_started && join_status != TG_WIFI_JOIN_CONNECTED) {
+        if (tg_wifi_join_should_accept(join_status, trial_started, applied_now, have_ip)) {
           /* Detta är den enda skrivvägen: fungerande IP först, NVS sedan. */
           if (tg_wifi_creds_remember(active_trial.ssid, active_trial.pass)) {
             got_ip_us = now;
@@ -713,6 +717,7 @@ static void guard_task(void *arg) {
             if (s_hooks->credentials_accepted)
               s_hooks->credentials_accepted(active_trial.ssid);
           } else {
+            trial_started = false;
             atomic_store(&s_join_status, TG_WIFI_JOIN_RETRY_CONNECTION);
             if (s_hooks->credentials_abandoned)
               s_hooks->credentials_abandoned();
@@ -729,6 +734,7 @@ static void guard_task(void *arg) {
         window_close();
         memset(&active_trial, 0, sizeof active_trial);
         applied_seq = 0;
+        trial_started = false;
         atomic_store(&s_phase, TG_WIFI_PHASE_IDLE);
         last_close_us = now;
         opened_us = 0;

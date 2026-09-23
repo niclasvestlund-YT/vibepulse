@@ -54,6 +54,7 @@
 #include "ota_service.h"
 #include "ota_ui.h"
 #include "rotation.h"
+#include "board_diagnostic.h"
 #include "secrets.h"
 #include "torget.h"
 #include "vibepulse_recovery.h"
@@ -208,7 +209,11 @@ uint8_t torget_wifi_signal_bars(void) {
 void torget_keep_awake(void) { s_last_activity_us = esp_timer_get_time(); }
 
 void torget_update_available(const char *version) {
+#ifndef TORGET_BOARD_191_TOUCH
   torget_ota_service_update_available(version);
+#else
+  (void)version;
+#endif
 }
 
 /* Bootskärmens datasignal: första lyckade hämtningen tar ner skärmen.
@@ -890,16 +895,18 @@ static void display_start(void) {
   /* Board code keeps panel MADCTL and touch transformation as a pair. */
   esp_lcd_touch_handle_t tp = NULL;
   esp_err_t touch_err = tg_board_touch_new(&tp);
-#ifdef TORGET_BOARD_175
-  if (touch_err != ESP_OK)
-    ESP_LOGE(TAG, "1.75 touch unavailable (%s); keeping display alive for diagnosis", esp_err_to_name(touch_err));
-#else
+#if !defined(TORGET_BOARD_175) && !defined(TORGET_BOARD_191_TOUCH)
   ESP_ERROR_CHECK(touch_err);
 #endif
-  if (touch_err == ESP_OK) {
+  if (touch_err == ESP_OK && tp) {
     esp_lv_adapter_touch_config_t adapter_touch =
       ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
     s_touch = esp_lv_adapter_register_touch(&adapter_touch);
+  } else {
+#if defined(TORGET_BOARD_175) || defined(TORGET_BOARD_191_TOUCH)
+    ESP_LOGW(TAG, "board touch unavailable (%s); continuing display-only",
+             esp_err_to_name(touch_err));
+#endif
   }
 
   ESP_ERROR_CHECK(esp_lv_adapter_start());
@@ -930,7 +937,7 @@ esp_err_t torget_round_rotation_set(int quarter_turns) {
   if (err != ESP_OK) return err;
   return esp_lcd_panel_io_tx_param(s_panel_io, lcd_cmd, &madctl, 1);
 }
-#elif !defined(TORGET_BOARD_241_V2)
+#elif !defined(TORGET_BOARD_241_V2) && !defined(TORGET_BOARD_191_TOUCH)
 esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation) {
   static const uint8_t MADCTL[4] = { 0x00, 0x60, 0xC0, 0xA0 };
   static const int GAP[4][2] = { /* {x_gap, y_gap} per läge */
@@ -1109,6 +1116,15 @@ void app_main(void) {
   for (;;) { vTaskDelay(pdMS_TO_TICKS(1000)); }
 #endif
 
+#ifdef TORGET_BOARD_DIAGNOSTIC
+  display_start();
+  torget_ui_lock();
+  tg_board_diagnostic_create();
+  torget_ui_unlock();
+  ESP_ERROR_CHECK(tg_board_brightness_set(20));
+  ESP_LOGI(TAG, "191 static diagnostic: inspect colors and tap corners 1-4");
+  return;
+#endif
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
     ESP_ERROR_CHECK(nvs_flash_erase());
@@ -1210,7 +1226,9 @@ void app_main(void) {
    * Http-servern och dess minneskostnad existerar först när ett KEY3-håll
    * öppnat underhållsfönstret — en boot utan uppdatering ska ha samma
    * minnesprofil som en build helt utan OTA (frysläxan 2026-08-14). */
+#ifndef TORGET_BOARD_191_TOUCH
   torget_ota_service_start();
+#endif
   /* Nätvakten sist och lika lat: accesspunkten, http-servern och
    * DNS-tasken existerar först när setupfönstret öppnats. En panel som
    * hittar sitt nät betalar ingenting för att funktionen finns. */

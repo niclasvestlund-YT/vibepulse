@@ -140,6 +140,11 @@ assert "const int prompt_w = 346, prompt_h = 52" in agent_monitor
 assert "const int command_w = 352, command_h = 48" in agent_monitor
 assert "ny_text_fits(p->title, &plex_body_27, title_w, 34" in agent_monitor
 assert "ny_text_fits(p->subtitle, &plex_ui_16, subtitle_w, 20" in agent_monitor
+assert "#define NY_PROMPT_W 300" in agent_monitor
+assert "#define NY_PROMPT_H 68" in agent_monitor
+assert "#define NY_TITLE_W 392" in agent_monitor
+assert "#define NY_COMMAND_W 432" in agent_monitor
+assert "#define NY_COMMAND_H 62" in agent_monitor
 assert "24, 182, 432" in agent_monitor
 assert "payoff_provider" in agent_monitor
 

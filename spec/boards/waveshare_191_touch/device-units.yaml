@@ -1,0 +1,20 @@
+schema_version: 1
+units:
+- id: vibepulse-191-touch-01
+  friendly_name: VibePulse 1.91 touch porting unit
+  board: waveshare-esp32-s3-touch-amoled-1.91
+  sku_evidence: Owner identified ESP32-S3 touch 1.91; USB confirms S3, 16 MB flash,
+    8 MB PSRAM
+  board_revision: unknown; no SD-card revision claim
+  enclosure: unknown
+  speaker: unknown
+  battery: unknown
+  microsd: unknown
+  antenna: onboard per vendor
+  installed_firmware: Last observed 2026-09-23 after power cycle was v1.1.0-16-g6b05e53-dirty; app SHA256 1906f4317c0c6f13d5d6b2e1391187c7d40961bea7dc29983e85037d773135f0. A later recovery build was flashed and observed once, but a subsequent boot reported this older image again; reason unknown.
+  last_physical_verification: '2026-09-23: four touch corners confirmed; phone Wi-Fi
+    saved; automatic rejoin and local usage fetch verified; owner saw real
+    values and working page swipes after power cycle on the older observed
+    firmware. Recovery build was observed booting display-only once, without
+    an owner swipe check. Photos show readable boot and Codex weekly page.'
+  secrets: false

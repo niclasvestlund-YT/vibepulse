@@ -109,3 +109,7 @@ Do not inherit motion, OTA, Windows physical-loop or long-soak approval from
 another model. Board-safe OTA identification is follow-up work; the V2 guide
 currently specifies USB updates. New animation work follows the separate
 physical performance protocol in the AMOLED skill.
+
+## 1.91 Touch AMOLED development profile
+
+`waveshare_191_touch` uses its own five-file registry under `spec/boards/waveshare_191_touch/`. Native geometry is 536 × 240. See [the port notes](porting-waveshare-191-touch.md) and [installation guide](waveshare-191-touch.md) for measured results and remaining physical checks.
