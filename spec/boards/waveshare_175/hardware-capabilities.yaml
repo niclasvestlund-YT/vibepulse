@@ -8,13 +8,14 @@ capabilities:
     board_wired: 'yes'
     bsp_support: 'yes'
     firmware_enabled: 'yes'
-    unit_verified: unknown
-  confidence: vendor_claimed
+    unit_verified: 'yes'
+  confidence: measured
   resources:
   - QSPI; vendor 466x466 geometry
   - Native LVGL and ESP-IDF application profile; 7456-byte flush
   constraints:
-  - Normal application booted on one unit; owner-visible review and live quota path pending
+  - Owner photographs show the normal application's live Codex quota page on one unit
+  - USB-down connector position and touch alignment await owner confirmation
   - PCB revision unknown; verify exact schematic and BSP before enabling pins
   conflicts: []
   opportunities: []
@@ -22,6 +23,7 @@ capabilities:
   - waveshare-175-docs
   - waveshare-175-reference
   - vibepulse-175-preview
+  - vibepulse-175-physical-2026-09-24
   evidence:
   - field: soc_capable
     value: 'yes'
@@ -35,7 +37,13 @@ capabilities:
   - field: firmware_enabled
     value: 'yes'
     source: vibepulse-175-preview
-  last_verified: unknown
+  - field: unit_verified
+    value: 'yes'
+    source: vibepulse-175-physical-2026-09-24
+  last_verified: '2026-09-24'
+  verification:
+    unit: vibepulse-175-01
+    test: owner-photographed-codex-quota-page
   width: 466
   height: 466
   color_format: RGB565

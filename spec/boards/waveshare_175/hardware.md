@@ -9,8 +9,9 @@ and 8 MB PSRAM. These are vendor facts, not verification of this unit.
 
 The `waveshare_175` selector enables the native VibePulse app and a separate
 `TORGET_ROUND_DIAGNOSTIC=ON` recovery build. The normal app boots, joins Wi-Fi
-and fetches tokens on the named unit. Its physical layout, touch alignment
-and value accuracy still require owner review. The connected unit was first
+and fetches tokens on the named unit. Owner photographs show its physical
+Codex quota page; USB-down mounting, touch alignment and value comparison
+against the host still require review. The connected unit was first
 found running a 1.91 recovery image; see the preview guide for the recovery
 and device-selection lesson.
 

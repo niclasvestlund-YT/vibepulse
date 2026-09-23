@@ -25,15 +25,16 @@ only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
 Current source includes the original **2.16-inch square panel**, the
-**Waveshare 2.41 V2** and a USB-installed **1.91 Touch** development port.
+**Waveshare 2.41 V2**, a USB-installed **1.91 Touch** development port and
+the round **1.75** profile.
 Each needs its own build profile. Start with the [2.41 V2 guide](docs/waveshare-241-v2.md)
 or the [1.91 Touch guide](docs/waveshare-191-touch.md) for the landscape boards.
 
-The round **1.75-inch model has a [native design preview and bench bring-up](docs/waveshare-175-preview.md)**
-with a quota ring, USED TODAY and D:H:M countdown. The bench firmware has
-booted on one unit, the owner photographed its quota page, and it has joined
-Wi-Fi and fetched tokens. Angle, touch and value accuracy still need review
-before public support.
+The round **1.75-inch model has a [physical quota checkpoint](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md)**
+and a [board-specific bring-up guide](docs/waveshare-175-preview.md).
+Its USB-installed profile shows a Codex quota ring, USED TODAY and D:H:M
+countdown on a real unit. Touch alignment, the fixed USB-down mounting and
+the latest Wi-Fi scan change still need final on-unit review.
 
 ## The problem
 
@@ -484,9 +485,11 @@ The support status below reflects our own verification of each model.
 | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=179337) (affiliate) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Its simulator frames are exact 480×480 renders. No soldering. Same board Clawdmeter uses. |
 | [Waveshare ESP32-S3-Touch-AMOLED-2.41](https://www.waveshare.com/esp32-s3-touch-amoled-2.41.htm?&aff_id=179337) (affiliate), **V2 / Rev2.0 only** | 600×450 AMOLED in fixed landscape, capacitive touch; BOOT opens settings | **Supported in current source.** Display bring-up, portrait corner touch, Wi-Fi and owner-visible Codex/Claude usage verified. [Install guide](docs/waveshare-241-v2.md) · [exact evidence](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md). V1, automatic rotation, OTA and physical answer replies are not validated by this port. |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate), **touch variant** | 536×240 AMOLED in fixed landscape; BOOT opens settings | **USB-installed development port in current source.** Four touch corners, phone Wi-Fi setup, saved-network reconnect and visible Codex usage checked on one real unit. [Install guide](docs/waveshare-191-touch.md) · [physical report](docs/superpowers/reviews/2026-09-23-waveshare-191-touch.md). Needs You decisions stay on the computer until a safe compact button layout is verified. Menu navigation, OTA and rotation remain unverified. |
+| [Waveshare ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate), marking **1.75** only | 466×466 round AMOLED; PCB revision unknown | **USB-installed round quota profile in current source.** A real unit boots, joins Wi-Fi and displays Codex usage, USED TODAY and reset countdown in [owner photographs](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md). [Bring-up guide](docs/waveshare-175-preview.md). Fixed USB-down orientation, touch and the latest portal scan still need final on-unit checks; OTA and automatic rotation are unverified. |
 
-The v1.1.0 tag predates both landscape ports. Use current source and explicitly
-select `waveshare_241_v2` or `waveshare_191_touch`; firmware images are board-specific.
+The v1.1.0 tag predates these newer ports. Use current source and explicitly
+select `waveshare_241_v2`, `waveshare_191_touch` or `waveshare_175`;
+firmware images are board-specific.
 More boards are added after physical verification, following
 [Adding a display](docs/adding-a-display.md). The 2.16 registry remains under
 [`spec/`](spec/hardware.md); V2 has its own
@@ -502,6 +505,16 @@ More boards are added after physical verification, following
 momentary account reading; red room lighting limits color judgment. Follow the
 [1.91 Touch guide](docs/waveshare-191-touch.md) for USB flashing and the exact
 phone Wi-Fi steps. This profile is not in the v1.1.0 release.*
+
+#### 1.75 round
+
+<p align="center">
+  <img src="docs/img/175-round/glass-codex-front.jpg" width="420" alt="Owner photograph of the real round 1.75 panel displaying Codex usage at 18 percent">
+</p>
+
+*Real 1.75-inch panel, photographed September 24, 2026. The 18% reading was
+momentary. [Physical evidence and open checks](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md)
+include touch, USB-down mounting and the new two-scan setup behavior.*
 
 #### 2.41 V2 landscape
 
@@ -525,9 +538,8 @@ recovery, sources and troubleshooting.
 
 ### Coming soon — hardware on the workbench
 
-These remaining boards have arrived for development. The 1.75 has a bench
-build, but **no supported firmware release** is available for these boards
-yet, and there is no release date. Each port must pass the
+The remaining 1.8 board has arrived for development, but **no VibePulse
+firmware release** exists for it yet. Each new port must pass the
 [display bring-up and physical verification checklist](docs/adding-a-display.md)
 before moving into the supported table above.
 
@@ -536,7 +548,6 @@ commission. Waveshare supplied this development hardware.
 
 | Planned VibePulse port | Status |
 |---|---|
-| [ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate) | Bench build boots and fetches data on one unit; USB-down angle/touch review pending · coming soon |
 | [ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=179337) (affiliate) | Received · coming soon · not supported yet |
 
 Also received for **VibeMatrix experiments**: the controller, three LED panels
@@ -1079,9 +1090,9 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
   service lifecycle, and a real-host + panel validation report. See
   [Host platform support](docs/platform-support.md).
 - **Other boards or panel sizes?** Current source includes Waveshare **2.16**,
-  **2.41 V2** and the USB-installed **1.91 Touch** development port, each with
-  its own build profile and native layout. AMOLED 1.75 and 1.8 are
-  [planned ports](#coming-soon--hardware-on-the-workbench), without firmware support yet.
+  **2.41 V2**, the USB-installed **1.91 Touch** development port and the
+  **round 1.75** quota profile, each with its own build and native layout.
+  AMOLED 1.8 remains a [planned port](#coming-soon--hardware-on-the-workbench).
   See [adding a display](docs/adding-a-display.md)
   and [#5](https://github.com/niclasvestlund-YT/vibepulse/issues/5).
 - **Cursor, Gemini CLI, other providers?** Not yet —
@@ -1106,14 +1117,16 @@ if VibePulse ends up on your shelf, a ⭐ helps others find it.
 
 Built by [Niclas Vestlund](https://niclasvestlund.se).
 
-## Round 1.75 design preview
+## Round 1.75 on the glass
 
-This 466 × 466 image is native LVGL output with sample data. The bright
-end of the ring is today’s contribution to the total usage; the small
-countdown shows days, hours and minutes. The owner photographed the quota page
-on the named round unit, and its serial log confirms Wi-Fi and token fetches.
-The first photo exposed default labels, now fixed; USB-down orientation is
-installed and awaits visual/touch confirmation. Public support remains pending.
-[Preview, hardware recovery and remaining work](docs/waveshare-175-preview.md).
+The physical 466 × 466 round panel now shows Codex weekly usage, USED TODAY
+and the D:H:M countdown in the owner's photographs. Serial logs confirm Wi-Fi
+join and token fetches. The screen uses a board-specific USB-installed source
+profile; [physical evidence](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md)
+names the remaining touch, mounting and setup checks. The separate image below
+is native LVGL output with sample data, useful for exact layout review.
+[Bring-up and recovery guide](docs/waveshare-175-preview.md).
+
+![Real round 1.75 VibePulse display showing a momentary Codex 18 percent reading](docs/img/175-round/glass-codex-held.jpg)
 
 ![Round 1.75 native LVGL design preview, sample Codex quota](docs/img/round-175-codex.png)

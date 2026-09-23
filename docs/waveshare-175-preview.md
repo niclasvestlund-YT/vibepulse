@@ -5,8 +5,10 @@ The native LVGL view uses the same quota presenter and daily-usage validation
 as the existing screens. The `waveshare_175` firmware profile now builds and
 has booted on the named round unit. The owner photographed the quota page,
 and the unit has joined Wi-Fi and fetched token data. Final visual/touch
-review, the USB-down angle and live value accuracy are still pending,
-so this is a bring-up guide, not a supported release or physical-review report.
+review, the USB-down angle and live value accuracy are still pending.
+This is the bring-up guide for the physically photographed quota profile,
+not a full-board certification. See the
+[named-unit checkpoint](superpowers/reviews/2026-09-24-waveshare-175-round.md).
 
 ```sh
 PYTHON_BIN=.venv/bin/python tools/preview-ui.sh vibepulse waveshare_175
@@ -51,7 +53,7 @@ must still confirm the visible image, colors and matching counters. Simulator
 clicks and serial counts alone do not prove the visual mapping. Motion remains
 behind static physical review and measured stress.
 
-## Remaining work before public support
+## Remaining work beyond the photographed quota profile
 
 The normal application profile now builds and renders quota, attention,
 completion, analytics, settings, Wi-Fi and OTA at native resolution. The
