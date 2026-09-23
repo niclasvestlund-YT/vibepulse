@@ -1,6 +1,6 @@
 #include "rotation.h"
 
-#ifdef TORGET_BOARD_241_V2
+#if defined(TORGET_BOARD_241_V2) || defined(TORGET_BOARD_175)
 /* The square board's measured IMU calibration does not transfer to this
  * rectangular board. The first V2 port deliberately uses fixed landscape. */
 void sg_rotation_start(lv_indev_t *touch) { (void)touch; }

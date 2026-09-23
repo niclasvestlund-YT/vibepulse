@@ -27,7 +27,7 @@ zero and full usage; longest countdown; early exhaustion; wide quota copy; and f
 - The first preview follows supplied fixture minutes. Wall-clock countdown
   integration and post-deadline refresh behaviour remain firmware work.
 
-## Recovery and physical test plan (not executed)
+## Recovery and physical test plan
 
 Confirm the exact unit and revision against the vendor schematic/BSP before
 enabling its power rails. Obtain explicit permission for backup and flash.
@@ -45,9 +45,12 @@ diagnostic; motion comes after static physical review and measured stress.
 
 ## Remaining work before public support
 
-The firmware build is intentionally blocked for this profile: no 1.75 BSP has
-been enabled, and generic settings/Wi-Fi/attention surfaces have not yet been
-adapted to the disk. Finish those surfaces, driver/power bring-up, recovery,
+The normal application build remains blocked: generic settings/Wi-Fi/attention
+surfaces have not yet been adapted to the disk. An explicitly selected
+`TORGET_ROUND_DIAGNOSTIC=ON` build now uses the 1.75 vendor panel sequence,
+GPIO mapping and paired touch transform. It starts at 20% brightness, before
+NVS/network initialization, and displays only the five-target static test.
+This exception is for hardware diagnosis, not installable VibePulse support. Finish those surfaces, driver/power bring-up, recovery,
 touch orientation, service-to-panel/reply verification, full-surface regression
 coverage and a named-unit physical report before claiming support.
 
@@ -75,3 +78,30 @@ and separately check the raw minutes and D:H:M formatter.
 ![Claude sample, native 466 × 466](img/round-175-claude.png)
 
 These are simulator captures, not photographs of the connected panel.
+
+
+## Black screen after swapping displays (2026-09-23)
+
+The round unit enumerated over USB but stayed black after software reset and
+full USB power cycling. A private flash read found the **1.91 recovery app**:
+its complete image SHA-256 matched that task's recorded recovery artifact.
+Six older flashing logs concerned the correct 1.91 unit, but did not cover the
+later installation. Do not use incomplete logs to dismiss an owner's report.
+The app's embedded digest was valid; this was an image for the wrong board,
+not evidence that the round panel itself had failed.
+
+A USB path such as `/dev/cu.usbmodem1101` is reusable when boards are swapped.
+Before every write, select the USB identity, connect, read and compare the
+ROM MAC, and keep that same connection for the write. Keep exclusive serial
+ownership through boot verification when multiple tasks are active. Record
+board profile, app hash, unit identity and boot result together in private
+bench evidence. Publish only sanitized findings. A backup taken now preserves
+the current wrong image; it must not be called a factory recovery image.
+
+The diagnostic driver is based on the vendor BSP and schematic at
+`waveshareteam/ESP32-S3-Touch-AMOLED-1.75@e4344e70c2fa78a13e8a06566507f1ba8af6672a`.
+It uses CO5300 QSPI CS12/CLK38/D4–7, display reset39, gap6/0; CST9217 on
+SDA15/SCL14, reset40/IRQ11, native no-swap mirrored X/Y. LCD and touch use
+VCC3V3; the vendor display path does not reprogram AXP2101. PCB revision stays
+unknown. The vendor-derived panel sequence's Apache-2.0 license is retained
+in `components/torget_board/LICENSE.vendor-175`.

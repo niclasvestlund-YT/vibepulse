@@ -1,6 +1,8 @@
 #include "torget_board.h"
 
-#ifndef TORGET_BOARD_241_V2
+#if defined(TORGET_BOARD_175)
+#include "board_175.inc"
+#elif !defined(TORGET_BOARD_241_V2)
 #include "bsp/touch.h"
 
 esp_err_t tg_board_display_new(size_t transfer_size,

@@ -10,6 +10,7 @@ static void count_touch(lv_event_t *event) {
     lv_obj_set_user_data(button, (void *)(uintptr_t)count);
     lv_obj_t *value = lv_obj_get_child(button, 1);
     lv_label_set_text_fmt(value, "%u", count);
+    printf("round-touch %s count=%u\n", lv_label_get_text(lv_obj_get_child(button, 0)), count);
 }
 
 static lv_obj_t *text(lv_obj_t *parent, const char *value, int y) {

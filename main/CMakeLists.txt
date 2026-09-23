@@ -31,6 +31,7 @@ idf_component_register(
        "../platform/torget_ui.c"
        "../platform/wifi_status_assets.c"
        "../platform/boot_screen.c"
+       "../platform/round_diagnostic.c"
        "../platform/settings_menu.c"
        "../platform/button_arbitration.c"
   # ".." ger `#include "secrets.h"` (gitignorad, kopieras ur secrets.h.example)

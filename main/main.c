@@ -45,6 +45,7 @@
 
 #include "boot_health.h"
 #include "boot_screen.h"
+#include "round_diagnostic.h"
 #include "button_arbitration.h"
 #include "settings_menu.h"
 #include "button_policy.h"
@@ -888,10 +889,18 @@ static void display_start(void) {
 
   /* Board code keeps panel MADCTL and touch transformation as a pair. */
   esp_lcd_touch_handle_t tp = NULL;
-  ESP_ERROR_CHECK(tg_board_touch_new(&tp));
-  esp_lv_adapter_touch_config_t adapter_touch =
-    ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
-  s_touch = esp_lv_adapter_register_touch(&adapter_touch);
+  esp_err_t touch_err = tg_board_touch_new(&tp);
+#ifdef TORGET_BOARD_175
+  if (touch_err != ESP_OK)
+    ESP_LOGE(TAG, "1.75 touch unavailable (%s); keeping display alive for diagnosis", esp_err_to_name(touch_err));
+#else
+  ESP_ERROR_CHECK(touch_err);
+#endif
+  if (touch_err == ESP_OK) {
+    esp_lv_adapter_touch_config_t adapter_touch =
+      ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
+    s_touch = esp_lv_adapter_register_touch(&adapter_touch);
+  }
 
   ESP_ERROR_CHECK(esp_lv_adapter_start());
 }
@@ -909,7 +918,7 @@ static void display_start(void) {
  * fotoforensik. Ser du en ljus kantlinje i ett läge: justera det lägets
  * par (6 på den axel linjen sitter, spegelvänt om den flyttar till
  * motsatt kant). */
-#ifndef TORGET_BOARD_241_V2
+#if !defined(TORGET_BOARD_241_V2) && !defined(TORGET_BOARD_175)
 esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation) {
   static const uint8_t MADCTL[4] = { 0x00, 0x60, 0xC0, 0xA0 };
   static const int GAP[4][2] = { /* {x_gap, y_gap} per läge */
@@ -1072,6 +1081,18 @@ void app_main(void) {
     ESP_LOGW(TAG, "startup-health: föregående VibePulse HTTP-stall "
                   "eskalerade till kontrollerad omstart");
   }
+
+#ifdef TORGET_ROUND_DIAGNOSTIC
+  display_start();
+  torget_ui_lock();
+  tg_round_diagnostic_create(lv_screen_active());
+  torget_ui_unlock();
+  ESP_ERROR_CHECK(tg_board_brightness_set(20));
+  ESP_LOGI(TAG, "1.75 static diagnostic: 466x466, brightness 20%%, DMA largest=%u, internal free=%u",
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+  for (;;) { vTaskDelay(pdMS_TO_TICKS(1000)); }
+#endif
 
   esp_err_t nvs = nvs_flash_init();
   if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {

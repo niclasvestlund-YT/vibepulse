@@ -7,9 +7,9 @@ units:
   board_revision: unknown
   enclosure: unknown
   speaker: unknown
-  battery: unknown
+  battery: not connected (owner confirmed USB-only)
   microsd: unknown
   antenna: unknown
-  installed_firmware: unknown
+  installed_firmware: wrong-board 1.91 recovery v1.1.0-24-g4d78592 (private flash-read identification)
   last_physical_verification: unknown
   secrets: false
