@@ -20,8 +20,10 @@ including the owner's 2.4 GHz network, but the Wi-Fi setup page listed only a
 printer. **Root cause:** the portal trusted one later scan and rejected every
 SSID not in that snapshot; the reason that later scan returned only one record
 is not yet established. **The rule now:** offer an exact-name fallback for
-incomplete scans. Treat a typed SSID as secured, require its password, validate
-both fields, and save nothing until the panel gets an IP from that trial.
+incomplete scans, and merge two scans before the setup AP opens. Treat a typed
+SSID as secured, require its password, validate both fields, and save nothing
+until the panel gets an IP from that trial. A retry improves coverage; it is
+not proof that the unexplained one-network scan cannot recur.
 **Guards:** portal form binding and ESP-IDF build checks, existing trial-before-
 NVS policy, and a physical retry on the round unit. **Watch for:** APSTA scans
 returning fewer networks than boot-time STA scans.

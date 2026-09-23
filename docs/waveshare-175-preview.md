@@ -153,6 +153,13 @@ exact typed SSID with a required password and still saves it only after a
 successful connection. The reason for the inconsistent scan is unconfirmed.
 Owner review and a service-to-panel reading remain the next acceptance checks.
 
+The portal now merges two scans before enabling its own access point, records
+the result of each attempt, and keeps the sixteen strongest distinct network
+names from up to twenty-four radio records per scan. This addresses the
+single-snapshot failure observed on this unit, but the exact cause of the
+first one-network result is still unknown. Manual SSID entry remains the
+recovery path and a physical two-scan result has not yet been measured.
+
 ## USB-down orientation trial (2026-09-24)
 
 The owner confirmed that the native image was upright with USB at the left,
@@ -187,3 +194,24 @@ a stale-marked reading after reconnection. A successful HTTP parse and
 `stale codex=0` log line alone do not prove that `codexWeekPct` is present:
 check the response's percentage and reset fields, then compare the actual
 glass. Keep LAN addresses and raw responses out of public reports.
+
+## Connectivity alternatives to evaluate
+
+The three failure classes need different remedies. A missed SSID is a setup
+discovery problem; the two-scan list and exact-name entry address it. A joined
+Wi-Fi network that blocks the Mac is a service-reachability problem; the
+existing optional numbers relay can bridge that, but still requires some
+Wi-Fi connection. A cold start with no usable Wi-Fi needs a different data
+transport if live values are required.
+
+On a desk with the USB cable connected to the Mac running tokenserver, a
+small host-to-panel quota bridge over the ESP32-S3's observed USB Serial/JTAG
+port is a plausible no-Wi-Fi path. Espressif documents that port as
+bidirectional. It would need framing, freshness/source marking, strict device
+identity, and exclusive-port coordination with flashing and serial logs.
+**No such bridge is implemented or physically validated yet.** USB power from
+a wall adapter would not provide a host to send the data. BLE provisioning is
+another way to deliver Wi-Fi credentials, not a source of quota data when no
+Wi-Fi exists; its radio and heap cost must be measured beside the display.
+See [Espressif's USB Serial/JTAG guide](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-guides/usb-serial-jtag-console.html)
+and [Wi-Fi provisioning guide](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/provisioning/wifi_provisioning.html).

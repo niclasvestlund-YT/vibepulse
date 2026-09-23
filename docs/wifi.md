@@ -73,6 +73,12 @@ Four things about travel that the old firmware got wrong:
    5 GHz-only network even when the phone shows full signal. The manual field
    is a recovery path for an incomplete scan, not proof that a 5 GHz-only
    network is compatible.
+
+   Before the setup access point opens, the panel now scans twice and merges
+   the strongest reading for each visible name. The list is still a best-effort
+   snapshot: a second scan cannot make a hidden, 5 GHz-only or intermittently
+   broadcasting network appear. The exact-name option remains available even
+   when the list is empty or incomplete.
 4. Leave the page open while the glass says JOINING. The browser follows a
    small secret-free status endpoint and reports whether the panel connected
    or needs another try.

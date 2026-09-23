@@ -37,6 +37,8 @@ static const char *TAG = "wifi-setup";
 /* Så många nät setupsidan listar. Fler än så är en rullningslista ingen
  * orkar läsa, och listan bor i .bss — inte på en tasks stack. */
 #define SCAN_MAX 16
+#define SCAN_RECORD_MAX 24
+#define SCAN_ATTEMPTS 2
 
 static struct {
   char ssid[SCAN_MAX][TG_WIFI_SSID_CAP];
@@ -116,28 +118,53 @@ static void derive_ap_password(void) {
 /* ------------------------------------------------------------- skanning */
 
 static void scan_networks(void) {
-  s_scan.n = 0;
-  if (esp_wifi_scan_start(NULL, true) != ESP_OK) {
-    ESP_LOGW(TAG, "skanningen gick inte att starta");
-    return;
-  }
-  static wifi_ap_record_t ap[SCAN_MAX]; /* .bss, inte stacken */
-  uint16_t n = SCAN_MAX;
-  if (esp_wifi_scan_get_ap_records(&n, ap) != ESP_OK) return;
-
-  for (int i = 0; i < (int)n && s_scan.n < SCAN_MAX; i++) {
-    const char *ssid = (const char *)ap[i].ssid;
-    /* Dolda nät har tomt SSID och kan inte väljas ur en lista; ett SSID
-     * med styrtecken hör inte hemma i HTML:en (upstream är fientlig). */
-    if (!tg_wifi_ssid_valid(ssid)) continue;
-    bool dupe = false;
-    for (int j = 0; j < s_scan.n; j++)
-      if (strcmp(s_scan.ssid[j], ssid) == 0) dupe = true;
-    if (dupe) continue;
-    snprintf(s_scan.ssid[s_scan.n], TG_WIFI_SSID_CAP, "%s", ssid);
-    s_scan.rssi[s_scan.n] = ap[i].rssi;
-    s_scan.authmode[s_scan.n] = ap[i].authmode;
-    s_scan.n++;
+  memset(&s_scan, 0, sizeof s_scan);
+  static wifi_ap_record_t ap[SCAN_RECORD_MAX]; /* .bss, inte stacken */
+  for (int attempt = 0; attempt < SCAN_ATTEMPTS; attempt++) {
+    esp_err_t err = esp_wifi_scan_start(NULL, true);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "skanning %d/%d kunde inte starta: %s", attempt + 1,
+               SCAN_ATTEMPTS, esp_err_to_name(err));
+      continue;
+    }
+    uint16_t found = 0;
+    err = esp_wifi_scan_get_ap_num(&found);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "skanning %d/%d saknar antal: %s", attempt + 1,
+               SCAN_ATTEMPTS, esp_err_to_name(err));
+    }
+    uint16_t n = SCAN_RECORD_MAX;
+    err = esp_wifi_scan_get_ap_records(&n, ap);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "skanning %d/%d saknar lista: %s", attempt + 1,
+               SCAN_ATTEMPTS, esp_err_to_name(err));
+      continue;
+    }
+    ESP_LOGI(TAG, "skanning %d/%d: %u rapporterade, %u lästa nät",
+             attempt + 1, SCAN_ATTEMPTS, (unsigned)found, (unsigned)n);
+    for (int i = 0; i < (int)n; i++) {
+      const char *ssid = (const char *)ap[i].ssid;
+      /* Dolda nät har tomt SSID och kan inte väljas ur en lista; ett SSID
+       * med styrtecken hör inte hemma i HTML:en (upstream är fientlig). */
+      if (!tg_wifi_ssid_valid(ssid)) continue;
+      int index = -1;
+      for (int j = 0; j < s_scan.n; j++) {
+        if (strcmp(s_scan.ssid[j], ssid) == 0) { index = j; break; }
+      }
+      if (index < 0 && s_scan.n < SCAN_MAX) index = s_scan.n++;
+      if (index < 0) {
+        int weakest = 0;
+        for (int j = 1; j < s_scan.n; j++)
+          if (s_scan.rssi[j] < s_scan.rssi[weakest]) weakest = j;
+        if (ap[i].rssi <= s_scan.rssi[weakest]) continue;
+        index = weakest;
+      } else if (s_scan.ssid[index][0] && ap[i].rssi <= s_scan.rssi[index]) {
+        continue;
+      }
+      snprintf(s_scan.ssid[index], TG_WIFI_SSID_CAP, "%s", ssid);
+      s_scan.rssi[index] = ap[i].rssi;
+      s_scan.authmode[index] = ap[i].authmode;
+    }
   }
 
   /* Starkast först. Nätet man står bredvid ska ligga överst i listan, inte
@@ -184,7 +211,8 @@ static const char PAGE_HEAD[] =
     "margin-top:14px}"
     "</style></head><body><h1>VibePulse</h1>"
     "<p>Pick a 2.4 GHz network. It is saved only after the panel connects "
-    "successfully. 2.4 GHz only&mdash;5 GHz networks are not visible.</p>"
+    "successfully. 2.4 GHz only&mdash;5 GHz networks are not visible. "
+    "If your network is missing, choose My network isn't listed.</p>"
     "<form method=\"POST\" action=\"/join\" "
     "onsubmit=\"this.querySelector('button').disabled=true\">"
     "<label for=\"ssid\">Wi-Fi network</label>"
