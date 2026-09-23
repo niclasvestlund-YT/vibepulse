@@ -1,6 +1,10 @@
 # Install VibePulse on Waveshare 1.91 Touch AMOLED
 
-**Development port:** phone provisioning, saving the network and reconnecting after reset now pass on the test unit. Transient touch NACKs recovered with bounded retries in the final boot samples. See [the physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact evidence and remaining checks.
+**USB-installed development port:** phone provisioning, saving the network, reconnecting after reset and visible Codex usage now pass on one physical unit. Transient touch NACKs recovered with bounded retries in the final boot samples. See [the physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact evidence and remaining checks.
+
+![Owner photo of Codex weekly usage on the real 1.91-inch panel, held in a hand](img/191-touch/glass-codex-held.jpg)
+
+*Real 1.91-inch panel, photographed on September 23, 2026. The 9% weekly quota is a momentary account reading, not sample data. Red room light prevents a reliable color comparison.*
 
 This development port targets **ESP32-S3 Touch AMOLED 1.91**, in fixed landscape
 **536 × 240**. Select `waveshare_191_touch` explicitly. The default profile still
@@ -65,9 +69,16 @@ idf.py -B build-191 -p /dev/cu.usbmodemYOURPORT flash monitor
 ```
 
 Use the generated flash arguments through `idf.py`; do not guess partition offsets.
-If there are no saved networks, follow the screen's Wi-Fi setup instructions from
-a phone and enter a 2.4 GHz network. Then check for real Claude/Codex usage and
-reset information. Missing data must remain a dash, never a fabricated zero.
+If there are no saved networks, join the temporary `VibePulse-setup` network from
+your phone. The QR code joins that network; it does **not** open the setup page.
+After joining, open `http://192.168.4.1` manually in your phone browser, select
+your 2.4 GHz home network, enter its password and submit. Keep the USB monitor
+open rather than reconnecting it during setup; opening this unit's serial port
+can reset it. If the temporary network's saved password fails after a reboot,
+forget that network and use the password currently shown on the panel. A first
+`NO_AP_FOUND` message can be transient; allow the retry to finish and confirm
+that the screen joins the home network. Then check for real Claude/Codex usage
+and reset information. Missing data must remain a dash, never a fabricated zero.
 
 ## Controls and current limits
 
@@ -89,4 +100,6 @@ requires separately configured local interaction credentials and verification.
 
 *536 × 240 native LVGL fixture; not live account data or a panel photograph.*
 
-The setup QR joins the temporary network; it is not a web link. Once connected, explicitly open `http://192.168.4.1`. Each new setup window can use a new password, so after a reboot forget an old saved VibePulse-setup network if reconnection fails.
+![Owner photo of the VibePulse boot logo on the real 1.91-inch panel](img/191-touch/glass-boot-logo.jpg)
+
+*Real panel during startup; the logo alone does not prove Wi-Fi or usage is ready.*

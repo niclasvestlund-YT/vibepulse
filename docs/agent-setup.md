@@ -1,6 +1,6 @@
 # Setting up VibePulse — a runbook for coding agents
 
-For the 1.91 Touch AMOLED development port, use [its board-specific guide](waveshare-191-touch.md) for firmware and verification.
+For the 1.91 Touch AMOLED development port, use [its board-specific guide](waveshare-191-touch.md) for firmware, phone Wi-Fi setup and verification.
 
 You are most likely here because someone handed you this repo and said
 "set this up for me". This file is the procedure: do the steps in order and
@@ -64,7 +64,9 @@ cannot determine yourself.
 2. **Which exact board and revision?** The default is Waveshare 2.16.
    **2.41 V2 / Rev2.0** requires the explicit `waveshare_241_v2` profile and
    [its build/backup/flash guide](waveshare-241-v2.md), replacing Steps 2–3
-   below. V1 is not supported. Do not infer the model from USB chip identity.
+   below. **1.91 Touch** requires `waveshare_191_touch` and
+   [its own backup/build/flash guide](waveshare-191-touch.md), also replacing
+   Steps 2–3. V1 of the 2.41 is not supported. Do not infer the model from USB chip identity.
    No board → skip to [Simulator only](#simulator-only-no-board).
 3. **Is their WiFi 2.4 GHz?** The ESP32-S3 cannot see 5 GHz at all. This is
    the single most common "it won't connect" cause. Ask; don't assume.
@@ -83,7 +85,7 @@ Then edit `secrets.h`. Two separate things must be right:
 
 - `TG_WIFI_SSID` / `TG_WIFI_PASS` — optional compiled 2.4 GHz fallback.
   Both may stay empty: the panel opens local phone provisioning after about
-  90 seconds, or via SETTINGS → WIFI (KEY3 on 2.16, BOOT on 2.41 V2).
+  90 seconds, or via SETTINGS → WIFI (KEY3 on 2.16, BOOT on 2.41 V2 or 1.91 Touch).
   Learned networks live in that panel's NVS, not automatically in a Mac's
   header. Missing credentials are not proof of an open network. See
   [wifi.md](wifi.md); never ask users to paste passwords into public logs.
@@ -147,7 +149,9 @@ keep it that way.
 
 These default commands are for **2.16**. For **2.41 V2** follow
 [the V2 guide](waveshare-241-v2.md#3-build-the-exact-board-profile) using
-`build-241` and a separate SDK config. Use the same build directory when
+`build-241` and a separate SDK config. For **1.91 Touch**, follow
+[its build guide](waveshare-191-touch.md#build-and-test-the-board) using
+`build-191` and `sdkconfig.191`. Use the same build directory when
 flashing; never switch to an older default `build/` image.
 
 ```sh
@@ -623,6 +627,8 @@ TORGET_CAPTURE_DIR=/tmp/caps ./sim/build/torget-sim --vibepulse-static-qa
 
 For 2.41 V2, `tools/preview-ui.sh vibepulse waveshare_241_v2` builds a separate
 simulator and validates its complete capture set at 600 × 450.
+For 1.91 Touch, use `tools/preview-ui.sh vibepulse waveshare_191_touch` for
+native 536 × 240 captures.
 
 ## Changing things afterwards
 

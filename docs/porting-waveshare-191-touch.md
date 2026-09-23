@@ -79,3 +79,8 @@ A real phone attempt exposed a shared onboarding bug: after NO_AP_FOUND (201), t
 ## Final session outcome
 
 Phone onboarding, credential persistence and automatic rejoin passed after the fix. Bounded touch retries recovered transient NACKs in 7 ms in two boot samples, without incrementing the panic counter. See [the final physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact firmware and remaining limits; it supersedes earlier pending statuses in this investigation narrative.
+
+Five owner-supplied photographs now document startup and the real Codex weekly
+page on this unit. They live in `docs/img/191-touch/glass-*.jpg`; the 9% quota
+is a dated account reading, not a fixture. The red ambient light limits color
+judgment, and still images do not verify menu navigation or interaction replies.

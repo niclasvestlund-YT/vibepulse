@@ -19,3 +19,6 @@ x=28; compact surfaces use 240px height and native fonts, not runtime bitmap
 scaling. Flush budget is 8,576 B, below the original 11,520 B. Static diagnostic
 uses existing LVGL objects with no extra persistent canvas. OTA is disabled
 for this new profile until board-specific image validation is implemented.
+Owner photographs from September 23 show readable startup and Codex weekly
+content on the physical panel. They do not verify calibrated color, the full
+menu, motion or an approval round trip.

@@ -20,6 +20,9 @@ App SHA256: `1906f4317c0c6f13d5d6b2e1391187c7d40961bea7dc29983e85037d773135f0`.
   two sampled boots. Earlier development builds had touch-initialization panics.
 - The first transient touch NACK in both final boot samples recovered with one
   retry in 7 ms. This is measured recovery, not proof that all bus faults are gone.
+- Five owner-supplied photographs show the real panel during boot and on the
+  Codex weekly page. The 9% quota, reset time, header and footer appear readable
+  within the glass on these static views. See `docs/img/191-touch/glass-*.jpg`.
 
 ## Defects found and corrected
 
@@ -50,7 +53,8 @@ was checked for dimensions, plus tracker clearance and QR raster checks. The hos
 suite passed on the initial port; targeted Wi-Fi regressions, onboarding/wiring
 checks and firmware build passed after the connection fix.
 
-No panel photograph or exhaustive physical visual acceptance was supplied.
+The photographs are static and were taken under strong red room lighting, so they
+do not establish calibrated colors or an exhaustive physical visual acceptance.
 BOOT menu operation needs a separate final owner check. Motion/stress testing,
 OTA, battery, SD, audio, IMU and approval round trips are not verified. This is a
 USB-installed development port with local usage display, not a tagged release.

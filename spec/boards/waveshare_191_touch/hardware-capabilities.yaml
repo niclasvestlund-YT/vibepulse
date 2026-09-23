@@ -8,20 +8,22 @@ capabilities:
     board_wired: 'yes'
     bsp_support: 'yes'
     firmware_enabled: 'yes'
-    unit_verified: unknown
-  confidence: source_inspected
+    unit_verified: 'yes'
+  confidence: measured
   resources:
   - 'SPI2: CS6 CLK47 DATA0/1/2/3=18/7/48/5; reset GPIO17'
   - 536x240 landscape; QSPI 40 MHz RGB565
   constraints:
   - MADCTL 0xF0; zero address gap
   - 8 rows x 536 pixels x 2 = 8576 bytes per flush
-  - Physical verification pending; static UI only
+  - Static Codex quota page readable in owner photos; red light prevents color judgment
+  - Full menu, animation and long-running physical review pending
   conflicts: []
   opportunities: []
   sources:
   - waveshare-191-1986f380
   - vibepulse-191-port
+  - owner-191-display-20260923
   evidence:
   - field: soc_capable
     value: 'yes'
@@ -35,7 +37,13 @@ capabilities:
   - field: firmware_enabled
     value: 'yes'
     source: vibepulse-191-port
+  - field: unit_verified
+    value: 'yes'
+    source: owner-191-display-20260923
   last_verified: '2026-09-23'
+  verification:
+    unit: vibepulse-191-touch-01
+    test: visible-codex-static
   width: 536
   height: 240
   color_format: RGB565

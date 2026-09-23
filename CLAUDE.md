@@ -10,9 +10,9 @@ table. Never flash the board without the user explicitly asking you to.
 
 ## Over-the-air updates
 
-This workflow applies to the original 2.16 board. Update 2.41 V2 over USB
-using `docs/waveshare-241-v2.md`; OTA and board identification in the update
-chain are not validated for V2.
+This workflow applies to the original 2.16 board. Update 2.41 V2 and 1.91 Touch
+over USB using their board-specific guides; OTA and board identification in the
+update chain are not validated for these ports.
 
 Day-to-day firmware goes over the air: `idf.py build && tools/ota-flash.sh`
 (device IP from git-ignored `.ota-device`). The full loop, consent model and
