@@ -34,6 +34,9 @@ The original quota font lacked percent and missing-data glyphs. A native 84 px
 font adds them. Tracker summary spacing overlapped its pager; native raster
 checks now enforce a clear strip. The QR screen omitted the second browser step;
 it now explicitly says to join the setup network and open http://192.168.4.1.
+Both compact setup recovery buttons were increased to 90 px high and their
+rendered outlines checked in the native simulator. This final button layout
+has not been reflashed for a second on-glass tap test.
 
 The radio reported NO_AP_FOUND (201), then retried successfully, but setup only
 accepted DHCP while its status remained CONNECTING. The stale error prevented

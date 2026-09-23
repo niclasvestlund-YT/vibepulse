@@ -35,8 +35,9 @@ Before the first install, identify the actual USB port and read a private backup
 
 ```sh
 python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT flash_id
-python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT read_flash 0 0x1000000 factory-private.bin
-python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT verify_flash 0 factory-private.bin
+mkdir -p backups
+python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT read_flash 0 0x1000000 backups/factory-private.bin
+python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT verify_flash 0 backups/factory-private.bin
 ```
 
 The tested unit has 16 MB flash and 8 MB PSRAM. Keep the backup and built firmware
@@ -79,6 +80,10 @@ forget that network and use the password currently shown on the panel. A first
 `NO_AP_FOUND` message can be transient; allow the retry to finish and confirm
 that the screen joins the home network. Then check for real Claude/Codex usage
 and reset information. Missing data must remain a dash, never a fabricated zero.
+
+![Native 1.91-inch Wi-Fi setup screen with QR code and two phone steps](img/191-touch/wifi-setup-qr.png)
+
+*Simulator capture at the panel's native 536 × 240 size.*
 
 If the serial log says `1.91 touch unavailable`, the display continues to boot
 without touch instead of restarting in a loop. Disconnect USB power for about

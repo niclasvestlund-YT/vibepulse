@@ -87,19 +87,19 @@ static void compact_layout(bool open, bool qr_open) {
   compact_position(ui.word, 10, 8, 460);
   compact_position(ui.foot, 10, 213, 460);
   if (qr_open) {
-    compact_position(ui.lead, 214, 42, 252);
-    compact_position(ui.hint1, 214, 100, 252);
+    compact_position(ui.lead, 214, 50, 252);
+    compact_position(ui.hint1, 214, 82, 252);
     lv_obj_set_style_text_letter_space(ui.hint1, 0, 0);
     lv_obj_set_style_text_letter_space(ui.lead, 0, 0);
-    lv_obj_set_pos(ui.action, 220, 158);
-    lv_obj_set_size(ui.action, 240, 44);
+    lv_obj_set_pos(ui.action, 220, 112);
+    lv_obj_set_size(ui.action, 240, 90);
   } else if (open) {
     compact_position(ui.lead, 10, 40, 460);
     compact_position(ui.primary, 10, 65, 460);
     compact_position(ui.secondary, 10, 96, 460);
-    compact_position(ui.hint1, 10, 128, 460);
-    lv_obj_set_pos(ui.action, 130, 159);
-    lv_obj_set_size(ui.action, 220, 46);
+    compact_position(ui.hint1, 10, 135, 285);
+    lv_obj_set_pos(ui.action, 310, 124);
+    lv_obj_set_size(ui.action, 160, 90);
   } else {
     compact_position(ui.primary, 10, 85, 460);
     compact_position(ui.detail, 10, 131, 460);
@@ -278,8 +278,8 @@ static void render_open_view(void) {
   show(ui.action, ui.qr_available);
 #ifdef TORGET_BOARD_191_TOUCH
   if (qr_open) {
-    lv_label_set_text(ui.lead, "1  SCAN & JOIN\nVibePulse-setup");
-    lv_label_set_text(ui.hint1, "2  OPEN IN BROWSER\nhttp://192.168.4.1");
+    lv_label_set_text(ui.lead, "1  SCAN TO JOIN WIFI");
+    lv_label_set_text(ui.hint1, "2  OPEN 192.168.4.1");
     show(ui.hint1, true);
   }
   compact_layout(true, qr_open);

@@ -15,4 +15,16 @@ with Image.open(root/'vibepulse-tracker-codex-full.png') as im:
 with Image.open(root/'wifi-setup-qr.png') as im:
  colors={color for count,color in im.convert('RGB').crop((56,42,220,206)).getcolors(164*164)}
  assert (0,0,0) in colors and (255,255,255) in colors
-print(f'PASS: {len(frames)} native 536x240 frames, tracker clearance and QR raster')
+# Both setup recovery controls must have a visible 90 px hit area on this board.
+# Check the rendered top/bottom outlines, not just the C size arguments.
+for name, left, right, top, bottom in [
+ ('wifi-setup-qr.png',248,488,112,201),
+ ('wifi-setup-manual.png',338,498,124,213),
+]:
+ with Image.open(root/name) as im:
+  rgb=im.convert('RGB')
+  assert bottom-top+1 >= 90
+  for row in (top,bottom):
+   bright=sum(any(rgb.getpixel((x,row))) for x in range(left,right))
+   assert bright > (right-left)//2, (name,row,bright)
+print(f'PASS: {len(frames)} native 536x240 frames, tracker clearance, QR and 90px setup controls')
