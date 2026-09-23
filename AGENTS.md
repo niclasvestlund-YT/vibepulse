@@ -214,6 +214,10 @@ overifierad.
 ## Hardware-aware work
 
 Select the board first. The five root files below describe **2.16 only**.
+For the experimental **1.91 Touch AMOLED**, use the five files under
+`spec/boards/waveshare_191_touch/` and `docs/waveshare-191-touch.md`.
+Native geometry is 536 × 240; USB updates only. Keep its open physical
+verification items explicit.
 For **2.41 V2**, read the same five filenames under
 `spec/boards/waveshare_241_v2/`; validate that directory separately. Never
 transfer installed firmware or physical verification between board registries.

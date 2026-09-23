@@ -2174,4 +2174,3 @@ lv_font_t plex_quota_84 = {
 
 
 #endif /*#if PLEX_QUOTA_84*/
-

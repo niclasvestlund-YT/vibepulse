@@ -3,6 +3,7 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
+#include "freertos/task.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_sh8601.h"
@@ -15,6 +16,19 @@
 static const char *TAG = "board-191";
 static i2c_master_bus_handle_t bus;
 static esp_lcd_panel_io_handle_t panel_io;
+static esp_err_t (*touch_read_original)(esp_lcd_touch_handle_t);
+static esp_err_t touch_read_diagnosed(esp_lcd_touch_handle_t touch) {
+    static bool reported;
+    const TickType_t started = xTaskGetTickCount();
+    const esp_err_t err = touch_read_original(touch);
+    if (err != ESP_OK && !reported) {
+        reported = true;
+        ESP_LOGW(TAG, "first touch read failure: %s after %lu ms",
+                 esp_err_to_name(err),
+                 (unsigned long)((xTaskGetTickCount() - started) * portTICK_PERIOD_MS));
+    }
+    return err;
+}
 static const sh8601_lcd_init_cmd_t commands[] = {
     {0x11, NULL, 0, 120},
     {0x36, (uint8_t[]){0xF0}, 1, 0},
@@ -76,6 +90,8 @@ esp_err_t tg_board_touch_new(esp_lcd_touch_handle_t *touch) {
      * profile uses continuous polling, so explicitly disable automatic monitor
      * (0x86) and select active power mode (0xA5) after generic driver init.
      * Register reference: LilyGO Arduino_FT3x68.h/cpp, FT3168 example. */
+    touch_read_original = (*touch)->read_data;
+    (*touch)->read_data = touch_read_diagnosed;
     const uint8_t active = 0;
     ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(touch_io, 0x86, &active, 1), TAG, "touch auto-monitor off");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(touch_io, 0xA5, &active, 1), TAG, "touch active mode");
