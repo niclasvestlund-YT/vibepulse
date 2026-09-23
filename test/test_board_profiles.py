@@ -146,6 +146,10 @@ class Native191RasterTests(unittest.TestCase):
                 with Image.open(self.output / capture) as current:
                     self.assertEqual(image.tobytes(), current.convert("RGB").tobytes())
 
+    def test_compact_layout_regression(self):
+        result = run([sys.executable, "test/test_191_layout.py", str(self.output)])
+        self.assertIn("PASS:", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
