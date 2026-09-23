@@ -137,6 +137,9 @@ void torget_settings_click_row(tg_settings_row row) {
        * Raden är nedtonad och trycket ignoreras — hellre en rad som
        * synligt inte går att välja än ett fönster som öppnas och sedan
        * inte kan göra något. ABOUT säger varför: ADDRESS visar streck. */
+#ifdef TORGET_BOARD_191_TOUCH
+      break; /* USB-only profile: reject untyped OTA images. */
+#endif
       if (!ui.ip[0]) break;
       /* Menyn stänger sig själv och lämnar över. Fönsterordningen — vem som
        * äger port 80 — avgörs av main.c, aldrig härifrån. */
@@ -231,6 +234,24 @@ void torget_settings_create(void) {
                               &ui.about_back_label, "BACK");
   lv_obj_add_event_cb(ui.about_back, back_clicked_cb, LV_EVENT_CLICKED, NULL);
 
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_style_text_font(ui.word, &plex_ui_21, 0);
+  lv_obj_set_y(ui.word, 14);
+  lv_obj_set_style_text_font(ui.foot, &plex_ui_21, 0);
+  lv_obj_set_y(ui.foot, 209);
+  for (int i = 0; i < TG_SETTINGS_ROW_COUNT; ++i) {
+    lv_obj_set_pos(ui.rows[i], 14 + (i % 2) * 232, 52 + (i / 2) * 73);
+    lv_obj_set_size(ui.rows[i], 220, 60);
+    lv_obj_set_style_text_letter_space(ui.row_labels[i], 0, 0);
+  }
+  for (int i = 0; i < ABOUT_ROWS; ++i) {
+    lv_obj_set_y(ui.about_labels[i], 48 + i * 52);
+    lv_obj_set_y(ui.about_values[i], 70 + i * 52);
+    lv_obj_set_style_text_font(ui.about_values[i], &plex_ui_21, 0);
+  }
+  lv_obj_set_pos(ui.about_back, 130, 155);
+  lv_obj_set_size(ui.about_back, 220, 45);
+#endif
   ui.view = VIEW_MENU;
   ui.about_dirty = true;
   render();
@@ -273,6 +294,10 @@ static void render(void) {
    * raden försvinner — den ska finnas kvar så menyn inte byter form. */
   {
     bool can_update = ui.ip[0] != '\0';
+#ifdef TORGET_BOARD_191_TOUCH
+    can_update = false;
+    if (menu) lv_label_set_text(ui.row_labels[TG_SETTINGS_ROW_UPDATE], "UPDATE VIA USB");
+#endif
     if (menu) lv_obj_set_style_text_color(ui.row_labels[TG_SETTINGS_ROW_UPDATE],
                                 can_update ? lv_color_white() : COL_MUTED, 0);
   }

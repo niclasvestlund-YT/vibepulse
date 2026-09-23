@@ -1080,3 +1080,11 @@ This is my first open source release. Issues and PRs are very welcome, and
 if VibePulse ends up on your shelf, a ⭐ helps others find it.
 
 Built by [Niclas Vestlund](https://niclasvestlund.se).
+
+### Waveshare 1.91 Touch AMOLED development port
+
+A compact 536 × 240 profile is being verified on hardware. See the [installation guide](docs/waveshare-191-touch.md) and [port notes](docs/porting-waveshare-191-touch.md) for the exact evidence and current limits. Select `waveshare_191_touch`; use USB for updates.
+
+![Native 1.91 compact quota preview](docs/img/191-touch/vibepulse-claude-fable.png)
+
+*Native LVGL fixture at 536 × 240; not a photograph or live account data.*

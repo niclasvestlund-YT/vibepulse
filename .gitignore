@@ -36,3 +36,5 @@ docs/img/mockups/*.svg
 # Private board backups and generated V2 configuration.
 /backups/
 /sdkconfig.241-v2*
+
+/sdkconfig.191*

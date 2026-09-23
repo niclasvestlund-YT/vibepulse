@@ -1,0 +1,93 @@
+# Install VibePulse on Waveshare 1.91 Touch AMOLED
+
+**Known issue in the current development build:** recurring touch I2C read errors and incomplete phone onboarding verification. This is a port under investigation, not a ready-to-release installation path.
+
+This development port targets **ESP32-S3 Touch AMOLED 1.91**, in fixed landscape
+**536 × 240**. Select `waveshare_191_touch` explicitly. The default profile still
+builds the 2.16-inch board. This port is not part of the v1.1.0 release.
+
+The September 23, 2026 installation established USB programming and a working
+four-corner touch diagnostic. The owner reported `1:1 2:1 3:1 4:1`, confirming
+one correctly mapped touch in each corner. PCB revision, full physical UI
+review and optional peripherals are separate, unverified claims.
+
+## Prepare
+
+Follow [agent setup](agent-setup.md) for the computer service. Reuse an existing
+healthy tokenserver. Adding this panel does not require reinstalling that service.
+The initial port was built on macOS using ESP-IDF 5.5.2 and LVGL 9.5.0.
+
+```sh
+test -f secrets.h || cp secrets.h.example secrets.h
+. ~/esp/esp-idf/export.sh
+```
+
+Set `TK_VIBEPULSE_BASE_URL` in the private `secrets.h` to your computer's reachable
+LAN address. On macOS, `scutil --get LocalHostName` gives its Bonjour name.
+Keep the endpoint macros enabled. Discovery is attempted before this fallback.
+Wi-Fi fields may remain empty for phone provisioning after installation.
+Device approval keys and relays are optional; they are not needed for usage display.
+
+Before the first install, identify the actual USB port and read a private backup:
+
+```sh
+python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT flash_id
+python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT read_flash 0 0x1000000 factory-private.bin
+python -m esptool --chip esp32s3 --port /dev/cu.usbmodemYOURPORT verify_flash 0 factory-private.bin
+```
+
+The tested unit has 16 MB flash and 8 MB PSRAM. Keep the backup and built firmware
+private: flash images can contain network configuration. Do not attach them to a
+public guide or release.
+
+## Build and test the board
+
+```sh
+idf.py -B build-191 -D SDKCONFIG=sdkconfig.191 \
+  -D TORGET_BOARD=waveshare_191_touch \
+  -D TORGET_SOLELKOLLEN_DIR=/nonexistent \
+  -D TORGET_BUDDY_DIR=/nonexistent \
+  -D TORGET_BOARD_DIAGNOSTIC=ON build
+idf.py -B build-191 -p /dev/cu.usbmodemYOURPORT flash
+```
+
+The static diagnostic labels the native dimensions, draws color samples and four
+numbered touch targets. Inspect orientation and colors, then touch each target
+once. Every counter should become 1 in its corresponding corner. Record actual
+results for each new hardware revision rather than inheriting this unit's results.
+
+Build the normal application explicitly with the diagnostic disabled:
+
+```sh
+idf.py -B build-191 -D SDKCONFIG=sdkconfig.191 \
+  -D TORGET_BOARD=waveshare_191_touch \
+  -D TORGET_BOARD_DIAGNOSTIC=OFF build
+idf.py -B build-191 -p /dev/cu.usbmodemYOURPORT flash monitor
+```
+
+Use the generated flash arguments through `idf.py`; do not guess partition offsets.
+If there are no saved networks, follow the screen's Wi-Fi setup instructions from
+a phone and enter a 2.4 GHz network. Then check for real Claude/Codex usage and
+reset information. Missing data must remain a dash, never a fabricated zero.
+
+## Controls and current limits
+
+Swipe between pages. Hold BOOT while the application is running to open Settings.
+Holding BOOT while resetting instead enters the chip's download mode.
+Updates for this profile use USB; the Settings update control says `UPDATE VIA USB`.
+Automatic rotation and new motion effects are disabled for this first static port.
+
+The main content occupies a centered 480 × 240 viewport; the panel driver and
+native screenshots are 536 × 240. Layouts are rearranged for the available height,
+not stretched from a square image. Approval text uses the same fit check as its
+renderer; content that cannot fit falls back to the computer. Answering prompts
+requires separately configured local interaction credentials and verification.
+
+[Hardware and pin evidence](../spec/boards/waveshare_191_touch/hardware.md) ·
+[Port implementation notes](porting-waveshare-191-touch.md)
+
+![Native compact quota layout](img/191-touch/vibepulse-claude-fable.png)
+
+*536 × 240 native LVGL fixture; not live account data or a panel photograph.*
+
+The setup QR joins the temporary network; it is not a web link. Once connected, explicitly open `http://192.168.4.1`. Each new setup window can use a new password, so after a reboot forget an old saved VibePulse-setup network if reconnection fails.

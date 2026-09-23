@@ -1,5 +1,7 @@
 # Setting up VibePulse — a runbook for coding agents
 
+For the 1.91 Touch AMOLED development port, use [its board-specific guide](waveshare-191-touch.md) for firmware and verification.
+
 You are most likely here because someone handed you this repo and said
 "set this up for me". This file is the procedure: do the steps in order and
 verify each one before moving on. Everything here is English; much of the

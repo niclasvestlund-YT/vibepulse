@@ -1,0 +1,29 @@
+schema_version: 1
+sources:
+- id: waveshare-191-1986f380
+  kind: source-code
+  rank: 3
+  title: Waveshare 1.91 factory, landscape LVGL and Arduino examples
+  publisher: Waveshare
+  locator: https://github.com/waveshareteam/ESP32-S3-AMOLED-1.91/tree/1986f380a4e668da5f4e2b93de9bd82555788018
+  revision: 1986f380a4e668da5f4e2b93de9bd82555788018
+  accessed: '2026-09-23'
+- id: vibepulse-191-port
+  kind: source-code
+  rank: 3
+  title: VibePulse 1.91 board profile and native compact UI
+  publisher: VibePulse
+  locator: components/torget_board/board_191.c
+  revision: codex/waveshare-191-touch on 3ce0e73
+  accessed: '2026-09-23'
+- id: owner-191-corners-20260923
+  kind: physical-test
+  rank: 1
+  title: Owner confirmed diagnostic counters 1:1 2:1 3:1 4:1
+  publisher: Device owner
+  locator: docs/porting-waveshare-191-touch.md
+  revision: '2026-09-23'
+  accessed: '2026-09-23'
+  unit: vibepulse-191-touch-01
+  tests:
+  - four-corner-touch

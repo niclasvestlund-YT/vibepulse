@@ -35,6 +35,7 @@ class BoardSelectionTests(unittest.TestCase):
                 'message(STATUS "profile=${TORGET_BOARD};defs=${defs}")\n'
             )
             for board, expected in [(None, "waveshare_216;defs="),
+                                    ("waveshare_191_touch", "waveshare_191_touch;defs=TORGET_BOARD_191_TOUCH=1"),
                                     ("waveshare_216", "waveshare_216;defs="),
                                     ("waveshare_241_v2", "waveshare_241_v2;defs=TORGET_BOARD_241_V2=1")]:
                 with self.subTest(board=board):

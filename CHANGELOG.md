@@ -13,6 +13,8 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- Development port for Waveshare 1.91 Touch AMOLED: native 536 × 240 layout, QSPI display, mapped touch, BOOT settings, USB installation guide and port evidence. Four-corner touch verified; full physical acceptance remains separate.
+
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
   product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).
   AMOLED 1.75/1.8/1.91 ports are planned; RGB matrix hardware is experimental.

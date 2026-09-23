@@ -241,6 +241,7 @@ static const char JOIN_PAGE[] =
     "</script></body></html>";
 
 static esp_err_t page_get(httpd_req_t *req) {
+  ESP_LOGI(TAG, "setup page requested");
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send_chunk(req, PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
 

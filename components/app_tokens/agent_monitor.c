@@ -10,7 +10,7 @@
 #include "needs_you_policy.h"
 #include "interaction_relay_policy.h"
 #include "torget.h"
-#include "vibepulse_layout.generated.h"
+#include "board_layout.h"
 
 extern const lv_font_t plex_attention_18;
 extern const lv_font_t plex_attention_25;
@@ -207,6 +207,9 @@ static void completion_pulse_stop(void) {
 
 static void completion_pulse_start(void) {
   completion_pulse_stop();
+#ifdef TORGET_BOARD_191_TOUCH
+  return; /* Static until this physical display has a motion review. */
+#endif
   lv_anim_t anim;
   lv_anim_init(&anim);
   lv_anim_set_var(&anim, &mon.completion);
@@ -388,6 +391,18 @@ static void create_completion(lv_obj_t *app_root) {
   lv_obj_set_style_text_letter_space(view->dismiss, 2, 0);
   lv_label_set_text(view->dismiss, "TAP TO DISMISS");
 
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_size(view->outline, 464, 224);
+  lv_obj_set_pos(view->provider, 170, 20); lv_obj_set_width(view->provider, 290);
+  lv_obj_set_pos(view->icon_ring, 20, 55);
+  lv_obj_set_pos(claude_group, 32, 67);
+  lv_obj_set_pos(view->codex_icon, 32, 67);
+  lv_obj_set_pos(view->title, 165, 63); lv_obj_set_size(view->title, 295, 66);
+  lv_obj_set_style_text_font(view->title, &plex_body_27, 0);
+  lv_obj_set_pos(view->project, 165, 121); lv_obj_set_size(view->project, 295, 32);
+  lv_obj_set_pos(view->detail, 165, 161); lv_obj_set_size(view->detail, 295, 25);
+  lv_obj_set_pos(view->dismiss, 165, 201); lv_obj_set_width(view->dismiss, 295);
+#endif
   lv_obj_add_flag(view->root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -497,6 +512,19 @@ static bool ny_text_fits(const char *text, const lv_font_t *font,
          horizontal_ink_inside;
 }
 
+#ifdef TORGET_BOARD_191_TOUCH
+#define NY_PROMPT_W 366
+#define NY_PROMPT_H 52
+#define NY_TITLE_W 346
+#define NY_COMMAND_W 366
+#define NY_COMMAND_H 38
+#else
+#define NY_PROMPT_W 300
+#define NY_PROMPT_H 68
+#define NY_TITLE_W 392
+#define NY_COMMAND_W 432
+#define NY_COMMAND_H 62
+#endif
 static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
                                            const tk_needs_you_view *decision) {
   ny_physical_fit fit = {.private_fallback = true,
@@ -507,9 +535,9 @@ static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
 
   if (decision->kind == TK_PENDING_QUESTION) {
     bool prompt_ok = p->has_prompt &&
-        ny_text_fits(p->prompt, &plex_body_27, 300, 68, false);
+        ny_text_fits(p->prompt, &plex_body_27, NY_PROMPT_W, NY_PROMPT_H, false);
     if (!prompt_ok && p->has_prompt &&
-        ny_text_fits(p->prompt, &plex_ui_21, 300, 68, false)) {
+        ny_text_fits(p->prompt, &plex_ui_21, NY_PROMPT_W, NY_PROMPT_H, false)) {
       prompt_ok = true;
       fit.prompt_font = &plex_ui_21;
     }
@@ -521,23 +549,23 @@ static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
       return fit;
     }
     if (!p->has_title ||
-        !ny_text_fits(p->title, &plex_body_27, 392, 34, true)) return fit;
+        !ny_text_fits(p->title, &plex_body_27, NY_TITLE_W, 34, true)) return fit;
     if (p->has_subtitle &&
-        !ny_text_fits(p->subtitle, &plex_ui_16, 392, 20, true)) return fit;
+        !ny_text_fits(p->subtitle, &plex_ui_16, NY_TITLE_W, 20, true)) return fit;
     fit.private_fallback = false;
     fit.can_approve = decision->offer_approve;
     return fit;
   }
 
   if (!p->has_title) return fit;
-  bool command_ok = ny_text_fits(p->title, &plex_mono_40, 432, 62, false);
-  if (!command_ok && ny_text_fits(p->title, &plex_mono_24, 432, 62, false)) {
+  bool command_ok = ny_text_fits(p->title, &plex_mono_40, NY_COMMAND_W, NY_COMMAND_H, false);
+  if (!command_ok && ny_text_fits(p->title, &plex_mono_24, NY_COMMAND_W, NY_COMMAND_H, false)) {
     command_ok = true;
     fit.command_font = &plex_mono_24;
   }
   if (!command_ok) return fit;
   if (p->has_subtitle &&
-      !ny_text_fits(p->subtitle, &plex_body_27, 300, 68, false)) return fit;
+      !ny_text_fits(p->subtitle, &plex_body_27, NY_PROMPT_W, NY_PROMPT_H, false)) return fit;
   if (p->has_tool) {
     char tool[TK_PENDING_TOOL_CAP];
     ny_ascii_lower(p->tool, tool, sizeof tool);
@@ -852,6 +880,45 @@ static void create_needs_you(lv_obj_t *app_root) {
   lv_label_set_text(v->po_word, "ON IT");
   v->po_echo = ny_text(v->po_group, &plex_ui_16, COL_MUTED, 0, 358, 480, 0, C);
 
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_pos(v->frame, 6, 6); lv_obj_set_size(v->frame, 468, 228);
+  lv_obj_set_style_radius(v->frame, 22, 0);
+  lv_obj_set_pos(v->a_ring, 26, 42);
+  lv_obj_set_pos(v->a_mascot, 40, 66);
+  lv_obj_set_pos(v->a_codex_icon, 72, 86);
+  lv_obj_set_pos(v->a_word, 194, 66); lv_obj_set_width(v->a_word, 270);
+  lv_obj_set_style_text_font(v->a_word, &plex_body_27, 0);
+  lv_obj_set_pos(v->a_project, 190, 114); lv_obj_set_width(v->a_project, 274);
+  lv_obj_set_pos(v->a_tap, 190, 169); lv_obj_set_width(v->a_tap, 274);
+  lv_obj_set_pos(v->h_ring, 0, 60);
+  lv_obj_set_pos(v->h_mascot, 12, 72);
+  lv_obj_set_pos(v->h_codex_icon, 12, 72);
+  lv_obj_set_pos(v->h_eyebrow, 94, 14); lv_obj_set_width(v->h_eyebrow, 366);
+  lv_obj_set_pos(v->q_prompt, 94, 36); lv_obj_set_size(v->q_prompt, NY_PROMPT_W, NY_PROMPT_H);
+  lv_obj_set_pos(v->q_card, 94, 94); lv_obj_set_size(v->q_card, 366, 76);
+  lv_obj_set_pos(v->q_rec, 10, 2); lv_obj_set_width(v->q_rec, 346);
+  lv_obj_set_pos(v->q_title, 10, 20); lv_obj_set_width(v->q_title, NY_TITLE_W);
+  lv_obj_set_pos(v->q_sub, 10, 54); lv_obj_set_width(v->q_sub, NY_TITLE_W);
+  lv_obj_set_y(v->q_footer, 220);
+  lv_obj_set_style_text_letter_space(v->q_footer, 0, 0);
+  lv_obj_set_pos(v->p_desc, 94, 36); lv_obj_set_size(v->p_desc, NY_PROMPT_W, NY_PROMPT_H);
+  lv_obj_set_pos(v->p_chip, 94, 96);
+  lv_obj_set_pos(v->p_cmd, 94, 128); lv_obj_set_size(v->p_cmd, NY_COMMAND_W, NY_COMMAND_H);
+  lv_obj_set_pos(v->pv_ring, 16, 48);
+  lv_obj_set_pos(v->pv_mascot, 32, 64);
+  lv_obj_set_pos(v->pv_codex_icon, 56, 88);
+  lv_obj_set_pos(v->pv_title, 170, 62); lv_obj_set_width(v->pv_title, 294);
+  lv_obj_set_style_text_font(v->pv_title, &plex_ui_21, 0);
+  lv_obj_set_style_text_letter_space(v->pv_title, 0, 0);
+  lv_obj_set_pos(v->pv_sub, 170, 115); lv_obj_set_width(v->pv_sub, 294);
+  lv_obj_set_pos(v->pv_tap, 170, 169); lv_obj_set_width(v->pv_tap, 294);
+  lv_obj_set_style_text_letter_space(v->pv_tap, 0, 0);
+  lv_obj_set_pos(v->po_mascot, 32, 58);
+  lv_obj_set_pos(v->po_codex_icon, 64, 90);
+  lv_obj_set_pos(v->po_word, 182, 76); lv_obj_set_width(v->po_word, 282);
+  lv_obj_set_pos(v->po_echo, 182, 145); lv_obj_set_width(v->po_echo, 282);
+  for (int i = 0; i < 5; ++i) lv_obj_add_flag(v->po_spark[i], LV_OBJ_FLAG_HIDDEN);
+#endif
   lv_obj_add_flag(v->root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -1096,6 +1163,16 @@ static void render_needs_you(void) {
     lv_obj_set_pos(v->leave, 24, offer_approve ? approve_y + 106 : approve_y);
     lv_obj_set_size(v->leave, 432, 90);
   }
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_style_radius(v->approve, 14, 0);
+  lv_obj_set_style_radius(v->deny, 14, 0);
+  lv_obj_set_style_radius(v->leave, 14, 0);
+  lv_obj_set_pos(v->approve, 20, 178);
+  lv_obj_set_size(v->approve, offer_deny ? 170 : 214, 40);
+  lv_obj_set_pos(v->deny, 198, 178); lv_obj_set_size(v->deny, 106, 40);
+  lv_obj_set_pos(v->leave, offer_deny ? 312 : offer_approve ? 246 : 20, 178);
+  lv_obj_set_size(v->leave, offer_deny ? 148 : offer_approve ? 214 : 440, 40);
+#endif
   ny_show(v->leave, true);
 
   ny_show(v->root, true);

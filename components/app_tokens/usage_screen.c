@@ -18,11 +18,12 @@
 #include "torget.h"
 #include "usage_live_policy.h"
 #include "usage_presenter.h"
-#include "vibepulse_layout.generated.h"
+#include "board_layout.h"
 
 extern const lv_font_t plex_num_164;
 extern const lv_font_t plex_num_118;
 extern const lv_font_t plex_num_84;
+extern const lv_font_t plex_quota_84;
 extern const lv_font_t plex_money_118;
 extern const lv_font_t plex_money_35;
 extern const lv_font_t plex_num_38;
@@ -54,8 +55,16 @@ extern const lv_font_t plex_text_17;
 _Static_assert(VP_PERCENT_FONT_PX == 164,
                "plex_num_164 must match the Studio percent token");
 
-#define HEADER_LINE_Y 63
+#ifdef TORGET_BOARD_191_TOUCH
+#define PAGER_Y 224
+#else
 #define PAGER_Y (456 - (TG_VIEWPORT_INSET_Y ? 4 : 0))
+#endif
+#ifdef TORGET_BOARD_191_TOUCH
+#define HEADER_LINE_Y 58
+#else
+#define HEADER_LINE_Y 63
+#endif
 #define STAT_VALUE_Y VP_RESET_Y
 #define STAT_LABEL_Y 396
 #define RIGHT_STAT_X 240
@@ -64,15 +73,30 @@ _Static_assert(VP_PERCENT_FONT_PX == 164,
 /* Max Tracker geometry — approved 2026-08-12 mocks, matches the studio
  * design tokens: content safe X 22/width 436, grid indented a further
  * 9-10 px each side so the heatmap reads as its own object. */
+#ifdef TORGET_BOARD_191_TOUCH
+#define MT_EYEBROW_Y 62
+#define MT_GRID_Y 84
+#define MT_CELL_H 6
+#define MT_PITCH_Y 9
+#define MT_STAT_LINE_Y 170
+#define MT_STAT_LABEL_Y 176
+#define MT_STAT_VALUE_Y 196
+#else
 #define MT_EYEBROW_Y (VP_QUOTA_Y + 4)
-#define MT_GRID_X 31
 #define MT_GRID_Y 112
+#define MT_CELL_H MT_CELL
+#define MT_PITCH_Y MT_PITCH
+#define MT_STAT_LINE_Y (MT_LEGEND_Y + MT_LEGEND_SWATCH + 20)
+#define MT_STAT_LABEL_Y (MT_STAT_LINE_Y + 16)
+#define MT_STAT_VALUE_Y (MT_STAT_LABEL_Y + 34)
+#endif
+#define MT_GRID_X 31
 #define MT_CELL 18
 #define MT_GAP 3
 #define MT_PITCH (MT_CELL + MT_GAP)
 #define MT_ROWS 7
 #define MT_GRID_W (TK_MT_WEEKS * MT_PITCH - MT_GAP)  /* 417 */
-#define MT_GRID_H (MT_ROWS * MT_PITCH - MT_GAP)      /* 144 */
+#define MT_GRID_H (MT_ROWS * MT_PITCH_Y - MT_GAP)      /* 144 */
 #define MT_GRID_RIGHT (MT_GRID_X + MT_GRID_W)         /* 448 */
 #define MT_LEGEND_SWATCH 12
 #define MT_LEGEND_GAP 3
@@ -81,9 +105,6 @@ _Static_assert(VP_PERCENT_FONT_PX == 164,
 #define MT_LEGEND_LABEL_GAP 8
 #define MT_LEGEND_Y (MT_GRID_Y + MT_GRID_H + 10)      /* 266 */
 #define MT_DRAW_H (MT_LEGEND_Y - MT_GRID_Y + MT_LEGEND_SWATCH) /* 166 */
-#define MT_STAT_LINE_Y (MT_LEGEND_Y + MT_LEGEND_SWATCH + 20)   /* 298 */
-#define MT_STAT_LABEL_Y (MT_STAT_LINE_Y + 16)
-#define MT_STAT_VALUE_Y (MT_STAT_LABEL_Y + 34)
 #define MT_STAT_COL_W (MT_GRID_W / 4)
 
 typedef struct {
@@ -369,6 +390,9 @@ static void set_star_hero(int32_t stars) {
     font = &plex_stat_35;
     compact_count(stars, text, sizeof text);
   }
+#ifdef TORGET_BOARD_191_TOUCH
+  font = stars <= 999999 ? &plex_num_84 : &plex_stat_35;
+#endif
   lv_obj_set_style_text_font(ui.github.stars, font, 0);
   lv_label_set_text(ui.github.stars, text);
 }
@@ -413,6 +437,13 @@ static void create_github_page(void) {
                       VP_SAFE_X, 407, VP_CONTENT_W, 43);
   lv_obj_set_style_text_align(page->forks, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_text(page->forks, "–");
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_pos(stars_label, 22, 68); lv_obj_set_width(stars_label, 250);
+  lv_obj_set_pos(page->stars, 16, 105); lv_obj_set_size(page->stars, 300, 90);
+  lv_obj_set_style_text_font(page->stars, &plex_quota_84, 0);
+  lv_obj_set_pos(forks_label, 320, 100); lv_obj_set_width(forks_label, 138);
+  lv_obj_set_pos(page->forks, 320, 134); lv_obj_set_width(page->forks, 138);
+#endif
   create_pager(page->tile, VIEW_GITHUB);
 }
 
@@ -423,7 +454,11 @@ static void apply_github_page(const tk_github_status *status) {
                     !status->has_data ? "WAITING" :
                     status->stale ? "CACHED" : "LIVE");
   if (!status->has_data) {
+#ifdef TORGET_BOARD_191_TOUCH
+    lv_obj_set_style_text_font(page->stars, &plex_quota_84, 0);
+#else
     lv_obj_set_style_text_font(page->stars, &plex_num_164, 0);
+#endif
     lv_label_set_text(page->stars, "–");
     lv_label_set_text(page->forks, "–");
     page->has_data = false;
@@ -461,6 +496,17 @@ static void create_stat(lv_obj_t *tile, lv_obj_t **value_out,
                         lv_obj_t **caption_out,
                         int x, int width, bool right, lv_color_t color,
                         const char *caption) {
+#ifdef TORGET_BOARD_191_TOUCH
+  int value_y = right ? 145 : 92;
+  *value_out = label(tile, &plex_ui_21, color, 286, value_y, 172, 28);
+  lv_obj_t *name = label(tile, &plex_ui_12, COL_MUTED, 286, value_y + 27, 172, 18);
+  lv_obj_set_style_text_align(*value_out, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_label_set_text(name, caption);
+  if (caption_out) *caption_out = name;
+  (void)x; (void)width;
+  return;
+#else
   *value_out = label(tile, &plex_stat_35, color, x, STAT_VALUE_Y, width, 42);
   lv_obj_set_style_text_align(*value_out,
                               right ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT,
@@ -473,6 +519,7 @@ static void create_stat(lv_obj_t *tile, lv_obj_t **value_out,
   lv_obj_set_style_text_letter_space(name, 2, 0);
   lv_label_set_text(name, caption);
   if (caption_out) *caption_out = name;
+#endif
 }
 
 static void create_quota_page(quota_page *page, int index,
@@ -490,7 +537,13 @@ static void create_quota_page(quota_page *page, int index,
 
   page->percent = label(page->tile, &plex_num_164, COL_WHITE,
                         16, VP_PERCENT_Y, 448, 190);
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_style_text_font(page->percent, &plex_quota_84, 0);
+  lv_obj_set_size(page->percent, 266, 90);
+  lv_obj_set_style_text_letter_space(page->percent, -4, 0);
+#else
   lv_obj_set_style_text_letter_space(page->percent, -9, 0);
+#endif
   lv_label_set_text(page->percent, "–");
 
   page->track = bare(page->tile);
@@ -561,6 +614,17 @@ static void create_burn_rate_page(void) {
   create_hairline(tile, 251);
   create_forecast_row(tile, &ui.forecast_rows[1], 270,
                       USAGE_PROVIDER_CODEX);
+#ifdef TORGET_BOARD_191_TOUCH
+  for (int i = 0; i < 2; ++i) {
+    forecast_row *row = &ui.forecast_rows[i];
+    lv_obj_set_pos(row->root, 22, 70 + i * 74);
+    lv_obj_set_size(row->root, 436, 70);
+    lv_obj_set_style_text_font(row->headline, &plex_ui_21, 0);
+    lv_obj_set_pos(row->headline, 0, 21);
+    lv_obj_set_size(row->headline, 436, 27);
+    lv_obj_set_pos(row->detail, 0, 48);
+  }
+#endif
   create_pager(tile, VIEW_BURN_RATE);
 }
 
@@ -652,6 +716,25 @@ static void create_value_page(void) {
   lv_label_set_text(page->cap_api, "VIA API");
   lv_label_set_text(page->cap_break, "BREAK EVEN");
   lv_label_set_text(page->cap_paid, "YOU PAID");
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_y(page->verdict, 62);
+  lv_obj_set_style_text_font(page->verdict, &plex_ui_16, 0);
+  lv_obj_set_pos(page->attribution, 22, 168);
+  lv_obj_set_style_text_letter_space(page->attribution, 0, 0);
+  lv_obj_set_pos(page->stat_api, 286, 88); lv_obj_set_size(page->stat_api, 172, 30);
+  lv_obj_set_pos(page->stat_paid, 286, 128); lv_obj_set_size(page->stat_paid, 172, 30);
+  lv_obj_set_style_text_font(page->stat_api, &plex_ui_21, 0);
+  lv_obj_set_style_text_font(page->stat_paid, &plex_ui_21, 0);
+  lv_obj_set_style_text_align(page->stat_api, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_pos(page->cap_api, 286, 114); lv_obj_set_width(page->cap_api, 172);
+  lv_obj_set_pos(page->cap_paid, 286, 154); lv_obj_set_width(page->cap_paid, 172);
+  lv_obj_set_style_text_align(page->cap_api, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_style_text_font(page->cap_api, &plex_ui_12, 0);
+  lv_obj_set_style_text_font(page->cap_paid, &plex_ui_12, 0);
+  lv_obj_set_pos(page->cap_break, 170, 208);
+  lv_obj_set_style_text_font(page->cap_break, &plex_ui_12, 0);
+  lv_obj_set_style_text_letter_space(page->cap_break, 0, 0);
+#endif
   create_pager(page->tile, VIEW_VALUE);
 }
 
@@ -669,6 +752,11 @@ static void apply_value_hero(value_page *page,
   lv_obj_set_pos(page->hero, word ? VP_SAFE_X : VALUE_HERO_X,
                  word ? VALUE_WORD_HERO_Y
                       : money ? VALUE_MONEY_HERO_Y : VALUE_HERO_Y);
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_style_text_font(page->hero, word ? &plex_ui_21 : &plex_money_35, 0);
+  lv_obj_set_style_text_letter_space(page->hero, 0, 0);
+  lv_obj_set_pos(page->hero, 22, 106);
+#endif
   lv_label_set_text(page->hero, view->hero_text);
 }
 
@@ -887,9 +975,9 @@ static void tracker_grid_draw(lv_event_t *e) {
       dsc.bg_color = lv_color_hex(pg->codex ? 0x0c0e13 : 0x0c0e11);
     }
     int wx = i / MT_ROWS, wy = i % MT_ROWS;
-    lv_area_t a = { o.x1 + wx * MT_PITCH, o.y1 + wy * MT_PITCH,
+    lv_area_t a = { o.x1 + wx * MT_PITCH, o.y1 + wy * MT_PITCH_Y,
                     o.x1 + wx * MT_PITCH + MT_CELL - 1,
-                    o.y1 + wy * MT_PITCH + MT_CELL - 1 };
+                    o.y1 + wy * MT_PITCH_Y + MT_CELL_H - 1 };
     lv_draw_rect(layer, &dsc, &a);
   }
 
@@ -974,6 +1062,13 @@ static void create_tracker_page(tracker_page *page, int index, bool codex) {
     lv_obj_add_flag(page->stat_unit[i], LV_OBJ_FLAG_HIDDEN);
   }
 
+#ifdef TORGET_BOARD_191_TOUCH
+  for (int i = 0; i < 4; ++i) {
+    lv_obj_set_style_text_font(page->stat_value[i], &plex_ui_21, 0);
+    lv_obj_set_y(page->stat_unit[i], MT_STAT_VALUE_Y + 3);
+    lv_obj_set_style_text_font(page->stat_unit[i], &plex_ui_12, 0);
+  }
+#endif
   create_pager(page->tile, index);
 }
 
