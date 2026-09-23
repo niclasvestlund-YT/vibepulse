@@ -150,6 +150,12 @@ class Native191RasterTests(unittest.TestCase):
         result = run([sys.executable, "test/test_191_layout.py", str(self.output)])
         self.assertIn("PASS:", result.stdout)
 
+    def test_compact_needs_you_never_sends_an_unverified_approval(self):
+        with tempfile.TemporaryDirectory(prefix="vibepulse-191-needs-you.") as capture_dir:
+            result = run(["sim/build-191/torget-sim", "--vibepulse-needs-you-qa"],
+                         env={**os.environ, "TORGET_CAPTURE_DIR": capture_dir})
+        self.assertNotIn("needs-you verdict:", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

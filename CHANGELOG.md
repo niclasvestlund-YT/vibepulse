@@ -17,7 +17,9 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   QSPI display, mapped touch, BOOT settings and a USB installation guide. One
   real unit passed four-corner touch, phone Wi-Fi setup, saved-network
   reconnect and visible Codex usage. Owner photographs and the physical report
-  show the result and remaining checks; full menu/answer acceptance is separate.
+  show the result and remaining checks. Needs You decisions stay on the
+  computer until a compact 90 px touch-target layout passes physical review;
+  full menu acceptance is separate.
 
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
   product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).

@@ -17,8 +17,9 @@ utvecklingsport för Waveshare 1.91 Touch i liggande 536×240.
 Se [stödda modeller](README.md#supported-screens) och
 [kommande modeller och experiment](README.md#coming-soon--hardware-on-the-workbench).
 AMOLED 1.75 och 1.8 finns på arbetsbänken men stöds ännu inte. 1.91-porten
-är fysiskt provad med Wi-Fi och en statisk Codex-vy; meny, OTA och
-godkännanden på glaset återstår att verifiera.
+är fysiskt provad med Wi-Fi och en statisk Codex-vy. Svar på agentfrågor
+hanteras på datorn tills en säker layout för minst 90 px höga tryckytor
+har provats fysiskt; meny och OTA återstår också att verifiera.
 **Reklam/affiliatelänkar:** Märkta köplänkar kan ge Niclas Vestlund provision.
 Waveshare har tillhandahållit hårdvara för utveckling och test.
 

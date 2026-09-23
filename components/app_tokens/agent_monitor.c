@@ -533,6 +533,15 @@ static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
                          .tool_chip_width = 58};
   if (!p || !decision || !decision->visible) return fit;
 
+#ifdef TORGET_BOARD_191_TOUCH
+  /* A 240 px-tall decision screen cannot fit the complete prompt and the
+   * project's 90 px minimum verdict targets. Until a separate compact
+   * interaction design is physically verified, alert and hand off every
+   * Needs You decision to the computer. The same fit check also guards
+   * needs_you_resolve(), so synthetic/late taps cannot send a verdict. */
+  return fit;
+#endif
+
   if (decision->kind == TK_PENDING_QUESTION) {
     bool prompt_ok = p->has_prompt &&
         ny_text_fits(p->prompt, &plex_body_27, NY_PROMPT_W, NY_PROMPT_H, false);
@@ -890,6 +899,7 @@ static void create_needs_you(lv_obj_t *app_root) {
   lv_obj_set_style_text_font(v->a_word, &plex_body_27, 0);
   lv_obj_set_pos(v->a_project, 190, 114); lv_obj_set_width(v->a_project, 274);
   lv_obj_set_pos(v->a_tap, 190, 169); lv_obj_set_width(v->a_tap, 274);
+  lv_label_set_text(v->a_tap, "TAP FOR NEXT STEP");
   lv_obj_set_pos(v->h_ring, 0, 60);
   lv_obj_set_pos(v->h_mascot, 12, 72);
   lv_obj_set_pos(v->h_codex_icon, 12, 72);
@@ -913,6 +923,7 @@ static void create_needs_you(lv_obj_t *app_root) {
   lv_obj_set_pos(v->pv_sub, 170, 115); lv_obj_set_width(v->pv_sub, 294);
   lv_obj_set_pos(v->pv_tap, 170, 169); lv_obj_set_width(v->pv_tap, 294);
   lv_obj_set_style_text_letter_space(v->pv_tap, 0, 0);
+  lv_label_set_text(v->pv_tap, "TAP TO HANDLE ON COMPUTER");
   lv_obj_set_pos(v->po_mascot, 32, 58);
   lv_obj_set_pos(v->po_codex_icon, 64, 90);
   lv_obj_set_pos(v->po_word, 182, 76); lv_obj_set_width(v->po_word, 282);
@@ -1163,16 +1174,6 @@ static void render_needs_you(void) {
     lv_obj_set_pos(v->leave, 24, offer_approve ? approve_y + 106 : approve_y);
     lv_obj_set_size(v->leave, 432, 90);
   }
-#ifdef TORGET_BOARD_191_TOUCH
-  lv_obj_set_style_radius(v->approve, 14, 0);
-  lv_obj_set_style_radius(v->deny, 14, 0);
-  lv_obj_set_style_radius(v->leave, 14, 0);
-  lv_obj_set_pos(v->approve, 20, 178);
-  lv_obj_set_size(v->approve, offer_deny ? 170 : 214, 40);
-  lv_obj_set_pos(v->deny, 198, 178); lv_obj_set_size(v->deny, 106, 40);
-  lv_obj_set_pos(v->leave, offer_deny ? 312 : offer_approve ? 246 : 20, 178);
-  lv_obj_set_size(v->leave, offer_deny ? 148 : offer_approve ? 214 : 440, 40);
-#endif
   ny_show(v->leave, true);
 
   ny_show(v->root, true);

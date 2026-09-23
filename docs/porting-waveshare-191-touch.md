@@ -13,7 +13,8 @@ CS6, CLK47, DATA0/1/2/3 = 18/7/48/5, reset17. RGB565, MADCTL 0xF0,
 and zero address offsets produce the landscape raster.
 
 FT3168 touch uses the register-compatible FT5x06 driver, address 0x38,
-SDA40/SCL39 at 300 kHz. Input is polled. Native portrait coordinates mirror X
+SDA40/SCL39 at **100 kHz** in this port; Waveshare's reference uses 300 kHz.
+Input is polled. Native portrait coordinates mirror X
 before swapping axes; inclusive maxima are 239 and 535. GPIO18 is display DATA0,
 so the original board's KEY3 mapping cannot be reused. This profile uses BOOT/GPIO0.
 PCB revision has not been established; SD and other peripherals are not claimed.
@@ -27,10 +28,11 @@ period and en-dash glyphs. Reusing the existing numeric font initially produced
 missing glyph boxes: native captures exposed the issue before the application flash.
 
 Settings become a two-column grid. Wi-Fi setup puts its QR beside the instructions.
-Attention screens put the provider icon beside the text and keep actions on the
-bottom row. Render dimensions and prompt-fit checks share constants; long prompts
-fall back instead of displaying a truncated decision. The tracker grid and summary
-are compressed vertically to leave the pager clear.
+Needs You shows an alert, then hands every decision to the computer on this
+profile: complete prompts plus the required 90 px touch targets cannot safely
+share the 240 px height. On-glass approval/denial awaits a separate compact
+design and physical round-trip test. The tracker grid and summary are compressed
+vertically to leave the pager clear.
 
 The display flush budget is eight rows: 536 × 8 × 2 = 8,576 bytes per transfer.
 No additional full-screen persistent canvas was added. Rotation, idle drift and

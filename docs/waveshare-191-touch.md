@@ -89,9 +89,10 @@ Automatic rotation and new motion effects are disabled for this first static por
 
 The main content occupies a centered 480 × 240 viewport; the panel driver and
 native screenshots are 536 × 240. Layouts are rearranged for the available height,
-not stretched from a square image. Approval text uses the same fit check as its
-renderer; content that cannot fit falls back to the computer. Answering prompts
-requires separately configured local interaction credentials and verification.
+not stretched from a square image. Needs You alerts remain visible, but all
+decisions are handed to the computer on this development port. On-glass
+approval and denial are disabled until a compact layout can preserve the
+90 px touch-target rule and pass a physical answer round trip.
 
 [Hardware and pin evidence](../spec/boards/waveshare_191_touch/hardware.md) ·
 [Port implementation notes](porting-waveshare-191-touch.md)

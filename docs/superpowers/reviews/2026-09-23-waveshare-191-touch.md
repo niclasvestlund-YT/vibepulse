@@ -56,7 +56,9 @@ checks and firmware build passed after the connection fix.
 The photographs are static and were taken under strong red room lighting, so they
 do not establish calibrated colors or an exhaustive physical visual acceptance.
 BOOT menu operation needs a separate final owner check. Motion/stress testing,
-OTA, battery, SD, audio, IMU and approval round trips are not verified. This is a
+OTA, battery, SD, audio and IMU are not verified. On-glass approvals and denials
+are disabled on this profile until the 90 px touch-target rule and a physical
+round trip can be satisfied. This is a
 USB-installed development port with local usage display, not a tagged release.
 Other boards' firmware was not reflashed. Private credentials, compiled firmware,
 raw logs and full flash images are excluded from publishable material.
