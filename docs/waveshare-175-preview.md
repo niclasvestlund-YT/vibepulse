@@ -22,6 +22,7 @@ ESP-IDF 5.5.2 and an explicit 1.75 build directory:
 test -f secrets.h || cp secrets.h.example secrets.h
 . ~/esp/esp-idf/export.sh
 idf.py -B build-175 -D TORGET_BOARD=waveshare_175 \
+  -D SDKCONFIG=sdkconfig.175 \
   -D TORGET_SOLELKOLLEN_DIR=/nonexistent \
   -D TORGET_BUDDY_DIR=/nonexistent build
 ```
