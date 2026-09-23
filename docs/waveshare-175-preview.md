@@ -11,7 +11,9 @@ PYTHON_BIN=.venv/bin/python tools/preview-ui.sh vibepulse waveshare_175
 
 The returned private directory contains 466 × 466 PNGs: live and cached/stale
 with identical values; missing total, today or reset; contradictory today;
-zero and full usage; longest countdown; early exhaustion; wide quota copy; and five-target touch diagnostics.
+zero and full usage; longest countdown; early exhaustion; wide quota copy;
+five-target touch diagnostics; settings/about/Labs; and QR/manual/searching/failed
+Wi-Fi states. All twenty fixtures are checked against the circular mask.
 
 ## Design and semantics
 
@@ -45,8 +47,10 @@ diagnostic; motion comes after static physical review and measured stress.
 
 ## Remaining work before public support
 
-The normal application build remains blocked: generic settings/Wi-Fi/attention
-surfaces have not yet been adapted to the disk. An explicitly selected
+The normal application build remains blocked: attention, completion and
+analytics surfaces still need the full round-port review. Settings and Wi-Fi
+surfaces now have native previews and circular pixel checks, but their physical
+flows are not yet verified. An explicitly selected
 `TORGET_ROUND_DIAGNOSTIC=ON` build now uses the 1.75 vendor panel sequence,
 GPIO mapping and paired touch transform. It starts at 20% brightness, before
 NVS/network initialization, and displays only the five-target static test.

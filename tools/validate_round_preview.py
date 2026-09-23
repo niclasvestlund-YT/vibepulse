@@ -16,7 +16,7 @@ def validate(directory):
             for x in range(466):
                 if (x - 232.5)**2 + (y - 232.5)**2 > 232.5**2:
                     assert image.getpixel((x, y)) == (0, 0, 0), (name, x, y)
-        if name == 'diagnostic':
+        if name == 'diagnostic' or name.startswith(('settings-', 'wifi-')):
             continue
         # Detect vanished/clipped captions independently of object geometry.
         for box in [(170, 75, 295, 115), (75, 295, 205, 325), (208, 295, 400, 325)]:
@@ -42,3 +42,14 @@ def validate(directory):
     assert images['diagnostic'].getpixel((160, 173)) == (255, 0, 0)
     assert images['diagnostic'].getpixel((194, 173)) == (0, 255, 0)
     assert images['diagnostic'].getpixel((228, 173)) == (0, 0, 255)
+
+    # Fixed independent content bands prevent blank surfaces passing the mask.
+    for name in ('settings-menu', 'settings-labs'):
+        for top in (112, 178, 244, 310):
+            assert sum(max(p) > 100 for p in images[name].crop((100, top, 365, top+48)).get_flattened_data()) > 100, (name, top)
+    qr = images['wifi-qr']
+    assert qr.getpixel((135, 120)) == (255, 255, 255)
+    assert qr.getpixel((330, 315)) == (255, 255, 255)
+    assert sum(max(p) > 180 for p in qr.crop((135, 120, 331, 316)).get_flattened_data()) > 15000
+    for name in ('wifi-manual', 'wifi-searching', 'wifi-failed'):
+        assert sum(max(p) > 100 for p in images[name].crop((45, 145, 420, 240)).get_flattened_data()) > 200, name

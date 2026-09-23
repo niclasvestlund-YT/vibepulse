@@ -13,6 +13,8 @@ NAMES = (
     "codex-live", "codex-stale", "codex-to-empty", "codex-long-reset", "codex-today-missing",
     "codex-today-invalid", "codex-full", "codex-zero", "codex-missing",
     "claude-live", "claude-wide-label", "claude-reset-missing", "diagnostic",
+    "settings-menu", "settings-about", "settings-labs", "wifi-qr", "wifi-manual",
+    "wifi-searching", "wifi-failed",
 )
 
 

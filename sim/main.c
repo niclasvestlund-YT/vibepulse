@@ -1857,6 +1857,26 @@ static int run_round_quota_qa(void) {
   lv_obj_t *probe = tg_round_diagnostic_create(lv_layer_top());
   dump_frame("round-diagnostic");
   lv_obj_delete(probe);
+  torget_settings_open("v1.1.0-round-preview", "192.168.100.100");
+  dump_frame("round-settings-menu");
+  torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
+  dump_frame("round-settings-about");
+  torget_settings_close();
+  torget_settings_open("preview", NULL);
+  torget_settings_click_slot(TG_SETTINGS_ROW_LABS);
+  dump_frame("round-settings-labs");
+  torget_settings_close();
+  torget_wifi_ui_set(TG_WIFI_UI_OPEN, "VibePulse-setup", "A1B2C3D4E5F6", NULL, 583);
+  dump_frame("round-wifi-qr");
+  torget_wifi_ui_set_manual_details(true);
+  dump_frame("round-wifi-manual");
+  torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "A network with a long sample name", NULL,
+                    "NOT SEEN - 2.4 GHZ ONLY", 24);
+  dump_frame("round-wifi-searching");
+  torget_wifi_ui_set(TG_WIFI_UI_FAILED, "A network with a long sample name", NULL,
+                    "CHECK THE PASSWORD", 0);
+  dump_frame("round-wifi-failed");
+  torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
   return capture_failures ? 1 : 0;
 }
 #endif

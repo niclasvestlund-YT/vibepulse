@@ -28,6 +28,7 @@ extern const lv_font_t plex_attention_52;
 extern const lv_font_t plex_body_27;
 extern const lv_font_t plex_mono_24;
 extern const lv_font_t plex_ui_21;
+extern const lv_font_t plex_ui_16;
 
 #define COL_MUTED lv_color_hex(0x9298A2) /* palette.muted */
 
@@ -203,6 +204,29 @@ static bool update_qr(const char *ssid, const char *password) {
   return true;
 }
 
+#ifdef TORGET_BOARD_175
+static void round_wifi_layout(bool open) {
+  lv_obj_set_style_text_font(ui.word, &plex_body_27, 0);
+  lv_obj_set_width(ui.word, 320);
+  position(ui.word, 65);
+  lv_obj_set_style_text_font(ui.foot, &plex_ui_16, 0);
+  lv_obj_set_style_text_letter_space(ui.foot, 0, 0);
+  lv_obj_set_width(ui.foot, 260);
+  position(ui.foot, 414);
+  lv_obj_set_width(ui.lead, 320);
+  lv_obj_set_style_text_letter_space(ui.lead, 0, 0);
+  lv_obj_set_pos(ui.action, 105, 341);
+  lv_obj_set_size(ui.action, 270, 54);
+  if (open) {
+    lv_obj_set_pos(ui.qr, 142, 127);
+    position(ui.lead, 99);
+    position(ui.primary, 157);
+    position(ui.secondary, 211);
+    position(ui.hint1, 272);
+  }
+}
+#endif
+
 static void render_open_view(void) {
   const bool qr_open = ui.qr_available && !ui.manual_details;
   position(ui.word, WIFI_OPEN_WORD_Y);
@@ -239,6 +263,9 @@ static void render_open_view(void) {
   show(ui.secondary, !qr_open);
   show(ui.hint1, !qr_open);
   show(ui.action, ui.qr_available);
+#ifdef TORGET_BOARD_175
+  round_wifi_layout(true);
+#endif
 }
 
 void torget_wifi_ui_set_manual_details(bool visible) {
@@ -337,6 +364,9 @@ void torget_wifi_ui_set(tg_wifi_ui_state state, const char *primary,
     show(ui.hint1, false);
   }
 
+#ifdef TORGET_BOARD_175
+  round_wifi_layout(open);
+#endif
   show(ui.lead, open);
   /* Orsaksraden och lösenordsraden delar y — bara ett av lägena har båda. */
   show(ui.detail, !open && detail && detail[0]);
