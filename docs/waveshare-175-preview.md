@@ -4,7 +4,7 @@ The owner chose a circular quota ring, USED TODAY and a D:H:M countdown.
 The native LVGL view uses the same quota presenter and daily-usage validation
 as the existing screens. The `waveshare_175` firmware profile now builds and
 has booted on the named round unit. The owner photographed the quota page,
-and the unit has joined Wi-Fi and fetched token data. Final visual/touch
+and the unit has joined Wi-Fi and fetched token data. Full visual/touch
 review, the USB-down angle and live value accuracy are still pending.
 This is the bring-up guide for the physically photographed quota profile,
 not a full-board certification. See the
@@ -99,14 +99,12 @@ separate `TORGET_ROUND_DIAGNOSTIC=ON` profile remains available for bench
 recovery. The named unit has booted the normal profile, saved a Wi-Fi network,
 received an IP address and fetched tokens. Confirm the USB-down angle and
 touch locations, compare the values on glass to the source, verify the reply
-loop, and record a
-named-unit physical report before claiming public support. Other boards do
-not confer OTA or motion approval on this one.
+loop, and extend the named-unit physical report before claiming touch,
+interaction, OTA or rotation support. Other boards do not confer OTA or
+motion approval on this one.
 
-Publish the verified guide and captures in VibePulse open source, then update
-the VibeOnChip presentation with the same support boundary and guide link.
-The owner requested both destinations; neither may inherit another board's
-physical certification.
+The VibePulse and VibeOnChip presentations must retain the same support
+boundary. Neither may inherit another board's physical certification.
 
 ## Reusable lessons and native evidence
 
