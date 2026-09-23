@@ -10,6 +10,44 @@ This is the bring-up guide for the physically photographed quota profile,
 not a full-board certification. See the
 [named-unit checkpoint](superpowers/reviews/2026-09-24-waveshare-175-round.md).
 
+## Install the current-source quota profile
+
+Follow [agent setup](agent-setup.md) for the Mac or Windows token service.
+Select the board marked `1.75` and confirm its actual USB identity; a USB
+port name alone cannot distinguish it from another ESP32-S3 panel. This
+profile is not in the v1.1.0 release. The following macOS example uses
+ESP-IDF 5.5.2 and an explicit 1.75 build directory:
+
+```sh
+test -f secrets.h || cp secrets.h.example secrets.h
+. ~/esp/esp-idf/export.sh
+idf.py -B build-175 -D TORGET_BOARD=waveshare_175 \
+  -D TORGET_SOLELKOLLEN_DIR=/nonexistent \
+  -D TORGET_BUDDY_DIR=/nonexistent build
+```
+
+Configure the private `TK_VIBEPULSE_BASE_URL` fallback in `secrets.h` for
+the computer running tokenserver. Discovery is attempted first. Leave Wi-Fi
+fields empty to provision by phone. Keep `secrets.h` and built binaries
+private. Before a first USB install on a new unit, inspect flash size and
+security state and save a private, verified backup of that exact unit. Never
+flash the 1.91 or 2.16 image onto the 1.75 panel. The normal app uses
+`TORGET_ROUND_DIAGNOSTIC=OFF` (the default); do not ship the static diagnostic
+as the quota app. Once the selected port and recovery image are checked:
+
+```sh
+idf.py -B build-175 -p /dev/cu.usbmodemYOURPORT flash monitor
+```
+
+If no network is saved, join the temporary `VibePulse-setup` Wi-Fi from a
+phone and open `http://192.168.4.1/` manually. The QR code joins the setup
+network; it does not open the page. Choose the 2.4 GHz network or type its
+exact SSID if a scan misses it. Verify that the panel rejoins Wi-Fi, displays
+real provider values, and keeps unavailable readings as dashes. Updates on
+this profile currently use USB. Touch, the requested USB-down angle, the
+new two-scan Wi-Fi behavior, OTA and automatic rotation have the physical
+limits recorded in the named-unit checkpoint.
+
 ```sh
 PYTHON_BIN=.venv/bin/python tools/preview-ui.sh vibepulse waveshare_175
 ```
