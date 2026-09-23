@@ -90,17 +90,18 @@ capabilities:
     board_wired: 'yes'
     bsp_support: 'yes'
     firmware_enabled: 'yes'
-    unit_verified: unknown
-  confidence: source_inspected
+    unit_verified: 'yes'
+  confidence: measured
   resources:
   - ESP32-S3 radio; existing VibePulse local setup portal
   constraints:
-  - Not yet verified on this unit
+  - 2.4 GHz only; local DHCP and usage fetch verified, no new relay claim
   conflicts: []
   opportunities: []
   sources:
   - waveshare-191-1986f380
   - vibepulse-191-port
+  - bench-191-wifi-20260923
   evidence:
   - field: soc_capable
     value: 'yes'
@@ -114,7 +115,13 @@ capabilities:
   - field: firmware_enabled
     value: 'yes'
     source: vibepulse-191-port
+  - field: unit_verified
+    value: 'yes'
+    source: bench-191-wifi-20260923
   last_verified: '2026-09-23'
+  verification:
+    unit: vibepulse-191-touch-01
+    test: wifi-local-onboarding
 - id: controls.settings
   name: BOOT settings button
   states:

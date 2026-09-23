@@ -20,12 +20,28 @@ static esp_err_t (*touch_read_original)(esp_lcd_touch_handle_t);
 static esp_err_t touch_read_diagnosed(esp_lcd_touch_handle_t touch) {
     static bool reported;
     const TickType_t started = xTaskGetTickCount();
-    const esp_err_t err = touch_read_original(touch);
-    if (err != ESP_OK && !reported) {
+    esp_err_t err = touch_read_original(touch);
+    const esp_err_t first_error = err;
+    if (err == ESP_ERR_INVALID_STATE) {
+        /* FT3168 can briefly NACK; one bounded retry preserves input without
+         * turning a transient bus response into a multi-second UI stall. */
+        vTaskDelay(pdMS_TO_TICKS(5));
+        err = touch_read_original(touch);
+    }
+    if (first_error != ESP_OK && !reported) {
         reported = true;
-        ESP_LOGW(TAG, "first touch read failure: %s after %lu ms",
-                 esp_err_to_name(err),
+        ESP_LOGW(TAG, "first touch read: %s; retry result %s after %lu ms",
+                 esp_err_to_name(first_error), esp_err_to_name(err),
                  (unsigned long)((xTaskGetTickCount() - started) * portTICK_PERIOD_MS));
+    }
+    return err;
+}
+static esp_err_t touch_write(esp_lcd_panel_io_handle_t io, int reg, uint8_t value) {
+    esp_err_t err = ESP_FAIL;
+    for (unsigned attempt = 0; attempt < 4; ++attempt) {
+        err = esp_lcd_panel_io_tx_param(io, reg, &value, 1);
+        if (err != ESP_ERR_INVALID_STATE) return err;
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
     return err;
 }
@@ -80,12 +96,18 @@ esp_err_t tg_board_touch_new(esp_lcd_touch_handle_t *touch) {
     esp_lcd_panel_io_handle_t touch_io = NULL;
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c(bus, &io, &touch_io), TAG, "touch IO");
     const uint8_t normal_mode = 0;
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(touch_io, 0, &normal_mode, 1), TAG, "touch normal mode");
+    ESP_RETURN_ON_ERROR(touch_write(touch_io, 0, normal_mode), TAG, "touch normal mode");
     const esp_lcd_touch_config_t config = {
         .x_max = 239, .y_max = 535, .rst_gpio_num = -1, .int_gpio_num = -1,
         .flags = {.swap_xy = 1, .mirror_x = 1, .mirror_y = 0},
     };
-    ESP_RETURN_ON_ERROR(esp_lcd_touch_new_i2c_ft5x06(touch_io, &config, touch), TAG, "touch init");
+    esp_err_t touch_err = ESP_FAIL;
+    for (unsigned attempt = 0; attempt < 4; ++attempt) {
+        touch_err = esp_lcd_touch_new_i2c_ft5x06(touch_io, &config, touch);
+        if (touch_err != ESP_ERR_INVALID_STATE) break;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    ESP_RETURN_ON_ERROR(touch_err, TAG, "touch init");
     /* FT3168 monitor mode can stop answering polled I2C reads. This USB-powered
      * profile uses continuous polling, so explicitly disable automatic monitor
      * (0x86) and select active power mode (0xA5) after generic driver init.
@@ -93,8 +115,8 @@ esp_err_t tg_board_touch_new(esp_lcd_touch_handle_t *touch) {
     touch_read_original = (*touch)->read_data;
     (*touch)->read_data = touch_read_diagnosed;
     const uint8_t active = 0;
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(touch_io, 0x86, &active, 1), TAG, "touch auto-monitor off");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(touch_io, 0xA5, &active, 1), TAG, "touch active mode");
+    ESP_RETURN_ON_ERROR(touch_write(touch_io, 0x86, active), TAG, "touch auto-monitor off");
+    ESP_RETURN_ON_ERROR(touch_write(touch_io, 0xA5, active), TAG, "touch active mode");
     return ESP_OK;
 }
 esp_err_t tg_board_brightness_set(int percent) {

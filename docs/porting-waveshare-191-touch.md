@@ -75,3 +75,7 @@ The first full application showed recurring FT5x06 I2C read errors despite the s
 Follow-up: active-mode and 100 kHz experiments both retained the periodic I2C read error. The lower-rate build recorded 14 errors in 50 seconds, with no observed panic during that sample. Wi-Fi AP DHCP and two HTTP page requests succeeded. Phone provisioning and sustained touch stability remain open acceptance items.
 
 A real phone attempt exposed a shared onboarding bug: after NO_AP_FOUND (201), the radio retried and obtained DHCP, but the guard retained the earlier error and skipped credential persistence. The fix accepts later IP for the active trial and has regressions for stale IP, failed-start trials and duplicate persistence. See [the lessons entry](lessons.md). USB serial reopening can also reset this unit; use a single persistent monitor while the owner provisions Wi-Fi. First touch-read failure was measured as ESP_ERR_INVALID_STATE after 2 ms, not a multi-second blocked read.
+
+## Final session outcome
+
+Phone onboarding, credential persistence and automatic rejoin passed after the fix. Bounded touch retries recovered transient NACKs in 7 ms in two boot samples, without incrementing the panic counter. See [the final physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact firmware and remaining limits; it supersedes earlier pending statuses in this investigation narrative.

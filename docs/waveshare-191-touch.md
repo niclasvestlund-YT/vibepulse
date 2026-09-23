@@ -1,6 +1,6 @@
 # Install VibePulse on Waveshare 1.91 Touch AMOLED
 
-**Known issue in the current development build:** recurring touch I2C read errors and incomplete phone onboarding verification. This is a port under investigation, not a ready-to-release installation path.
+**Development port:** phone provisioning, saving the network and reconnecting after reset now pass on the test unit. Transient touch NACKs recovered with bounded retries in the final boot samples. See [the physical report](superpowers/reviews/2026-09-23-waveshare-191-touch.md) for exact evidence and remaining checks.
 
 This development port targets **ESP32-S3 Touch AMOLED 1.91**, in fixed landscape
 **536 × 240**. Select `waveshare_191_touch` explicitly. The default profile still
@@ -8,8 +8,7 @@ builds the 2.16-inch board. This port is not part of the v1.1.0 release.
 
 The September 23, 2026 installation established USB programming and a working
 four-corner touch diagnostic. The owner reported `1:1 2:1 3:1 4:1`, confirming
-one correctly mapped touch in each corner. PCB revision, full physical UI
-review and optional peripherals are separate, unverified claims.
+one correctly mapped touch in each corner. Wi-Fi provisioning, NVS persistence, automatic reconnection and local usage fetch also passed. PCB revision, full physical UI review and optional peripherals remain unverified.
 
 ## Prepare
 

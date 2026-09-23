@@ -9,7 +9,8 @@ error became sticky and the working credentials never reached NVS. Keep observin
 a trial that actually started, accept fresh IP after transient errors, and write
 once. Never accept old IP from the submission tick or a failed/abandoned trial.
 The captured sequence and these negative cases are covered in test_wifi_slots.c.
-Physical revalidation after installing the fix is still required.
+Physical revalidation passed on the 1.91 unit: credentials saved once, setup
+closed, and the panel rejoined after a controlled reset.
 
 
 ## 2026-09-20 · A two-second status heartbeat consumes a daily request budget
