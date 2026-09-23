@@ -203,7 +203,21 @@ BOARD_241_FRAMES = {
     "241-v2/settings.png": "settings-menu.png",
 }
 
+# Native 536x240 captures must match the current 1.91 simulator byte for byte.
+# test_board_profiles.py owns that comparison, as it does for the V2 frames.
+BOARD_191_FRAMES = {
+    "191-touch/settings-menu.png": "settings-menu.png",
+    "191-touch/vibepulse-claude-fable.png": "vibepulse-claude-fable.png",
+    "191-touch/vibepulse-tracker-codex-full.png": "vibepulse-tracker-codex-full.png",
+    "191-touch/wifi-setup-qr.png": "wifi-setup-qr.png",
+}
+
 NOT_FRAMES = {
+    "191-touch/glass-boot-logo.jpg": "owner photograph of the physical 1.91 Touch boot logo",
+    "191-touch/glass-boot-stages.jpg": "owner photograph of the physical 1.91 Touch boot stages",
+    "191-touch/glass-codex-close.jpg": "owner close-up of Codex on the physical 1.91 Touch",
+    "191-touch/glass-codex-desk.jpg": "owner photograph of Codex on the physical 1.91 Touch on a desk",
+    "191-touch/glass-codex-held.jpg": "owner photograph of Codex on the physical 1.91 Touch held in hand",
     "241-v2/glass-codex.jpg": "owner photograph of the physical 2.41 V2 panel",
     "241-v2/glass-codex-detail.jpg": "owner close-up photograph of the physical 2.41 V2 panel",
     "github/glass-live.png": "a photograph of the physical panel",
@@ -245,7 +259,7 @@ def docs_frames():
     missed by hand.
     """
     for name, path in docs_images():
-        if name in NOT_FRAMES or name in BOARD_241_FRAMES or path.suffix != ".png":
+        if name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -526,7 +540,8 @@ class DocsFrameDriftTests(unittest.TestCase):
             if name in NOT_FRAMES or path.suffix != ".png":
                 continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
-                expected = (600, 450) if name in BOARD_241_FRAMES else (480, 480)
+                expected = ((600, 450) if name in BOARD_241_FRAMES else
+                            (536, 240) if name in BOARD_191_FRAMES else (480, 480))
                 if im.size != expected:
                     wrong.append(f"{name} is {im.size[0]}x{im.size[1]}")
         self.assertEqual(wrong, [], "\n".join(

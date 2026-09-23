@@ -34,6 +34,8 @@ conv Bold     164 "0x30-0x39,0x25,0x2E,0x2013"           plex_num_164
 # (rastergranskning 2026-08-14), 84 är mockupens klockstorlek. Bara det
 # klockan behöver: siffror, kolon, mellanslag.
 conv Bold      84 "0x30-0x39,0x20,0x3A"                  plex_num_84
+# Native 1.91 quota glyphs: keep the existing clock raster unchanged.
+conv Bold      84 "0x30-0x39,0x25,0x2E,0x2013"           plex_quota_84
 # 118 bär kolon sedan 2026-08-14 (kvar för ev. framtida stora klockor).
 conv Bold     118 "0x30-0x39,0x20,0x25,0x2E,0xA0,0x2013,0x3A" plex_num_118
 conv Bold      50 "0x30-0x39,0x25,0x2C,0x2013"           plex_num_50

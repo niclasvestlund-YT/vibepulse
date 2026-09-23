@@ -228,6 +228,25 @@ static void test_join_submissions_retry_and_explain_failures(void) {
         tg_wifi_disconnect_status(8) == TG_WIFI_JOIN_RETRY_CONNECTION);
 }
 
+static void test_late_ip_recovers_transient_join_failure(void) {
+  /* Captured sequence on 1.91: reason 201, then association and DHCP success. */
+  tg_wifi_join_status status = tg_wifi_disconnect_status(201);
+  check("transient failure without IP cannot save credentials",
+        !tg_wifi_join_should_accept(status, true, false, false));
+  check("late IP overrides the stale not-found error",
+        tg_wifi_join_should_accept(status, true, false, true));
+  check("already accepted does not write NVS again",
+        !tg_wifi_join_should_accept(TG_WIFI_JOIN_CONNECTED, true, false, true));
+  check("old IP before applying this submission is not proof",
+        !tg_wifi_join_should_accept(status, true, true, true));
+  check("failed-start or abandoned trial cannot save fallback credentials",
+        !tg_wifi_join_should_accept(status, false, false, true));
+  check("an idle form cannot save credentials",
+        !tg_wifi_join_should_accept(TG_WIFI_JOIN_IDLE, true, false, true));
+  check("late success also clears a previous handshake failure",
+        tg_wifi_join_should_accept(TG_WIFI_JOIN_RETRY_PASSWORD, true, false, true));
+}
+
 static void test_dma_gates_protect_the_flush(void) {
   const size_t flush = 12 * 480 * 2; /* 11 520 — panelflushens block */
   const size_t open_floor = TG_WIFI_SETUP_DMA_OPEN_FACTOR * flush +
@@ -271,6 +290,7 @@ static void test_dma_gates_protect_the_flush(void) {
 }
 
 int main(void) {
+  test_late_ip_recovers_transient_join_failure();
   test_dma_gates_protect_the_flush();
   test_validation();
   test_write_slot_updates_before_it_evicts();

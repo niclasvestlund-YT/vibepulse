@@ -6,7 +6,7 @@
 #include "project_star_assets.h"
 #include "project_star_popup_policy.h"
 #include "project_star_style.h"
-#include "vibepulse_layout.generated.h"
+#include "board_layout.h"
 
 extern const lv_font_t plex_num_38;
 extern const lv_font_t plex_ui_21;
@@ -142,12 +142,18 @@ void tk_project_star_popup_create(lv_obj_t *app_root) {
   lv_obj_set_style_text_align(popup.repo, LV_TEXT_ALIGN_LEFT, 0);
 
   /* Final state of the impact: one large, still, fully filled gold star. */
+#ifdef TORGET_BOARD_191_TOUCH
+  filled_star(popup.root, 30, 66, 130, 130);
+#else
   filled_star(popup.root, 130, 80, 220, 220);
+#endif
 
   popup.actor = label(popup.root, &plex_ui_21, COL_WHITE,
                       20, 327, 440, 30);
 
+#ifndef TORGET_BOARD_191_TOUCH
   filled_star(popup.root, 145, 380, 40, 40);
+#endif
   popup.count = label(popup.root, &plex_num_38, COL_WHITE,
                       200, 380, 240, 46);
   lv_obj_set_style_text_align(popup.count, LV_TEXT_ALIGN_LEFT, 0);
@@ -156,6 +162,11 @@ void tk_project_star_popup_create(lv_obj_t *app_root) {
                         20, 442, 440, 20);
   lv_obj_set_style_text_letter_space(popup.dismiss, 2, 0);
   lv_label_set_text(popup.dismiss, "TAP TO DISMISS");
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_pos(popup.actor, 175, 85); lv_obj_set_width(popup.actor, 280);
+  lv_obj_set_pos(popup.count, 200, 133); lv_obj_set_width(popup.count, 240);
+  lv_obj_set_y(popup.dismiss, 212);
+#endif
 
   lv_obj_add_flag(popup.root, LV_OBJ_FLAG_HIDDEN);
 }

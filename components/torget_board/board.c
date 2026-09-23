@@ -1,6 +1,6 @@
 #include "torget_board.h"
 
-#ifndef TORGET_BOARD_241_V2
+#if !defined(TORGET_BOARD_241_V2) && !defined(TORGET_BOARD_191_TOUCH)
 #include "bsp/touch.h"
 
 esp_err_t tg_board_display_new(size_t transfer_size,
@@ -17,7 +17,7 @@ esp_err_t tg_board_touch_new(esp_lcd_touch_handle_t *touch) {
 esp_err_t tg_board_brightness_init(void) { return bsp_display_brightness_init(); }
 esp_err_t tg_board_brightness_set(int percent) { return bsp_display_brightness_set(percent); }
 
-#else
+#elif defined(TORGET_BOARD_241_V2)
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"

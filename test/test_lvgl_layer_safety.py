@@ -133,10 +133,13 @@ assert "sim_wifi_signal_bars" in sim_main
 assert "ny_physical_fit_of" in agent_monitor
 assert agent_monitor.count("ny_physical_fit_of(p") >= 3
 assert "lv_font_get_glyph_dsc" in agent_monitor
-assert "300, 68" in agent_monitor
-assert "392, 34" in agent_monitor
-assert "392, 20" in agent_monitor
-assert "432, 62" in agent_monitor
+assert "#define NY_PROMPT_W 300" in agent_monitor
+assert "#define NY_PROMPT_H 68" in agent_monitor
+assert "NY_TITLE_W, 34" in agent_monitor
+assert "#define NY_TITLE_W 392" in agent_monitor
+assert "NY_TITLE_W, 20" in agent_monitor
+assert "#define NY_COMMAND_W 432" in agent_monitor
+assert "#define NY_COMMAND_H 62" in agent_monitor
 assert "24, 182, 432" in agent_monitor
 assert "payoff_provider" in agent_monitor
 

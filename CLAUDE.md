@@ -10,9 +10,9 @@ table. Never flash the board without the user explicitly asking you to.
 
 ## Over-the-air updates
 
-This workflow applies to the original 2.16 board. Update 2.41 V2 over USB
-using `docs/waveshare-241-v2.md`; OTA and board identification in the update
-chain are not validated for V2.
+This workflow applies to the original 2.16 board. Update 2.41 V2 and 1.91 Touch
+over USB using their board-specific guides; OTA and board identification in the
+update chain are not validated for these ports.
 
 Day-to-day firmware goes over the air: `idf.py build && tools/ota-flash.sh`
 (device IP from git-ignored `.ota-device`). The full loop, consent model and
@@ -58,6 +58,10 @@ root-cause story add an entry there.
 ## Hardware-aware work
 
 Select the board first. The five root files below describe **2.16 only**.
+For the experimental **1.91 Touch AMOLED**, use the five files under
+`spec/boards/waveshare_191_touch/` and `docs/waveshare-191-touch.md`.
+Native geometry is 536 × 240; USB updates only. Keep its open physical
+verification items explicit.
 For **2.41 V2**, read the same five filenames under
 `spec/boards/waveshare_241_v2/`; validate that directory separately. Never
 transfer installed firmware or physical verification between board registries.

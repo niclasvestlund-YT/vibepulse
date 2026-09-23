@@ -24,9 +24,10 @@ current across ordinary internet WiFi. Every cloud feature is off by default;
 only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
-Current source supports the original **2.16-inch square panel** and the
-**Waveshare 2.41 V2 in 600 × 450 landscape**. For V2 revision checks, build
-selection and phone Wi-Fi setup, use the [2.41 V2 guide](docs/waveshare-241-v2.md).
+Current source includes the original **2.16-inch square panel**, the
+**Waveshare 2.41 V2** and a USB-installed **1.91 Touch** development port.
+Each needs its own build profile. Start with the [2.41 V2 guide](docs/waveshare-241-v2.md)
+or the [1.91 Touch guide](docs/waveshare-191-touch.md) for the landscape boards.
 
 ## The problem
 
@@ -476,13 +477,25 @@ The support status below reflects our own verification of each model.
 |---|---|---|
 | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=179337) (affiliate) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Its simulator frames are exact 480×480 renders. No soldering. Same board Clawdmeter uses. |
 | [Waveshare ESP32-S3-Touch-AMOLED-2.41](https://www.waveshare.com/esp32-s3-touch-amoled-2.41.htm?&aff_id=179337) (affiliate), **V2 / Rev2.0 only** | 600×450 AMOLED in fixed landscape, capacitive touch; BOOT opens settings | **Supported in current source.** Display bring-up, portrait corner touch, Wi-Fi and owner-visible Codex/Claude usage verified. [Install guide](docs/waveshare-241-v2.md) · [exact evidence](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md). V1, automatic rotation, OTA and physical answer replies are not validated by this port. |
+| [Waveshare ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate), **touch variant** | 536×240 AMOLED in fixed landscape; BOOT opens settings | **USB-installed development port in current source.** Four touch corners, phone Wi-Fi setup, saved-network reconnect and visible Codex usage checked on one real unit. [Install guide](docs/waveshare-191-touch.md) · [physical report](docs/superpowers/reviews/2026-09-23-waveshare-191-touch.md). Needs You decisions stay on the computer until a safe compact button layout is verified. Menu navigation, OTA and rotation remain unverified. |
 
-The v1.1.0 tag predates the V2 port. Use current source and the explicit
-`waveshare_241_v2` build profile; firmware images are board-specific.
+The v1.1.0 tag predates both landscape ports. Use current source and explicitly
+select `waveshare_241_v2` or `waveshare_191_touch`; firmware images are board-specific.
 More boards are added after physical verification, following
 [Adding a display](docs/adding-a-display.md). The 2.16 registry remains under
 [`spec/`](spec/hardware.md); V2 has its own
 [hardware registry](spec/boards/waveshare_241_v2/hardware.md).
+
+#### 1.91 Touch landscape
+
+<p align="center">
+  <img src="docs/img/191-touch/glass-codex-held.jpg" width="420" alt="Owner photograph of live Codex weekly usage on the physical 1.91 Touch panel">
+</p>
+
+*Real 1.91-inch panel, photographed September 23, 2026. The 9% quota was a
+momentary account reading; red room lighting limits color judgment. Follow the
+[1.91 Touch guide](docs/waveshare-191-touch.md) for USB flashing and the exact
+phone Wi-Fi steps. This profile is not in the v1.1.0 release.*
 
 #### 2.41 V2 landscape
 
@@ -506,7 +519,7 @@ recovery, sources and troubleshooting.
 
 ### Coming soon — hardware on the workbench
 
-These boards have arrived for development. **No VibePulse firmware is available
+These remaining boards have arrived for development. **No VibePulse firmware is available
 for them yet**, and there is no release date. Each port must pass the
 [display bring-up and physical verification checklist](docs/adding-a-display.md)
 before moving into the supported table above.
@@ -518,7 +531,6 @@ commission. Waveshare supplied this development hardware.
 |---|---|
 | [ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate) | Received · coming soon · not supported yet |
 | [ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=179337) (affiliate) | Received · coming soon · not supported yet |
-| [ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate) | Received · coming soon · not supported yet; link selects the touch variant |
 
 Also received for **VibeMatrix experiments**: the controller, three LED panels
 and a power adapter below. This is an exploratory direction; it does not yet
@@ -590,8 +602,8 @@ understand how the pieces fit together.
 ## Setup, the manual way
 
 **Select the board first.** The commands below build the original 2.16 profile.
-For 2.41 V2 use the separate [V2 build/flash sequence](docs/waveshare-241-v2.md);
-do not flash the default image to it.
+For a landscape board use its own sequence: [2.41 V2](docs/waveshare-241-v2.md)
+or [1.91 Touch](docs/waveshare-191-touch.md). Do not flash the default image to it.
 
 The commands below show the macOS path. Windows is supported for the host
 service too; use the Windows ESP-IDF environment and the OS-specific
@@ -678,6 +690,10 @@ Countdown clocks and coding quotes remain concepts for a later Labs addition.
 WIFI, LABS or ABOUT. Use the [V2 guide](docs/waveshare-241-v2.md) for USB
 updates; OTA is not validated on this model.
 
+**1.91 Touch:** hold **BOOT while the application runs** to open SETTINGS;
+use the [1.91 Touch guide](docs/waveshare-191-touch.md) for setup and USB
+updates. Its menu navigation still needs a final physical review.
+
 The details and 480×480 captures below describe the **original 2.16**.
 **KEY3** is that panel's one user button — BOOT and reset are recovery
 controls, not part of normal use. Hold KEY3 for three seconds and
@@ -743,8 +759,8 @@ cannot keep.
 
 ## Over-the-air updates
 
-This section describes **2.16**. The **2.41 V2** port currently uses
-[board-specific USB updates](docs/waveshare-241-v2.md#4-back-up-and-install-over-usb).
+This section describes **2.16**. The **2.41 V2** and **1.91 Touch** ports
+currently use board-specific USB updates; see their installation guides.
 
 After the first USB flash, the screen updates itself over WiFi. The consent
 chain is deliberate and three-factor: a **physical 3-second hold on KEY3**
@@ -841,7 +857,7 @@ tokenserver reachability, or relay health. During setup the complete symbol mean
 successful destination join.
 
 The setup window opens on its own after 90 seconds without a network, or
-at once from a 3-second button hold (**KEY3 on 2.16, BOOT on 2.41 V2**)
+at once from a 3-second button hold (**KEY3 on 2.16, BOOT on 2.41 V2 or 1.91 Touch**)
 followed by **WIFI** in SETTINGS. Before
 that, at 60 seconds, the glass stops being coy: it names the network it is
 hunting and what the radio actually answered ("NOT SEEN - 2.4 GHZ ONLY", "WRONG PASSWORD") instead of
@@ -913,8 +929,9 @@ platform and VibePulse against the real LVGL, and feeds it the recorded
 fixtures in `sim-fixtures/` through the same parsers the board runs. The
 flat UI captures in this README are unmodified simulator frames (the
 banner places three of them side by side). The separately captioned 2.41 V2
-photograph shows the owner's real panel; its evidence is recorded in the
-[V2 physical report](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md).
+and 1.91 Touch photographs show the owner's real panels; evidence is recorded
+in the [V2 physical report](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md)
+and [1.91 physical report](docs/superpowers/reviews/2026-09-23-waveshare-191-touch.md).
 For the original 2.16, the
 [2026-08-13 physical review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)
 covered the quota pages, agent monitor states and Max Tracker pages in that
@@ -1054,10 +1071,11 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
   `main` still needs XDG paths, Linux credential selection, systemd user
   service lifecycle, and a real-host + panel validation report. See
   [Host platform support](docs/platform-support.md).
-- **Other boards or panel sizes?** Current source supports Waveshare **2.16**
-  and **2.41 V2**, each with its own build profile and native layout. AMOLED
-  1.75, 1.8 and 1.91 are [planned ports](#coming-soon--hardware-on-the-workbench),
-  without firmware support yet. See [adding a display](docs/adding-a-display.md)
+- **Other boards or panel sizes?** Current source includes Waveshare **2.16**,
+  **2.41 V2** and the USB-installed **1.91 Touch** development port, each with
+  its own build profile and native layout. AMOLED 1.75 and 1.8 are
+  [planned ports](#coming-soon--hardware-on-the-workbench), without firmware support yet.
+  See [adding a display](docs/adding-a-display.md)
   and [#5](https://github.com/niclasvestlund-YT/vibepulse/issues/5).
 - **Cursor, Gemini CLI, other providers?** Not yet —
   [#4](https://github.com/niclasvestlund-YT/vibepulse/issues/4).

@@ -270,7 +270,7 @@ assert "xTaskNotifyGive(s_guard_task)" in join_post, (
 
 guard = setup_c.split("static void guard_task(void *arg)")[1]
 trial_at = guard.find("s_hooks->try_credentials")
-have_ip_at = guard.find("if (!applied_now && have_ip)", trial_at)
+have_ip_at = guard.find("tg_wifi_join_should_accept(join_status, trial_started, applied_now, have_ip)", trial_at)
 remember_at = guard.find("tg_wifi_creds_remember", trial_at)
 accepted_at = guard.find("s_hooks->credentials_accepted", remember_at)
 assert 0 <= trial_at < have_ip_at < remember_at < accepted_at, (
@@ -280,7 +280,7 @@ assert "tg_wifi_join_should_apply" in guard, (
     "the guard must apply each submission sequence at most once"
 )
 assert "bool applied_now = false" in guard
-assert "if (!applied_now && have_ip)" in guard, (
+assert "tg_wifi_join_should_accept(join_status, trial_started, applied_now, have_ip)" in guard, (
     "an IP sample taken before a new trial starts must not validate it"
 )
 assert "s_hooks->last_disconnect_reason" in guard, (
