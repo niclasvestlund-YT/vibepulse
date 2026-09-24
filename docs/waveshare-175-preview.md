@@ -98,14 +98,16 @@ behind static physical review and measured stress.
 ## Remaining work beyond the photographed quota profile
 
 The normal application profile now builds and renders quota, attention,
-completion, analytics, settings, Wi-Fi and OTA at native resolution. The
+completion, analytics, settings and Wi-Fi at native resolution. OTA remains
+disabled on this board until its identity and update path are verified. The
 separate `TORGET_ROUND_DIAGNOSTIC=ON` profile remains available for bench
 recovery. The named unit has booted the normal profile, saved a Wi-Fi network,
 received an IP address and fetched tokens. Confirm the USB-down angle and
-touch locations, compare the values on glass to the source, verify the reply
-loop, and extend the named-unit physical report before claiming touch,
-interaction, OTA or rotation support. Other boards do not confer OTA or
-motion approval on this one.
+touch locations, compare the values on glass to the source, and extend the
+named-unit physical report before claiming touch, interaction, OTA or rotation
+support. Needs You decisions remain on the computer. The whole-screen burn-in
+drift timer is disabled for 1.75 until physical motion review is complete;
+other boards do not confer motion approval on this one.
 
 The VibePulse and VibeOnChip presentations must retain the same support
 boundary. Neither may inherit another board's physical certification.
