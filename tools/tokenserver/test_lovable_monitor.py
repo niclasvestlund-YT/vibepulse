@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import time
 import unittest
 import urllib.error
@@ -249,6 +250,8 @@ class MonitorTests(unittest.TestCase):
 
 
 class TokenStoreTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt",
+                     "POSIX file modes are not enforced on Windows")
     def test_file_store_is_private(self):
         import os
         import tempfile

@@ -797,7 +797,7 @@ static void refresh_lovable_daily(const tk_lovable_status *status) {
 
 static void refresh_lovable_countdown(int64_t elapsed) {
   lovable_page *page = &ui.lovable;
-  char text[48] = "";
+  char text[64] = "";
   char grant[16] = "";
   if (page->has_grant) format_grant(page->grant_tenths, grant, sizeof grant);
   char reset[32] = "";
