@@ -318,6 +318,14 @@ class DocsFrameDriftTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
+    def test_lovable_host_disconnect_changes_provenance_not_balance(self):
+        with Image.open(self.capture_dir / "torget-vibepulse-lovable-live.bmp") as live, \
+             Image.open(self.capture_dir / "torget-vibepulse-lovable-disconnected.bmp") as cached:
+            self.assertNotEqual(live.crop((350, 40, 465, 64)).tobytes(),
+                                cached.crop((350, 40, 465, 64)).tobytes())
+            self.assertEqual(live.crop((30, 120, 450, 255)).tobytes(),
+                             cached.crop((30, 120, 450, 255)).tobytes())
+
     def test_the_capture_set_actually_ran(self):
         """The QA mode writing nothing would make every other test in this
         file pass vacuously — an empty allowed-set rejects nothing unless

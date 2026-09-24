@@ -1787,6 +1787,8 @@ static int run_vibepulse_lovable_qa(void) {
   dump_frame("vibepulse-lovable-login");
   apply_lovable_file("lovable.json");
   dump_frame("vibepulse-lovable-live");
+  usage_screen_tick(torget_now_us() + 181000000LL);
+  dump_frame("vibepulse-lovable-disconnected");
   apply_lovable_file("lovable-stale.json");
   dump_frame("vibepulse-lovable-cached");
   apply_lovable_file("lovable-daily-empty.json");

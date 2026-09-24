@@ -101,24 +101,26 @@ Codex. You do not need to read this whole page:
    are concepts. New installs start with quotas and activity; analytics are
    optional in SETTINGS → LABS.
 
-## Latest release: v1.2.0
+## Latest release: v1.3.0
 
-VibePulse now has board-specific builds for four AMOLED shapes: the original
-2.16 square, 2.41 V2 landscape, the USB-installed 1.91 Touch development port,
-and a round 1.75 quota display. Real-panel photos, native captures, USB setup
-guides and physical evidence sit with each model under
-[Supported screens](#supported-screens). The round face shows weekly usage,
-USED TODAY and a reset countdown in one ring. Each build must match the exact
-board; the new boards have different remaining physical checks.
+Lovable joins the optional Labs pages. An experimental Chrome extension reads
+explicitly labelled credits from the billing page and sends them through your
+local tokenserver. The [setup guide](docs/lovable-pulse.md) covers installation,
+workspace selection, freshness, removal and switching to the official API later.
+Lovable's MCP documentation describes credits, but the response we checked did
+not include them. Browser automation remains experimental; a real one-time
+reading reached the round display, while automatic refresh still needs confirmation.
 
-The release also adds an optional Claude statusLine quota source and saved LABS
-choices. Its firmware and host checks run in CI. This tag is not itself a
-physical flash of every final image, and the Windows v1 physical-answer and
-lifecycle result remains pinned to the v1.0.0 runtime.
+Labs now lets you hide Claude Code or Codex quota pages and apply saved choices
+with **RESTART NOW**. The existing quota designs stay the same. Source and native
+render checks cover all 256 combinations, including every page off. A release
+tag is not a physical flash of every final image; board-specific touch and
+installation checks remain separate.
 
-[Read the illustrated v1.2.0 notes](docs/releases/2026-09-24-four-amoled-shapes.md)
+[Illustrated v1.3.0 notes](docs/releases/2026-09-25-lovable-and-labs.md)
 · [Full changelog](CHANGELOG.md)
-· [Compare v1.1.0...v1.2.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.1.0...v1.2.0)
+· [Compare v1.2.0...v1.3.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.2.0...v1.3.0)
+· [Four-board v1.2.0 release](docs/releases/2026-09-24-four-amoled-shapes.md)
 
 Contributing or validating another host? Read
 [CONTRIBUTING.md](CONTRIBUTING.md), the

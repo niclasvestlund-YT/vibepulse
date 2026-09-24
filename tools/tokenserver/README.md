@@ -202,6 +202,7 @@ curl http://localhost:8737/api/lovable
 `auto` (default) combines available sources, preferring a healthy official balance
 when newer or when the browser reading is stale. `mcp` disables browser ingress.
 The environment equivalent is `VIBEPULSE_LOVABLE_SOURCE=browser|auto|mcp`.
+On Windows, use `-Lovable -LovableSource browser` on the installer/runner.
 Preserve existing service arguments and restart the service after changing them.
 
 The OAuth tokens are stored in the macOS Keychain (service

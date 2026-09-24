@@ -5,6 +5,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+## v1.3.0 — 2026-09-25
+
+Release notes: [Lovable credits and Labs controls](docs/releases/2026-09-25-lovable-and-labs.md).
+
 ### Added
 
 - Optional Lovable build-credit page and an experimental local Chrome bridge
@@ -22,6 +26,9 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Fixed
 
+- Keep nested daily balances and reset dates out of the main credit period.
+- Accept CRLF-delimited MCP event streams and retain Lovable source options in
+  the Windows task runner. Mark retained panel readings CACHED if host polling stops.
 - Disabled quota pages are skipped safely during updates and header refreshes;
   carousel navigation is bounded even when every page is off.
 - Round preview tooling keeps the correct 466 × 466 profile and explicitly

@@ -107,6 +107,16 @@ class ExtractTests(unittest.TestCase):
         self.assertEqual(data["daily_credits"], 3)
         self.assertEqual(data["daily_grant"], 5)
 
+    def test_nested_daily_pool_cannot_supply_main_balance_or_period(self):
+        daily = {"balance": 3, "limit": 5, "reset_at": 1800000000,
+                 "period_start": 1799900000}
+        for payload in ({"billing": {"daily": daily}},
+                        {"credits": {"remaining": 20}, "billing": {"daily": daily}}):
+            data = lm.extract(payload)
+            self.assertEqual(data["credits"], 20 if "credits" in payload else None)
+            for key in ("grant", "reset_at", "start_at"):
+                self.assertIsNone(data[key], key)
+
     def test_daily_credits_are_never_inferred_from_plan(self):
         data = lm.extract({"plan": "Pro", "credits": 100})
         self.assertIsNone(data["daily_credits"])
@@ -123,6 +133,15 @@ class ToolResultTests(unittest.TestCase):
     def test_sse_body(self):
         raw = b'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{}}\n\n'
         self.assertEqual(lm._parse_rpc_body(raw, "text/event-stream", 2)["id"], 2)
+
+
+    def test_sse_notifications_before_response_with_crlf_and_multiline_data(self):
+        for newline in ("\n", "\r\n", "\r"):
+            text = newline.join([
+                'data: {"jsonrpc":"2.0","method":"notifications/progress"}', '',
+                'data: {"jsonrpc":"2.0",', 'data: "id":2,"result":{}}', '', ''])
+            self.assertEqual(lm._parse_rpc_body(
+                text.encode(), "text/event-stream", 2)["id"], 2)
 
 
 class MonitorTests(unittest.TestCase):

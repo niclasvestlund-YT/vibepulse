@@ -30,7 +30,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".agents/plugins/plugins/vibepulse/scripts"
 MAX_HOOK_INPUT = 64 * 1024
-HOST_SOURCE_FINGERPRINT = "cb0d6c51a5d3"
+HOST_SOURCE_FINGERPRINT = "b234d72044c8"
 
 PERMISSION = {
     "hook_event_name": "PermissionRequest",
@@ -1788,8 +1788,8 @@ class PluginPackageTests(unittest.TestCase):
         self.assertNotIn("eventual `v0.7.1` tag", release)
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("## Latest release: v1.2.0", readme)
-        self.assertIn("Compare v1.1.0...v1.2.0", readme)
+        self.assertIn("## Latest release: v1.3.0", readme)
+        self.assertIn("Compare v1.2.0...v1.3.0", readme)
         self.assertIn("physical flash of every final image", readme)
         self.assertNotIn(
             "latest sanitized checkpoint is explicitly\n"
@@ -1864,7 +1864,7 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("## v1.2.0 — 2026-09-24", changelog)
         self.assertLess(changelog.index("## Unreleased"),
                         changelog.index("## v1.2.0 — 2026-09-24"))
-        self.assertIn("## Latest release: v1.2.0", readme)
+        self.assertIn("## Latest release: v1.3.0", readme)
         for image in (
                 "241-v2/glass-codex.jpg",
                 "191-touch/glass-codex-held.jpg",

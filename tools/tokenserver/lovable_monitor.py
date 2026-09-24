@@ -474,8 +474,8 @@ class McpClient:
 def _parse_rpc_body(raw, content_type, want_id):
     text = raw.decode("utf-8", "replace")
     if "text/event-stream" in content_type:
-        for block in text.split("\n\n"):
-            data = "".join(line[5:].lstrip() for line in block.splitlines()
+        for block in text.replace("\r\n", "\n").replace("\r", "\n").split("\n\n"):
+            data = "\n".join(line[5:].removeprefix(" ") for line in block.splitlines()
                            if line.startswith("data:"))
             if not data:
                 continue
@@ -581,6 +581,14 @@ def _timestamp(value):
     return None
 
 
+def _without_daily_pools(obj, depth=0):
+    """Keep named daily subtrees out of the primary balance and period."""
+    if depth > 5 or not isinstance(obj, dict):
+        return obj if not isinstance(obj, dict) else {}
+    return {key: _without_daily_pools(value, depth + 1)
+            for key, value in obj.items() if not _norm(key).startswith("daily")}
+
+
 def extract(workspace):
     """Return {"plan", "credits", "workspace"} with None for unknown fields."""
     root = workspace
@@ -589,11 +597,12 @@ def extract(workspace):
     if not isinstance(root, dict):
         raise ValueError("get_workspace did not return an object")
 
-    credits = _find(root, _CREDIT_KEYS, _number, _CREDIT_CONTAINERS)
+    main_root = _without_daily_pools(root)
+    credits = _find(main_root, _CREDIT_KEYS, _number, _CREDIT_CONTAINERS)
     if credits is None:
         # A nested credits object like {"remaining": 12, "total": 100}.
         for key in _CREDIT_CONTAINERS:
-            child = {_norm(k): v for k, v in root.items()}.get(key)
+            child = {_norm(k): v for k, v in main_root.items()}.get(key)
             if isinstance(child, dict):
                 credits = _find(child, ("remaining", "available", "current"),
                                 _number)
@@ -623,13 +632,11 @@ def extract(workspace):
     # Keep daily pools out of the main allowance search. _find deliberately
     # walks nested objects, so an explicit daily allowance must not become the
     # monthly/main grant merely because both use a key such as "allowance".
-    main_root = {key: value for key, value in root.items()
-                 if _norm(key) not in _DAILY_CONTAINERS[:4]}
     grant = _find(main_root, _GRANT_KEYS, _number, _CREDIT_CONTAINERS)
     if grant is not None and grant <= 0:
         grant = None
-    reset_at = _find(root, _RESET_KEYS, _timestamp, _CREDIT_CONTAINERS)
-    start_at = _find(root, _START_KEYS, _timestamp, _CREDIT_CONTAINERS)
+    reset_at = _find(main_root, _RESET_KEYS, _timestamp, _CREDIT_CONTAINERS)
+    start_at = _find(main_root, _START_KEYS, _timestamp, _CREDIT_CONTAINERS)
 
     # Daily credits are a distinct pool. Never derive them from the plan name
     # (Pro happens to advertise five today, but other plans can differ). A

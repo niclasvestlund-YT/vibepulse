@@ -1,5 +1,15 @@
 # Lessons log
 
+## 2026-09-25 · Green checks do not close unresolved review findings
+
+Before merging, inspect every review thread as well as the exact-head CI result.
+The Lovable release review found unhandled CRLF SSE records, nested daily data
+leaking into the main credit period, a missing Windows startup switch and a
+retained LIVE label after the host disappeared. Fix the behavior and add the
+specific regression checks before resolving a thread. Keep browser lifecycle
+and physical touch claims separate from unit/build results. Release notes and
+a website announcement should publish only after the release dependency exists.
+
 ## 2026-09-24 · Resolve the physical unit and build inputs before installation
 
 The Lovable session exposed a wrong display profile, an unwanted companion app,

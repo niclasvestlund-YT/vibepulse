@@ -127,8 +127,11 @@ launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver
 ```
 
 Alternatively set `VIBEPULSE_LOVABLE=1` and `VIBEPULSE_LOVABLE_SOURCE=browser` in
-the service environment. For Windows, preserve the existing task action and
-follow [the scheduled-task restart instructions](windows-setup.md). Do not rerun
+the service environment. For Windows, the installer and runner accept
+`-Lovable -LovableSource browser` (also `auto` or `mcp`). Add these PowerShell
+options to the existing task's runner action, preserving its other arguments.
+For a new installation, pass them to `tools/tokenserver/install-windows-task.ps1`.
+Then follow [the scheduled-task restart instructions](windows-setup.md). Do not rerun
 the installer with missing options: that can remove existing configuration.
 
 ### 3. Load it in Chrome

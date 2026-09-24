@@ -826,6 +826,16 @@ static void refresh_lovable_age(int64_t now_us) {
       ? (now_us - page->applied_at_us) / 1000000 : 0;
   refresh_lovable_countdown(elapsed);
   int64_t age = (int64_t)page->age_seconds + elapsed;
+  /* The host can disappear after a LIVE response. Do not keep claiming live
+   * forever; preserve sign-in/off messages and dim the retained real reading. */
+  if ((elapsed > 180 || age > 900) &&
+      strcmp(lv_label_get_text(page->provenance), "LIVE") == 0) {
+    lv_label_set_text(page->provenance, "CACHED");
+    lv_obj_set_style_bg_opa(page->sweep, LV_OPA_40, 0);
+    lv_obj_set_style_text_opa(page->daily, LV_OPA_40, 0);
+    if (page->ring_reset)
+      lv_obj_set_style_arc_opa(page->ring_reset, LV_OPA_40, LV_PART_INDICATOR);
+  }
   char text[40];
   if (age < 60) snprintf(text, sizeof text, "UPDATED JUST NOW");
   else if (age < 3600)
