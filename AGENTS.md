@@ -34,7 +34,15 @@ Designsystemet: **spec/ui-spec.md**. Hårdvarusanningen routas under
 `Hardware-aware work` nedan; läs den kanoniska femfilslistan där före
 hårdvaruarbete.
 
-## Status (2026-09-10, v1.1.0)
+## Status (2026-09-24, v1.2.0)
+
+`v1.2.0` packages board-specific source for 2.16, 2.41 V2, 1.91 Touch and
+round 1.75, with photographs, native layouts and individual USB guides. The
+2.41 V2 has physical display/touch/Wi-Fi/quota evidence; 1.91 Touch is a
+physically exercised development port; 1.75 has a photographed physical quota
+checkpoint. Their unverified interaction, OTA and rotation paths are recorded
+in the [illustrated release notes](docs/releases/2026-09-24-four-amoled-shapes.md)
+and board guides. Do not inherit a physical PASS from one board to another.
 
 Plattformen bröts ut ur underhållarens tidigare solcells-firmware (den
 historiken ligger i ett privat repo och är inget du behöver) och stöptes om

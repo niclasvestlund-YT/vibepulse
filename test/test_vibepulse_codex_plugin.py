@@ -1788,10 +1788,9 @@ class PluginPackageTests(unittest.TestCase):
         self.assertNotIn("eventual `v0.7.1` tag", release)
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("## Latest release: v1.1.0", readme)
-        self.assertIn("Compare v1.0.0...v1.1.0", readme)
-        self.assertIn("### v1.1.0 verification", readme)
-        self.assertIn("windows-v1-full-lifecycle.md", readme)
+        self.assertIn("## Latest release: v1.2.0", readme)
+        self.assertIn("Compare v1.1.0...v1.2.0", readme)
+        self.assertIn("physical flash of every final image", readme)
         self.assertNotIn(
             "latest sanitized checkpoint is explicitly\n"
             "  **[PARTIAL]", readme)
@@ -1833,9 +1832,9 @@ class PluginPackageTests(unittest.TestCase):
                 release)
         # The ABOUT fixture displays an older sample firmware version.
         self.assertNotIn("vibepulse-settings-about.png", release)
-        # The README's release section carries the same evidence boundary.
-        self.assertIn("NOT YET FLASHED", readme)
-        self.assertIn("Pinned to v1.0.0's runtime `bee5d8c`", readme)
+        # The older release remains documented, while the latest-release
+        # section advances independently with its own evidence boundary.
+        self.assertIn("v1.1.0 added SETTINGS", readme)
         self.assertIn("## v1.1.0 — 2026-09-10", changelog)
         self.assertIn("2026-09-10-settings-and-evidence.md", changelog)
         self.assertLess(changelog.index("## Unreleased"),
@@ -1845,13 +1844,36 @@ class PluginPackageTests(unittest.TestCase):
         # The cut left nothing behind: v1.1.0's entries live under v1.1.0,
         # never under Unreleased (which may already hold the next change).
         between = changelog[changelog.index("## Unreleased"):
-                            changelog.index("## v1.1.0")]
+                            changelog.index("## v1.2.0")]
         for shipped in ("coredump", "reboot ledger", "poll_backoff_policy",
                         "ruff"):
             self.assertNotIn(shipped, between)
         for forbidden in ("oauth token:", "refresh token:",
                           "account id:", "relay address:"):
             self.assertNotIn(forbidden, release.lower())
+
+    def test_v120_release_links_physical_photos_and_limits(self):
+        release = (ROOT / "docs/releases/"
+                   "2026-09-24-four-amoled-shapes.md").read_text(
+                       encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertTrue(release.startswith("VibePulse v1.2.0"))
+        self.assertIsNone(re.search(r"^# ", release, re.MULTILINE))
+        self.assertIn("## Unreleased\n\n## v1.2.0 — 2026-09-24", changelog)
+        self.assertIn("## Latest release: v1.2.0", readme)
+        for image in (
+                "241-v2/glass-codex.jpg",
+                "191-touch/glass-codex-held.jpg",
+                "175-round/glass-codex-front.jpg"):
+            self.assertTrue((ROOT / "docs/img" / image).is_file(), image)
+            self.assertIn(
+                "https://raw.githubusercontent.com/niclasvestlund-YT/"
+                "vibepulse/v1.2.0/docs/img/" + image, release)
+        for limit in ("V1 is a different board", "development port",
+                      "PCB revision is unknown", "Automatic rotation is unverified",
+                      "disables OTA", "source-only", "no firmware binary"):
+            self.assertIn(limit, release)
 
     def test_v100_release_is_major_windows_honest_and_source_only(self):
         release = (ROOT / "docs/releases/"
