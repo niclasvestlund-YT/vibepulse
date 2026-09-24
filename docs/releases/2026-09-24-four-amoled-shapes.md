@@ -34,6 +34,16 @@ Claude Code's statusLine can now supply session and weekly quota readings throug
 
 ## Install or upgrade
 
-Check the marking on the actual board, then use its linked guide and explicitly select `TORGET_BOARD=waveshare_241_v2`, `waveshare_191_touch` or `waveshare_175`. The original 2.16 remains the default. **Never flash one board's image to another.** The three new profiles use USB installation; their OTA paths are not verified. On the computer running the tokenserver, fetch and check out `v1.2.0`, run `python3 tools/vibepulse_setup.py status`, then restart the service using the [macOS](https://github.com/niclasvestlund-YT/vibepulse/blob/v1.2.0/docs/agent-setup.md) or [Windows](https://github.com/niclasvestlund-YT/vibepulse/blob/v1.2.0/docs/windows-setup.md#restarting-the-scheduled-task) instructions for that host. `python3 tools/tokenserver/smoke.py` checks the running service.
+Check the marking on the actual board, then use its linked guide and explicitly select `TORGET_BOARD=waveshare_241_v2`, `waveshare_191_touch` or `waveshare_175`. The original 2.16 remains the default. **Never flash one board's image to another.** The three new profiles use USB installation; their OTA paths are not verified.
+
+In the checkout used by the computer running the tokenserver:
+
+```sh
+git fetch --tags origin
+git switch --detach v1.2.0
+python3 tools/vibepulse_setup.py status
+```
+
+Restart the service to load this code: on macOS run `launchctl kickstart -k gui/$(id -u)/se.torget.tokenserver`; on Windows follow the [stop, wait, then start procedure](https://github.com/niclasvestlund-YT/vibepulse/blob/v1.2.0/docs/windows-setup.md#restarting-the-scheduled-task). Then run `python3 tools/tokenserver/smoke.py` to check the running service.
 
 This is a **source-only** release. A local `torget.bin` can contain Wi-Fi credentials and a private device key, so no firmware binary is attached. [Compare v1.1.0...v1.2.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.1.0...v1.2.0) · [All supported-screen status and photos](https://github.com/niclasvestlund-YT/vibepulse/blob/v1.2.0/README.md#supported-screens).
