@@ -209,7 +209,7 @@ uint8_t torget_wifi_signal_bars(void) {
 void torget_keep_awake(void) { s_last_activity_us = esp_timer_get_time(); }
 
 void torget_update_available(const char *version) {
-#ifndef TORGET_BOARD_191_TOUCH
+#if !defined(TORGET_BOARD_191_TOUCH) && !defined(TORGET_BOARD_175)
   torget_ota_service_update_available(version);
 #else
   (void)version;
@@ -1226,7 +1226,7 @@ void app_main(void) {
    * Http-servern och dess minneskostnad existerar först när ett KEY3-håll
    * öppnat underhållsfönstret — en boot utan uppdatering ska ha samma
    * minnesprofil som en build helt utan OTA (frysläxan 2026-08-14). */
-#ifndef TORGET_BOARD_191_TOUCH
+#if !defined(TORGET_BOARD_191_TOUCH) && !defined(TORGET_BOARD_175)
   torget_ota_service_start();
 #endif
   /* Nätvakten sist och lika lat: accesspunkten, http-servern och

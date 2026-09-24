@@ -1859,6 +1859,10 @@ static int run_round_quota_qa(void) {
   lv_obj_delete(probe);
   torget_settings_open("v1.1.0-round-preview", "192.168.100.100");
   dump_frame("round-settings-menu");
+  /* A reachable IP must not turn this USB-only board's UPDATE row into OTA. */
+  torget_settings_click_row(TG_SETTINGS_ROW_UPDATE);
+  if (torget_settings_take_intent() != TG_SETTINGS_INTENT_NONE ||
+      !torget_settings_open_p()) return 1;
   torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
   dump_frame("round-settings-about");
   torget_settings_close();

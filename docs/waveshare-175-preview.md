@@ -23,6 +23,7 @@ test -f secrets.h || cp secrets.h.example secrets.h
 . ~/esp/esp-idf/export.sh
 idf.py -B build-175 -D TORGET_BOARD=waveshare_175 \
   -D SDKCONFIG=sdkconfig.175 \
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.175' \
   -D TORGET_SOLELKOLLEN_DIR=/nonexistent \
   -D TORGET_BUDDY_DIR=/nonexistent build
 ```
@@ -45,7 +46,9 @@ phone and open `http://192.168.4.1/` manually. The QR code joins the setup
 network; it does not open the page. Choose the 2.4 GHz network or type its
 exact SSID if a scan misses it. Verify that the panel rejoins Wi-Fi, displays
 real provider values, and keeps unavailable readings as dashes. Updates on
-this profile currently use USB. Touch, the requested USB-down angle, the
+this profile currently use USB. The photographed trial image predates the
+USB-only OTA and computer-only decision gates: do not use UPDATE or on-glass
+prompt answers on that image. Touch, the requested USB-down angle, the
 new two-scan Wi-Fi behavior, OTA and automatic rotation have the physical
 limits recorded in the named-unit checkpoint.
 

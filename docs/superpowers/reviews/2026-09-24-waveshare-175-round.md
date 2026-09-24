@@ -50,6 +50,11 @@ attribute the source change to these photographs or call the scan issue
 physically resolved.
 
 The current board source is a USB-installed bench profile after v1.1.0.
+The photographed USB-down trial predates the reviewed USB-only OTA gate and
+computer-only Needs You fallback. Until a later build is installed and its
+touch behavior verified, do not use UPDATE or answer prompts on this unit;
+use the computer for decisions and USB for firmware changes. The source gate
+does not retroactively change the installed image.
 The three photographs are supplied by the owner for the public VibePulse and
 VibeOnChip presentation. They contain no location or camera-device EXIF tags.
 Private raw serial logs, credentials, firmware binaries and flash backups are

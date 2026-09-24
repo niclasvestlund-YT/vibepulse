@@ -8,11 +8,14 @@ platform, and it is mostly Swedish.
 
 Det här repot är **VibePulse**: appen som visar Claude Code- och
 Codex-kvoter på Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480), **2.41 V2**
-(600×450) och en USB-installerad **1.91 Touch**-utvecklingsport (536×240).
+(600×450), en USB-installerad **1.91 Touch**-utvecklingsport (536×240)
+och den runda **1.75**-kvotprofilen (466×466).
 Liggande modeller väljs uttryckligen med `-DTORGET_BOARD=waveshare_241_v2`
-respektive `-DTORGET_BOARD=waveshare_191_touch`; samma val gäller firmware
+respektive `-DTORGET_BOARD=waveshare_191_touch`; den runda modellen väljs
+med `-DTORGET_BOARD=waveshare_175`. Samma val gäller firmware
 och simulator. [Installera V2](docs/waveshare-241-v2.md),
 [installera 1.91 Touch](docs/waveshare-191-touch.md),
+[rund 1.75-guide](docs/waveshare-175-preview.md),
 [nästa display](docs/adding-a-display.md).
 Appen kör
 på **Torget**, en liten LVGL-appplattform som bor i samma repo och äger
@@ -112,7 +115,7 @@ AMOLED-skillen och mäts på panelen.
 
 ## Over-the-air-uppdateringar
 
-Det här arbetsflödet gäller originalmodellen 2.16. 2.41 V2 och 1.91 Touch
+Det här arbetsflödet gäller originalmodellen 2.16. 2.41 V2, 1.91 Touch och 1.75
 uppdateras tills vidare via USB enligt sina boardguider; OTA och
 modellkontroll i uppdateringskedjan är inte verifierade för dem.
 
@@ -225,6 +228,10 @@ verification items explicit.
 For **2.41 V2**, read the same five filenames under
 `spec/boards/waveshare_241_v2/`; validate that directory separately. Never
 transfer installed firmware or physical verification between board registries.
+For the round **1.75**, read the five files under
+`spec/boards/waveshare_175/` and `docs/waveshare-175-preview.md`.
+PCB revision remains unknown; quota display is photographed on one unit,
+while touch decisions, OTA and automatic rotation remain unverified.
 
 Before proposing external hardware, declaring a device limitation, or designing
 a hardware-dependent feature, read `spec/hardware.md`,

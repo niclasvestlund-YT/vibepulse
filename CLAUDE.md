@@ -10,7 +10,7 @@ table. Never flash the board without the user explicitly asking you to.
 
 ## Over-the-air updates
 
-This workflow applies to the original 2.16 board. Update 2.41 V2 and 1.91 Touch
+This workflow applies to the original 2.16 board. Update 2.41 V2, 1.91 Touch and 1.75
 over USB using their board-specific guides; OTA and board identification in the
 update chain are not validated for these ports.
 
@@ -65,6 +65,10 @@ verification items explicit.
 For **2.41 V2**, read the same five filenames under
 `spec/boards/waveshare_241_v2/`; validate that directory separately. Never
 transfer installed firmware or physical verification between board registries.
+For the round **1.75**, read the five files under
+`spec/boards/waveshare_175/` and `docs/waveshare-175-preview.md`.
+PCB revision remains unknown; quota display is photographed on one unit,
+while touch decisions, OTA and automatic rotation remain unverified.
 
 Before proposing external hardware, declaring a device limitation, or designing
 a hardware-dependent feature, read `spec/hardware.md`,

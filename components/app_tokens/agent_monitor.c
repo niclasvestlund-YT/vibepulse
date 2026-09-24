@@ -207,8 +207,8 @@ static void completion_pulse_stop(void) {
 
 static void completion_pulse_start(void) {
   completion_pulse_stop();
-#ifdef TORGET_BOARD_191_TOUCH
-  return; /* Static until this physical display has a motion review. */
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
+  return; /* Static until these physical displays have a motion review. */
 #endif
   lv_anim_t anim;
   lv_anim_init(&anim);
@@ -551,8 +551,8 @@ static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
                          .tool_chip_width = 58};
   if (!p || !decision || !decision->visible) return fit;
 
-#ifdef TORGET_BOARD_191_TOUCH
-  return fit; /* compact glass cannot offer safe 90px verdict targets */
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
+  return fit; /* Keep decisions on the computer until 90px targets pass review. */
 #endif
 #ifdef TORGET_BOARD_175
   /* The round decision bands are narrower and shorter. The same dimensions
@@ -1235,45 +1235,30 @@ static void render_needs_you(void) {
   }
 
   /* -- Buttons: every target >= 90 px; APPROVE filled and only where allowed */
-  int approve_y = is_question ? 244 : 252;
 #ifdef TORGET_BOARD_175
-  approve_y = 278;
-#endif
-  if (offer_approve) {
-#ifdef TORGET_BOARD_175
-    lv_obj_set_pos(v->approve, 62, approve_y);
-    lv_obj_set_size(v->approve, 356, 62);
+  /* Round decisions are intentionally computer-only. Keep no smaller verdict
+   * controls in the compiled layout, even if fit policy changes later. */
+  lv_obj_set_pos(v->leave, 94, 278);
+  lv_obj_set_size(v->leave, 292, 90);
 #else
+  int approve_y = is_question ? 244 : 252;
+  if (offer_approve) {
     lv_obj_set_pos(v->approve, 24, approve_y);
     lv_obj_set_size(v->approve, 432, 96);
-#endif
     ny_show(v->approve, true);
   }
   if (offer_deny) {
-#ifdef TORGET_BOARD_175
-    int row_y = 344;
-    lv_obj_set_pos(v->deny, 104, row_y);
-    lv_obj_set_size(v->deny, 132, 58);
-    ny_show(v->deny, true);
-    lv_obj_set_pos(v->leave, 244, row_y);
-    lv_obj_set_size(v->leave, 132, 58);
-#else
     int row_y = approve_y + 108;
     lv_obj_set_pos(v->deny, 24, row_y);
     lv_obj_set_size(v->deny, 208, 90);
     ny_show(v->deny, true);
     lv_obj_set_pos(v->leave, 248, row_y);
     lv_obj_set_size(v->leave, 208, 90);
-#endif
   } else {
-#ifdef TORGET_BOARD_175
-    lv_obj_set_pos(v->leave, 94, offer_approve ? 344 : 278);
-    lv_obj_set_size(v->leave, 292, offer_approve ? 58 : 68);
-#else
     lv_obj_set_pos(v->leave, 24, offer_approve ? approve_y + 106 : approve_y);
     lv_obj_set_size(v->leave, 432, 90);
-#endif
   }
+#endif
   ny_show(v->leave, true);
 
   ny_show(v->root, true);

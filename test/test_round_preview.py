@@ -13,6 +13,22 @@ from test_docs_frame_drift import BOARD_175_FRAMES, ROOT
 
 
 class RoundPreviewTests(unittest.TestCase):
+    def test_round_needs_you_hands_decisions_to_computer(self):
+        """The real renderer's approve attempts must never send a round verdict."""
+        build = ROOT / 'sim/build-175/torget-sim'
+        subprocess.run(['cmake', '-S', 'sim', '-B', 'sim/build-175', '-G', 'Ninja',
+                        '-DTORGET_BOARD=waveshare_175',
+                        f'-DTORGET_SOLELKOLLEN_DIR={ROOT}/no-companion'],
+                       cwd=ROOT, check=True, capture_output=True)
+        subprocess.run(['cmake', '--build', 'sim/build-175', '--parallel', '2'],
+                       cwd=ROOT, check=True, capture_output=True)
+        with tempfile.TemporaryDirectory(prefix='vibepulse-round-needs-you.') as directory:
+            result = subprocess.run([str(build), '--vibepulse-needs-you-qa'],
+                                    cwd=ROOT,
+                                    env={**os.environ, 'TORGET_CAPTURE_DIR': directory},
+                                    text=True, capture_output=True, check=True)
+        self.assertNotIn('needs-you verdict:', result.stdout)
+
     def test_full_app_surfaces_stay_inside_round_glass(self):
         """Exercise the real shared LVGL surfaces, including attention and OTA."""
         build = ROOT / 'sim/build-175/torget-sim'

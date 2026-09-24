@@ -247,4 +247,5 @@ jobs:
           target: esp32s3
           command: >-
             idf.py -B build-175 -D TORGET_BOARD=waveshare_175
-            -D SDKCONFIG=sdkconfig.175 build
+            -D SDKCONFIG=sdkconfig.175
+            -D SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.175' build
