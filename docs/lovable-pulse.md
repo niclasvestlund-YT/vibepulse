@@ -172,6 +172,12 @@ needed. Otherwise build/install using your **actual board's guide** linked from
 [hardware requirements](../README.md#what-you-need). Identify the unit before
 building; a 1.75 round display needs `TORGET_BOARD=waveshare_175`, 466 × 466,
 not the default 2.16 profile. A USB port name alone does not identify the board.
+Check the board registry and named unit before building. Maintainer machines may also have optional
+Solelkollen/Buddy companion checkouts auto-detected by CMake. Inspect the app
+registry/build configuration; for a VibePulse-only image, explicitly point
+`TORGET_SOLELKOLLEN_DIR` and `TORGET_BUDDY_DIR` at nonexistent component paths
+instead of accidentally including a companion app. See
+[the maintainer build notes](../AGENTS.md#status-2026-09-24-v120).
 
 Hold the Settings button for three seconds (**BOOT**, not RESET, on the 1.75).
 Tap **LABS → MORE → LOVABLE PAGE ON → MORE → RESTART NOW**. Reopen VibePulse
