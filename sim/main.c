@@ -1794,6 +1794,96 @@ static int run_vibepulse_labs_qa(bool catalogue) {
   return capture_failures == 0 ? 0 : 1;
 }
 
+#ifdef TORGET_BOARD_175
+#include "round_diagnostic.h"
+static int run_round_quota_qa(void) {
+  capture_failures = 0;
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
+  torget_app_show(SIM_APP_VIBEPULSE);
+  tk_tokens data = {0};
+  data.codex_week = forecast_limit(43, 2549);
+  data.codex_week.has_delta = 1;
+  data.codex_week.delta_pct = 8;
+  data.claude_model_week = forecast_limit(73, 3129);
+  data.claude_model_week.has_delta = 1;
+  data.claude_model_week.delta_pct = 12;
+  tokens_apply(&data);
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("round-codex-live");
+  data.codex_week.stale = 1;
+  tokens_apply(&data);
+  dump_frame("round-codex-stale");
+  data.codex_week.stale = 0;
+  data.codex_forecast.state = TK_FORECAST_EXHAUSTS;
+  data.codex_forecast.has_offset_min = 1;
+  data.codex_forecast.offset_min = -540;
+  tokens_apply(&data);
+  dump_frame("round-codex-to-empty");
+  memset(&data.codex_forecast, 0, sizeof data.codex_forecast);
+  data.codex_week.stale = 0;
+  data.codex_week.has_delta = 0;
+  tokens_apply(&data);
+  dump_frame("round-codex-today-missing");
+  data.codex_week.has_delta = 1;
+  data.codex_week.delta_pct = 44;
+  tokens_apply(&data);
+  dump_frame("round-codex-today-invalid");
+  data.codex_week.pct = 100;
+  data.codex_week.delta_pct = 100;
+  data.codex_week.reset_min = 59;
+  tokens_apply(&data);
+  dump_frame("round-codex-full");
+  data.codex_week.reset_min = 143999;
+  tokens_apply(&data);
+  dump_frame("round-codex-long-reset");
+  data.codex_week.reset_min = 59;
+  data.codex_week.pct = 0;
+  data.codex_week.delta_pct = 0;
+  tokens_apply(&data);
+  dump_frame("round-codex-zero");
+  memset(&data.codex_week, 0, sizeof data.codex_week);
+  tokens_apply(&data);
+  dump_frame("round-codex-missing");
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("round-claude-live");
+  data.claude_week = data.claude_model_week;
+  tokens_apply(&data);
+  tokens_show_view(VIEW_CLAUDE_ALL);
+  dump_frame("round-claude-wide-label");
+  data.claude_week.has_reset = 0;
+  tokens_apply(&data);
+  dump_frame("round-claude-reset-missing");
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_HIDDEN);
+  lv_obj_t *probe = tg_round_diagnostic_create(lv_layer_top());
+  dump_frame("round-diagnostic");
+  lv_obj_delete(probe);
+  torget_settings_open("v1.1.0-round-preview", "192.168.100.100");
+  dump_frame("round-settings-menu");
+  /* A reachable IP must not turn this USB-only board's UPDATE row into OTA. */
+  torget_settings_click_row(TG_SETTINGS_ROW_UPDATE);
+  if (torget_settings_take_intent() != TG_SETTINGS_INTENT_NONE ||
+      !torget_settings_open_p()) return 1;
+  torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
+  dump_frame("round-settings-about");
+  torget_settings_close();
+  torget_settings_open("preview", NULL);
+  torget_settings_click_slot(TG_SETTINGS_ROW_LABS);
+  dump_frame("round-settings-labs");
+  torget_settings_close();
+  torget_wifi_ui_set(TG_WIFI_UI_OPEN, "VibePulse-setup", "A1B2C3D4E5F6", NULL, 583);
+  dump_frame("round-wifi-qr");
+  torget_wifi_ui_set_manual_details(true);
+  dump_frame("round-wifi-manual");
+  torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "A network with a long sample name", NULL,
+                    "NOT SEEN - 2.4 GHZ ONLY", 24);
+  dump_frame("round-wifi-searching");
+  torget_wifi_ui_set(TG_WIFI_UI_FAILED, "A network with a long sample name", NULL,
+                    "CHECK THE PASSWORD", 0);
+  dump_frame("round-wifi-failed");
+  torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
+  return capture_failures ? 1 : 0;
+}
+#endif
 #include "board_diagnostic.h"
 
 int main(int argc, char **argv) {
@@ -1827,6 +1917,11 @@ int main(int argc, char **argv) {
    * så READY-takeovern vinner över menyn på båda. */
   torget_settings_create();
   torget_ota_ui_create();
+
+#ifdef TORGET_BOARD_175
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-round-qa") == 0)
+    return run_round_quota_qa();
+#endif
 
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-qa") == 0)
     return run_vibepulse_labs_qa(false);

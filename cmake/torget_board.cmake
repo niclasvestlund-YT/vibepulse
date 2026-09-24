@@ -1,12 +1,14 @@
 # One explicit board selector for firmware and the native LVGL simulator.
 set(TORGET_BOARD "waveshare_216" CACHE STRING "VibePulse board profile")
-set_property(CACHE TORGET_BOARD PROPERTY STRINGS waveshare_216 waveshare_241_v2 waveshare_191_touch)
-if(TORGET_BOARD STREQUAL "waveshare_241_v2")
+set_property(CACHE TORGET_BOARD PROPERTY STRINGS waveshare_216 waveshare_241_v2 waveshare_191_touch waveshare_175)
+if(TORGET_BOARD STREQUAL "waveshare_175")
+  add_compile_definitions(TORGET_BOARD_175=1)
+elseif(TORGET_BOARD STREQUAL "waveshare_241_v2")
   add_compile_definitions(TORGET_BOARD_241_V2=1)
 elseif(TORGET_BOARD STREQUAL "waveshare_191_touch")
   add_compile_definitions(TORGET_BOARD_191_TOUCH=1)
 elseif(NOT TORGET_BOARD STREQUAL "waveshare_216")
-  message(FATAL_ERROR "Unsupported TORGET_BOARD: ${TORGET_BOARD}. Choose waveshare_216, waveshare_241_v2 or waveshare_191_touch; 2.41 V1 is not supported.")
+  message(FATAL_ERROR "V1 is not supported. Unsupported TORGET_BOARD: ${TORGET_BOARD}. Choose waveshare_216, waveshare_241_v2, waveshare_191_touch or waveshare_175.")
 endif()
 
 option(TORGET_BOARD_DIAGNOSTIC "Static display and four-corner touch diagnostic" OFF)

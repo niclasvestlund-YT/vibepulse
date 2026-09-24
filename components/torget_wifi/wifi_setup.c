@@ -37,6 +37,8 @@ static const char *TAG = "wifi-setup";
 /* Så många nät setupsidan listar. Fler än så är en rullningslista ingen
  * orkar läsa, och listan bor i .bss — inte på en tasks stack. */
 #define SCAN_MAX 16
+#define SCAN_RECORD_MAX 24
+#define SCAN_ATTEMPTS 2
 
 static struct {
   char ssid[SCAN_MAX][TG_WIFI_SSID_CAP];
@@ -116,28 +118,53 @@ static void derive_ap_password(void) {
 /* ------------------------------------------------------------- skanning */
 
 static void scan_networks(void) {
-  s_scan.n = 0;
-  if (esp_wifi_scan_start(NULL, true) != ESP_OK) {
-    ESP_LOGW(TAG, "skanningen gick inte att starta");
-    return;
-  }
-  static wifi_ap_record_t ap[SCAN_MAX]; /* .bss, inte stacken */
-  uint16_t n = SCAN_MAX;
-  if (esp_wifi_scan_get_ap_records(&n, ap) != ESP_OK) return;
-
-  for (int i = 0; i < (int)n && s_scan.n < SCAN_MAX; i++) {
-    const char *ssid = (const char *)ap[i].ssid;
-    /* Dolda nät har tomt SSID och kan inte väljas ur en lista; ett SSID
-     * med styrtecken hör inte hemma i HTML:en (upstream är fientlig). */
-    if (!tg_wifi_ssid_valid(ssid)) continue;
-    bool dupe = false;
-    for (int j = 0; j < s_scan.n; j++)
-      if (strcmp(s_scan.ssid[j], ssid) == 0) dupe = true;
-    if (dupe) continue;
-    snprintf(s_scan.ssid[s_scan.n], TG_WIFI_SSID_CAP, "%s", ssid);
-    s_scan.rssi[s_scan.n] = ap[i].rssi;
-    s_scan.authmode[s_scan.n] = ap[i].authmode;
-    s_scan.n++;
+  memset(&s_scan, 0, sizeof s_scan);
+  static wifi_ap_record_t ap[SCAN_RECORD_MAX]; /* .bss, inte stacken */
+  for (int attempt = 0; attempt < SCAN_ATTEMPTS; attempt++) {
+    esp_err_t err = esp_wifi_scan_start(NULL, true);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "skanning %d/%d kunde inte starta: %s", attempt + 1,
+               SCAN_ATTEMPTS, esp_err_to_name(err));
+      continue;
+    }
+    uint16_t found = 0;
+    err = esp_wifi_scan_get_ap_num(&found);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "skanning %d/%d saknar antal: %s", attempt + 1,
+               SCAN_ATTEMPTS, esp_err_to_name(err));
+    }
+    uint16_t n = SCAN_RECORD_MAX;
+    err = esp_wifi_scan_get_ap_records(&n, ap);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "skanning %d/%d saknar lista: %s", attempt + 1,
+               SCAN_ATTEMPTS, esp_err_to_name(err));
+      continue;
+    }
+    ESP_LOGI(TAG, "skanning %d/%d: %u rapporterade, %u lästa nät",
+             attempt + 1, SCAN_ATTEMPTS, (unsigned)found, (unsigned)n);
+    for (int i = 0; i < (int)n; i++) {
+      const char *ssid = (const char *)ap[i].ssid;
+      /* Dolda nät har tomt SSID och kan inte väljas ur en lista; ett SSID
+       * med styrtecken hör inte hemma i HTML:en (upstream är fientlig). */
+      if (!tg_wifi_ssid_valid(ssid)) continue;
+      int index = -1;
+      for (int j = 0; j < s_scan.n; j++) {
+        if (strcmp(s_scan.ssid[j], ssid) == 0) { index = j; break; }
+      }
+      if (index < 0 && s_scan.n < SCAN_MAX) index = s_scan.n++;
+      if (index < 0) {
+        int weakest = 0;
+        for (int j = 1; j < s_scan.n; j++)
+          if (s_scan.rssi[j] < s_scan.rssi[weakest]) weakest = j;
+        if (ap[i].rssi <= s_scan.rssi[weakest]) continue;
+        index = weakest;
+      } else if (s_scan.ssid[index][0] && ap[i].rssi <= s_scan.rssi[index]) {
+        continue;
+      }
+      snprintf(s_scan.ssid[index], TG_WIFI_SSID_CAP, "%s", ssid);
+      s_scan.rssi[index] = ap[i].rssi;
+      s_scan.authmode[index] = ap[i].authmode;
+    }
   }
 
   /* Starkast först. Nätet man står bredvid ska ligga överst i listan, inte
@@ -184,14 +211,20 @@ static const char PAGE_HEAD[] =
     "margin-top:14px}"
     "</style></head><body><h1>VibePulse</h1>"
     "<p>Pick a 2.4 GHz network. It is saved only after the panel connects "
-    "successfully. 2.4 GHz only&mdash;5 GHz networks are not visible.</p>"
+    "successfully. 2.4 GHz only&mdash;5 GHz networks are not visible. "
+    "If your network is missing, choose My network isn't listed.</p>"
     "<form method=\"POST\" action=\"/join\" "
     "onsubmit=\"this.querySelector('button').disabled=true\">"
     "<label for=\"ssid\">Wi-Fi network</label>"
-    "<select id=\"ssid\" name=\"ssid\">";
+    "<select id=\"ssid\">";
 
 static const char PAGE_TAIL[] =
     "</select>"
+    "<div id=\"manual-wrap\" hidden><label for=\"manual\">"
+    "Network name</label><input id=\"manual\" type=\"text\" maxlength=\"32\" "
+    "autocapitalize=\"off\" autocorrect=\"off\" autocomplete=\"off\" "
+    "placeholder=\"Type the 2.4 GHz network name\"></div>"
+    "<input id=\"ssid-value\" name=\"ssid\" type=\"hidden\">"
     "<div id=\"pass-wrap\"><label id=\"pass-label\" for=\"pass\">"
     "Wi-Fi password</label>"
     "<input id=\"pass\" name=\"pass\" type=\"password\" autocapitalize=\"off\" "
@@ -200,20 +233,29 @@ static const char PAGE_TAIL[] =
     "<p id=\"open-note\" hidden>No password required</p>"
     "<button id=\"join\" type=\"submit\">Join</button></form><script>"
     "const ssid=document.getElementById('ssid'),pass=document.getElementById('pass'),"
+    "manual=document.getElementById('manual'),"
+    "manualWrap=document.getElementById('manual-wrap'),"
+    "ssidValue=document.getElementById('ssid-value'),"
     "passWrap=document.getElementById('pass-wrap'),"
     "passLabel=document.getElementById('pass-label'),"
     "openNote=document.getElementById('open-note'),"
     "join=document.getElementById('join');"
     "function syncPassword(){const option=ssid.options[ssid.selectedIndex],"
-    "hasNetwork=!!option&&!option.disabled;join.disabled=!hasNetwork;"
+    "typed=!!option&&option.value==='__manual__',"
+    "hasNetwork=typed?manual.value.trim().length>0:!!option&&!option.disabled;"
+    "manualWrap.hidden=!typed;manual.required=typed;"
+    "ssidValue.value=typed?manual.value:(option&&!option.disabled?option.value:'');"
+    "join.disabled=!hasNetwork;"
     "if(!hasNetwork){passWrap.hidden=true;openNote.hidden=true;"
     "pass.required=false;pass.disabled=true;pass.value='';return;}"
-    "const secured=option.dataset.secured==='1';"
+    "const secured=typed||option.dataset.secured==='1';"
     "passWrap.hidden = !secured;openNote.hidden=secured;"
     "pass.required = secured;pass.disabled=!secured;"
-    "passLabel.textContent=secured?'Password for '+option.text:'Wi-Fi password';"
+    "passLabel.textContent=secured?'Password for '+"
+    "(typed?manual.value:option.text):'Wi-Fi password';"
     "if(!secured)pass.value='';}"
-    "ssid.addEventListener('change',syncPassword);syncPassword();"
+    "ssid.addEventListener('change',syncPassword);"
+    "manual.addEventListener('input',syncPassword);syncPassword();"
     "</script></body></html>";
 
 static const char JOIN_PAGE[] =
@@ -261,6 +303,9 @@ static esp_err_t page_get(httpd_req_t *req) {
         req,
         "<option disabled selected>No 2.4 GHz networks found</option>",
         HTTPD_RESP_USE_STRLEN);
+  httpd_resp_send_chunk(req,
+      "<option value=\"__manual__\">My network isn't listed</option>",
+      HTTPD_RESP_USE_STRLEN);
 
   httpd_resp_send_chunk(req, PAGE_TAIL, HTTPD_RESP_USE_STRLEN);
   httpd_resp_send_chunk(req, NULL, 0);
@@ -298,11 +343,11 @@ static esp_err_t join_post(httpd_req_t *req) {
       break;
     }
   }
-  if (scan_index < 0) {
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "network not scanned");
-    return ESP_FAIL;
-  }
-  bool secured = authmode_requires_password(s_scan.authmode[scan_index]);
+  /* A single scan can miss a real 2.4 GHz AP. Typed names are allowed but
+   * treated as secured until a successful connection proves them; only a
+   * scanned open/OWE record may omit the password. NVS is written after IP. */
+  bool secured = scan_index < 0 ||
+      authmode_requires_password(s_scan.authmode[scan_index]);
   if (secured && pass[0] == '\0') {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "password required");
     return ESP_FAIL;

@@ -534,7 +534,8 @@ class RepositoryRegistryTests(unittest.TestCase):
                 self.assertEqual(
                     routed_paths, self.CANONICAL_HARDWARE_PATHS
                     | {"spec/boards/waveshare_241_v2/",
-                       "spec/boards/waveshare_191_touch/"}
+                       "spec/boards/waveshare_191_touch/",
+                       "spec/boards/waveshare_175/"}
                 )
 
     def test_root_docs_match_registered_app_set(self):

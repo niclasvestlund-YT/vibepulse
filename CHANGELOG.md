@@ -13,6 +13,14 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- Round 1.75 bring-up profile at 466 × 466: one quota ring with today’s
+  contribution, USED TODAY and a D:H:M reset/exhaustion countdown. Native
+  boundary-state and full-app captures now cover quota, attention, analytics,
+  settings, Wi-Fi and OTA. A five-target diagnostic and the normal app have
+  booted on the named unit. Its quota page has been photographed, and Wi-Fi
+  and token fetches work. A fixed USB-down orientation is installed; its
+  angle, touch alignment, value accuracy and reply flow need physical review
+  before public support is claimed.
 - Development port for Waveshare 1.91 Touch AMOLED: native 536 × 240 layout,
   QSPI display, mapped touch, BOOT settings and a USB installation guide. One
   real unit passed four-corner touch, phone Wi-Fi setup, saved-network

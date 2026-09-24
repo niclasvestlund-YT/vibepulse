@@ -136,6 +136,9 @@ void tk_project_star_popup_create(lv_obj_t *app_root) {
   lv_image_set_src(github_mark, &tk_img_github_mark_24);
   lv_obj_set_pos(github_mark, 20, 20);
   lv_obj_remove_flag(github_mark, LV_OBJ_FLAG_CLICKABLE);
+#ifdef TORGET_BOARD_175
+  lv_obj_add_flag(github_mark, LV_OBJ_FLAG_HIDDEN);
+#endif
 
   popup.repo = label(popup.root, &plex_ui_16, COL_REPO,
                      55, 24, 405, 24);
@@ -166,6 +169,20 @@ void tk_project_star_popup_create(lv_obj_t *app_root) {
   lv_obj_set_pos(popup.actor, 175, 85); lv_obj_set_width(popup.actor, 280);
   lv_obj_set_pos(popup.count, 200, 133); lv_obj_set_width(popup.count, 240);
   lv_obj_set_y(popup.dismiss, 212);
+#endif
+
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(popup.repo, 79, 67);
+  lv_obj_set_width(popup.repo, 322);
+  lv_obj_set_style_text_align(popup.repo, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(popup.actor, 90, 323);
+  lv_obj_set_width(popup.actor, 300);
+  lv_obj_set_style_text_align(popup.actor, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(popup.count, 190, 369);
+  lv_obj_set_width(popup.count, 180);
+  lv_obj_set_pos(popup.dismiss, 110, 414);
+  lv_obj_set_width(popup.dismiss, 260);
+  lv_obj_set_style_text_align(popup.dismiss, LV_TEXT_ALIGN_CENTER, 0);
 #endif
 
   lv_obj_add_flag(popup.root, LV_OBJ_FLAG_HIDDEN);

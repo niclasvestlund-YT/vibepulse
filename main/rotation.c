@@ -1,9 +1,40 @@
 #include "rotation.h"
 
 #if defined(TORGET_BOARD_241_V2) || defined(TORGET_BOARD_191_TOUCH)
-/* The square board's measured IMU calibration does not transfer to this
- * rectangular board. The first V2 port deliberately uses fixed landscape. */
+/* The square board's measured IMU calibration does not transfer here. */
 void sg_rotation_start(lv_indev_t *touch) { (void)touch; }
+#elif defined(TORGET_BOARD_175)
+
+#include "esp_log.h"
+#include "esp_lv_adapter.h"
+
+/* On the observed unit, the native (0x00) image is upright with USB at 9
+ * o'clock. The owner wants USB at 6 o'clock, requiring one clockwise image
+ * quarter-turn. Keep touch in the same frame. IMU auto-rotation needs a
+ * separate four-pose calibration and must not reuse the 2.16 constants. */
+esp_err_t torget_round_rotation_set(int quarter_turns);
+static lv_indev_read_cb_t round_orig_read;
+
+static void read_round_port_down(lv_indev_t *indev, lv_indev_data_t *data) {
+  round_orig_read(indev, data);
+  if (data->state != LV_INDEV_STATE_PRESSED) return;
+  int32_t x = data->point.x;
+  data->point.x = data->point.y;
+  data->point.y = 465 - x;
+}
+
+void sg_rotation_start(lv_indev_t *touch) {
+  if (esp_lv_adapter_lock(-1) != ESP_OK) return;
+  esp_err_t err = torget_round_rotation_set(1);
+  if (err == ESP_OK && touch) {
+    round_orig_read = lv_indev_get_read_cb(touch);
+    if (round_orig_read) lv_indev_set_read_cb(touch, read_round_port_down);
+  }
+  if (err == ESP_OK) lv_obj_invalidate(lv_screen_active());
+  esp_lv_adapter_unlock();
+  if (err != ESP_OK) ESP_LOGE("round-rotation", "USB-down rotation failed: %s", esp_err_to_name(err));
+  else ESP_LOGI("round-rotation", "USB-down fixed orientation; touch paired");
+}
 #else
 
 #include <math.h>

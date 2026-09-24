@@ -207,8 +207,8 @@ static void completion_pulse_stop(void) {
 
 static void completion_pulse_start(void) {
   completion_pulse_stop();
-#ifdef TORGET_BOARD_191_TOUCH
-  return; /* Static until this physical display has a motion review. */
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
+  return; /* Static until these physical displays have a motion review. */
 #endif
   lv_anim_t anim;
   lv_anim_init(&anim);
@@ -391,6 +391,24 @@ static void create_completion(lv_obj_t *app_root) {
   lv_obj_set_style_text_letter_space(view->dismiss, 2, 0);
   lv_label_set_text(view->dismiss, "TAP TO DISMISS");
 
+#ifdef TORGET_BOARD_175
+  /* The circular glass has no visible corners. Keep every line inside the
+   * changing horizontal chord instead of shrinking the square layout. */
+  lv_obj_add_flag(view->outline, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_pos(view->provider, 88, 47);
+  lv_obj_set_width(view->provider, 290);
+  lv_obj_set_pos(view->icon_ring, 165, 90);
+  lv_obj_set_pos(claude_group, 177, 102);
+  lv_obj_set_pos(view->codex_icon, 177, 102);
+  lv_obj_set_pos(view->title, 46, 247);
+  lv_obj_set_width(view->title, 374);
+  lv_obj_set_pos(view->project, 70, 319);
+  lv_obj_set_width(view->project, 326);
+  lv_obj_set_pos(view->detail, 73, 362);
+  lv_obj_set_width(view->detail, 320);
+  lv_obj_set_pos(view->dismiss, 111, 409);
+  lv_obj_set_width(view->dismiss, 244);
+#endif
 #ifdef TORGET_BOARD_191_TOUCH
   lv_obj_set_size(view->outline, 464, 224);
   lv_obj_set_pos(view->provider, 170, 20); lv_obj_set_width(view->provider, 290);
@@ -533,20 +551,26 @@ static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
                          .tool_chip_width = 58};
   if (!p || !decision || !decision->visible) return fit;
 
-#ifdef TORGET_BOARD_191_TOUCH
-  /* A 240 px-tall decision screen cannot fit the complete prompt and the
-   * project's 90 px minimum verdict targets. Until a separate compact
-   * interaction design is physically verified, alert and hand off every
-   * Needs You decision to the computer. The same fit check also guards
-   * needs_you_resolve(), so synthetic/late taps cannot send a verdict. */
-  return fit;
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
+  return fit; /* Keep decisions on the computer until 90px targets pass review. */
+#endif
+#ifdef TORGET_BOARD_175
+  /* The round decision bands are narrower and shorter. The same dimensions
+   * govern the renderer and the approval gate: unreadable text stays private. */
+  const int prompt_w = 346, prompt_h = 52;
+  const int title_w = 338, subtitle_w = 338;
+  const int command_w = 352, command_h = 48;
+#else
+  const int prompt_w = 300, prompt_h = 68;
+  const int title_w = 392, subtitle_w = 392;
+  const int command_w = 432, command_h = 62;
 #endif
 
   if (decision->kind == TK_PENDING_QUESTION) {
     bool prompt_ok = p->has_prompt &&
-        ny_text_fits(p->prompt, &plex_body_27, NY_PROMPT_W, NY_PROMPT_H, false);
+        ny_text_fits(p->prompt, &plex_body_27, prompt_w, prompt_h, false);
     if (!prompt_ok && p->has_prompt &&
-        ny_text_fits(p->prompt, &plex_ui_21, NY_PROMPT_W, NY_PROMPT_H, false)) {
+        ny_text_fits(p->prompt, &plex_ui_21, prompt_w, prompt_h, false)) {
       prompt_ok = true;
       fit.prompt_font = &plex_ui_21;
     }
@@ -558,23 +582,26 @@ static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
       return fit;
     }
     if (!p->has_title ||
-        !ny_text_fits(p->title, &plex_body_27, NY_TITLE_W, 34, true)) return fit;
+        !ny_text_fits(p->title, &plex_body_27, title_w, 34, true)) return fit;
     if (p->has_subtitle &&
-        !ny_text_fits(p->subtitle, &plex_ui_16, NY_TITLE_W, 20, true)) return fit;
+        !ny_text_fits(p->subtitle, &plex_ui_16, subtitle_w, 20, true)) return fit;
     fit.private_fallback = false;
     fit.can_approve = decision->offer_approve;
     return fit;
   }
 
   if (!p->has_title) return fit;
-  bool command_ok = ny_text_fits(p->title, &plex_mono_40, NY_COMMAND_W, NY_COMMAND_H, false);
-  if (!command_ok && ny_text_fits(p->title, &plex_mono_24, NY_COMMAND_W, NY_COMMAND_H, false)) {
+  bool command_ok = ny_text_fits(p->title, &plex_mono_40,
+                                 command_w, command_h, false);
+  if (!command_ok && ny_text_fits(p->title, &plex_mono_24,
+                                  command_w, command_h, false)) {
     command_ok = true;
     fit.command_font = &plex_mono_24;
   }
   if (!command_ok) return fit;
   if (p->has_subtitle &&
-      !ny_text_fits(p->subtitle, &plex_body_27, NY_PROMPT_W, NY_PROMPT_H, false)) return fit;
+      !ny_text_fits(p->subtitle, &plex_body_27,
+                    prompt_w, prompt_h, false)) return fit;
   if (p->has_tool) {
     char tool[TK_PENDING_TOOL_CAP];
     ny_ascii_lower(p->tool, tool, sizeof tool);
@@ -686,15 +713,24 @@ static lv_obj_t *ny_ring(lv_obj_t *parent, int cx, int cy, int r, int stroke) {
   return arc;
 }
 
+#ifndef TORGET_BOARD_175
 static void ny_ring_set(lv_obj_t *arc, uint16_t permille) {
   uint32_t degrees = ((uint32_t)permille * 360u) / 1000u;
   if (degrees > 360u) degrees = 360u;
   lv_arc_set_angles(arc, 0, degrees);
   mon.render_stats.ring_updates++;
 }
+#endif
 
 static bool ny_ring_update(needs_you_view *view, ny_stage stage,
                            bool private_view, uint16_t permille) {
+#ifdef TORGET_BOARD_175
+  (void)view;
+  (void)stage;
+  (void)private_view;
+  (void)permille;
+  return false; /* Round countdown motion awaits a physical panel review. */
+#else
   if (mon.rendered_ring_valid &&
       mon.rendered_ring_permille == permille) return false;
   lv_obj_t *ring = stage == NY_ATTRACT ? view->a_ring
@@ -703,6 +739,7 @@ static bool ny_ring_update(needs_you_view *view, ny_stage stage,
   mon.rendered_ring_permille = permille;
   mon.rendered_ring_valid = true;
   return true;
+#endif
 }
 
 /* A touch target: filled slab or outlined pill, ASCII-uppercase label centred,
@@ -889,6 +926,60 @@ static void create_needs_you(lv_obj_t *app_root) {
   lv_label_set_text(v->po_word, "ON IT");
   v->po_echo = ny_text(v->po_group, &plex_ui_16, COL_MUTED, 0, 358, 480, 0, C);
 
+#ifdef TORGET_BOARD_175
+  /* Positions are in the 480px logical viewport; the 466px panel starts at
+   * logical (7,7). Buttons stay within the lower circular chord. */
+  lv_obj_add_flag(v->frame, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(v->a_ring, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(v->h_ring, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(v->pv_ring, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_pos(v->a_word, 55, 270);
+  lv_obj_set_width(v->a_word, 370);
+  lv_obj_set_pos(v->a_project, 79, 325);
+  lv_obj_set_width(v->a_project, 322);
+  lv_obj_set_pos(v->a_tap, 105, 411);
+  lv_obj_set_width(v->a_tap, 270);
+
+  lv_obj_set_pos(v->h_ring, 188, 27);
+  lv_obj_set_pos(v->h_mascot, 208, 48);
+  lv_obj_set_pos(v->h_codex_icon, 208, 48);
+  lv_obj_set_pos(v->h_eyebrow, 53, 126);
+  lv_obj_set_width(v->h_eyebrow, 374);
+  lv_obj_set_style_text_align(v->h_eyebrow, LV_TEXT_ALIGN_CENTER, 0);
+
+  lv_obj_set_pos(v->q_prompt, 67, 140);
+  lv_obj_set_size(v->q_prompt, 346, 52);
+  lv_obj_set_style_text_align(v->q_prompt, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(v->q_card, 52, 197);
+  lv_obj_set_size(v->q_card, 376, 73);
+  lv_obj_set_pos(v->q_rec, 12, 8);
+  lv_obj_set_width(v->q_rec, 352);
+  lv_obj_set_pos(v->q_title, 12, 26);
+  lv_obj_set_width(v->q_title, 352);
+  lv_obj_set_pos(v->q_sub, 12, 53);
+  lv_obj_set_width(v->q_sub, 352);
+  lv_obj_set_pos(v->q_footer, 109, 414);
+  lv_obj_set_width(v->q_footer, 262);
+
+  lv_obj_set_pos(v->p_desc, 67, 142);
+  lv_obj_set_size(v->p_desc, 346, 52);
+  lv_obj_set_style_text_align(v->p_desc, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(v->p_chip, 80, 198);
+  lv_obj_set_pos(v->p_cmd, 64, 219);
+  lv_obj_set_size(v->p_cmd, 352, 48);
+  lv_obj_set_style_text_align(v->p_cmd, LV_TEXT_ALIGN_CENTER, 0);
+
+  lv_obj_set_pos(v->pv_title, 53, 271);
+  lv_obj_set_width(v->pv_title, 374);
+  lv_obj_set_pos(v->pv_sub, 76, 319);
+  lv_obj_set_width(v->pv_sub, 328);
+  lv_obj_set_pos(v->pv_tap, 94, 407);
+  lv_obj_set_width(v->pv_tap, 292);
+  lv_obj_set_pos(v->po_word, 72, 297);
+  lv_obj_set_width(v->po_word, 336);
+  lv_obj_set_pos(v->po_echo, 78, 360);
+  lv_obj_set_width(v->po_echo, 324);
+#endif
 #ifdef TORGET_BOARD_191_TOUCH
   lv_obj_set_pos(v->frame, 6, 6); lv_obj_set_size(v->frame, 468, 228);
   lv_obj_set_style_radius(v->frame, 22, 0);
@@ -1157,6 +1248,12 @@ static void render_needs_you(void) {
   }
 
   /* -- Buttons: every target >= 90 px; APPROVE filled and only where allowed */
+#ifdef TORGET_BOARD_175
+  /* Round decisions are intentionally computer-only. Keep no smaller verdict
+   * controls in the compiled layout, even if fit policy changes later. */
+  lv_obj_set_pos(v->leave, 94, 278);
+  lv_obj_set_size(v->leave, 292, 90);
+#else
   int approve_y = is_question ? 244 : 252;
   if (offer_approve) {
     lv_obj_set_pos(v->approve, 24, approve_y);
@@ -1174,6 +1271,7 @@ static void render_needs_you(void) {
     lv_obj_set_pos(v->leave, 24, offer_approve ? approve_y + 106 : approve_y);
     lv_obj_set_size(v->leave, 432, 90);
   }
+#endif
   ny_show(v->leave, true);
 
   ny_show(v->root, true);

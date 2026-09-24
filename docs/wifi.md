@@ -62,12 +62,23 @@ Four things about travel that the old firmware got wrong:
    `http://192.168.4.1/`. **Not Secure is expected**: there is no certificate
    because this is a ten-minute local page served directly by the panel, with
    no internet route.
-3. Pick the destination network and press Join once. For a secured selection,
+3. Pick the destination network and press Join once. If the list misses a
+   network you know broadcasts on 2.4 GHz, choose **My network isn't listed**
+   and type its exact SSID. A manually entered network requires a password;
+   it is still saved only after a successful connection. For a secured selection,
    the password field says `Password for <network>` and is required. For an
    open network the password field is hidden and the page says that no
    password is required. The list is **strongest first, and it is the panel's
    radio that decides**. The ESP32-S3 supports 2.4 GHz only; it cannot hear a
-   5 GHz-only network even when the phone shows full signal.
+   5 GHz-only network even when the phone shows full signal. The manual field
+   is a recovery path for an incomplete scan, not proof that a 5 GHz-only
+   network is compatible.
+
+   Before the setup access point opens, the panel now scans twice and merges
+   the strongest reading for each visible name. The list is still a best-effort
+   snapshot: a second scan cannot make a hidden, 5 GHz-only or intermittently
+   broadcasting network appear. The exact-name option remains available even
+   when the list is empty or incomplete.
 4. Leave the page open while the glass says JOINING. The browser follows a
    small secret-free status endpoint and reports whether the panel connected
    or needs another try.

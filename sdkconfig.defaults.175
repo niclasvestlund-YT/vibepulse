@@ -1,0 +1,2 @@
+# Round 1.75: USB Serial/JTAG console remains available during bring-up.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

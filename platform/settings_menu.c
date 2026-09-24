@@ -137,7 +137,7 @@ void torget_settings_click_row(tg_settings_row row) {
        * Raden är nedtonad och trycket ignoreras — hellre en rad som
        * synligt inte går att välja än ett fönster som öppnas och sedan
        * inte kan göra något. ABOUT säger varför: ADDRESS visar streck. */
-#ifdef TORGET_BOARD_191_TOUCH
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
       break; /* USB-only profile: reject untyped OTA images. */
 #endif
       if (!ui.ip[0]) break;
@@ -234,6 +234,20 @@ void torget_settings_create(void) {
                               &ui.about_back_label, "BACK");
   lv_obj_add_event_cb(ui.about_back, back_clicked_cb, LV_EVENT_CLICKED, NULL);
 
+#ifdef TORGET_BOARD_175
+  /* Native fonts; keep every touch target inside the circular glass. */
+  lv_obj_align(ui.word, LV_ALIGN_TOP_MID, 0, 56);
+  lv_obj_set_width(ui.word, 320);
+  lv_obj_align(ui.foot, LV_ALIGN_TOP_MID, 0, 410);
+  lv_obj_set_width(ui.foot, 280);
+  lv_obj_set_style_text_letter_space(ui.foot, 0, 0);
+  for (int i = 0; i < TG_SETTINGS_ROW_COUNT; ++i) {
+    lv_obj_set_pos(ui.rows[i], 90, 118 + 66 * i);
+    lv_obj_set_size(ui.rows[i], 300, 56);
+  }
+  lv_obj_set_pos(ui.about_back, 90, 304);
+  lv_obj_set_size(ui.about_back, 300, 56);
+#endif
 #ifdef TORGET_BOARD_191_TOUCH
   lv_obj_set_style_text_font(ui.word, &plex_ui_21, 0);
   lv_obj_set_y(ui.word, 14);
@@ -294,7 +308,7 @@ static void render(void) {
    * raden försvinner — den ska finnas kvar så menyn inte byter form. */
   {
     bool can_update = ui.ip[0] != '\0';
-#ifdef TORGET_BOARD_191_TOUCH
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
     can_update = false;
     if (menu) lv_label_set_text(ui.row_labels[TG_SETTINGS_ROW_UPDATE], "UPDATE VIA USB");
 #endif

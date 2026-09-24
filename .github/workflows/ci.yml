@@ -240,3 +240,12 @@ jobs:
           command: >-
             idf.py -B build-191 -D TORGET_BOARD=waveshare_191_touch
             -D SDKCONFIG=sdkconfig.191 build
+      - name: Build the round 1.75 profile with its own SDK config
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-175 -D TORGET_BOARD=waveshare_175
+            -D SDKCONFIG=sdkconfig.175
+            -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build

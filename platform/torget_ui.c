@@ -81,7 +81,11 @@ static void wifi_status_timer(lv_timer_t *timer) {
 static void wifi_status_create(void) {
   tg.wifi_mode = TG_WIFI_STATUS_HIDDEN;
   tg.wifi_group = bare(tg.shift);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(tg.wifi_group, 230, 43);
+#else
   lv_obj_set_pos(tg.wifi_group, 426, 28);
+#endif
   lv_obj_set_size(tg.wifi_group, 20, 18);
   /* One muted, native-size image sits in the same translated page shell as
    * every app.  It therefore follows burn-in drift and cannot float above a
@@ -264,7 +268,7 @@ void torget_ui_create(void) {
 
   launcher_build();
   wifi_status_create();
-#ifndef TORGET_BOARD_191_TOUCH
+#if !defined(TORGET_BOARD_191_TOUCH) && !defined(TORGET_BOARD_175)
   lv_timer_create(drift_timer, 60000, NULL);
 #else
   (void)drift_timer;

@@ -37,4 +37,5 @@ docs/img/mockups/*.svg
 /backups/
 /sdkconfig.241-v2*
 
+/sdkconfig.175*
 /sdkconfig.191*

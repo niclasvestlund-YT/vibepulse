@@ -8,6 +8,13 @@
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
 include(cmake/torget_board.cmake)
+option(TORGET_ROUND_DIAGNOSTIC "Static 1.75 hardware diagnostic only" OFF)
+if(TORGET_ROUND_DIAGNOSTIC)
+  if(NOT TORGET_BOARD STREQUAL "waveshare_175")
+    message(FATAL_ERROR "The round diagnostic requires waveshare_175")
+  endif()
+  add_compile_definitions(TORGET_ROUND_DIAGNOSTIC=1)
+endif()
 # third_party/ innehåller vendrade komponenter (cjson) som apparna delar.
 # Vibbe (app_buddy) bor i sitt eget repo (~/Buddy) och delas in härifrån —
 # EN källa, ingen kopiedrift (inflyttsbeslutet 2026-08-07: "alla tre ska bo

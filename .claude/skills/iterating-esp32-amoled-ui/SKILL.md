@@ -70,3 +70,5 @@ stress run. Prefer fewer frames when bandwidth is limited.
 | Flash requested implicitly | Stop and ask for explicit authorization. |
 | Motion requested early | Complete the static physical AMOLED review first. |
 | Motion feels slow across apps | Instrument the shared pipeline before changing UI code. |
+
+Round boards: [lessons](../../../docs/waveshare-175-preview.md#reusable-lessons-and-native-evidence).

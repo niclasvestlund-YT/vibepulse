@@ -150,6 +150,8 @@ static void build_countdown(usage_quota_page_view *out, const tk_limit *limit,
   snprintf(out->countdown_text, sizeof out->countdown_text, "%s",
            out->quota.reset_short_text);
   if (!limit->has_pct || !limit->has_reset) return;
+  out->has_countdown = 1;
+  out->countdown_minutes = limit->reset_min;
   if (!forecast || forecast->state != TK_FORECAST_EXHAUSTS) return;
   if (!forecast->has_offset_min || forecast->offset_min >= 0) return;
 
@@ -161,6 +163,20 @@ static void build_countdown(usage_quota_page_view *out, const tk_limit *limit,
                         sizeof out->countdown_text);
   snprintf(out->countdown_caption, sizeof out->countdown_caption, "TO EMPTY");
   out->counts_to_empty = 1;
+  out->countdown_minutes = minutes;
+}
+
+void usage_presenter_format_dhm(int minutes, int available,
+                                char *out, size_t capacity) {
+  if (!out || !capacity) return;
+  if (!available || minutes < 0) {
+    snprintf(out, capacity, "–");
+  } else if (minutes / (24 * 60) > 99) {
+    snprintf(out, capacity, ">99D");
+  } else {
+    snprintf(out, capacity, "%02d:%02d:%02d", minutes / (24 * 60),
+             (minutes / 60) % 24, minutes % 60);
+  }
 }
 
 void usage_presenter_build_quota_page(const tk_tokens *tokens,
