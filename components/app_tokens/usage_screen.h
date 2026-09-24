@@ -9,6 +9,7 @@
 #include "app_tokens_config.h"
 #include "agent_status.h"
 #include "github_status.h"
+#include "lovable_status.h"
 #include "max_tracker.h"
 #include "tokens.h"
 
@@ -23,6 +24,8 @@ void usage_screen_apply_agent_status_relay(
     const tk_agent_snapshot *snapshot, int64_t now_us);
 void usage_screen_apply_max_tracker(const tk_max_tracker *t);
 void usage_screen_apply_github(const tk_github_status *status);
+void usage_screen_apply_lovable(const tk_lovable_status *status,
+                                int64_t now_us);
 void usage_screen_tick(int64_t now_us);
 void usage_screen_set_stale(bool stale);
 void usage_screen_show_view(int index);

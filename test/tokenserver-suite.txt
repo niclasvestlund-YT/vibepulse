@@ -24,3 +24,4 @@ tools.tokenserver.test_publisher
 tools.tokenserver.test_discovery
 tools.tokenserver.test_smoke
 tools.tokenserver.test_statusline_bridge
+tools.tokenserver.test_lovable_monitor

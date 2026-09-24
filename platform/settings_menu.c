@@ -178,8 +178,9 @@ void torget_settings_click_slot(unsigned slot) {
     if (slot < 3) ui.labs.toggle((int)slot);
     else ui.view = VIEW_LABS_GITHUB;
   } else if (ui.view == VIEW_LABS_GITHUB) {
-    if (slot < 2) ui.labs.toggle((int)slot + 3);
-    else ui.view = slot == 2 ? VIEW_LABS_ANALYTICS : VIEW_MENU;
+    /* MORE: GITHUB PAGE, STAR POPUP, LOVABLE PAGE, then back to SETTINGS. */
+    if (slot < 3) ui.labs.toggle((int)slot + 3);
+    else ui.view = VIEW_MENU;
   }
   render();
 }
@@ -288,7 +289,7 @@ static void render(void) {
     if (labs) {
       int feature = ui.view == VIEW_LABS_ANALYTICS ? i : i + 3;
       if ((ui.view == VIEW_LABS_ANALYTICS && i < 3) ||
-          (ui.view == VIEW_LABS_GITHUB && i < 2)) {
+          (ui.view == VIEW_LABS_GITHUB && i < 3)) {
         char text[40];
         bool enabled = ui.labs.selected(feature);
         snprintf(text, sizeof text, "%s  %s", ui.labs.name(feature),
@@ -298,8 +299,7 @@ static void render(void) {
                                     enabled ? lv_color_white() : COL_MUTED, 0);
       } else {
         lv_label_set_text(ui.row_labels[i],
-            ui.view == VIEW_LABS_ANALYTICS ? "MORE" :
-            i == 2 ? "BACK" : "SETTINGS");
+            ui.view == VIEW_LABS_ANALYTICS ? "MORE" : "SETTINGS");
       }
     }
   }

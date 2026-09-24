@@ -15,7 +15,7 @@ class LabsRenderTests(unittest.TestCase):
         subprocess.run(["cmake", "--build", "sim/build"], cwd=ROOT,
                        check=True, capture_output=True)
         with tempfile.TemporaryDirectory(prefix="vp-labs-") as temporary:
-            for mask in range(32):
+            for mask in range(64):
                 with self.subTest(mask=mask):
                     env = dict(os.environ, TORGET_LABS_MASK=str(mask),
                                TORGET_CAPTURE_DIR=temporary)

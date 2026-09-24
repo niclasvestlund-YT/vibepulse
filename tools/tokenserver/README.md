@@ -177,6 +177,32 @@ and popup are then enabled independently on the panel in SETTINGS → LABS →
 MORE; the `secrets.h` macros (see `secrets.h.example`) only seed the defaults
 until a choice is saved.
 
+## Optional Lovable page
+
+Shows credits left, plan and data age for one Lovable workspace. It uses
+only Lovable's official read-only MCP server (`https://mcp.lovable.dev`,
+tool `get_workspace`) with OAuth and the `workspaces:read offline` scopes.
+
+```
+python3 lovable_monitor.py login     # opens the browser once, picks a workspace
+python3 lovable_monitor.py status    # what the panel would receive
+python3 tokenserver.py --lovable     # or VIBEPULSE_LOVABLE=1
+curl http://localhost:8737/api/lovable
+```
+
+The OAuth tokens are stored in the macOS Keychain (service
+`se.torget.vibepulse.lovable`); on other systems in
+`~/.config/vibepulse/lovable-oauth.json` with mode 0600. They never leave the
+computer and are never relayed: `/api/lovable` carries only `creditsTenths`,
+`ageSeconds`, `plan`, `workspace`, `stale`/`login` flags and -- only when
+`get_workspace` names them -- `grantTenths`, `resetSeconds` and
+`periodSeconds`, plus `dailyCreditsTenths`/`dailyGrantTenths` for a separately
+named daily pool. Daily credits are never inferred from the plan. Run
+`lovable_monitor.py probe` to see which key names your
+workspace returns (names and types only, no values).
+`lovable_monitor.py logout` removes the login. Enable the page on the panel
+in SETTINGS → LABS → MORE. See `docs/lovable-pulse.md`.
+
 ## Agent status
 
 `/api/agent-status` is a separate v2 contract for Claude Code's and Codex's

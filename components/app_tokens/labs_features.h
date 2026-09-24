@@ -5,16 +5,17 @@
 
 typedef enum {
   TK_LABS_BURN_RATE, TK_LABS_TRACKER, TK_LABS_VALUE,
-  TK_LABS_GITHUB, TK_LABS_STAR_POPUP, TK_LABS_COUNT
+  TK_LABS_GITHUB, TK_LABS_STAR_POPUP, TK_LABS_LOVABLE, TK_LABS_COUNT
 } tk_labs_feature;
-#define TK_LABS_ALL 31u
+#define TK_LABS_ALL 63u
 #define TK_LABS_RECORD_VERSION 0x100u
 
 /* IDs stay stable; physical tile columns are dense and depend on the boot mask. */
 enum {
   VIEW_CLAUDE_FABLE = 0, VIEW_CLAUDE_ALL = 1, VIEW_CODEX_WEEKLY = 2,
   VIEW_BURN_RATE = 3, VIEW_TRACKER_CLAUDE = 4, VIEW_TRACKER_CODEX = 5,
-  VIEW_GITHUB = 6, VIEW_VALUE = 7, TK_USAGE_SCREEN_VIEWS = 8
+  VIEW_GITHUB = 6, VIEW_VALUE = 7, VIEW_LOVABLE = 8,
+  TK_USAGE_SCREEN_VIEWS = 9
 };
 
 /* Init before creating UI/tasks. Active is immutable until the next boot.

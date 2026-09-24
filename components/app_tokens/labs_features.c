@@ -9,7 +9,8 @@ static bool read_only, storage_error;
 static uint8_t defaults(void) {
   return (TK_LABS_ANALYTICS_DEFAULT ? 7u : 0u) |
          (TK_GITHUB_SCREEN_ENABLED ? 8u : 0u) |
-         (TK_GITHUB_NOTIFICATIONS_ENABLED ? 16u : 0u);
+         (TK_GITHUB_NOTIFICATIONS_ENABLED ? 16u : 0u) |
+         (TK_LOVABLE_SCREEN_ENABLED ? 32u : 0u);
 }
 
 void tk_labs_init(void) {
@@ -48,7 +49,8 @@ bool tk_labs_pending(void) { return active != selected; }
 bool tk_labs_storage_error(void) { return storage_error; }
 const char *tk_labs_name(int feature) {
   static const char *const names[] = {
-    "BURN RATE", "MAX TRACKER", "API VALUE", "GITHUB PAGE", "STAR POPUP"
+    "BURN RATE", "MAX TRACKER", "API VALUE", "GITHUB PAGE", "STAR POPUP",
+    "LOVABLE PAGE"
   };
   return valid(feature) ? names[feature] : "";
 }
@@ -60,6 +62,7 @@ static bool view_enabled(int view) {
     case VIEW_TRACKER_CODEX: return tk_labs_active(TK_LABS_TRACKER);
     case VIEW_GITHUB: return tk_labs_active(TK_LABS_GITHUB);
     case VIEW_VALUE: return tk_labs_active(TK_LABS_VALUE);
+    case VIEW_LOVABLE: return tk_labs_active(TK_LABS_LOVABLE);
     default: return false;
   }
 }

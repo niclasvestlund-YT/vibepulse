@@ -9,6 +9,7 @@
 #include "app_tokens.h"
 #include "app_tokens_config.h"
 #include "github_status.h"
+#include "lovable_status.h"
 #include "max_tracker.h"
 #include "max_tracker_presenter.h"
 #include "project_star_event.h"
@@ -198,6 +199,34 @@ typedef struct {
 
 typedef struct {
   lv_obj_t *tile;
+  lv_obj_t *plan;
+  lv_obj_t *provenance;
+  lv_obj_t *credits;
+  lv_obj_t *sweep;
+  lv_obj_t *workspace;    /* square boards only */
+  lv_obj_t *age;
+  lv_obj_t *countdown;    /* square boards only */
+  lv_obj_t *daily;        /* "5 DAILY LEFT" -- only from a named daily pool */
+  lv_obj_t *ring_reset;   /* round glass only: reliable time left to reset */
+  bool has_data;
+  bool has_grant;
+  bool has_reset;
+  bool has_period;
+  int32_t credits_tenths;
+  int32_t grant_tenths;
+  int32_t age_seconds;
+  int32_t reset_seconds;
+  int32_t period_seconds;
+  int32_t daily_credits_tenths;
+  int32_t daily_grant_tenths;
+  int64_t applied_at_us;
+  char rendered_age[40];
+  char rendered_countdown[48];
+  int32_t rendered_time_deg;
+} lovable_page;
+
+typedef struct {
+  lv_obj_t *tile;
   lv_obj_t *verdict;
   lv_obj_t *hero;
   lv_obj_t *attribution;
@@ -215,6 +244,7 @@ static struct {
   forecast_row forecast_rows[2];
   tracker_page trackers[2];
   github_page github;
+  lovable_page lovable;
   value_page value;
   tk_tokens last_tokens;
   tk_agent_snapshot agent_snapshot;
@@ -593,6 +623,422 @@ static void apply_github_page(const tk_github_status *status) {
   lv_label_set_text(page->forks, forks);
   page->has_data = true;
 }
+
+/* ---- Lovable: plan + credits left, from the Mac's read-only feed --------
+ * One dominant number, a plan chip, an honest provenance word and the data
+ * age in words. No percentage, bar-of-quota or reset time: the source does
+ * not give reliable values for those, so the page does not draw them. The
+ * gradient stroke under the number is decoration (Lovable's warm sweep),
+ * not a meter; it breathes once when the balance changes. */
+#define COL_LOVABLE_ORANGE lv_color_hex(0xFF7A3D)
+#define COL_LOVABLE_PINK   lv_color_hex(0xF2468F)
+#define COL_LOVABLE_VIOLET lv_color_hex(0x9B5CF6)
+#define LOVABLE_SWEEP_W    132
+#define LOVABLE_SWEEP_WIDE 300
+
+static void lovable_heart_draw(lv_event_t *event) {
+  lv_obj_t *obj = lv_event_get_target_obj(event);
+  lv_layer_t *layer = lv_event_get_layer(event);
+  lv_area_t a;
+  lv_obj_get_coords(obj, &a);
+  const int w = lv_area_get_width(&a);
+  const int r = w / 4;
+  lv_draw_rect_dsc_t lobe;
+  lv_draw_rect_dsc_init(&lobe);
+  lobe.radius = LV_RADIUS_CIRCLE;
+  lobe.bg_opa = LV_OPA_COVER;
+  lobe.bg_color = COL_LOVABLE_ORANGE;
+  lobe.bg_grad.dir = LV_GRAD_DIR_HOR;
+  lobe.bg_grad.stops_count = 2;
+  lobe.bg_grad.stops[0].color = COL_LOVABLE_ORANGE;
+  lobe.bg_grad.stops[0].frac = 0;
+  lobe.bg_grad.stops[0].opa = LV_OPA_COVER;
+  lobe.bg_grad.stops[1].color = COL_LOVABLE_PINK;
+  lobe.bg_grad.stops[1].frac = 255;
+  lobe.bg_grad.stops[1].opa = LV_OPA_COVER;
+  lv_area_t left = {a.x1, a.y1, a.x1 + 2 * r, a.y1 + 2 * r};
+  lv_draw_rect(layer, &lobe, &left);
+  lobe.bg_grad.stops[0].color = COL_LOVABLE_PINK;
+  lobe.bg_grad.stops[1].color = COL_LOVABLE_VIOLET;
+  lobe.bg_color = COL_LOVABLE_PINK;
+  lv_area_t right = {a.x2 - 2 * r, a.y1, a.x2, a.y1 + 2 * r};
+  lv_draw_rect(layer, &lobe, &right);
+  lv_draw_triangle_dsc_t tip;
+  lv_draw_triangle_dsc_init(&tip);
+  tip.color = COL_LOVABLE_PINK;
+  tip.opa = LV_OPA_COVER;
+  tip.p[0].x = a.x1 + 1;       tip.p[0].y = a.y1 + r + r / 2;
+  tip.p[1].x = a.x2 - 1;       tip.p[1].y = a.y1 + r + r / 2;
+  tip.p[2].x = a.x1 + w / 2;   tip.p[2].y = a.y2;
+  lv_draw_triangle(layer, &tip);
+}
+
+static void lovable_sweep_width_cb(void *obj, int32_t width) {
+  lv_obj_set_width(obj, width);
+  lv_obj_set_x(obj, (VP_SCREEN_W - width) / 2);
+}
+
+static void lovable_pulse(void) {
+  lovable_page *page = &ui.lovable;
+  lv_anim_t anim;
+  lv_anim_init(&anim);
+  lv_anim_set_var(&anim, page->sweep);
+  lv_anim_set_exec_cb(&anim, lovable_sweep_width_cb);
+  lv_anim_set_values(&anim, LOVABLE_SWEEP_W, LOVABLE_SWEEP_WIDE);
+  lv_anim_set_duration(&anim, 520);
+  lv_anim_set_playback_duration(&anim, 900);
+  lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
+  lv_anim_start(&anim);
+}
+
+/* "12 340" with the fonts' own space glyph; fractions only below 1000,
+ * where plex_num_164 carries the point. Never rounded up. */
+static void set_lovable_hero(int32_t tenths) {
+  lovable_page *page = &ui.lovable;
+  int32_t whole = tenths / 10;
+  int32_t frac = tenths % 10;
+  char text[24];
+  const lv_font_t *font = &plex_num_164;
+  if (whole < 1000) {
+    if (frac) snprintf(text, sizeof text, "%ld.%ld", (long)whole, (long)frac);
+    else snprintf(text, sizeof text, "%ld", (long)whole);
+  } else if (whole < 1000000) {
+    font = whole < 100000 ? &plex_num_118 : &plex_num_84;
+    snprintf(text, sizeof text, "%ld %03ld", (long)(whole / 1000),
+             (long)(whole % 1000));
+  } else {
+    font = &plex_stat_35;
+    compact_count(whole, text, sizeof text);
+  }
+#ifdef TORGET_BOARD_191_TOUCH
+  font = &plex_quota_84;
+  if (whole >= 1000) compact_count(whole, text, sizeof text);
+  if (whole >= 1000) font = &plex_stat_35;
+#endif
+  lv_obj_set_style_text_font(page->credits, font, 0);
+  lv_label_set_text(page->credits, text);
+}
+
+/* One measured period ring for the round 1.75 glass. It drains clockwise
+ * from twelve and only appears when the Mac forwarded a named grant. */
+#ifdef TORGET_BOARD_175
+#define LOVABLE_RING_R      221
+#define LOVABLE_RING_STROKE 9
+
+static lv_obj_t *lovable_ring(lv_obj_t *parent, int r, int stroke,
+                              lv_color_t color) {
+  lv_obj_t *arc = lv_arc_create(parent);
+  lv_obj_remove_style_all(arc);
+  int diameter = 2 * r + stroke;
+  lv_obj_set_size(arc, diameter, diameter);
+  lv_obj_set_pos(arc, VP_SCREEN_W / 2 - diameter / 2,
+                 VP_SCREEN_W / 2 - diameter / 2);
+  lv_arc_set_rotation(arc, 270);
+  lv_arc_set_bg_angles(arc, 0, 360);
+  lv_arc_set_angles(arc, 0, 0);
+  lv_obj_set_style_arc_color(arc, COL_HAIRLINE, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(arc, stroke, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(arc, color, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(arc, stroke, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
+  lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
+  return arc;
+}
+
+#endif
+
+static void set_ring_deg(lv_obj_t *arc, int64_t part, int64_t whole) {
+  if (!arc) return;
+  if (whole <= 0) {
+    lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  if (part < 0) part = 0;
+  if (part > whole) part = whole;
+  int32_t deg = (int32_t)((part * 360) / whole);
+  /* A sliver stays visible until the very end: "almost out" reads better
+   * than a ring that silently vanished. */
+  if (part > 0 && deg < 2) deg = 2;
+  /* Keep a one-degree datum gap even at 100 %. A genuinely full allowance
+   * still reads as a full turn, while its finish does not disappear into its
+   * start cap at twelve o'clock. */
+  if (deg >= 360) deg = 359;
+  lv_arc_set_angles(arc, 0, (uint16_t)deg);
+  lv_obj_remove_flag(arc, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void format_grant(int32_t tenths, char *out, size_t cap) {
+  if (tenths % 10) snprintf(out, cap, "%ld.%ld", (long)(tenths / 10),
+                            (long)(tenths % 10));
+  else snprintf(out, cap, "%ld", (long)(tenths / 10));
+}
+
+static void refresh_lovable_daily(const tk_lovable_status *status) {
+  lovable_page *page = &ui.lovable;
+  char amount[16] = "";
+  char text[48] = "";
+  if (status->has_daily_credits) {
+    format_grant(status->daily_credits_tenths, amount, sizeof amount);
+    snprintf(text, sizeof text, "%s DAILY LEFT", amount);
+    lv_obj_set_style_text_color(page->daily,
+                                status->daily_credits_tenths > 0
+                                    ? COL_LOVABLE_PINK : COL_MUTED, 0);
+  } else if (status->has_daily_grant) {
+    format_grant(status->daily_grant_tenths, amount, sizeof amount);
+    snprintf(text, sizeof text, "%s DAILY INCLUDED", amount);
+    lv_obj_set_style_text_color(page->daily, COL_LOVABLE_ORANGE, 0);
+  }
+  lv_obj_set_style_text_opa(page->daily,
+                            status->stale ? LV_OPA_40 : LV_OPA_COVER, 0);
+  lv_label_set_text(page->daily, text);
+}
+
+static void refresh_lovable_countdown(int64_t elapsed) {
+  lovable_page *page = &ui.lovable;
+  char text[48] = "";
+  char grant[16] = "";
+  if (page->has_grant) format_grant(page->grant_tenths, grant, sizeof grant);
+  char reset[32] = "";
+  int64_t left = page->has_reset ? (int64_t)page->reset_seconds - elapsed : 0;
+  if (page->has_reset) {
+    if (left <= 0) snprintf(reset, sizeof reset, "REFILL DUE");
+    else if (left >= 2 * 86400)
+      snprintf(reset, sizeof reset, "RESETS IN %d DAYS", (int)(left / 86400));
+    else if (left >= 86400)
+      snprintf(reset, sizeof reset, "RESETS IN 1 D %d H",
+               (int)((left - 86400) / 3600));
+    else if (left >= 3600)
+      snprintf(reset, sizeof reset, "RESETS IN %d H %d M", (int)(left / 3600),
+               (int)((left % 3600) / 60));
+    else snprintf(reset, sizeof reset, "RESETS IN %d MIN",
+                  (int)((left + 59) / 60));
+  }
+  if (grant[0] && reset[0])
+    snprintf(text, sizeof text, "OF %s  \xC2\xB7  %s", grant, reset);
+  else if (grant[0]) snprintf(text, sizeof text, "OF %s", grant);
+  else snprintf(text, sizeof text, "%s", reset);
+  if (strcmp(text, page->rendered_countdown) != 0) {
+    snprintf(page->rendered_countdown, sizeof page->rendered_countdown, "%s",
+             text);
+    lv_label_set_text(page->countdown, text);
+  }
+  if (page->ring_reset) {
+    if (page->has_reset && page->has_period) {
+      int32_t deg = left <= 0 ? 0
+          : (int32_t)((left * 360) / page->period_seconds);
+      if (deg != page->rendered_time_deg) {
+        page->rendered_time_deg = deg;
+        set_ring_deg(page->ring_reset, left, page->period_seconds);
+      }
+    } else {
+      set_ring_deg(page->ring_reset, 0, 0);
+    }
+  }
+}
+
+static void refresh_lovable_age(int64_t now_us) {
+  lovable_page *page = &ui.lovable;
+  if (!page->tile || !page->has_data) return;
+  int64_t elapsed = now_us > page->applied_at_us
+      ? (now_us - page->applied_at_us) / 1000000 : 0;
+  refresh_lovable_countdown(elapsed);
+  int64_t age = (int64_t)page->age_seconds + elapsed;
+  char text[40];
+  if (age < 60) snprintf(text, sizeof text, "UPDATED JUST NOW");
+  else if (age < 3600)
+    snprintf(text, sizeof text, "UPDATED %d MIN AGO", (int)(age / 60));
+  else if (age < 86400)
+    snprintf(text, sizeof text, "UPDATED %d H AGO", (int)(age / 3600));
+  else snprintf(text, sizeof text, "UPDATED %d D AGO", (int)(age / 86400));
+  if (strcmp(text, page->rendered_age) != 0) {
+    snprintf(page->rendered_age, sizeof page->rendered_age, "%s", text);
+    lv_label_set_text(page->age, text);
+  }
+}
+
+static void create_lovable_page(void) {
+  lovable_page *page = &ui.lovable;
+  memset(page, 0, sizeof *page);
+  page->tile = new_tile(VIEW_LOVABLE);
+
+  lv_obj_t *heart = bare(page->tile);
+  lv_obj_set_size(heart, 26, 24);
+  lv_obj_set_pos(heart, VP_SAFE_X, 26);
+  lv_obj_add_event_cb(heart, lovable_heart_draw, LV_EVENT_DRAW_MAIN, NULL);
+
+  lv_obj_t *heading = label(page->tile, &plex_ui_21, COL_WHITE,
+                            VP_SAFE_X + 36, 23, 170, 30);
+  lv_obj_set_style_text_letter_space(heading, 2, 0);
+  lv_label_set_text(heading, "LOVABLE");
+  page->plan = label(page->tile, &plex_ui_14, COL_META, 230, 21, 178, 18);
+  lv_obj_set_style_text_align(page->plan, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_style_text_letter_space(page->plan, 2, 0);
+  lv_label_set_text(page->plan, "");
+  page->provenance = label(page->tile, &plex_ui_12, COL_MUTED,
+                           230, 42, 178, 16);
+  lv_obj_set_style_text_align(page->provenance, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_style_text_letter_space(page->provenance, 2, 0);
+  lv_label_set_text(page->provenance, "WAITING");
+  create_header_hairline(page->tile);
+
+  lv_obj_t *caption = label(page->tile, &plex_ui_21, COL_LOVABLE_PINK,
+                            VP_SAFE_X, 88, VP_CONTENT_W, 30);
+  lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(caption, 3, 0);
+  lv_label_set_text(caption, "CREDITS LEFT");
+
+  page->credits = label(page->tile, &plex_num_164, COL_WHITE,
+                        16, 128, 448, 190);
+  lv_obj_set_style_text_align(page->credits, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(page->credits, -7, 0);
+  lv_label_set_text(page->credits, "–");
+
+  page->sweep = bare(page->tile);
+  lv_obj_set_size(page->sweep, LOVABLE_SWEEP_W, 4);
+  lv_obj_set_pos(page->sweep, (VP_SCREEN_W - LOVABLE_SWEEP_W) / 2, 272);
+  lv_obj_set_style_radius(page->sweep, 2, 0);
+  lv_obj_set_style_bg_opa(page->sweep, LV_OPA_COVER, 0);
+  /* Two stops: the build's gradient limit. Orange -> violet passes through
+   * the brand pink on its own. */
+  lv_obj_set_style_bg_color(page->sweep, COL_LOVABLE_ORANGE, 0);
+  lv_obj_set_style_bg_grad_color(page->sweep, COL_LOVABLE_VIOLET, 0);
+  lv_obj_set_style_bg_grad_dir(page->sweep, LV_GRAD_DIR_HOR, 0);
+
+#ifdef TORGET_BOARD_175
+  create_hairline(page->tile, 334);
+#else
+  create_hairline(page->tile, 354);
+#endif
+  /* Upper case in the UI face: the panel fonts carry capitals, and the
+   * workspace reads as a label, not prose. */
+  page->workspace = label(page->tile, &plex_ui_21, COL_META,
+                          VP_SAFE_X, 372, VP_CONTENT_W, 28);
+  lv_obj_set_style_text_letter_space(page->workspace, 2, 0);
+  lv_obj_set_style_text_align(page->workspace, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(page->workspace, LV_LABEL_LONG_DOT);
+  lv_label_set_text(page->workspace, "");
+  page->age = label(page->tile, &plex_ui_14, COL_MUTED,
+                    VP_SAFE_X, 410, VP_CONTENT_W, 20);
+  lv_obj_set_style_text_align(page->age, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(page->age, 2, 0);
+  lv_label_set_text(page->age, "CONNECT ON YOUR MAC");
+  page->countdown = label(page->tile, &plex_ui_14, COL_META,
+                          VP_SAFE_X, 292, VP_CONTENT_W, 20);
+  lv_obj_set_style_text_align(page->countdown, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(page->countdown, 2, 0);
+  lv_label_set_text(page->countdown, "");
+  page->daily = label(page->tile, &plex_ui_16, COL_LOVABLE_ORANGE,
+                      VP_SAFE_X, 326, VP_CONTENT_W, 22);
+  lv_obj_set_style_text_align(page->daily, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_letter_space(page->daily, 2, 0);
+  lv_label_set_text(page->daily, "");
+  page->rendered_time_deg = -1;
+
+#ifdef TORGET_BOARD_175
+  /* Keep the identity inside the round safe area; the old x=120 icon was
+   * visibly pinched by the bezel and made the header read off-centre. */
+  lv_obj_set_pos(heart, 126, 78);
+  lv_obj_set_pos(heading, 162, 75);
+  lv_obj_set_width(heading, 200);
+  lv_obj_set_pos(page->plan, 100, 104);
+  lv_obj_set_width(page->plan, 280);
+  lv_obj_set_style_text_align(page->plan, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_add_flag(page->provenance, LV_OBJ_FLAG_HIDDEN);
+  /* Keep a real line of black glass between the caption and the numeral.
+   * Their old object boxes overlapped by six pixels on the round face. */
+  lv_obj_set_pos(caption, 90, 129);
+  lv_obj_set_width(caption, 300);
+  lv_obj_set_pos(page->credits, 48, 174);
+  lv_obj_set_width(page->credits, 384);
+  lv_obj_add_flag(page->sweep, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(page->countdown, LV_OBJ_FLAG_HIDDEN);
+  page->ring_reset = lovable_ring(page->tile, LOVABLE_RING_R,
+                                  LOVABLE_RING_STROKE, COL_LOVABLE_ORANGE);
+  lv_obj_set_pos(page->daily, 95, 328);
+  lv_obj_set_width(page->daily, 290);
+  lv_obj_add_flag(page->workspace, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_pos(page->age, 95, 366);
+  lv_obj_set_width(page->age, 290);
+#endif
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_pos(caption, 22, 68); lv_obj_set_width(caption, 250);
+  lv_obj_set_pos(page->credits, 16, 105); lv_obj_set_size(page->credits, 300, 90);
+  lv_obj_set_style_text_font(page->credits, &plex_quota_84, 0);
+  lv_obj_add_flag(page->sweep, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_pos(page->workspace, 320, 100); lv_obj_set_width(page->workspace, 196);
+  lv_obj_set_pos(page->age, 320, 134); lv_obj_set_width(page->age, 196);
+  lv_obj_set_pos(page->countdown, 320, 160); lv_obj_set_width(page->countdown, 196);
+  lv_obj_set_pos(page->daily, 320, 184); lv_obj_set_width(page->daily, 196);
+#endif
+  create_pager(page->tile, VIEW_LOVABLE);
+}
+
+static void apply_lovable_page(const tk_lovable_status *status,
+                               int64_t now_us) {
+  lovable_page *page = &ui.lovable;
+  if (!status->enabled) {
+    lv_label_set_text(page->provenance, "OFF ON MAC");
+    return;
+  }
+  lv_label_set_text(page->provenance,
+                    status->needs_login ? "SIGN IN ON MAC" :
+                    !status->has_data ? "WAITING" :
+                    status->stale ? "CACHED" : "LIVE");
+  lv_label_set_text(page->plan, status->has_plan ? status->plan : "");
+  if (!status->has_data) {
+    if (!page->has_data) {
+      lv_label_set_text(page->credits, "–");
+      lv_label_set_text(page->age, status->needs_login
+                        ? "RUN LOVABLE LOGIN ON YOUR MAC"
+                        : "CONNECT ON YOUR MAC");
+    }
+    return; /* keep the last real balance rather than blanking it */
+  }
+  bool changed = page->has_data &&
+                 page->credits_tenths != status->credits_tenths;
+  page->credits_tenths = status->credits_tenths;
+  page->age_seconds = status->age_seconds;
+  page->applied_at_us = now_us;
+  page->has_data = true;
+  set_lovable_hero(status->credits_tenths);
+  char workspace[TK_LOVABLE_WORKSPACE_CAP] = "";
+  if (status->has_workspace) {
+    size_t i = 0;
+    for (; status->workspace[i] && i + 1 < sizeof workspace; i++) {
+      char ch = status->workspace[i];
+      workspace[i] = (ch >= 'a' && ch <= 'z') ? (char)(ch - 32) : ch;
+    }
+    workspace[i] = '\0';
+  }
+  lv_label_set_text(page->workspace, workspace);
+  page->has_grant = status->has_grant;
+  page->grant_tenths = status->grant_tenths;
+  page->has_reset = status->has_reset;
+  page->reset_seconds = status->reset_seconds;
+  page->has_period = status->has_period;
+  page->period_seconds = status->period_seconds;
+  page->daily_credits_tenths = status->daily_credits_tenths;
+  page->daily_grant_tenths = status->daily_grant_tenths;
+  refresh_lovable_daily(status);
+  if (page->ring_reset)
+    lv_obj_set_style_arc_opa(page->ring_reset,
+                             status->stale ? LV_OPA_40 : LV_OPA_COVER,
+                             LV_PART_INDICATOR);
+  page->rendered_age[0] = '\0';
+  /* Sentinel, not "": an empty countdown must still clear the label. */
+  snprintf(page->rendered_countdown, sizeof page->rendered_countdown, "?");
+  page->rendered_time_deg = -1;
+  refresh_lovable_age(now_us);
+  /* Cached data keeps its number but loses the glow. */
+  /* bg_opa, not whole-object opa: no extra LVGL layer on the small heap. */
+  lv_obj_set_style_bg_opa(page->sweep, status->stale ? LV_OPA_40 : LV_OPA_COVER, 0);
+  if (changed) lovable_pulse();
+}
+
+_Static_assert(VIEW_LOVABLE < TK_USAGE_SCREEN_VIEWS,
+               "VIEW_LOVABLE ligger utanför ui.tiles");
 
 /* Varje vy måste rymmas i `ui.tiles`. Det var precis det som inte gällde när
  * GitHub-sidan var bortvald, och det kostade en skrivning utanför arrayen. */
@@ -1432,6 +1878,7 @@ void usage_screen_create(lv_obj_t *root) {
   }
   if (tk_labs_active(TK_LABS_GITHUB)) create_github_page();
   if (tk_labs_active(TK_LABS_VALUE)) create_value_page();
+  if (tk_labs_active(TK_LABS_LOVABLE)) create_lovable_page();
   if (tk_labs_active(TK_LABS_STAR_POPUP)) {
     /* Created before the agent monitor: NEEDS YOU/ERROR/DONE always retain
      * transient priority over a project star. */
@@ -1509,6 +1956,12 @@ void usage_screen_apply_github(const tk_github_status *status) {
   }
 }
 
+void usage_screen_apply_lovable(const tk_lovable_status *status,
+                                int64_t now_us) {
+  if (!status || !ui.lovable.tile) return;
+  apply_lovable_page(status, now_us);
+}
+
 void usage_screen_apply_agent(const tk_agent_snapshot *snapshot,
                               int64_t now_us) {
   if (!snapshot) return;
@@ -1540,6 +1993,7 @@ void usage_screen_tick(int64_t now_us) {
   for (int i = 0; i < 3; i++) refresh_header(&ui.quotas[i], now_us);
   for (int i = 0; i < 2; i++) refresh_tracker_header(&ui.trackers[i], now_us);
   tk_agent_monitor_tick(now_us);
+  refresh_lovable_age(now_us);
   if (tk_labs_active(TK_LABS_STAR_POPUP)) tk_project_star_popup_tick(now_us);
 }
 

@@ -39,6 +39,7 @@
 #include "needs_you_send_policy.h"
 #include "agent_status_parse.h"
 #include "github_status_parse.h"
+#include "lovable_status_parse.h"
 #include "max_tracker_parse.h"
 #include "boot_screen.h"
 #include "ota_ui.h"
@@ -454,6 +455,19 @@ static void apply_max_tracker_fixture(int idx) {
       (int)(sizeof MAX_TRACKER_FIXTURES / sizeof MAX_TRACKER_FIXTURES[0]);
   max_tracker_fixture_idx = (idx % count + count) % count;
   feed_max_tracker_file(MAX_TRACKER_FIXTURES[max_tracker_fixture_idx]);
+}
+
+static void apply_lovable_file(const char *file) {
+  size_t len = 0;
+  char *json = read_fixture(file, &len);
+  tk_lovable_status status;
+  if (json && tk_lovable_status_parse(json, len, &status)) {
+    tokens_apply_lovable(&status);
+    printf("lovable: %s (%s)\n", file, status.has_data ? "data" : "waiting");
+  } else {
+    printf("lovable: %s avvisad\n", file);
+  }
+  free(json);
 }
 
 static void apply_github_file(const char *file, bool unique_event) {
@@ -1752,6 +1766,39 @@ static int run_vibepulse_needs_you_render_qa(void) {
   return 0;
 }
 
+/* Lovable page captures. Its own mode, run with LABS bit 32 set
+ * (TORGET_LABS_MASK=32 or more), so the pinned default frames and their pager
+ * rows stay byte-identical to a build without the page. */
+static int run_vibepulse_lovable_qa(void) {
+  capture_failures = 0;
+  torget_app_show(SIM_APP_VIBEPULSE);
+  apply_agent_file("agent-status-idle.json");
+  feed_tokens_file("tokens.json");
+  if (tk_labs_view_position(VIEW_LOVABLE) < 0) {
+    printf("lovable: page is off -- set TORGET_LABS_MASK with bit 32\n");
+    return 1;
+  }
+  /* Lovable: credits left dominate; plan, provenance and data age are the
+   * only other facts. Waiting and sign-in never draw a number. */
+  apply_lovable_file("lovable-waiting.json");
+  tokens_show_view(VIEW_LOVABLE);
+  dump_frame("vibepulse-lovable-waiting");
+  apply_lovable_file("lovable-login.json");
+  dump_frame("vibepulse-lovable-login");
+  apply_lovable_file("lovable.json");
+  dump_frame("vibepulse-lovable-live");
+  apply_lovable_file("lovable-stale.json");
+  dump_frame("vibepulse-lovable-cached");
+  apply_lovable_file("lovable-daily-empty.json");
+  dump_frame("vibepulse-lovable-daily-empty");
+  apply_lovable_file("lovable-large.json");
+  dump_frame("vibepulse-lovable-large");
+  apply_lovable_file("lovable-small.json");
+  dump_frame("vibepulse-lovable-small");
+
+  return capture_failures == 0 ? 0 : 1;
+}
+
 /* Run in a fresh process for every mask; hit the real shared renderer and
  * update paths with pages absent. Pure policy tests alone cannot catch a NULL
  * label dereference or a tileview column mistaken for a semantic ID. */
@@ -1760,6 +1807,7 @@ static int run_vibepulse_labs_qa(bool catalogue) {
   apply_agent_file("agent-status-idle.json");
   feed_tokens_file("tokens.json");
   apply_github_file("github.json", false);
+  apply_lovable_file("lovable.json");
   apply_max_tracker_fixture(0);
   usage_screen_tick(torget_now_us());
   usage_screen_set_stale(true);
@@ -1923,6 +1971,8 @@ int main(int argc, char **argv) {
     return run_round_quota_qa();
 #endif
 
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-lovable-qa") == 0)
+    return run_vibepulse_lovable_qa();
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-qa") == 0)
     return run_vibepulse_labs_qa(false);
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-captures") == 0)

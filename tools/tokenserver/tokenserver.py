@@ -80,6 +80,8 @@ if __package__:
     )
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from .github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
+    from .lovable_monitor import LovableMonitor
+    from .lovable_monitor import disabled_snapshot as lovable_disabled_snapshot
     from .interactions import InteractionStore
     from .max_tracker import MaxTrackerStore
     from .publisher import Publisher
@@ -105,6 +107,8 @@ else:  # run directly: python3 tools/tokenserver/tokenserver.py
     )
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
+    from lovable_monitor import LovableMonitor
+    from lovable_monitor import disabled_snapshot as lovable_disabled_snapshot
     from interactions import InteractionStore
     from max_tracker import MaxTrackerStore
     from publisher import Publisher
@@ -2966,6 +2970,7 @@ class Handler(BaseHTTPRequestHandler):
     agent_status = None  # background service, set in main
     max_tracker_store = None  # set in main
     github_monitor = None  # optional public repo monitor, set in main
+    lovable_monitor = None  # optional read-only Lovable credits, set in main
     plans = {"claude": None, "codex": None}  # set in main from --*-plan
     interaction_store = None  # "Needs You", off by default; set in main
     interaction_timeout_s = 120.0  # set in main from --interaction-timeout
@@ -3587,7 +3592,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/api/tokens", "/api/agent-status",
-                         "/api/max-tracker", "/api/github"):
+                         "/api/max-tracker", "/api/github", "/api/lovable"):
             self._record_panel_poll()
         if self.path == "/api/tokens":
             self._reply(self._tokens_payload)
@@ -3599,6 +3604,12 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(lambda: (self.github_monitor.snapshot()
                                  if self.github_monitor is not None
                                  else disabled_snapshot()))
+        elif self.path == "/api/lovable":
+            # Numbers only: plan, credits, age. The OAuth token never leaves
+            # the Keychain and is never part of this payload.
+            self._reply(lambda: (self.lovable_monitor.snapshot()
+                                 if self.lovable_monitor is not None
+                                 else lovable_disabled_snapshot()))
         elif self.path == "/":
             self._reply(self._root_payload)
         else:
@@ -3613,7 +3624,7 @@ class Handler(BaseHTTPRequestHandler):
         failing_since = _compute_failing_since
         save_failing_since = _max_tracker_save_failing_since
         endpoints = ["/api/tokens", "/api/agent-status",
-                     "/api/max-tracker", "/api/github"]
+                     "/api/max-tracker", "/api/github", "/api/lovable"]
         return {"service": "torget-tokenserver",
                 "rev": _SERVER_REV,
                 "srcFingerprint": _SERVER_SRC,
@@ -3623,6 +3634,9 @@ class Handler(BaseHTTPRequestHandler):
                 "github": (self.github_monitor.snapshot()
                            if self.github_monitor is not None
                            else disabled_snapshot()),
+                "lovable": (self.lovable_monitor.snapshot()
+                            if self.lovable_monitor is not None
+                            else lovable_disabled_snapshot()),
                 # Status, backoff, credential and header evidence come from
                 # one locked read so they always describe the same cycle.
                 **_probe_view(),
@@ -3717,6 +3731,14 @@ def _build_arg_parser():
         default=os.environ.get("VIBEPULSE_GITHUB_REPO") or None,
         help="optional public GitHub repo as owner/repository. "
              "Can also be set with VIBEPULSE_GITHUB_REPO.")
+    ap.add_argument(
+        "--lovable", action="store_true",
+        default=os.environ.get("VIBEPULSE_LOVABLE") == "1",
+        help="optional read-only Lovable plan + credit balance on"
+             " /api/lovable, via the official MCP tool get_workspace. Log in"
+             " once with: python3 tools/tokenserver/lovable_monitor.py login."
+             " Can also be set with VIBEPULSE_LOVABLE=1. Never published to"
+             " a relay")
     ap.add_argument(
         "--publish", metavar="RELAY_URL", default=None,
         help="also POST the numbers endpoints (/api/tokens, /api/max-tracker,"
@@ -4141,6 +4163,14 @@ def main():
                  "'someone'")
     Handler.github_monitor = github_monitor
 
+    lovable_monitor = None
+    if args.lovable:
+        lovable_monitor = LovableMonitor()
+        lovable_monitor.start()
+        log.info("Lovable monitor started (read-only get_workspace; the "
+                 "login stays in this computer's Keychain)")
+    Handler.lovable_monitor = lovable_monitor
+
     Handler.projects_dir = Path(args.dir)
     if not _any_provider_dir(Handler.projects_dir):
         # Was: SystemExit. Under launchd (KeepAlive without
@@ -4367,6 +4397,8 @@ def main():
             relay_publisher.stop()
         if github_monitor is not None:
             github_monitor.stop()
+        if lovable_monitor is not None:
+            lovable_monitor.stop()
         backfill_stop.set()
         backfill_thread.join(timeout=max(1.0, MAX_TRACKER_BACKFILL_TICK_S * 4))
         try:
