@@ -221,7 +221,7 @@ typedef struct {
   int32_t daily_grant_tenths;
   int64_t applied_at_us;
   char rendered_age[40];
-  char rendered_countdown[48];
+  char rendered_countdown[64];
   int32_t rendered_time_deg;
 } lovable_page;
 
@@ -629,12 +629,11 @@ static void apply_github_page(const tk_github_status *status) {
  * age in words. No percentage, bar-of-quota or reset time: the source does
  * not give reliable values for those, so the page does not draw them. The
  * gradient stroke under the number is decoration (Lovable's warm sweep),
- * not a meter; it breathes once when the balance changes. */
+ * not a meter; the physical build stays fully static. */
 #define COL_LOVABLE_ORANGE lv_color_hex(0xFF7A3D)
 #define COL_LOVABLE_PINK   lv_color_hex(0xF2468F)
 #define COL_LOVABLE_VIOLET lv_color_hex(0x9B5CF6)
 #define LOVABLE_SWEEP_W    132
-#define LOVABLE_SWEEP_WIDE 300
 
 static void lovable_heart_draw(lv_event_t *event) {
   lv_obj_t *obj = lv_event_get_target_obj(event);
@@ -671,24 +670,6 @@ static void lovable_heart_draw(lv_event_t *event) {
   tip.p[1].x = a.x2 - 1;       tip.p[1].y = a.y1 + r + r / 2;
   tip.p[2].x = a.x1 + w / 2;   tip.p[2].y = a.y2;
   lv_draw_triangle(layer, &tip);
-}
-
-static void lovable_sweep_width_cb(void *obj, int32_t width) {
-  lv_obj_set_width(obj, width);
-  lv_obj_set_x(obj, (VP_SCREEN_W - width) / 2);
-}
-
-static void lovable_pulse(void) {
-  lovable_page *page = &ui.lovable;
-  lv_anim_t anim;
-  lv_anim_init(&anim);
-  lv_anim_set_var(&anim, page->sweep);
-  lv_anim_set_exec_cb(&anim, lovable_sweep_width_cb);
-  lv_anim_set_values(&anim, LOVABLE_SWEEP_W, LOVABLE_SWEEP_WIDE);
-  lv_anim_set_duration(&anim, 520);
-  lv_anim_set_playback_duration(&anim, 900);
-  lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
-  lv_anim_start(&anim);
 }
 
 /* "12 340" with the fonts' own space glyph; fractions only below 1000,
@@ -996,8 +977,6 @@ static void apply_lovable_page(const tk_lovable_status *status,
     }
     return; /* keep the last real balance rather than blanking it */
   }
-  bool changed = page->has_data &&
-                 page->credits_tenths != status->credits_tenths;
   page->credits_tenths = status->credits_tenths;
   page->age_seconds = status->age_seconds;
   page->applied_at_us = now_us;
@@ -1034,7 +1013,6 @@ static void apply_lovable_page(const tk_lovable_status *status,
   /* Cached data keeps its number but loses the glow. */
   /* bg_opa, not whole-object opa: no extra LVGL layer on the small heap. */
   lv_obj_set_style_bg_opa(page->sweep, status->stale ? LV_OPA_40 : LV_OPA_COVER, 0);
-  if (changed) lovable_pulse();
 }
 
 _Static_assert(VIEW_LOVABLE < TK_USAGE_SCREEN_VIEWS,
