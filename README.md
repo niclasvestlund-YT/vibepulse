@@ -24,6 +24,11 @@ current across ordinary internet WiFi. Every cloud feature is off by default;
 only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
+An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
+The current MCP response omits balances despite the documentation; an opt-in
+local Chrome extension can read the visible balance while a Lovable project is
+open. Setup and freshness limits are documented in the linked guide.
+
 Current source includes the original **2.16-inch square panel**, the
 **Waveshare 2.41 V2**, a USB-installed **1.91 Touch** development port and
 the round **1.75** profile.
@@ -681,7 +686,9 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
 
 New installations using `secrets.h.example` show quotas with reset information
 and local activity when available. In **SETTINGS → LABS**, add burn rate,
-Max Tracker, API-equivalent value, a GitHub page or independent star popups.
+Max Tracker, API-equivalent value, a GitHub page, independent star popups, or Lovable credits.
+Use **MORE → MORE** to hide the Claude Code or Codex quota pages and select
+**RESTART NOW** to apply saved changes.
 Tap to save a choice, then restart the panel to apply it. GitHub needs a
 repository configured on the computer; Value needs prices and a plan cost for
 its comparison. These choices do not start cloud services.
@@ -699,6 +706,32 @@ firmware updates. Disabled pages are not created at boot. The new selector
 has shared LVGL simulator coverage; physical memory and touch review are
 pending before release. [Setup, defaults and future experiments](docs/labs/README.md).
 Countdown clocks and coding quotes remain concepts for a later Labs addition.
+
+## Lovable credits (experimental)
+
+An opt-in Chrome extension reads the balance shown on Lovable's billing page
+while a project is open. It sends only the workspace name and named credit/plan
+fields to the local tokenserver; the screen receives a compact credit snapshot.
+It does not read browser credentials, project source or chats. Missing data stays
+missing, and a reading becomes **CACHED** after three minutes without an update.
+
+<p align="center">
+  <img src="docs/img/vibepulse-lovable.png" width="45%" alt="Native 480 by 480 Lovable page rendered with simulator example data">
+  <img src="docs/img/vibepulse-labs-providers.png" width="45%" alt="Labs controls for Claude Code and Codex page visibility">
+</p>
+
+*Native LVGL captures, with illustrative credit data. The browser source does
+not currently provide the reset countdown shown in this example.* A real browser reading
+has also reached the round 1.75-inch panel. Automatic Chrome refresh and the
+Windows browser integration still need end-to-end confirmation.
+
+**[Install the Lovable browser integration](docs/lovable-pulse.md#browser-fallback-chrome-optional)**
+for workspace selection, custom ports, startup configuration, verification,
+removal and the round display's BOOT/Labs controls. No MCP login is needed for
+`--lovable --lovable-source browser`. Lovable's documentation describes a credit
+balance in `get_workspace`, but the authenticated response checked on
+2026-09-24 omitted it. Source modes `auto` and `mcp` allow a later switch to the
+official API without changing the display contract.
 
 ## One button, one menu
 

@@ -413,6 +413,9 @@ done
 if [ "$SKIP_JS" = 1 ]; then
   echo "OBS: --skip-js — relayernas JS-tester körs i CI:s egna jobb"
 elif command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  for browser_script in tools/lovable-browser/*.js; do
+    node --check "$browser_script"
+  done
   node --test tools/relay/test.mjs
   (cd tools/relay && npm ci && npm test)
   (cd tools/interaction-relay && npm ci && npm test && npm run typecheck)

@@ -764,6 +764,9 @@ static void tick_cb(lv_timer_t *t) {
     case TG_SETTINGS_INTENT_OPEN_WIFI:
       torget_wifi_setup_request_open();
       break;
+    case TG_SETTINGS_INTENT_RESTART:
+      esp_restart();
+      break;
     default:
       break;
   }

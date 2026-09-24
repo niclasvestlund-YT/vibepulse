@@ -81,6 +81,7 @@ if __package__:
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from .github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from .lovable_monitor import LovableMonitor
+    from .lovable_browser import LovableBrowserBridge
     from .lovable_monitor import disabled_snapshot as lovable_disabled_snapshot
     from .interactions import InteractionStore
     from .max_tracker import MaxTrackerStore
@@ -108,6 +109,7 @@ else:  # run directly: python3 tools/tokenserver/tokenserver.py
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from lovable_monitor import LovableMonitor
+    from lovable_browser import LovableBrowserBridge
     from lovable_monitor import disabled_snapshot as lovable_disabled_snapshot
     from interactions import InteractionStore
     from max_tracker import MaxTrackerStore
@@ -2971,6 +2973,7 @@ class Handler(BaseHTTPRequestHandler):
     max_tracker_store = None  # set in main
     github_monitor = None  # optional public repo monitor, set in main
     lovable_monitor = None  # optional read-only Lovable credits, set in main
+    lovable_browser = None  # separately configured local browser balance source
     plans = {"claude": None, "codex": None}  # set in main from --*-plan
     interaction_store = None  # "Needs You", off by default; set in main
     interaction_timeout_s = 120.0  # set in main from --interaction-timeout
@@ -3541,7 +3544,43 @@ class Handler(BaseHTTPRequestHandler):
                     denied)
         self._send(200, {"ok": True, "denied": denied})
 
+    def _lovable_snapshot(self):
+        if self.lovable_monitor is None:
+            return lovable_disabled_snapshot()
+        official = self.lovable_monitor.snapshot()
+        return (self.lovable_browser.snapshot(official)
+                if self.lovable_browser is not None else official)
+
+    def _handle_lovable_browser(self):
+        bridge = self.lovable_browser
+        if self.lovable_monitor is None or bridge is None or not bridge.extension_id:
+            self._send(404, {"error": "browser bridge is not enabled"})
+            return
+        origins = self._header_values("Origin")
+        # No CORS preflight is offered. Website scripts cannot send this custom
+        # header; the installed extension's service worker has loopback access.
+        if (not self._is_loopback() or not self._has_valid_loopback_host() or
+                self._header_values("X-VibePulse-Browser") != [bridge.extension_id] or
+                origins not in ([], ["chrome-extension://" + bridge.extension_id])):
+            self._send(403, {"error": "browser ingress rejected"})
+            return
+        if not self._has_json_content_type():
+            self._send(415, {"error": "application/json required"})
+            return
+        try:
+            bridge.accept(self._read_json_body(limit=2048))
+        except (ValueError, TypeError):
+            self._send(400, {"error": "invalid, old or different-workspace snapshot"})
+            return
+        except OSError:
+            self._send(503, {"error": "could not persist browser snapshot"})
+            return
+        self._send(200, {"ok": True})
+
     def do_POST(self):
+        if self.path == "/api/lovable/browser":
+            self._handle_lovable_browser()
+            return
         claude_route = self.path in (
             "/api/hook/question", "/api/hook/permission")
         codex_route = self.path in (
@@ -3607,9 +3646,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/lovable":
             # Numbers only: plan, credits, age. The OAuth token never leaves
             # the Keychain and is never part of this payload.
-            self._reply(lambda: (self.lovable_monitor.snapshot()
-                                 if self.lovable_monitor is not None
-                                 else lovable_disabled_snapshot()))
+            self._reply(self._lovable_snapshot)
         elif self.path == "/":
             self._reply(self._root_payload)
         else:
@@ -3634,9 +3671,7 @@ class Handler(BaseHTTPRequestHandler):
                 "github": (self.github_monitor.snapshot()
                            if self.github_monitor is not None
                            else disabled_snapshot()),
-                "lovable": (self.lovable_monitor.snapshot()
-                            if self.lovable_monitor is not None
-                            else lovable_disabled_snapshot()),
+                "lovable": self._lovable_snapshot(),
                 # Status, backoff, credential and header evidence come from
                 # one locked read so they always describe the same cycle.
                 **_probe_view(),
@@ -3735,10 +3770,15 @@ def _build_arg_parser():
         "--lovable", action="store_true",
         default=os.environ.get("VIBEPULSE_LOVABLE") == "1",
         help="optional read-only Lovable plan + credit balance on"
-             " /api/lovable, via the official MCP tool get_workspace. Log in"
-             " once with: python3 tools/tokenserver/lovable_monitor.py login."
+             " /api/lovable. Choose MCP, the local Chrome bridge, or both"
+             " with --lovable-source."
              " Can also be set with VIBEPULSE_LOVABLE=1. Never published to"
              " a relay")
+    ap.add_argument(
+        "--lovable-source", choices=["auto", "browser", "mcp"],
+        default=os.environ.get("VIBEPULSE_LOVABLE_SOURCE", "auto"),
+        help="Lovable source (requires --lovable): auto combines both; browser"
+             " needs no MCP OAuth login; mcp uses only official get_workspace")
     ap.add_argument(
         "--publish", metavar="RELAY_URL", default=None,
         help="also POST the numbers endpoints (/api/tokens, /api/max-tracker,"
@@ -4166,10 +4206,14 @@ def main():
     lovable_monitor = None
     if args.lovable:
         lovable_monitor = LovableMonitor()
-        lovable_monitor.start()
-        log.info("Lovable monitor started (read-only get_workspace; the "
-                 "login stays in this computer's Keychain)")
+        if args.lovable_source != "browser":
+            lovable_monitor.start()
+        log.info("Lovable enabled (source: %s; credentials stay on this computer)",
+                 args.lovable_source)
     Handler.lovable_monitor = lovable_monitor
+    Handler.lovable_browser = (LovableBrowserBridge()
+                              if args.lovable and args.lovable_source != "mcp"
+                              else None)
 
     Handler.projects_dir = Path(args.dir)
     if not _any_provider_dir(Handler.projects_dir):

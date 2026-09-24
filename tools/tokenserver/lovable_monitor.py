@@ -22,7 +22,7 @@ CLI (run on the Mac)::
 
     python3 tools/tokenserver/lovable_monitor.py login [--workspace ID]
     python3 tools/tokenserver/lovable_monitor.py status
-    python3 tools/tokenserver/lovable_monitor.py probe     # key names, no values
+    python3 tools/tokenserver/lovable_monitor.py probe     # full workspace, secrets redacted
     python3 tools/tokenserver/lovable_monitor.py logout
 """
 
@@ -63,6 +63,7 @@ FAILURE_BACKOFF_SECONDS = 10 * 60.0
 STALE_AFTER_SECONDS = 15 * 60.0
 MAX_RESPONSE_BYTES = 512 * 1024
 HTTP_TIMEOUT_SECONDS = 15
+HTTP_HEADERS = {"User-Agent": "VibePulse Lovable Monitor/1.0"}
 
 KEYCHAIN_SERVICE = "se.torget.vibepulse.lovable"
 KEYCHAIN_ACCOUNT = "oauth"
@@ -195,14 +196,16 @@ def _post_form(opener, url, fields):
     body = urllib.parse.urlencode(fields).encode()
     request = urllib.request.Request(
         url, data=body, method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded",
+        headers={**HTTP_HEADERS,
+                 "Content-Type": "application/x-www-form-urlencoded",
                  "Accept": "application/json"})
     with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
         return json.loads(_read_limited(response))
 
 
 def _get_json(opener, url):
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    request = urllib.request.Request(
+        url, headers={**HTTP_HEADERS, "Accept": "application/json"})
     with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
         return json.loads(_read_limited(response))
 
@@ -210,7 +213,7 @@ def _get_json(opener, url):
 def _post_json(opener, url, payload):
     request = urllib.request.Request(
         url, data=json.dumps(payload).encode(), method="POST",
-        headers={"Content-Type": "application/json",
+        headers={**HTTP_HEADERS, "Content-Type": "application/json",
                  "Accept": "application/json"})
     with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
         return json.loads(_read_limited(response))
@@ -397,6 +400,7 @@ class McpClient:
             self._id += 1
             payload["id"] = self._id
         headers = {
+            **HTTP_HEADERS,
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "Authorization": f"Bearer {self._token}",
@@ -675,6 +679,33 @@ def describe_shape(obj, prefix="", depth=0, out=None):
     return out
 
 
+_PROBE_EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+_PROBE_TOKEN_RE = re.compile(
+    r"(?i)\b(?:bearer\s+)?(?:eyJ[A-Z0-9_-]{8,}\.[A-Z0-9_-]{8,}"
+    r"(?:\.[A-Z0-9_-]{8,})?|(?:sk|gh[pousr]|github_pat)_?[A-Z0-9_-]{20,}|"
+    r"[A-Z0-9_-]{16,})\b")
+_PROBE_SECRET_KEYS = ("token", "secret", "password", "email", "authorization",
+                      "apikey", "accesskey", "privatekey")
+
+
+def redact_probe_value(value, key=None):
+    """Keep get_workspace's shape and ordinary values, redact credentials/PII."""
+    if key is not None:
+        normalized = _norm(key)
+        if any(marker in normalized for marker in _PROBE_SECRET_KEYS):
+            return "[REDACTED]"
+    if isinstance(value, dict):
+        return {k: redact_probe_value(v, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_probe_value(v) for v in value]
+    if isinstance(value, tuple):
+        return [redact_probe_value(v) for v in value]
+    if isinstance(value, str):
+        value = _PROBE_EMAIL_RE.sub("[REDACTED EMAIL]", value)
+        return _PROBE_TOKEN_RE.sub("[REDACTED TOKEN]", value)
+    return value
+
+
 # --------------------------------------------------------------------------
 # The monitor thread used by tokenserver
 # --------------------------------------------------------------------------
@@ -833,7 +864,7 @@ def main(argv=None):
     login_cmd.add_argument("--workspace", default=None,
                            help="workspace id (default: your first workspace)")
     commands.add_parser("status", help="fetch once and print what the glass gets")
-    commands.add_parser("probe", help="print get_workspace key names (no values)")
+    commands.add_parser("probe", help="print get_workspace values with secrets redacted")
     commands.add_parser("logout", help="forget the saved Lovable login")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -858,9 +889,8 @@ def main(argv=None):
         record = monitor._access_token()
         workspace = McpClient(record["access_token"]).get_workspace(
             record["workspace_id"])
-        print("\n".join(describe_shape(workspace)))
-        print("\nidentified:", {k: (v is not None)
-                                for k, v in extract(workspace).items()})
+        print(json.dumps(redact_probe_value(workspace), indent=2,
+                         ensure_ascii=False))
         return 0
     return 2
 

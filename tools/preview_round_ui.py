@@ -13,7 +13,9 @@ NAMES = (
     "codex-live", "codex-stale", "codex-to-empty", "codex-long-reset", "codex-today-missing",
     "codex-today-invalid", "codex-full", "codex-zero", "codex-missing",
     "claude-live", "claude-wide-label", "claude-reset-missing", "diagnostic",
-    "settings-menu", "settings-about", "settings-labs", "wifi-qr", "wifi-manual",
+    "settings-menu", "settings-about", "settings-labs",
+    "settings-labs-providers", "settings-labs-providers-pending",
+    "wifi-qr", "wifi-manual",
     "wifi-searching", "wifi-failed",
 )
 
@@ -41,7 +43,7 @@ def main():
     try:
         run([str(build / "torget-sim"), "--vibepulse-round-qa"],
             env={**os.environ, "TORGET_CAPTURE_DIR": str(captures),
-                 "TORGET_LABS_MASK": "0"})
+                 "TORGET_LABS_MASK": "192"})
         expected = {f"torget-round-{name}.bmp" for name in NAMES}
         actual = {p.name for p in captures.iterdir()}
         if actual != expected:

@@ -5,10 +5,13 @@
 
 typedef enum {
   TK_LABS_BURN_RATE, TK_LABS_TRACKER, TK_LABS_VALUE,
-  TK_LABS_GITHUB, TK_LABS_STAR_POPUP, TK_LABS_LOVABLE, TK_LABS_COUNT
+  TK_LABS_GITHUB, TK_LABS_STAR_POPUP, TK_LABS_LOVABLE,
+  TK_LABS_CLAUDE_CODE, TK_LABS_CODEX, TK_LABS_COUNT
 } tk_labs_feature;
-#define TK_LABS_ALL 63u
-#define TK_LABS_RECORD_VERSION 0x100u
+#define TK_LABS_ALL 255u
+#define TK_LABS_RECORD_VERSION 0x200u
+#define TK_LABS_PREVIOUS_ALL 63u
+#define TK_LABS_PREVIOUS_RECORD_VERSION 0x100u
 
 /* IDs stay stable; physical tile columns are dense and depend on the boot mask. */
 enum {

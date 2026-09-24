@@ -1534,6 +1534,7 @@ static void refresh_live_header(lv_obj_t *halo, lv_obj_t *context,
 }
 
 static void refresh_header(quota_page *page, int64_t now_us) {
+  if (!page->tile) return;
   bool stale = ui.stale || page->quota_stale;
   refresh_live_header(page->halo, page->context, &page->halo_initialized,
                       &page->halo_visible, &page->context_initialized,
@@ -1597,6 +1598,7 @@ static bool apply_today_bar(quota_page *page,
 }
 
 static void apply_quota(quota_page *page, const tk_tokens *tokens) {
+  if (!page->tile) return;
   usage_quota_page_view view = {0};
   usage_presenter_build_quota_page(tokens, page->scope, &view);
   const usage_card_view *quota = &view.quota;
@@ -1843,12 +1845,15 @@ void usage_screen_create(lv_obj_t *root) {
   lv_obj_set_style_bg_opa(ui.tileview, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(ui.tileview, COL_BLACK, 0);
 
-  create_quota_page(&ui.quotas[0], VIEW_CLAUDE_FABLE,
-                    USAGE_QUOTA_CLAUDE_MODEL, USAGE_PROVIDER_CLAUDE);
-  create_quota_page(&ui.quotas[1], VIEW_CLAUDE_ALL,
-                    USAGE_QUOTA_CLAUDE_ALL, USAGE_PROVIDER_CLAUDE);
-  create_quota_page(&ui.quotas[2], VIEW_CODEX_WEEKLY,
-                    USAGE_QUOTA_CODEX_WEEK, USAGE_PROVIDER_CODEX);
+  if (tk_labs_active(TK_LABS_CLAUDE_CODE)) {
+    create_quota_page(&ui.quotas[0], VIEW_CLAUDE_FABLE,
+                      USAGE_QUOTA_CLAUDE_MODEL, USAGE_PROVIDER_CLAUDE);
+    create_quota_page(&ui.quotas[1], VIEW_CLAUDE_ALL,
+                      USAGE_QUOTA_CLAUDE_ALL, USAGE_PROVIDER_CLAUDE);
+  }
+  if (tk_labs_active(TK_LABS_CODEX))
+    create_quota_page(&ui.quotas[2], VIEW_CODEX_WEEKLY,
+                      USAGE_QUOTA_CODEX_WEEK, USAGE_PROVIDER_CODEX);
   if (tk_labs_active(TK_LABS_BURN_RATE)) create_burn_rate_page();
   if (tk_labs_active(TK_LABS_TRACKER)) {
     create_tracker_page(&ui.trackers[0], VIEW_TRACKER_CLAUDE, false);
@@ -1857,6 +1862,14 @@ void usage_screen_create(lv_obj_t *root) {
   if (tk_labs_active(TK_LABS_GITHUB)) create_github_page();
   if (tk_labs_active(TK_LABS_VALUE)) create_value_page();
   if (tk_labs_active(TK_LABS_LOVABLE)) create_lovable_page();
+  if (tk_labs_view_count() == 0) {
+    lv_obj_t *empty = lv_tileview_add_tile(ui.tileview, 0, 0, LV_DIR_NONE);
+    lv_obj_set_style_bg_color(empty, COL_BLACK, 0);
+    lv_obj_t *hint = label(empty, &plex_ui_16, COL_META,
+                           0, VP_SCREEN_H / 2 - 30, VP_SCREEN_W, 60);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(hint, "NO PAGES ENABLED\nOpen SETTINGS > LABS");
+  }
   if (tk_labs_active(TK_LABS_STAR_POPUP)) {
     /* Created before the agent monitor: NEEDS YOU/ERROR/DONE always retain
      * transient priority over a project star. */
@@ -1995,5 +2008,5 @@ int usage_screen_current_view(void) {
     if (!ui.tiles[i]) continue;   /* bortvald sida: inget index att matcha */
     if (ui.tiles[i] == active) return i;
   }
-  return VIEW_CLAUDE_FABLE;
+  return -1;
 }

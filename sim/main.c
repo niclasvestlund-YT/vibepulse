@@ -1837,6 +1837,8 @@ static int run_vibepulse_labs_qa(bool catalogue) {
   torget_settings_click_slot(3);
   dump_frame(catalogue ? "settings-labs-github" : "labs-github");
   torget_settings_click_slot(3);
+  dump_frame(catalogue ? "settings-labs-providers" : "labs-providers");
+  torget_settings_click_slot(3);
   if (catalogue) dump_frame("settings-labs-return");
   printf("LABS: %d dense tiles verified\n", visited);
   return capture_failures == 0 ? 0 : 1;
@@ -1917,6 +1919,14 @@ static int run_round_quota_qa(void) {
   torget_settings_open("preview", NULL);
   torget_settings_click_slot(TG_SETTINGS_ROW_LABS);
   dump_frame("round-settings-labs");
+  torget_settings_click_slot(3); /* More: GitHub, popup, Lovable. */
+  torget_settings_click_slot(3); /* More: provider visibility switches. */
+  dump_frame("round-settings-labs-providers");
+  torget_settings_click_slot(0); /* Hide Claude Code until the next boot. */
+  dump_frame("round-settings-labs-providers-pending");
+  torget_settings_click_slot(3); /* The visible RESTART NOW action. */
+  if (torget_settings_take_intent() != TG_SETTINGS_INTENT_RESTART ||
+      torget_settings_open_p()) return 1;
   torget_settings_close();
   torget_wifi_ui_set(TG_WIFI_UI_OPEN, "VibePulse-setup", "A1B2C3D4E5F6", NULL, 583);
   dump_frame("round-wifi-qr");

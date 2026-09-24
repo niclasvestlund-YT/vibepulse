@@ -103,6 +103,8 @@ WIFI_BOX = (426, 28, 426 + 20, 28 + 18)
 PINNED = {
     "vibepulse-labs-analytics.png": "torget-settings-labs-analytics.bmp",
     "vibepulse-labs-github.png": "torget-settings-labs-github.bmp",
+    "vibepulse-labs-providers.png": "torget-settings-labs-providers.bmp",
+    "vibepulse-lovable.png": "torget-vibepulse-lovable-live.bmp",
     "vibepulse-labs-pending.png": "torget-settings-labs-pending.bmp",
     "vibepulse-settings-menu.png": "torget-settings-menu.bmp",
     "vibepulse-settings-about.png": "torget-settings-about-found.bmp",
@@ -302,6 +304,12 @@ class DocsFrameDriftTests(unittest.TestCase):
             [str(ROOT / "sim/build/torget-sim"), "--vibepulse-labs-captures"],
             cwd=ROOT,
             env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir)},
+            check=True, text=True, capture_output=True)
+        subprocess.run(
+            [str(ROOT / "sim/build/torget-sim"), "--vibepulse-lovable-qa"],
+            cwd=ROOT,
+            env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir),
+                 "TORGET_LABS_MASK": "32"},
             check=True, text=True, capture_output=True)
         cls.captures = sorted(cls.capture_dir.glob("*.bmp"))
         cls.frames = list(docs_frames())
