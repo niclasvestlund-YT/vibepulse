@@ -41,7 +41,8 @@ position cannot be inferred. The photos also cannot prove touch alignment,
 page swipes, Wi-Fi list completeness, reply actions, OTA or automatic rotation.
 The owner has been asked to confirm the fixed orientation and touch behavior.
 The current source disables the whole-screen burn-in drift timer on this board
-until a physical motion review; the photographs do not validate animation.
+and hides the timed Needs You countdown arcs until a physical motion review;
+the photographs do not validate animation.
 
 The first portal scan on this unit listed only a printer although a boot scan
 had seen the owner's network. Exact-name entry recovered setup. A later

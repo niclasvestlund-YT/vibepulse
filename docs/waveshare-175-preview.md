@@ -107,7 +107,8 @@ touch locations, compare the values on glass to the source, and extend the
 named-unit physical report before claiming touch, interaction, OTA or rotation
 support. Needs You decisions remain on the computer. The whole-screen burn-in
 drift timer is disabled for 1.75 until physical motion review is complete;
-other boards do not confer motion approval on this one.
+the Needs You countdown arcs are likewise hidden and receive no timed updates.
+Other boards do not confer motion approval on this one.
 
 The VibePulse and VibeOnChip presentations must retain the same support
 boundary. Neither may inherit another board's physical certification.

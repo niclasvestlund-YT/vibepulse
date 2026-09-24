@@ -713,15 +713,24 @@ static lv_obj_t *ny_ring(lv_obj_t *parent, int cx, int cy, int r, int stroke) {
   return arc;
 }
 
+#ifndef TORGET_BOARD_175
 static void ny_ring_set(lv_obj_t *arc, uint16_t permille) {
   uint32_t degrees = ((uint32_t)permille * 360u) / 1000u;
   if (degrees > 360u) degrees = 360u;
   lv_arc_set_angles(arc, 0, degrees);
   mon.render_stats.ring_updates++;
 }
+#endif
 
 static bool ny_ring_update(needs_you_view *view, ny_stage stage,
                            bool private_view, uint16_t permille) {
+#ifdef TORGET_BOARD_175
+  (void)view;
+  (void)stage;
+  (void)private_view;
+  (void)permille;
+  return false; /* Round countdown motion awaits a physical panel review. */
+#else
   if (mon.rendered_ring_valid &&
       mon.rendered_ring_permille == permille) return false;
   lv_obj_t *ring = stage == NY_ATTRACT ? view->a_ring
@@ -730,6 +739,7 @@ static bool ny_ring_update(needs_you_view *view, ny_stage stage,
   mon.rendered_ring_permille = permille;
   mon.rendered_ring_valid = true;
   return true;
+#endif
 }
 
 /* A touch target: filled slab or outlined pill, ASCII-uppercase label centred,
@@ -920,6 +930,9 @@ static void create_needs_you(lv_obj_t *app_root) {
   /* Positions are in the 480px logical viewport; the 466px panel starts at
    * logical (7,7). Buttons stay within the lower circular chord. */
   lv_obj_add_flag(v->frame, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(v->a_ring, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(v->h_ring, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(v->pv_ring, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_pos(v->a_word, 55, 270);
   lv_obj_set_width(v->a_word, 370);
   lv_obj_set_pos(v->a_project, 79, 325);

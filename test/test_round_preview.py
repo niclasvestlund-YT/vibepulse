@@ -28,6 +28,9 @@ class RoundPreviewTests(unittest.TestCase):
                                     env={**os.environ, 'TORGET_CAPTURE_DIR': directory},
                                     text=True, capture_output=True, check=True)
         self.assertNotIn('needs-you verdict:', result.stdout)
+        motion = subprocess.run([str(build), '--vibepulse-needs-you-render-qa'],
+                                cwd=ROOT, text=True, capture_output=True, check=True)
+        self.assertIn('ring_updates=0', motion.stdout)
 
     def test_full_app_surfaces_stay_inside_round_glass(self):
         """Exercise the real shared LVGL surfaces, including attention and OTA."""
