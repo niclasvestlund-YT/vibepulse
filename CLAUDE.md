@@ -93,3 +93,27 @@ the idea is only silicon-capable, board-wired, firmware-enabled, and
 physically verified on the named unit. Mention a relevant
 unused onboard capability when it materially improves the request.
 Never copy secrets or turn an opportunity into authorized implementation work.
+
+## Releases and the README
+
+Two rules, learned 2026-08-16, not optional:
+
+- **When an important feature ships, update `README.md` in the same effort** —
+  headline it at the top (tagline + intro) AND add/refresh its own section with
+  current native simulator frames (480 x 480 or 600 x 450). A feature nobody can see in the README is
+  a feature nobody adopts.
+- **Every GitHub release gets real feature images and a clean card.** Embed the
+  feature's simulator frames in the release body via absolute
+  `raw.githubusercontent.com/.../<tag>/...` URLs. Do NOT open the body with a
+  `# Release: ...` H1 — GitHub renders it huge and it collides with the title in
+  the auto-generated OG card; lead with a plain intro paragraph instead.
+  Releases are source-only — never attach `torget.bin` (WiFi creds + device key
+  compiled in). The per-release OG card is auto-generated and NOT customisable;
+  the one shared-link image you can set is the repo's Social preview (Settings ->
+  Social preview) — refresh it for a major feature.
+- **Tagging includes the documentation cut.** In the same effort, move the
+  shipped entries out of `Unreleased` into a dated version in `CHANGELOG.md`,
+  leave a new empty `Unreleased` section at the top, update README's `Latest
+  release`, and save the GitHub-ready body under `docs/releases/`. A tag on a
+  commit whose changelog still calls its features unreleased is not a finished
+  release.
