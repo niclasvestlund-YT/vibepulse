@@ -232,6 +232,7 @@ NOT_FRAMES = {
     "hero.png": "the README banner, a composed graphic",
     "qr-repo.png": "a QR code, not a screen",
     "social-preview.png": "the repository's social card",
+    "vibepulse-desk-short.jpg": "YouTube video poster, not a firmware or simulator capture",
 }
 
 
