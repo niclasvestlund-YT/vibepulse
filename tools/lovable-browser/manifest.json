@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "VibePulse Lovable Credits",
+  "version": "0.1.0",
+  "description": "Read visible Lovable credit balances and send numbers to your local VibePulse display.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAumYX6nzZdT1oSgS+5mtsjDLuU5yYFGBdhIV4oC9sy7Bl3cXCmyGVpZoYjG7wY5rxhnAXtuuKstFIoHQDWUPSYypXSzvDkotsF0Xg+b5VjM1hLau0ziaPRkNBEYh8Uubx5oMuJ38vMIpCBkwf7jHONPS2mTNkNy/Mg2KQYAaSox0009vDkxn5PicL/+Wo4pQqlO9dk5E3diWcqB+F5BaskB0sHjP7Uto/7RPknl/ag9ufASUKs90ullEyT/uawtVq0xW9NdL6yiamZfKekkC+ZBsPaeGwh4MxPgbjPhYjvElRHAINtC/zObylUChKaCV+5OqPXApgrPBJL2i1BlEVcQIDAQAB",
+  "permissions": [
+    "alarms",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://lovable.dev/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://lovable.dev/settings/billing*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "VibePulse Lovable credits"
+  }
+}

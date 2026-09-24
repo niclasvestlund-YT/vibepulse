@@ -24,6 +24,11 @@ current across ordinary internet WiFi. Every cloud feature is off by default;
 only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
+An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
+The current MCP response omits balances despite the documentation; an opt-in
+local Chrome extension can read the visible balance while a Lovable project is
+open. Setup and freshness limits are documented in the linked guide.
+
 Current source includes the original **2.16-inch square panel**, the
 **Waveshare 2.41 V2**, a USB-installed **1.91 Touch** development port and
 the round **1.75** profile.
@@ -96,24 +101,26 @@ Codex. You do not need to read this whole page:
    are concepts. New installs start with quotas and activity; analytics are
    optional in SETTINGS → LABS.
 
-## Latest release: v1.2.0
+## Latest release: v1.3.0
 
-VibePulse now has board-specific builds for four AMOLED shapes: the original
-2.16 square, 2.41 V2 landscape, the USB-installed 1.91 Touch development port,
-and a round 1.75 quota display. Real-panel photos, native captures, USB setup
-guides and physical evidence sit with each model under
-[Supported screens](#supported-screens). The round face shows weekly usage,
-USED TODAY and a reset countdown in one ring. Each build must match the exact
-board; the new boards have different remaining physical checks.
+Lovable joins the optional Labs pages. An experimental Chrome extension reads
+explicitly labelled credits from the billing page and sends them through your
+local tokenserver. The [setup guide](docs/lovable-pulse.md) covers installation,
+workspace selection, freshness, removal and switching to the official API later.
+Lovable's MCP documentation describes credits, but the response we checked did
+not include them. Browser automation remains experimental; a real one-time
+reading reached the round display, while automatic refresh still needs confirmation.
 
-The release also adds an optional Claude statusLine quota source and saved LABS
-choices. Its firmware and host checks run in CI. This tag is not itself a
-physical flash of every final image, and the Windows v1 physical-answer and
-lifecycle result remains pinned to the v1.0.0 runtime.
+Labs now lets you hide Claude Code or Codex quota pages and apply saved choices
+with **RESTART NOW**. The existing quota designs stay the same. Source and native
+render checks cover all 256 combinations, including every page off. A release
+tag is not a physical flash of every final image; board-specific touch and
+installation checks remain separate.
 
-[Read the illustrated v1.2.0 notes](docs/releases/2026-09-24-four-amoled-shapes.md)
+[Illustrated v1.3.0 notes](docs/releases/2026-09-25-lovable-and-labs.md)
 · [Full changelog](CHANGELOG.md)
-· [Compare v1.1.0...v1.2.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.1.0...v1.2.0)
+· [Compare v1.2.0...v1.3.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.2.0...v1.3.0)
+· [Four-board v1.2.0 release](docs/releases/2026-09-24-four-amoled-shapes.md)
 
 Contributing or validating another host? Read
 [CONTRIBUTING.md](CONTRIBUTING.md), the
@@ -681,7 +688,9 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
 
 New installations using `secrets.h.example` show quotas with reset information
 and local activity when available. In **SETTINGS → LABS**, add burn rate,
-Max Tracker, API-equivalent value, a GitHub page or independent star popups.
+Max Tracker, API-equivalent value, a GitHub page, independent star popups, or Lovable credits.
+Use **MORE → MORE** to hide the Claude Code or Codex quota pages and select
+**RESTART NOW** to apply saved changes.
 Tap to save a choice, then restart the panel to apply it. GitHub needs a
 repository configured on the computer; Value needs prices and a plan cost for
 its comparison. These choices do not start cloud services.
@@ -699,6 +708,32 @@ firmware updates. Disabled pages are not created at boot. The new selector
 has shared LVGL simulator coverage; physical memory and touch review are
 pending before release. [Setup, defaults and future experiments](docs/labs/README.md).
 Countdown clocks and coding quotes remain concepts for a later Labs addition.
+
+## Lovable credits (experimental)
+
+An opt-in Chrome extension reads the balance shown on Lovable's billing page
+while a project is open. It sends only the workspace name and named credit/plan
+fields to the local tokenserver; the screen receives a compact credit snapshot.
+It does not read browser credentials, project source or chats. Missing data stays
+missing, and a reading becomes **CACHED** after three minutes without an update.
+
+<p align="center">
+  <img src="docs/img/vibepulse-lovable.png" width="45%" alt="Native 480 by 480 Lovable page rendered with simulator example data">
+  <img src="docs/img/vibepulse-labs-providers.png" width="45%" alt="Labs controls for Claude Code and Codex page visibility">
+</p>
+
+*Native LVGL captures, with illustrative credit data. The browser source does
+not currently provide the reset countdown shown in this example.* A real browser reading
+has also reached the round 1.75-inch panel. Automatic Chrome refresh and the
+Windows browser integration still need end-to-end confirmation.
+
+**[Install the Lovable browser integration](docs/lovable-pulse.md#browser-fallback-chrome-optional)**
+for workspace selection, custom ports, startup configuration, verification,
+removal and the round display's BOOT/Labs controls. No MCP login is needed for
+`--lovable --lovable-source browser`. Lovable's documentation describes a credit
+balance in `get_workspace`, but the authenticated response checked on
+2026-09-24 omitted it. Source modes `auto` and `mcp` allow a later switch to the
+official API without changing the display contract.
 
 ## One button, one menu
 

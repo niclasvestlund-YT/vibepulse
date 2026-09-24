@@ -177,6 +177,48 @@ and popup are then enabled independently on the panel in SETTINGS → LABS →
 MORE; the `secrets.h` macros (see `secrets.h.example`) only seed the defaults
 until a choice is saved.
 
+## Optional Lovable page
+
+Shows credits left, plan and data age for one Lovable workspace. The official
+source is Lovable's read-only MCP server (`https://mcp.lovable.dev`, tool
+`get_workspace`) with OAuth and the `workspaces:read offline` scopes. As of
+2026-09-24 its actual response omits credits. An optional Chrome DOM reader
+can supply the real visible balance; see the browser fallback setup in
+[`docs/lovable-pulse.md`](../../docs/lovable-pulse.md#browser-fallback-chrome-optional).
+
+```
+# Recommended current path: prepare/install the extension using the guide above,
+# then ADD these flags to your existing service command:
+python3 tokenserver.py --lovable --lovable-source browser
+
+# Optional official MCP path:
+python3 lovable_monitor.py login     # opens the browser once, picks a workspace
+python3 lovable_monitor.py status    # official MCP source only
+python3 tokenserver.py --lovable     # or VIBEPULSE_LOVABLE=1
+curl http://localhost:8737/api/lovable
+```
+
+`--lovable-source browser` uses only the browser bridge and needs no OAuth login.
+`auto` (default) combines available sources, preferring a healthy official balance
+when newer or when the browser reading is stale. `mcp` disables browser ingress.
+The environment equivalent is `VIBEPULSE_LOVABLE_SOURCE=browser|auto|mcp`.
+On Windows, use `-Lovable -LovableSource browser` on the installer/runner.
+Preserve existing service arguments and restart the service after changing them.
+
+The OAuth tokens are stored in the macOS Keychain (service
+`se.torget.vibepulse.lovable`); on other systems in
+`~/.config/vibepulse/lovable-oauth.json` with mode 0600. They never leave the
+computer and are never relayed: `/api/lovable` carries only `creditsTenths`,
+`ageSeconds`, `plan`, `workspace`, `stale`/`login` flags and -- only when
+the source names them -- `grantTenths`, `resetSeconds` and
+`periodSeconds`, plus `dailyCreditsTenths`/`dailyGrantTenths` for a separately
+named daily pool. Daily credits are never inferred from the plan. Run
+`lovable_monitor.py probe` to see the full workspace response with token-like
+values and email addresses redacted. Browser readings expose no guessed reset
+date and become cached after three minutes without updates.
+`lovable_monitor.py logout` removes the login. Enable the page on the panel
+in SETTINGS → LABS → MORE. See `docs/lovable-pulse.md`.
+
 ## Agent status
 
 `/api/agent-status` is a separate v2 contract for Claude Code's and Codex's

@@ -54,6 +54,16 @@
 #define TK_GITHUB_SOUND_ENABLED 0
 #endif
 
+/* The Lovable page (plan + credits from the Mac's read-only get_workspace
+ * feed). Off on a fresh clone; seeds LABS on the first boot only. The feed is
+ * LAN-only: no relay address exists for it. */
+#ifndef TK_LOVABLE_SCREEN_ENABLED
+#define TK_LOVABLE_SCREEN_ENABLED 0
+#endif
+#if TK_LOVABLE_SCREEN_ENABLED != 0 && TK_LOVABLE_SCREEN_ENABLED != 1
+#error "TK_LOVABLE_SCREEN_ENABLED must be 0 or 1"
+#endif
+
 #if TK_GITHUB_SCREEN_ENABLED != 0 && TK_GITHUB_SCREEN_ENABLED != 1
 #error "TK_GITHUB_SCREEN_ENABLED must be 0 or 1"
 #endif

@@ -21,15 +21,21 @@ using quotas.
 
 ## Add features on the display
 
-Hold KEY3 for three seconds, then tap **LABS**. Tap a row to switch it ON or
-OFF. **MORE** opens the GitHub choices; **BACK** returns to analytics and
-**SETTINGS** returns to the main menu. KEY3 closes any of these pages.
+Hold KEY3 for three seconds (**BOOT** on the round 1.75), then tap **LABS**. RESET
+is the hardware reset button, not the Settings shortcut. Tap a row to switch it ON or
+OFF. **MORE** advances through the analytics choices, GitHub/Lovable choices,
+and provider visibility. **BACK** returns to the GitHub/Lovable choices;
+**SETTINGS** returns to the main menu. When a saved change is waiting, the last
+provider page shows **RESTART NOW**. Tap it to restart and apply the changes.
+KEY3 closes any of these pages.
 
-Choices are saved immediately. **RESTART TO APPLY** means the saved choices
-differ from the currently running pages: power-cycle the display when ready.
+Choices are saved immediately. **RESTART NOW** appears when the saved choices
+differ from the currently running pages and reboots the display to apply them.
 Disabled pages are not allocated at boot, and disabled Max Tracker/GitHub
-polling tasks are not started. The menu does not enable a cloud service,
-install a provider plugin, or configure anything on the computer.
+polling tasks are not started. CLAUDE CODE and CODEX hide their quota pages;
+agent-activity monitoring remains governed by its separate settings. The menu
+does not enable a cloud service, install a provider plugin, or configure
+anything on the computer.
 
 | LABS choice | What it adds | Set up first on the computer | New install |
 |---|---|---|---|
@@ -38,10 +44,18 @@ install a provider plugin, or configure anything on the computer.
 | API VALUE | API-equivalent value page | Current model prices; plan cost for a multiple | Off |
 | GITHUB PAGE | Repository stars and forks | One public repository in tokenserver | Off |
 | STAR POPUP | New-star moments, independent of the page | The same repository feed | Off |
+| LOVABLE PAGE | Remaining build credits, plan and freshness | [Lovable browser setup](../lovable-pulse.md) | Off |
+| CLAUDE CODE | Show or hide the Claude quota pages | Claude quota source | On |
+| CODEX | Show or hide the Codex quota page | Codex quota source | On |
 
 The ON label is a saved display preference, not a claim that its data source
 is ready. Configure the computer first using the linked guides. Missing data
 continues to show dashes or the existing setup/pricing state.
+
+For a Lovable-only carousel, turn LOVABLE PAGE on and CLAUDE CODE/CODEX off,
+then tap RESTART NOW on the provider page. If every page is off, an empty-state message
+points back to Settings; the agent overlay remains independent. Version-1 Labs
+records retain their existing choices and migrate with both provider pages on.
 
 ### Existing installations and saved choices
 

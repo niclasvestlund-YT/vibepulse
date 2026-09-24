@@ -5,6 +5,36 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+## v1.3.0 — 2026-09-25
+
+Release notes: [Lovable credits and Labs controls](docs/releases/2026-09-25-lovable-and-labs.md).
+
+### Added
+
+- Optional Lovable build-credit page and an experimental local Chrome bridge
+  that reads labelled values from the logged-in billing page. Credentials stay
+  in the browser; only allowlisted display data reaches the loopback receiver
+  and existing LAN endpoint. Cached readings preserve their age across restarts.
+  [Setup, troubleshooting and removal](docs/lovable-pulse.md) include the
+  current official MCP documentation/service mismatch and verification limits.
+- `--lovable-source browser|mcp|auto` selects the source independently of the
+  firmware. Browser mode needs no MCP login; the official OAuth path remains
+  available for future API support.
+- LABS provider visibility switches for Claude Code and Codex, plus a
+  **RESTART NOW** action to apply saved page choices. Existing Labs choices
+  migrate; disabling all pages leaves a usable empty state.
+
+### Fixed
+
+- Keep nested daily balances and reset dates out of the main credit period.
+- Accept CRLF-delimited MCP event streams and retain Lovable source options in
+  the Windows task runner. Mark retained panel readings CACHED if host polling stops.
+- Disabled quota pages are skipped safely during updates and header refreshes;
+  carousel navigation is bounded even when every page is off.
+- Round preview tooling keeps the correct 466 × 466 profile and explicitly
+  enables its quota fixtures. Documentation names BOOT as the round Settings
+  shortcut and requires identifying the board before any flash.
+
 ## v1.2.0 — 2026-09-24
 
 Release notes:

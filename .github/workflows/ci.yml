@@ -86,6 +86,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: tools/relay/package-lock.json
+      - name: Check the optional Lovable browser scripts
+        run: |
+          for browser_script in tools/lovable-browser/*.js; do
+            node --check "$browser_script"
+          done
       - name: Run relay mailbox merge tests
         run: node --test tools/relay/test.mjs
       - name: Run relay Durable Object tests

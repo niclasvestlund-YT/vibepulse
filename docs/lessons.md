@@ -1,5 +1,59 @@
 # Lessons log
 
+## 2026-09-25 · Green checks do not close unresolved review findings
+
+Before merging, inspect every review thread as well as the exact-head CI result.
+The Lovable release review found unhandled CRLF SSE records, nested daily data
+leaking into the main credit period, a missing Windows startup switch and a
+retained LIVE label after the host disappeared. Fix the behavior and add the
+specific regression checks before resolving a thread. Keep browser lifecycle
+and physical touch claims separate from unit/build results. Release notes and
+a website announcement should publish only after the release dependency exists.
+
+## 2026-09-24 · Resolve the physical unit and build inputs before installation
+
+The Lovable session exposed a wrong display profile, an unwanted companion app,
+and an orientation mismatch. The intended unit was the round 1.75 (466 × 466),
+with USB down; using the default 2.16 profile could crop or enlarge its layout.
+Local companion checkouts also changed which apps were built.
+
+Before the next installation, use the recorded unit and current connection
+evidence, inspect the effective CMake profile and companion paths, and review
+native output. A serial port or ESP32-S3 chip identity does not establish panel
+geometry. Keep display and touch rotation paired. Read the board's controls:
+BOOT opens Settings on this unit; RESET restarts it. These checks are now in
+AGENTS.md so future sessions encounter them before hardware work.
+
+## 2026-09-24 · A manual reading does not verify automatic browser updates
+
+A real billing-page reading reached the display and was photographed. That
+proved the observed value's host-to-panel path, but did not prove extension
+installation or periodic refresh. Before calling the automatic integration
+verified, observe delivery from the installed extension, a later fresh reading,
+and honest aging when the source stops. Preserve the original observation time
+across restarts. Record missing browser/OS evidence explicitly in the guide and
+PR, and never substitute a fixture or refreshed timestamp for real data.
+
+## 2026-09-24 · Provider switches make an empty carousel valid
+
+When the previously permanent Claude/Codex pages became optional, every page
+could be disabled. An unbounded next-page search would loop forever. Navigation
+now checks at most one circuit and returns no view; an empty-state tile points
+back to Settings. The 256-mask policy/render checks include this case. Migrating
+a six-switch record preserves the owner's choices even if its upgraded write
+fails; a storage failure must not silently restore unrelated default pages.
+
+## 2026-09-24 · A documented credit balance was absent from the live MCP contract
+
+Lovable's public docs and server skill promised credits, but authenticated
+`tools/list`, `get_workspace`, `get_me` and `list_workspaces` exposed none.
+Do not assume missing OAuth scopes or manufacture a number from the plan.
+The opt-in browser fallback reads explicitly labelled DOM fields, binds them
+to the configured workspace and preserves observation age across host restarts.
+Daily chat percentage is not daily build credits; grant expiry is not renewal.
+The fallback is unofficial and needs live browser evidence independently of MCP.
+Its strict loopback ingress and three-minute stale cutoff preserve that boundary.
+
 ## 2026-09-24 · A round display still has a physical up direction
 
 **What happened:** the native VibePulse image looked upright on the 1.75-inch

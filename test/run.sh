@@ -69,11 +69,12 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 
 # Both the legacy header fallback and fresh-install template seed.
 for labs_default in 0 1; do
-  for github_default in 0 1 2 3; do
+  for github_default in 0 1 2 3 4 5 6 7; do
     cc -std=c11 -Wall -Wextra -Werror -O1 \
       -DTK_LABS_ANALYTICS_DEFAULT=$labs_default \
       -DTK_GITHUB_SCREEN_ENABLED=$((github_default & 1)) \
       -DTK_GITHUB_NOTIFICATIONS_ENABLED=$(((github_default >> 1) & 1)) \
+      -DTK_LOVABLE_SCREEN_ENABLED=$(((github_default >> 2) & 1)) \
       ../components/app_tokens/labs_features.c test_labs_features.c \
       -o /tmp/torget-labs-test
     /tmp/torget-labs-test
@@ -169,6 +170,13 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -lm \
   -o /tmp/torget-github-status-test
 /tmp/torget-github-status-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/lovable_status_parse.c \
+  test_lovable_status.c /tmp/torget-cjson.o \
+  -lm \
+  -o /tmp/torget-lovable-status-test
+/tmp/torget-lovable-status-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/project_star_popup_policy.c \
@@ -405,6 +413,9 @@ done
 if [ "$SKIP_JS" = 1 ]; then
   echo "OBS: --skip-js — relayernas JS-tester körs i CI:s egna jobb"
 elif command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  for browser_script in tools/lovable-browser/*.js; do
+    node --check "$browser_script"
+  done
   node --test tools/relay/test.mjs
   (cd tools/relay && npm ci && npm test)
   (cd tools/interaction-relay && npm ci && npm test && npm run typecheck)

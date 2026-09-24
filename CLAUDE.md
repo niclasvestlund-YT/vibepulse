@@ -57,6 +57,21 @@ root-cause story add an entry there.
 
 ## Hardware-aware work
 
+Before each hardware build/install, resolve the intended physical unit from its
+board registry and the current session. The unit used in the 2026-09-24 Lovable
+session was `vibepulse-175-01`: round 1.75, `waveshare_175`, 466 × 466, USB down,
+BOOT held three seconds for Settings. This is a recorded unit, not a permanent
+assumption about whichever screen is connected next. A USB port name or the
+ESP32-S3 chip type alone cannot identify the panel. Bind the connected ROM
+identity to the intended unit using the board's installation workflow; clarify
+only if the available evidence cannot resolve the model.
+
+Inspect the effective CMake board and companion inputs before building. For a
+VibePulse-only install, explicitly exclude local Solelkollen/Buddy checkouts;
+do not let auto-discovery silently change the app registry. Review native-size
+output, pair display and touch rotation, and keep build, flash/hash verification,
+visual inspection and touch acceptance as separate evidence.
+
 Select the board first. The five root files below describe **2.16 only**.
 For the experimental **1.91 Touch AMOLED**, use the five files under
 `spec/boards/waveshare_191_touch/` and `docs/waveshare-191-touch.md`.

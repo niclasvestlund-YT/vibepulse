@@ -10,6 +10,6 @@ units:
   battery: not connected (owner confirmed USB-only)
   microsd: unknown
   antenna: unknown
-  installed_firmware: round VibePulse USB-down trial; app SHA-256 854d92e9e64da72d5dd745af7100b6d636ef764ac41ab125d43707ae90f073ff (boot and Wi-Fi verified; angle/touch review pending)
-  last_physical_verification: '2026-09-24 (owner-photographed Codex quota page; touch and connector direction pending)'
+  installed_firmware: Lovable-page + Labs provider switches and restart action flashed 2026-09-24 with the waveshare_175 466 x 466 profile and no Solelkollen companion; app SHA-256 e8b9a39d67e2b7900784d0a473eb6f2a56f95018fbd1f6b0c0c62680fa79843f (all written segments hash-verified; owner photographs show a live Lovable balance with USB down; touch alignment remains unverified)
+  last_physical_verification: '2026-09-24 (owner photographs show Codex quota and Lovable balance on the round panel, USB down; automatic browser updates, touch alignment and automatic rotation remain unverified)'
   secrets: false

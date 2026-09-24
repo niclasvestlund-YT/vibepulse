@@ -19,7 +19,8 @@
  *
  * LABS reuses these same row controls. The app supplies names and persisted
  * choices; changes take effect at the next boot, so disabled pages cost no
- * LVGL objects. PAIR belongs to a later onboarding step.
+ * LVGL objects. A pending choice exposes RESTART NOW on the MORE page. PAIR
+ * belongs to a later onboarding step.
  */
 
 typedef enum {
@@ -47,6 +48,7 @@ typedef enum {
   TG_SETTINGS_INTENT_NONE,
   TG_SETTINGS_INTENT_OPEN_UPDATE,
   TG_SETTINGS_INTENT_OPEN_WIFI,
+  TG_SETTINGS_INTENT_RESTART,
 } tg_settings_intent;
 
 /*
