@@ -49,11 +49,13 @@ Both answers already exist, buried in a terminal you're not looking at.
 VibePulse moves them onto a screen you can't miss: one glance from across
 the room, no window to switch to, no menu bar to squint at.
 
-> **Status:** v1.1.0. The core shelf-screen loop is real and physically
+> **Status:** v1.2.0. The core shelf-screen loop is real and physically
 > exercised on macOS and Windows: see quota, see an agent waiting, and answer
 > a supported prompt on the glass. The Windows core, physical answer loop and
 > persistent sign-in/sleep/reboot lifecycle were verified at the v1.0.0 host
-> runtime and are not re-claimed for a later one. v1.1.0 adds SETTINGS on
+> runtime and are not re-claimed for a later one. v1.2.0 adds three
+> board-specific AMOLED builds with different physical verification limits;
+> the original 2.16 build remains. v1.1.0 added SETTINGS on
 > the glass, an honest warm-up, and crash evidence in the firmware. The
 > v1.1.0 SETTINGS menu has been on `torget-home-01` since the 2026-09-06 USB
 > flash of `v1.0.0-67-ge51b79f`, with its static on-panel review still unrun;
@@ -85,38 +87,24 @@ Codex. You do not need to read this whole page:
    are concepts. New installs start with quotas and activity; analytics are
    optional in SETTINGS → LABS.
 
-## Latest release: v1.1.0
+## Latest release: v1.2.0
 
-The first release after 1.0 gives the panel a menu and a memory. A
-three-second **KEY3** hold opens **SETTINGS** on the glass (UPDATE, WIFI,
-ABOUT), so the maintenance window is chosen rather than guessed. The service
-answers the panel at once after a restart while the first history scan runs,
-labelling the volume counters as placeholders instead of letting the glass go
-STALE. A panic now leaves an ELF coredump in flash and a reboot ledger in
-NVS, every device poller backs off from a dead service, and the logging
-configuration is pinned by a configure-time guard. The host quarantines a
-corrupt state file instead of wiping it, says why the Claude probe is idle,
-names the keychain failure, typesets any model id, and the whole tokenserver
-directory now reads in English. Never a number it did not measure, still.
+VibePulse now has board-specific builds for four AMOLED shapes: the original
+2.16 square, 2.41 V2 landscape, the USB-installed 1.91 Touch development port,
+and a round 1.75 quota display. Real-panel photos, native captures, USB setup
+guides and physical evidence sit with each model under
+[Supported screens](#supported-screens). The round face shows weekly usage,
+USED TODAY and a reset countdown in one ring. Each build must match the exact
+board; the new boards have different remaining physical checks.
 
-### v1.1.0 verification
+The release also adds an optional Claude statusLine quota source and saved LABS
+choices. Its firmware and host checks run in CI. This tag is not itself a
+physical flash of every final image, and the Windows v1 physical-answer and
+lifecycle result remains pinned to the v1.0.0 runtime.
 
-| Gate | Result |
-|---|---|
-| Host gate (`./test/run.sh`), tokenserver suite on ubuntu, macOS and Windows, both Workers, snapshot tool | **PASS** on every merged PR and on merged `main` |
-| ESP32-S3 firmware build | **PASS** in CI — a build, not a flash |
-| SETTINGS (UPDATE / WIFI / ABOUT) on the physical panel | **FLASHED, NOT REVIEWED** — `torget-home-01` runs `v1.0.0-67-ge51b79f` (USB, 2026-09-06), which carries the v1.1.0 menu; the static on-panel review, §3 of [`docs/manual-test-key3.md`](docs/manual-test-key3.md), has not been run |
-| Warm-up placeholders, coredump, reboot ledger, poller backoff, and the SETTINGS → LABS addition on the physical panel | **NOT YET FLASHED** — all landed after `e51b79f`; the run sheet is [`docs/flash-session-2026-09.md`](docs/flash-session-2026-09.md) |
-| Windows v1 host claim (core, physical answer loop, lifecycle) | **Pinned to v1.0.0's runtime `bee5d8c`** — not re-run for this release |
-
-The coredump partition is new in the table, and OTA never writes the table:
-one USB `idf.py -p <port> partition-table-flash` is needed before a dump can
-land, and the boot log says so until then.
-
-[Read the v1.1.0 notes](docs/releases/2026-09-10-settings-and-evidence.md)
-· [Windows v1 evidence](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)
+[Read the illustrated v1.2.0 notes](docs/releases/2026-09-24-four-amoled-shapes.md)
 · [Full changelog](CHANGELOG.md)
-· [Compare v1.0.0...v1.1.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.0.0...v1.1.0)
+· [Compare v1.1.0...v1.2.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.1.0...v1.2.0)
 
 Contributing or validating another host? Read
 [CONTRIBUTING.md](CONTRIBUTING.md), the
@@ -487,7 +475,7 @@ The support status below reflects our own verification of each model.
 | [Waveshare ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate), **touch variant** | 536×240 AMOLED in fixed landscape; BOOT opens settings | **USB-installed development port in current source.** Four touch corners, phone Wi-Fi setup, saved-network reconnect and visible Codex usage checked on one real unit. [Install guide](docs/waveshare-191-touch.md) · [physical report](docs/superpowers/reviews/2026-09-23-waveshare-191-touch.md). Needs You decisions stay on the computer until a safe compact button layout is verified. Menu navigation, OTA and rotation remain unverified. |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate), marking **1.75** only | 466×466 round AMOLED; PCB revision unknown | **USB-installed round quota profile in current source.** A real unit boots, joins Wi-Fi and displays Codex usage, USED TODAY and reset countdown in [owner photographs](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md). [Bring-up guide](docs/waveshare-175-preview.md). Needs You decisions remain on the computer and OTA is disabled in current source; use USB updates. Fixed USB-down orientation, touch and the latest portal scan still need final on-unit checks; automatic rotation is unverified. |
 
-The v1.1.0 tag predates these newer ports. Use current source and explicitly
+The v1.2.0 tag includes these newer ports. Check the exact model and explicitly
 select `waveshare_241_v2`, `waveshare_191_touch` or `waveshare_175`;
 firmware images are board-specific.
 More boards are added after physical verification, following
@@ -504,7 +492,7 @@ More boards are added after physical verification, following
 *Real 1.91-inch panel, photographed September 23, 2026. The 9% quota was a
 momentary account reading; red room lighting limits color judgment. Follow the
 [1.91 Touch guide](docs/waveshare-191-touch.md) for USB flashing and the exact
-phone Wi-Fi steps. This profile is not in the v1.1.0 release.*
+phone Wi-Fi steps. This profile is included in v1.2.0.*
 
 #### 1.75 round
 
