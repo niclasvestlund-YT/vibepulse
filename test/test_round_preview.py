@@ -8,11 +8,25 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
 from PIL import Image, ImageChops
 from test_docs_frame_drift import BOARD_175_FRAMES, ROOT
 
 
 class RoundPreviewTests(unittest.TestCase):
+    def test_ci_round_build_passes_both_sdk_defaults_through_action_shell(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
+        command = next(step['with']['command']
+                       for step in workflow['jobs']['firmware']['steps']
+                       if step.get('name', '').startswith('Build the round 1.75'))
+        # The Espressif action embeds this command inside /bin/bash -c '...'.
+        # A quoted semicolon escaped only for the inner shell breaks that wrapper.
+        probe = command.replace('idf.py ', 'printf "<%s>\\n" ', 1)
+        result = subprocess.run(['bash', '-c', "/bin/bash -c '" + probe + "'"],
+                                cwd=ROOT, text=True, capture_output=True, check=True)
+        self.assertIn('<SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.175>',
+                      result.stdout)
+
     def test_round_needs_you_hands_decisions_to_computer(self):
         """The real renderer's approve attempts must never send a round verdict."""
         build = ROOT / 'sim/build-175/torget-sim'
