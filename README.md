@@ -36,6 +36,15 @@ Its USB-installed profile shows a Codex quota ring, USED TODAY and D:H:M
 countdown on a real unit. Touch alignment, the fixed USB-down mounting and
 the latest Wi-Fi scan change still need final on-unit review.
 
+## Watch it on the desk
+
+<p align="center">
+  <a href="https://www.youtube.com/shorts/WhZPEq4w3WA"><img src="docs/img/vibepulse-desk-short.jpg" width="640" alt="Video poster: VibePulse quota screens and LED matrix art on Niclas's desk; the computer screen is blurred"></a>
+</p>
+<p align="center"><a href="https://www.youtube.com/shorts/WhZPEq4w3WA">▶ VibePulse: AI-agenterna på mitt skrivbord 🤖 — watch on YouTube</a></p>
+
+The thumbnail is from a [Niclas Testar Livet Short](https://www.youtube.com/shorts/WhZPEq4w3WA), not a simulator capture or a verification of every board profile.
+
 ## The problem
 
 When you run coding agents all day, two things are invisible:
