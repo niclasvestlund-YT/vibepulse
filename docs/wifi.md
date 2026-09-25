@@ -84,6 +84,21 @@ If QR generation ever fails, the manual details view appears automatically
 with the setup SSID, temporary password, and `192.168.4.1`; recovery does not
 depend on the QR renderer.
 
+### iPhone friction and follow-up
+
+The QR only helps the phone join the panel's temporary access point; it does
+not guarantee that iOS opens or returns to the local portal. Some owners must
+approve the network switch and then reopen Camera/Safari or enter
+`http://192.168.4.1/`. This works as a recovery path but is not a quick
+first-run experience. Keep those consent and manual-return steps visible in
+board guides. A QR-driven board installer plus an authenticated BLE
+provisioning flow is being considered; iOS still requires explicit approval
+before an app changes the phone's Wi-Fi configuration.
+
+See the [display-onboarding proposal](display-onboarding-proposal.md) for the
+target journey and acceptance criteria. Do not embed home-network credentials
+or unique device secrets in a permanent QR code.
+
 ### Optional: from a Mac — `tools/wifi-here.sh`
 
 One command. It reads the Mac's current SSID, pulls that network's password

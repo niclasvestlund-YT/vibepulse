@@ -4,7 +4,7 @@
 #include "esp_lcd_types.h"
 #include "esp_lcd_touch.h"
 #include "display_geometry.h"
-#ifndef TORGET_BOARD_241_V2
+#if !defined(TORGET_BOARD_241_V2)
 #include "bsp/esp-bsp.h"
 #endif
 

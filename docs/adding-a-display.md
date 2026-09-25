@@ -10,6 +10,7 @@ record evidence on one named unit before announcing support.
 |---|---|---|---|
 | `waveshare_216` (default) | 480 × 480 | KEY3 / GPIO18 | `spec/` |
 | `waveshare_241_v2` | 600 × 450 landscape | BOOT / GPIO0 | `spec/boards/waveshare_241_v2/` |
+| `waveshare_18_v2` | 368 × 448 portrait | BOOT / GPIO0 | `spec/boards/waveshare_18_v2/` |
 
 Each registry contains `hardware.md`, `hardware-capabilities.yaml`,
 `hardware-sources.yaml`, `device-units.yaml` and `hardware-opportunities.md`.
@@ -45,16 +46,22 @@ capabilities unchanged.
    transforms together. Do not turn another board's GPIO18 into a button or
    apply its IMU calibration. Unknown profile names must fail early.
 7. **Budget memory at the new width.** Flush bytes are width × rows × bytes per
-   pixel. V2 uses 600 × 8 × 2 = 9,600 B, below the original 11,520 B. Keep
-   two-pixel dirty-area alignment and sample the largest internal DMA block;
-   free PSRAM and summed low-water heap are not substitutes. Extra persistent
-   layers or larger buffers require measured budgets and the AMOLED workflow.
+   pixel: the 2.41 V2 uses 600 × 8 × 2 = 9,600 B and the 1.8 V2 uses
+   368 × 12 × 2 = 8,832 B. Keep two-pixel dirty-area alignment and sample the
+   largest internal DMA block; free PSRAM and summed low-water heap are not
+   substitutes. Extra persistent layers or larger buffers require measured
+   budgets and the AMOLED workflow.
 8. **Fit every surface.** Physical raster and app composition are separate.
    Preserve native fonts and bitmaps. Inspect live/stale/no-data, widest copy,
    attention, pager, completion borders, settings, Labs, boot and Wi-Fi/QR
-   surfaces at the real dimensions. For V2, a centred 480-pixel composition
-   loses 15 pixels of vertical margin per side; footers and frames therefore
-   needed explicit adjustments. Do not silently change the public app API.
+   surfaces at the real dimensions. For the 2.41-inch V2, a centred
+   480-pixel composition loses 15 pixels of vertical margin per side; footers
+   and frames therefore needed explicit adjustments. Do not silently change
+   the public app API.
+   The 1.8-inch V2 profile instead maps the 480 × 480 logical canvas to its
+   368 × 448 glass with an origin-pivoted LVGL transform. That transform needs
+   a temporary composition layer; budget it explicitly and measure the
+   PSRAM-backed LVGL pool's runtime high-water mark on the target.
 9. **Build reproducibly.** Pin target and simulator LVGL to the same version.
    Keep board-specific build and generated SDK-config files. Configure once,
    then use `cmake --build <build-dir> --parallel 2` on small-memory machines.
@@ -70,7 +77,7 @@ capabilities unchanged.
     coverage in one PR. State the exact tested build and untested features.
     Do not publish credentials, personalized binaries or flash backups.
 
-## Traps from the first 2.41 V2 port
+## Lessons from the 2.41 V2 and 1.8 V2 ports
 
 - V1/V2 reset wiring differs. Size and chip family were insufficient selectors.
 - One vendor LVGL demo omitted the panel's 16-pixel address gap. Factory and
@@ -99,8 +106,33 @@ capabilities unchanged.
   no-reset serial recipe was verified in this session.
 - Visible quota values and provider freshness are distinct. A stale source or
   cancelled subscription is not evidence of a broken display driver.
+- The 1.8-inch retail label covers incompatible V1 and V2 display/touch chips;
+  read the back label before choosing a profile.
+- Check `TORGET_BOARD` in the generated CMake cache before flashing. A clean
+  build can still use the default profile if the selector was omitted.
+- ESP-IDF's separate bootloader CMake build on macOS needs Xtensa `ar` and
+  `ranlib`; host archive tools can leave the bootloader without its entry point.
+- Match the managed BSP function's exact config type. The 1.8 V2 touch API
+  expects `bsp_touch_config_t`.
+- Preview the full raster at native size. Scaling the 480 × 480 composition
+  to 368 × 448 fixes clipping but adds an LVGL layer whose runtime high-water
+  must still be measured.
+- QR is not synonymous with easy setup. The iPhone flow requires a Wi-Fi
+  approval and can require a manual return to the local portal. Track network
+  functionality separately from onboarding usability.
 
 Do not inherit motion, OTA, Windows physical-loop or long-soak approval from
 another model. Board-safe OTA identification is follow-up work; the V2 guide
 currently specifies USB updates. New animation work follows the separate
 physical performance protocol in the AMOLED skill.
+
+The 1.8 V2 port and owner-reported physical evidence are documented in
+[its support guide](waveshare-amoled-18-v2.md), [physical review](superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md)
+and [porting journal](porting-journal-waveshare-amoled-18-v2.md). Follow-up
+onboarding work is scoped in [display onboarding](display-onboarding-proposal.md).
+Waveshare's 1.8-inch label covers two incompatible generations: V1 uses
+SH8601/FT3168; V2 uses CO5300/CST820. Select `waveshare_18_v2` only for the
+owner-confirmed V2 marking. The native canvas is 368 × 448 portrait. The
+owner reports display, touch, Wi-Fi/data path and settings working on the
+named unit; the viewport transform's runtime high-water and 1.8-inch OTA
+remain unverified.

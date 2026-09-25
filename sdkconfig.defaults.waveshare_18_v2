@@ -1,0 +1,4 @@
+CONFIG_LV_MEM_SIZE_KILOBYTES=768
+# The default INFO boot log makes the ESP-IDF 5.5.2 bootloader exceed this
+# target's 12 KiB IRAM budget. Keep warnings/errors while preserving app logs.
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

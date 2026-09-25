@@ -476,6 +476,7 @@ The support status below reflects our own verification of each model.
 |---|---|---|
 | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=179337) (affiliate) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Its simulator frames are exact 480×480 renders. No soldering. Same board Clawdmeter uses. |
 | [Waveshare ESP32-S3-Touch-AMOLED-2.41](https://www.waveshare.com/esp32-s3-touch-amoled-2.41.htm?&aff_id=179337) (affiliate), **V2 / Rev2.0 only** | 600×450 AMOLED in fixed landscape, capacitive touch; BOOT opens settings | **Supported in current source.** Display bring-up, portrait corner touch, Wi-Fi and owner-visible Codex/Claude usage verified. [Install guide](docs/waveshare-241-v2.md) · [exact evidence](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md). V1, automatic rotation, OTA and physical answer replies are not validated by this port. |
+| [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=179337) (affiliate), **V2 only** | 368×448 portrait CO5300 AMOLED, CST820 touch; BOOT opens settings | **Supported in current source.** Owner reports display, touch, Wi-Fi/data path and settings working on one unit. [Install guide](docs/waveshare-amoled-18-v2.md) · [physical review](docs/superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md). V1, OTA, Windows, audio, IMU, RTC, battery and microSD are not verified. iPhone Wi-Fi onboarding still needs UX work. |
 
 The v1.1.0 tag predates the V2 port. Use current source and the explicit
 `waveshare_241_v2` build profile; firmware images are board-specific.
@@ -483,6 +484,21 @@ More boards are added after physical verification, following
 [Adding a display](docs/adding-a-display.md). The 2.16 registry remains under
 [`spec/`](spec/hardware.md); V2 has its own
 [hardware registry](spec/boards/waveshare_241_v2/hardware.md).
+
+#### 1.8 V2 portrait
+
+<p align="center">
+  <img src="docs/img/18-v2/vibepulse-18-v2-simulator.png" width="320" alt="Native-size 368 by 448 VibePulse simulator preview with fixture data">
+</p>
+
+*Native-size simulator preview with fixture data, not a physical-panel photo
+or live account reading. The owner-reported physical checks are documented in
+the [physical review](docs/superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md).*
+
+The 1.8 product label covers incompatible revisions: V1 is not supported.
+Use the [V2 install guide](docs/waveshare-amoled-18-v2.md) and check the rear
+label before building. The shared 480×480 UI is viewport-scaled to the native
+368×448 panel; runtime memory high-water is not measured yet.
 
 #### 2.41 V2 landscape
 
@@ -507,7 +523,8 @@ recovery, sources and troubleshooting.
 ### Coming soon — hardware on the workbench
 
 These boards have arrived for development. **No VibePulse firmware is available
-for them yet**, and there is no release date. Each port must pass the
+for the boards listed here yet**, and there is no release date. Each port must
+pass the
 [display bring-up and physical verification checklist](docs/adding-a-display.md)
 before moving into the supported table above.
 
@@ -517,7 +534,6 @@ commission. Waveshare supplied this development hardware.
 | Planned VibePulse port | Status |
 |---|---|
 | [ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate) | Received · coming soon · not supported yet |
-| [ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=179337) (affiliate) | Received · coming soon · not supported yet |
 | [ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate) | Received · coming soon · not supported yet; link selects the touch variant |
 
 Also received for **VibeMatrix experiments**: the controller, three LED panels
@@ -1054,9 +1070,9 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
   `main` still needs XDG paths, Linux credential selection, systemd user
   service lifecycle, and a real-host + panel validation report. See
   [Host platform support](docs/platform-support.md).
-- **Other boards or panel sizes?** Current source supports Waveshare **2.16**
-  and **2.41 V2**, each with its own build profile and native layout. AMOLED
-  1.75, 1.8 and 1.91 are [planned ports](#coming-soon--hardware-on-the-workbench),
+- **Other boards or panel sizes?** Current source supports Waveshare **2.16**,
+  **2.41 V2** and **1.8 V2**, each with its own build profile and native layout.
+  AMOLED 1.75 and 1.91 are [planned ports](#coming-soon--hardware-on-the-workbench),
   without firmware support yet. See [adding a display](docs/adding-a-display.md)
   and [#5](https://github.com/niclasvestlund-YT/vibepulse/issues/5).
 - **Cursor, Gemini CLI, other providers?** Not yet —

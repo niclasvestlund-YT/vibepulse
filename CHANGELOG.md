@@ -7,9 +7,19 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- **Waveshare ESP32-S3-Touch-AMOLED-1.8 V2 support**, selected with
+  `TORGET_BOARD=waveshare_18_v2`: CO5300 QSPI at native 368×448 portrait,
+  CST820 touch via Waveshare BSP 2.0.3, BOOT settings input, and a viewport
+  transform for the shared 480×480 app. The owner reports display, touch,
+  Wi-Fi/data path and settings working on one unit. See the [USB install guide](docs/waveshare-amoled-18-v2.md),
+  [physical review](docs/superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md),
+  and [porting journal](docs/porting-journal-waveshare-amoled-18-v2.md).
+  V1 and untested peripherals, OTA, Windows, long-running memory/network
+  stress remain outside the support claim. iPhone Wi-Fi setup needs a simpler
+  onboarding experience.
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
   product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).
-  AMOLED 1.75/1.8/1.91 ports are planned; RGB matrix hardware is experimental.
+  AMOLED 1.75/1.91 ports are planned; RGB matrix hardware is experimental.
   Neither listing claims additional firmware support.
 - **Waveshare ESP32-S3-Touch-AMOLED-2.41 V2 support**, selected with
   `TORGET_BOARD=waveshare_241_v2`: fixed 600×450 landscape, V2 QSPI/I2C/reset

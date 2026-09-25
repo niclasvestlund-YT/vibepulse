@@ -1,0 +1,48 @@
+schema_version: 1
+sources:
+  - id: vibepulse-amoled-18-v2-physical-2026-09-25
+    kind: physical-test
+    rank: 1
+    title: 1.8 V2 bring-up and owner-reported display, touch, network and settings acceptance
+    publisher: VibePulse
+    locator: docs/superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md
+    revision: app-sha256-e383a4f5783dad3bd98bb3ed89132cf82ea109a4eacaf5d6eb66ce42614f96b6
+    accessed: '2026-09-25'
+    unit: vibepulse-amoled-18-v2-01
+    tests:
+      - live-display-owner-confirmation
+      - touch-owner-confirmation
+      - wifi-data-path-owner-confirmation
+      - boot-settings-owner-confirmation
+  - id: waveshare-amoled-18-upstream-78e13f8
+    kind: source-code
+    rank: 3
+    title: Waveshare ESP32-S3-Touch-AMOLED-1.8 official examples
+    publisher: Waveshare
+    locator: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.8/tree/78e13f852929c2ab4f9d5e0ad1c50ea378dbf2b4
+    revision: 78e13f852929c2ab4f9d5e0ad1c50ea378dbf2b4
+    accessed: '2026-09-25'
+  - id: waveshare-amoled-18-docs
+    kind: vendor-documentation
+    rank: 4
+    title: Waveshare ESP32-S3-Touch-AMOLED-1.8 documentation
+    publisher: Waveshare
+    locator: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8
+    revision: accessed-2026-09-25; owner confirmed rear label V2
+    accessed: '2026-09-25'
+  - id: waveshare-amoled-18-bsp-2.0.3
+    kind: source-code
+    rank: 3
+    title: Waveshare ESP32-S3-Touch-AMOLED-1.8 managed BSP
+    publisher: Waveshare
+    locator: https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_8/versions/2.0.3/readme
+    revision: 2.0.3
+    accessed: '2026-09-25'
+  - id: vibepulse-amoled-18-port
+    kind: source-code
+    rank: 3
+    title: VibePulse Waveshare 1.8 V2 board profile
+    publisher: VibePulse
+    locator: components/torget_board/board.c
+    revision: reviewed support port on codex/waveshare-amoled-18-v2; PR commit records implementation
+    accessed: '2026-09-25'

@@ -1,0 +1,181 @@
+schema_version: 1
+board: waveshare-esp32-s3-touch-amoled-1.8-v2
+capabilities:
+  - id: display.amoled
+    name: 1.8-inch CO5300 AMOLED
+    width: 368
+    height: 448
+    color_format: RGB565
+    byte_order: big_endian
+    bus: QSPI
+    states:
+      soc_capable: 'yes'
+      board_wired: 'yes'
+      bsp_support: 'yes'
+      firmware_enabled: 'yes'
+      unit_verified: 'yes'
+    confidence: measured
+    resources:
+      - ESP32-S3 QSPI display bus
+      - Waveshare 1.8 V2 managed BSP 2.0.3
+      - 12-row RGB565 flush = 8,832 bytes
+    constraints:
+      - V2 only; V1 uses SH8601/FT3168
+      - Native raster is 368x448 portrait
+      - Owner reports live VibePulse display accepted on the named unit
+      - Viewport transform allocates an LVGL layer; runtime memory high-water remains unmeasured
+    conflicts: []
+    opportunities: []
+    sources:
+      - waveshare-amoled-18-upstream-78e13f8
+      - waveshare-amoled-18-docs
+      - waveshare-amoled-18-bsp-2.0.3
+      - vibepulse-amoled-18-port
+      - vibepulse-amoled-18-v2-physical-2026-09-25
+    evidence:
+      - field: soc_capable
+        value: 'yes'
+        source: waveshare-amoled-18-upstream-78e13f8
+      - field: board_wired
+        value: 'yes'
+        source: waveshare-amoled-18-docs
+      - field: bsp_support
+        value: 'yes'
+        source: waveshare-amoled-18-bsp-2.0.3
+      - field: firmware_enabled
+        value: 'yes'
+        source: vibepulse-amoled-18-port
+      - field: unit_verified
+        value: 'yes'
+        source: vibepulse-amoled-18-v2-physical-2026-09-25
+    verification:
+      unit: vibepulse-amoled-18-v2-01
+      test: live-display-owner-confirmation
+    last_verified: '2026-09-25'
+  - id: touch.controller
+    name: CST820 capacitive touch
+    states:
+      soc_capable: 'yes'
+      board_wired: 'yes'
+      bsp_support: 'yes'
+      firmware_enabled: 'yes'
+      unit_verified: 'yes'
+    confidence: measured
+    resources:
+      - I2C touch controller
+      - Waveshare 1.8 V2 managed BSP 2.0.3
+    constraints:
+      - Vendor documentation and BSP release notes use different touch-family names; confirm resolved driver behavior
+      - Physical touch acceptance is owner-reported; no instrumented coordinate log was retained
+    conflicts: []
+    opportunities: []
+    sources:
+      - waveshare-amoled-18-upstream-78e13f8
+      - waveshare-amoled-18-docs
+      - waveshare-amoled-18-bsp-2.0.3
+      - vibepulse-amoled-18-port
+      - vibepulse-amoled-18-v2-physical-2026-09-25
+    evidence:
+      - field: soc_capable
+        value: 'yes'
+        source: waveshare-amoled-18-upstream-78e13f8
+      - field: board_wired
+        value: 'yes'
+        source: waveshare-amoled-18-docs
+      - field: bsp_support
+        value: 'yes'
+        source: waveshare-amoled-18-bsp-2.0.3
+      - field: firmware_enabled
+        value: 'yes'
+        source: vibepulse-amoled-18-port
+      - field: unit_verified
+        value: 'yes'
+        source: vibepulse-amoled-18-v2-physical-2026-09-25
+    verification:
+      unit: vibepulse-amoled-18-v2-01
+      test: touch-owner-confirmation
+    last_verified: '2026-09-25'
+  - id: radio.wifi-24
+    name: 2.4 GHz Wi-Fi and local provisioning
+    states:
+      soc_capable: 'yes'
+      board_wired: 'yes'
+      bsp_support: 'yes'
+      firmware_enabled: 'yes'
+      unit_verified: 'yes'
+    confidence: measured
+    resources:
+      - ESP32-S3 2.4 GHz Wi-Fi
+      - Existing VibePulse local network transport
+    constraints:
+      - Owner reports the Wi-Fi/data path working; iPhone provisioning UX remains a known usability issue
+    conflicts: []
+    opportunities: []
+    sources:
+      - waveshare-amoled-18-upstream-78e13f8
+      - waveshare-amoled-18-docs
+      - vibepulse-amoled-18-port
+      - vibepulse-amoled-18-v2-physical-2026-09-25
+    evidence:
+      - field: soc_capable
+        value: 'yes'
+        source: waveshare-amoled-18-upstream-78e13f8
+      - field: board_wired
+        value: 'yes'
+        source: waveshare-amoled-18-docs
+      - field: bsp_support
+        value: 'yes'
+        source: vibepulse-amoled-18-port
+      - field: firmware_enabled
+        value: 'yes'
+        source: vibepulse-amoled-18-port
+      - field: unit_verified
+        value: 'yes'
+        source: vibepulse-amoled-18-v2-physical-2026-09-25
+    verification:
+      unit: vibepulse-amoled-18-v2-01
+      test: wifi-data-path-owner-confirmation
+    last_verified: '2026-09-25'
+  - id: controls.settings
+    name: BOOT button settings control
+    states:
+      soc_capable: 'yes'
+      board_wired: 'yes'
+      bsp_support: 'yes'
+      firmware_enabled: 'yes'
+      unit_verified: 'yes'
+    confidence: measured
+    resources:
+      - Physical BOOT button
+      - GPIO0 boot-mode strap
+    constraints:
+      - Runtime 3-second settings gesture is owner-reported working
+      - Holding BOOT during reset or power-up enters firmware download mode
+    conflicts: []
+    opportunities: []
+    sources:
+      - waveshare-amoled-18-upstream-78e13f8
+      - waveshare-amoled-18-docs
+      - vibepulse-amoled-18-port
+      - vibepulse-amoled-18-v2-physical-2026-09-25
+    evidence:
+      - field: soc_capable
+        value: 'yes'
+        source: waveshare-amoled-18-upstream-78e13f8
+      - field: board_wired
+        value: 'yes'
+        source: waveshare-amoled-18-docs
+      - field: bsp_support
+        value: 'yes'
+        source: waveshare-amoled-18-upstream-78e13f8
+      - field: firmware_enabled
+        value: 'yes'
+        source: vibepulse-amoled-18-port
+      - field: unit_verified
+        value: 'yes'
+        source: vibepulse-amoled-18-v2-physical-2026-09-25
+    verification:
+      unit: vibepulse-amoled-18-v2-01
+      test: boot-settings-owner-confirmation
+    last_verified: '2026-09-25'
+    last_verified: '2026-09-25'

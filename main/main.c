@@ -909,7 +909,7 @@ static void display_start(void) {
  * fotoforensik. Ser du en ljus kantlinje i ett läge: justera det lägets
  * par (6 på den axel linjen sitter, spegelvänt om den flyttar till
  * motsatt kant). */
-#ifndef TORGET_BOARD_241_V2
+#if !defined(TORGET_BOARD_241_V2) && !defined(TORGET_BOARD_18_V2)
 esp_err_t torget_display_rotation_set(bsp_display_rotation_t rotation) {
   static const uint8_t MADCTL[4] = { 0x00, 0x60, 0xC0, 0xA0 };
   static const int GAP[4][2] = { /* {x_gap, y_gap} per läge */

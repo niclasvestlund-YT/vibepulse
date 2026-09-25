@@ -1,0 +1,15 @@
+schema_version: 1
+units:
+  - id: vibepulse-amoled-18-v2-01
+    friendly_name: VibePulse 1.8 V2 porting unit
+    board: waveshare-esp32-s3-touch-amoled-1.8-v2
+    sku_evidence: owner-confirmed V2 marking on rear label
+    board_revision: V2
+    enclosure: unknown
+    speaker: unknown
+    battery: unknown
+    microsd: unknown
+    antenna: unknown
+    installed_firmware: "VibePulse ESP-IDF 5.5.2 waveshare_18_v2 build; esptool verified all written segments on 2026-09-25"
+    last_physical_verification: "Owner reports display, touch, Wi-Fi/data path and BOOT settings working; owner photos show live VibePulse display. iPhone provisioning UX needs improvement; see 2026-09-25 physical review"
+    secrets: false
