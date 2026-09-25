@@ -488,7 +488,7 @@ More boards are added after physical verification, following
 #### 1.8 V2 portrait
 
 <p align="center">
-  <img src="docs/img/18-v2/vibepulse-18-v2-simulator.png" width="320" alt="Native-size 368 by 448 VibePulse simulator preview with fixture data">
+  <img src="docs/previews/18-v2/vibepulse-18-v2-simulator.png" width="320" alt="Native-size 368 by 448 VibePulse simulator preview with fixture data">
 </p>
 
 *Native-size simulator preview with fixture data, not a physical-panel photo

@@ -38,7 +38,7 @@ partition table, OTA data and application. NVS was not erased.
 
 ## Public supporting image
 
-- `docs/img/18-v2/vibepulse-18-v2-simulator.png` — native-size fixture preview,
+- `docs/previews/18-v2/vibepulse-18-v2-simulator.png` — native-size fixture preview,
   not physical evidence.
 
 No owner photo, flash log, credential, network detail or unique serial

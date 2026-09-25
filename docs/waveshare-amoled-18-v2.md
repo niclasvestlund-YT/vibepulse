@@ -6,7 +6,7 @@ network path working on one real unit. See the [physical review](superpowers/rev
 for the exact evidence and limitations. V1 is not supported. The 1.8-inch
 product name covers two incompatible hardware generations.
 
-![Native-size 368 × 448 VibePulse simulator preview with fixture data](img/18-v2/vibepulse-18-v2-simulator.png)
+![Native-size 368 × 448 VibePulse simulator preview with fixture data](previews/18-v2/vibepulse-18-v2-simulator.png)
 
 *Native-size simulator preview with fixture data, not a physical-panel photo
 or live account reading. Physical verification is summarized in the
