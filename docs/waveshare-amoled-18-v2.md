@@ -5,6 +5,12 @@ Owner-reported operation does not establish four-corner touch acceptance or
 worst-case transform-layer memory safety under network/TLS load. Those checks
 remain required before full support is claimed.
 
+Existing generated SDK configs must set `CONFIG_LV_MEM_SIZE_KILOBYTES=768`
+or higher; configuration rejects smaller pools for this profile. This floor
+is not a measured worst-case memory guarantee. `TORGET_BOARD_DIAGNOSTIC=ON`
+is rejected for 1.8 V2 until a native diagnostic is implemented; the 1.91
+diagnostic cannot establish this board's corner acceptance.
+
 
 **Supported in current source: V2 only**, portrait **368 × 448**. VibePulse
 has been installed and the owner reports the display, touch, settings and

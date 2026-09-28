@@ -13,10 +13,11 @@ ROOT_CMAKE = ROOT / "CMakeLists.txt"
 SDKCONFIG_DEFAULTS = ROOT / "sdkconfig.defaults"
 
 
-def run_guard(actual_kib: int) -> subprocess.CompletedProcess[str]:
+def run_guard(actual_kib: int, board: str = "waveshare_216") -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as tmp:
         script = Path(tmp) / "check.cmake"
         script.write_text(
+            f'set(TORGET_BOARD "{board}")\n'
             f'include("{GUARD.as_posix()}")\n'
             f"torget_require_lvgl_pool({actual_kib})\n",
             encoding="utf-8",
@@ -42,6 +43,15 @@ class LvglMemoryConfigTests(unittest.TestCase):
 
     def test_intended_256_kib_config_is_accepted(self) -> None:
         result = run_guard(256)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_18_v2_rejects_an_existing_square_board_pool(self) -> None:
+        result = run_guard(256, "waveshare_18_v2")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("at least 768 KiB", result.stdout + result.stderr)
+
+    def test_18_v2_accepts_its_development_pool(self) -> None:
+        result = run_guard(768, "waveshare_18_v2")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_root_build_invokes_the_guard(self) -> None:

@@ -15,5 +15,8 @@ endif()
 
 option(TORGET_BOARD_DIAGNOSTIC "Static display and four-corner touch diagnostic" OFF)
 if(TORGET_BOARD_DIAGNOSTIC)
+  if(TORGET_BOARD STREQUAL "waveshare_18_v2")
+    message(FATAL_ERROR "The 1.8 V2 native diagnostic is not implemented; do not use the 1.91 diagnostic for its corner sweep.")
+  endif()
   add_compile_definitions(TORGET_BOARD_DIAGNOSTIC=1)
 endif()

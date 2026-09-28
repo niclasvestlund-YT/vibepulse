@@ -30,7 +30,7 @@ class BoardSelectionTests(unittest.TestCase):
             source = Path(tmp)
             (source / "CMakeLists.txt").write_text(
                 'cmake_minimum_required(VERSION 3.24)\nproject(check NONE)\n'
-                f'include("{ROOT}/cmake/torget_board.cmake")\n'
+                f'include("{ROOT.as_posix()}/cmake/torget_board.cmake")\n'
                 'get_directory_property(defs COMPILE_DEFINITIONS)\n'
                 'message(STATUS "profile=${TORGET_BOARD};defs=${defs}")\n'
             )
@@ -50,6 +50,13 @@ class BoardSelectionTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("V1 is not supported", result.stderr)
+            result = subprocess.run(
+                ["cmake", "-S", str(source), "-B", str(source / "invalid-diagnostic"),
+                 "-DTORGET_BOARD=waveshare_18_v2", "-DTORGET_BOARD_DIAGNOSTIC=ON"],
+                text=True, capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("1.8 V2 native diagnostic is not implemented", result.stderr)
 
     def test_registries_do_not_share_units_or_display_geometry(self):
         square = load_registry(ROOT / "spec")
