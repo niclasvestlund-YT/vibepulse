@@ -171,5 +171,17 @@ class Native191RasterTests(unittest.TestCase):
         self.assertNotIn("needs-you verdict:", result.stdout)
 
 
+class Native18InteractionSafetyTests(unittest.TestCase):
+    def test_unverified_touch_never_sends_a_verdict(self):
+        run(["cmake", "-S", "sim", "-B", "sim/build-18-v2", "-G", "Ninja",
+             "-DTORGET_BOARD=waveshare_18_v2",
+             f"-DTORGET_SOLELKOLLEN_DIR={ROOT}/no-companion"])
+        run(["cmake", "--build", "sim/build-18-v2", "--parallel", "2"])
+        with tempfile.TemporaryDirectory(prefix="vibepulse-18-needs-you.") as capture_dir:
+            result = run(["sim/build-18-v2/torget-sim", "--vibepulse-needs-you-qa"],
+                         env={**os.environ, "TORGET_CAPTURE_DIR": capture_dir})
+        self.assertNotIn("needs-you verdict:", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

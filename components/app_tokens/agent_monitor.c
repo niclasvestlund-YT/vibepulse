@@ -207,7 +207,7 @@ static void completion_pulse_stop(void) {
 
 static void completion_pulse_start(void) {
   completion_pulse_stop();
-#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175) || defined(TORGET_BOARD_18_V2)
   return; /* Static until these physical displays have a motion review. */
 #endif
   lv_anim_t anim;
@@ -551,7 +551,7 @@ static ny_physical_fit ny_physical_fit_of(const tk_pending_interaction *p,
                          .tool_chip_width = 58};
   if (!p || !decision || !decision->visible) return fit;
 
-#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175)
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175) || defined(TORGET_BOARD_18_V2)
   return fit; /* Keep decisions on the computer until 90px targets pass review. */
 #endif
 #ifdef TORGET_BOARD_175

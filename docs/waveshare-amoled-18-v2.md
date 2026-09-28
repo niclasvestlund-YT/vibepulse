@@ -10,8 +10,10 @@ or higher; configuration rejects smaller pools for this profile. This floor
 is not a measured worst-case memory guarantee. `TORGET_BOARD_DIAGNOSTIC=ON`
 is rejected for 1.8 V2 until a native diagnostic is implemented; the 1.91
 diagnostic cannot establish this board's corner acceptance.
-Automatic pixel drift is also disabled until the native panel has passed
+Automatic pixel drift and the completion pulse are disabled until the native panel has passed
 the physical motion/performance protocol; static owner reports do not cover it.
+Needs You questions and permissions remain on the computer until native-size
+touch targets and the four-corner sweep pass physical review.
 
 
 **Supported in current source: V2 only**, portrait **368 × 448**. VibePulse
