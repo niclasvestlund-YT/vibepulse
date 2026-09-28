@@ -1,5 +1,5 @@
 set(board_requires torget_app esp_lcd esp_driver_gpio esp_driver_i2c esp_driver_spi)
-if(TORGET_BOARD STREQUAL "waveshare_18_v2")
+if("$ENV{TORGET_BOARD}" STREQUAL "waveshare_18_v2")
     list(APPEND board_requires waveshare__esp32_s3_touch_amoled_1_8)
 else()
     list(APPEND board_requires waveshare__esp32_s3_touch_amoled_2_16

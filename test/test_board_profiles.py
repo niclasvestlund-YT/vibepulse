@@ -25,6 +25,26 @@ def run(args, **kwargs):
 
 
 class BoardSelectionTests(unittest.TestCase):
+    def test_bsp_selection_survives_idf_early_expansion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "early.cmake"
+            script.write_text(
+                'function(idf_component_register)\n'
+                '  message(STATUS "requirements=${ARGN}")\n'
+                'endfunction()\n'
+                f'include("{ROOT.as_posix()}/components/torget_board/CMakeLists.txt")\n',
+                encoding="utf-8",
+            )
+            for board, selected, excluded in [
+                ("waveshare_18_v2", "amoled_1_8", "amoled_2_16"),
+                ("waveshare_216", "amoled_2_16", "amoled_1_8"),
+            ]:
+                with self.subTest(board=board):
+                    result = run(["cmake", "-P", str(script)],
+                                 env={**os.environ, "TORGET_BOARD": board})
+                    self.assertIn(selected, result.stdout)
+                    self.assertNotIn(excluded, result.stdout)
+
     def test_cmake_profiles_and_unsupported_revision(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp)

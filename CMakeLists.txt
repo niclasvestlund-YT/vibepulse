@@ -8,6 +8,9 @@
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
 include(cmake/torget_board.cmake)
+# ESP-IDF discovers component requirements in a separate early CMake pass.
+# Mirror the selector just as we do for the optional companion paths below.
+set(ENV{TORGET_BOARD} "${TORGET_BOARD}")
 if(TORGET_BOARD STREQUAL "waveshare_18_v2")
   # The native-size viewport transform needs a temporary LVGL composition
   # layer. Give its PSRAM-backed LVGL pool room for that layer plus the UI tree.

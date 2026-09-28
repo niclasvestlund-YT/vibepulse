@@ -223,6 +223,15 @@ jobs:
           sed -i 's/TK_GITHUB_SCREEN_ENABLED 0/TK_GITHUB_SCREEN_ENABLED 1/' secrets.h
           sed -i 's/TK_GITHUB_NOTIFICATIONS_ENABLED 0/TK_GITHUB_NOTIFICATIONS_ENABLED 1/' secrets.h
           sed -i 's/TK_GITHUB_SOUND_ENABLED 0/TK_GITHUB_SOUND_ENABLED 1/' secrets.h
+      - name: Build the 1.8 V2 profile with its own SDK config
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-18-v2 -D TORGET_BOARD=waveshare_18_v2
+            -D SDKCONFIG=sdkconfig.waveshare_18_v2
+            -D TORGET_SOLELKOLLEN_DIR=no-companion build
       - name: Build with ESP-IDF 5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -254,12 +263,3 @@ jobs:
             idf.py -B build-175 -D TORGET_BOARD=waveshare_175
             -D SDKCONFIG=sdkconfig.175
             -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build
-      - name: Build the 1.8 V2 profile with its own SDK config
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-18-v2 -D TORGET_BOARD=waveshare_18_v2
-            -D SDKCONFIG=sdkconfig.waveshare_18_v2
-            -D TORGET_SOLELKOLLEN_DIR=no-companion build
