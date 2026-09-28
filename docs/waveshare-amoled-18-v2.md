@@ -14,6 +14,8 @@ Automatic pixel drift and the completion pulse are disabled until the native pan
 the physical motion/performance protocol; static owner reports do not cover it.
 Needs You questions and permissions remain on the computer until native-size
 touch targets and the four-corner sweep pass physical review.
+If the touch controller cannot be initialized, this development profile logs
+the failure and continues in display-only mode instead of rebooting.
 
 
 **Supported in current source: V2 only**, portrait **368 × 448**. VibePulse

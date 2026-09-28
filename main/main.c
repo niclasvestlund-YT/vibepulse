@@ -898,7 +898,7 @@ static void display_start(void) {
   /* Board code keeps panel MADCTL and touch transformation as a pair. */
   esp_lcd_touch_handle_t tp = NULL;
   esp_err_t touch_err = tg_board_touch_new(&tp);
-#if !defined(TORGET_BOARD_175) && !defined(TORGET_BOARD_191_TOUCH)
+#if !defined(TORGET_BOARD_175) && !defined(TORGET_BOARD_191_TOUCH) && !defined(TORGET_BOARD_18_V2)
   ESP_ERROR_CHECK(touch_err);
 #endif
   if (touch_err == ESP_OK && tp) {
@@ -906,7 +906,7 @@ static void display_start(void) {
       ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
     s_touch = esp_lv_adapter_register_touch(&adapter_touch);
   } else {
-#if defined(TORGET_BOARD_175) || defined(TORGET_BOARD_191_TOUCH)
+#if defined(TORGET_BOARD_175) || defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_18_V2)
     ESP_LOGW(TAG, "board touch unavailable (%s); continuing display-only",
              esp_err_to_name(touch_err));
 #endif
