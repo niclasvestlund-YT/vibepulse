@@ -77,6 +77,9 @@ For the experimental **1.91 Touch AMOLED**, use the five files under
 `spec/boards/waveshare_191_touch/` and `docs/waveshare-191-touch.md`.
 Native geometry is 536 × 240; USB updates only. Keep its open physical
 verification items explicit.
+For the **1.8 V2** USB-only development profile, read the five files under
+`spec/boards/waveshare_18_v2/` and `docs/waveshare-amoled-18-v2.md`.
+Four-corner touch and runtime transform-memory acceptance remain open.
 For **2.41 V2**, read the same five filenames under
 `spec/boards/waveshare_241_v2/`; validate that directory separately. Never
 transfer installed firmware or physical verification between board registries.
