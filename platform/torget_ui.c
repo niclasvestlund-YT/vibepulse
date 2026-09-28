@@ -268,7 +268,7 @@ void torget_ui_create(void) {
 
   launcher_build();
   wifi_status_create();
-#if !defined(TORGET_BOARD_191_TOUCH) && !defined(TORGET_BOARD_175)
+#if !defined(TORGET_BOARD_191_TOUCH) && !defined(TORGET_BOARD_175) && !defined(TORGET_BOARD_18_V2)
   lv_timer_create(drift_timer, 60000, NULL);
 #else
   (void)drift_timer;
