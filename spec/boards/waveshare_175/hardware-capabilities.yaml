@@ -1,0 +1,119 @@
+schema_version: 1
+board: waveshare-esp32-s3-touch-amoled-1.75
+capabilities:
+- id: display.amoled
+  name: 1.75-inch CO5300 round AMOLED
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - QSPI; vendor 466x466 geometry
+  - Native LVGL and ESP-IDF application profile; 7456-byte flush
+  constraints:
+  - Owner photographs show the normal application's live Codex quota page on one unit
+  - USB-down connector position and touch alignment await owner confirmation
+  - PCB revision unknown; verify exact schematic and BSP before enabling pins
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-175-docs
+  - waveshare-175-reference
+  - vibepulse-175-preview
+  - vibepulse-175-physical-2026-09-24
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-175-reference
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-175-preview
+  - field: unit_verified
+    value: 'yes'
+    source: vibepulse-175-physical-2026-09-24
+  last_verified: '2026-09-24'
+  verification:
+    unit: vibepulse-175-01
+    test: owner-photographed-codex-quota-page
+  width: 466
+  height: 466
+  color_format: RGB565
+  byte_order: big_endian
+  bus: QSPI
+- id: touch.controller
+  name: CST9217 touch
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: unknown
+  confidence: vendor_claimed
+  resources:
+  - Vendor I2C 0x5A; reset40, IRQ11
+  constraints:
+  - Diagnostic logged all five touch targets; owner-visible mapping review pending
+  - PCB revision unknown; verify exact schematic and BSP before enabling pins
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-175-docs
+  - waveshare-175-reference
+  - vibepulse-175-preview
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-175-reference
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-175-preview
+  last_verified: unknown
+- id: controls.settings
+  name: BOOT input
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: unknown
+  confidence: vendor_claimed
+  resources:
+  - Vendor GPIO0 active-low boot strap
+  constraints:
+  - BOOT settings control is compiled but physical hold/open/close review is pending
+  - PCB revision unknown; verify exact schematic and BSP before enabling pins
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-175-docs
+  - waveshare-175-reference
+  - vibepulse-175-preview
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-175-docs
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-175-reference
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-175-preview
+  last_verified: unknown

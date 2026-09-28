@@ -15,7 +15,7 @@ class LabsRenderTests(unittest.TestCase):
         subprocess.run(["cmake", "--build", "sim/build"], cwd=ROOT,
                        check=True, capture_output=True)
         with tempfile.TemporaryDirectory(prefix="vp-labs-") as temporary:
-            for mask in range(32):
+            for mask in range(256):
                 with self.subTest(mask=mask):
                     env = dict(os.environ, TORGET_LABS_MASK=str(mask),
                                TORGET_CAPTURE_DIR=temporary)
@@ -24,7 +24,7 @@ class LabsRenderTests(unittest.TestCase):
                                          env=env, capture_output=True, text=True,
                                          timeout=30)
                     self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-                    for tag in ("labs-menu", "labs-pending", "labs-github"):
+                    for tag in ("labs-menu", "labs-pending", "labs-github", "labs-providers"):
                         with Image.open(Path(temporary) / f"torget-{tag}.bmp") as im:
                             self.assertEqual(im.size, (480, 480))
                             # Independent evidence of all four touch controls:

@@ -14,6 +14,13 @@ if(TORGET_BOARD STREQUAL "waveshare_18_v2")
   set(SDKCONFIG_DEFAULTS
       "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults;sdkconfig.defaults.waveshare_18_v2")
 endif()
+option(TORGET_ROUND_DIAGNOSTIC "Static 1.75 hardware diagnostic only" OFF)
+if(TORGET_ROUND_DIAGNOSTIC)
+  if(NOT TORGET_BOARD STREQUAL "waveshare_175")
+    message(FATAL_ERROR "The round diagnostic requires waveshare_175")
+  endif()
+  add_compile_definitions(TORGET_ROUND_DIAGNOSTIC=1)
+endif()
 # third_party/ innehåller vendrade komponenter (cjson) som apparna delar.
 # Vibbe (app_buddy) bor i sitt eget repo (~/Buddy) och delas in härifrån —
 # EN källa, ingen kopiedrift (inflyttsbeslutet 2026-08-07: "alla tre ska bo

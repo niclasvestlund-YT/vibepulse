@@ -55,6 +55,7 @@ typedef enum {
   VIEW_ABOUT,
   VIEW_LABS_ANALYTICS,
   VIEW_LABS_GITHUB,
+  VIEW_LABS_PROVIDERS,
 } settings_view;
 
 static struct {
@@ -137,6 +138,9 @@ void torget_settings_click_row(tg_settings_row row) {
        * Raden är nedtonad och trycket ignoreras — hellre en rad som
        * synligt inte går att välja än ett fönster som öppnas och sedan
        * inte kan göra något. ABOUT säger varför: ADDRESS visar streck. */
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175) || defined(TORGET_BOARD_18_V2)
+      break; /* USB-only profile: reject untyped OTA images. */
+#endif
       if (!ui.ip[0]) break;
       /* Menyn stänger sig själv och lämnar över. Fönsterordningen — vem som
        * äger port 80 — avgörs av main.c, aldrig härifrån. */
@@ -175,8 +179,17 @@ void torget_settings_click_slot(unsigned slot) {
     if (slot < 3) ui.labs.toggle((int)slot);
     else ui.view = VIEW_LABS_GITHUB;
   } else if (ui.view == VIEW_LABS_GITHUB) {
-    if (slot < 2) ui.labs.toggle((int)slot + 3);
-    else ui.view = slot == 2 ? VIEW_LABS_ANALYTICS : VIEW_MENU;
+    /* MORE: GitHub, star popup, Lovable, then provider switches. */
+    if (slot < 3) ui.labs.toggle((int)slot + 3);
+    else ui.view = VIEW_LABS_PROVIDERS;
+  } else if (ui.view == VIEW_LABS_PROVIDERS) {
+    if (slot < 2) ui.labs.toggle((int)slot + 6);
+    else if (slot == 2) ui.view = VIEW_LABS_GITHUB;
+    else if (ui.labs.pending && ui.labs.pending()) {
+      ui.pending = TG_SETTINGS_INTENT_RESTART;
+      torget_settings_close();
+      return;
+    } else ui.view = VIEW_MENU;
   }
   render();
 }
@@ -231,6 +244,38 @@ void torget_settings_create(void) {
                               &ui.about_back_label, "BACK");
   lv_obj_add_event_cb(ui.about_back, back_clicked_cb, LV_EVENT_CLICKED, NULL);
 
+#ifdef TORGET_BOARD_175
+  /* Native fonts; keep every touch target inside the circular glass. */
+  lv_obj_align(ui.word, LV_ALIGN_TOP_MID, 0, 56);
+  lv_obj_set_width(ui.word, 320);
+  lv_obj_align(ui.foot, LV_ALIGN_TOP_MID, 0, 410);
+  lv_obj_set_width(ui.foot, 280);
+  lv_obj_set_style_text_letter_space(ui.foot, 0, 0);
+  for (int i = 0; i < TG_SETTINGS_ROW_COUNT; ++i) {
+    lv_obj_set_pos(ui.rows[i], 90, 118 + 66 * i);
+    lv_obj_set_size(ui.rows[i], 300, 56);
+  }
+  lv_obj_set_pos(ui.about_back, 90, 304);
+  lv_obj_set_size(ui.about_back, 300, 56);
+#endif
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_style_text_font(ui.word, &plex_ui_21, 0);
+  lv_obj_set_y(ui.word, 14);
+  lv_obj_set_style_text_font(ui.foot, &plex_ui_21, 0);
+  lv_obj_set_y(ui.foot, 209);
+  for (int i = 0; i < TG_SETTINGS_ROW_COUNT; ++i) {
+    lv_obj_set_pos(ui.rows[i], 14 + (i % 2) * 232, 52 + (i / 2) * 73);
+    lv_obj_set_size(ui.rows[i], 220, 60);
+    lv_obj_set_style_text_letter_space(ui.row_labels[i], 0, 0);
+  }
+  for (int i = 0; i < ABOUT_ROWS; ++i) {
+    lv_obj_set_y(ui.about_labels[i], 48 + i * 52);
+    lv_obj_set_y(ui.about_values[i], 70 + i * 52);
+    lv_obj_set_style_text_font(ui.about_values[i], &plex_ui_21, 0);
+  }
+  lv_obj_set_pos(ui.about_back, 130, 155);
+  lv_obj_set_size(ui.about_back, 220, 45);
+#endif
   ui.view = VIEW_MENU;
   ui.about_dirty = true;
   render();
@@ -240,20 +285,29 @@ static void render(void) {
   if (!ui.overlay) return;
   bool menu = (ui.view == VIEW_MENU);
   bool about = (ui.view == VIEW_ABOUT);
-  bool labs = ui.view == VIEW_LABS_ANALYTICS || ui.view == VIEW_LABS_GITHUB;
+  bool labs = ui.view == VIEW_LABS_ANALYTICS ||
+              ui.view == VIEW_LABS_GITHUB ||
+              ui.view == VIEW_LABS_PROVIDERS;
   lv_label_set_text(ui.word, labs ? "LABS" : "SETTINGS");
+  bool labs_pending = labs && ui.labs.pending && ui.labs.pending();
   lv_label_set_text(ui.foot,
-      labs && ui.labs.storage_error() ? "COULD NOT SAVE" :
-      labs && ui.labs.pending() ? "RESTART TO APPLY" : TG_SETTINGS_CLOSE_TEXT);
+      labs && ui.labs.storage_error && ui.labs.storage_error()
+          ? "COULD NOT SAVE"
+          : labs_pending
+              ? (ui.view == VIEW_LABS_PROVIDERS ? "TAP RESTART NOW" : "MORE FOR RESTART")
+              : TG_SETTINGS_CLOSE_TEXT);
 
   for (int i = 0; i < TG_SETTINGS_ROW_COUNT; i++) {
     show(ui.rows[i], !about);
     lv_obj_set_style_text_color(ui.row_labels[i], lv_color_white(), 0);
     if (menu) lv_label_set_text(ui.row_labels[i], ROW_TEXT[i]);
     if (labs) {
-      int feature = ui.view == VIEW_LABS_ANALYTICS ? i : i + 3;
-      if ((ui.view == VIEW_LABS_ANALYTICS && i < 3) ||
-          (ui.view == VIEW_LABS_GITHUB && i < 2)) {
+      int feature = ui.view == VIEW_LABS_ANALYTICS ? i :
+                    ui.view == VIEW_LABS_GITHUB ? i + 3 : i + 6;
+      bool choice = (ui.view == VIEW_LABS_ANALYTICS && i < 3) ||
+                    (ui.view == VIEW_LABS_GITHUB && i < 3) ||
+                    (ui.view == VIEW_LABS_PROVIDERS && i < 2);
+      if (choice) {
         char text[40];
         bool enabled = ui.labs.selected(feature);
         snprintf(text, sizeof text, "%s  %s", ui.labs.name(feature),
@@ -262,9 +316,10 @@ static void render(void) {
         lv_obj_set_style_text_color(ui.row_labels[i],
                                     enabled ? lv_color_white() : COL_MUTED, 0);
       } else {
-        lv_label_set_text(ui.row_labels[i],
-            ui.view == VIEW_LABS_ANALYTICS ? "MORE" :
-            i == 2 ? "BACK" : "SETTINGS");
+        const char *label = ui.view == VIEW_LABS_ANALYTICS ? "MORE" :
+            ui.view == VIEW_LABS_GITHUB ? "MORE" :
+            i == 2 ? "BACK" : labs_pending ? "RESTART NOW" : "SETTINGS";
+        lv_label_set_text(ui.row_labels[i], label);
       }
     }
   }
@@ -273,6 +328,10 @@ static void render(void) {
    * raden försvinner — den ska finnas kvar så menyn inte byter form. */
   {
     bool can_update = ui.ip[0] != '\0';
+#if defined(TORGET_BOARD_191_TOUCH) || defined(TORGET_BOARD_175) || defined(TORGET_BOARD_18_V2)
+    can_update = false;
+    if (menu) lv_label_set_text(ui.row_labels[TG_SETTINGS_ROW_UPDATE], "UPDATE VIA USB");
+#endif
     if (menu) lv_obj_set_style_text_color(ui.row_labels[TG_SETTINGS_ROW_UPDATE],
                                 can_update ? lv_color_white() : COL_MUTED, 0);
   }

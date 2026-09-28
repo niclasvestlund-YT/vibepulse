@@ -132,6 +132,15 @@ bool tg_wifi_join_should_apply(uint32_t submitted, uint32_t applied) {
   return submitted != 0 && submitted != applied;
 }
 
+bool tg_wifi_join_should_accept(tg_wifi_join_status status, bool trial_started,
+                               bool applied_now, bool have_ip) {
+  return trial_started && !applied_now && have_ip &&
+         (status == TG_WIFI_JOIN_CONNECTING ||
+          status == TG_WIFI_JOIN_RETRY_PASSWORD ||
+          status == TG_WIFI_JOIN_RETRY_NOT_FOUND ||
+          status == TG_WIFI_JOIN_RETRY_CONNECTION);
+}
+
 tg_wifi_join_status tg_wifi_disconnect_status(int reason) {
   switch (reason) {
     case 0:

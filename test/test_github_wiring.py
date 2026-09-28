@@ -52,7 +52,7 @@ class GitHubWiringTests(unittest.TestCase):
         in the last valid slot and next/prev navigation for every Labs mask;
         this guard keeps run.sh compiling it under both defaults."""
         run = read("test/run.sh")
-        self.assertIn("for github_default in 0 1 2 3; do", run)
+        self.assertIn("for github_default in 0 1 2 3 4 5 6 7; do", run)
         self.assertIn("-DTK_GITHUB_SCREEN_ENABLED=$((github_default & 1))", run)
         self.assertIn("test_labs_features.c", run)
         workflow = read(".github/workflows/ci.yml")

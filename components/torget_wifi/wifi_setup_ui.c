@@ -28,6 +28,7 @@ extern const lv_font_t plex_attention_52;
 extern const lv_font_t plex_body_27;
 extern const lv_font_t plex_mono_24;
 extern const lv_font_t plex_ui_21;
+extern const lv_font_t plex_ui_16;
 
 #define COL_MUTED lv_color_hex(0x9298A2) /* palette.muted */
 
@@ -77,6 +78,35 @@ static struct {
 } ui;
 
 static void render_open_view(void);
+#ifdef TORGET_BOARD_191_TOUCH
+static void compact_position(lv_obj_t *obj, int x, int y, int w) {
+  lv_obj_set_align(obj, LV_ALIGN_TOP_LEFT);
+  lv_obj_set_pos(obj, x, y);
+  lv_obj_set_width(obj, w);
+}
+static void compact_layout(bool open, bool qr_open) {
+  compact_position(ui.word, 10, 8, 460);
+  compact_position(ui.foot, 10, 213, 460);
+  if (qr_open) {
+    compact_position(ui.lead, 214, 50, 252);
+    compact_position(ui.hint1, 214, 82, 252);
+    lv_obj_set_style_text_letter_space(ui.hint1, 0, 0);
+    lv_obj_set_style_text_letter_space(ui.lead, 0, 0);
+    lv_obj_set_pos(ui.action, 220, 112);
+    lv_obj_set_size(ui.action, 240, 90);
+  } else if (open) {
+    compact_position(ui.lead, 10, 40, 460);
+    compact_position(ui.primary, 10, 65, 460);
+    compact_position(ui.secondary, 10, 96, 460);
+    compact_position(ui.hint1, 10, 135, 285);
+    lv_obj_set_pos(ui.action, 310, 124);
+    lv_obj_set_size(ui.action, 160, 90);
+  } else {
+    compact_position(ui.primary, 10, 85, 460);
+    compact_position(ui.detail, 10, 131, 460);
+  }
+}
+#endif
 
 static void action_clicked_cb(lv_event_t *event) {
   if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
@@ -150,6 +180,14 @@ void torget_wifi_ui_create(void) {
   lv_obj_center(ui.action_label);
   lv_obj_add_event_cb(ui.action, action_clicked_cb, LV_EVENT_CLICKED, NULL);
 
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_style_text_font(ui.word, &plex_ui_21, 0);
+  lv_obj_set_style_text_font(ui.primary, &plex_ui_21, 0);
+  lv_obj_set_style_text_font(ui.secondary, &plex_ui_21, 0);
+  lv_obj_set_style_text_letter_space(ui.action_label, 0, 0);
+  lv_qrcode_set_size(ui.qr, 164);
+  lv_obj_set_pos(ui.qr, 28, 42);
+#endif
   ui.rendered_state = TG_WIFI_UI_HIDDEN;
 }
 
@@ -203,6 +241,29 @@ static bool update_qr(const char *ssid, const char *password) {
   return true;
 }
 
+#ifdef TORGET_BOARD_175
+static void round_wifi_layout(bool open) {
+  lv_obj_set_style_text_font(ui.word, &plex_body_27, 0);
+  lv_obj_set_width(ui.word, 320);
+  position(ui.word, 65);
+  lv_obj_set_style_text_font(ui.foot, &plex_ui_16, 0);
+  lv_obj_set_style_text_letter_space(ui.foot, 0, 0);
+  lv_obj_set_width(ui.foot, 260);
+  position(ui.foot, 414);
+  lv_obj_set_width(ui.lead, 320);
+  lv_obj_set_style_text_letter_space(ui.lead, 0, 0);
+  lv_obj_set_pos(ui.action, 105, 341);
+  lv_obj_set_size(ui.action, 270, 54);
+  if (open) {
+    lv_obj_set_pos(ui.qr, 142, 127);
+    position(ui.lead, 99);
+    position(ui.primary, 157);
+    position(ui.secondary, 211);
+    position(ui.hint1, 272);
+  }
+}
+#endif
+
 static void render_open_view(void) {
   const bool qr_open = ui.qr_available && !ui.manual_details;
   position(ui.word, WIFI_OPEN_WORD_Y);
@@ -239,6 +300,17 @@ static void render_open_view(void) {
   show(ui.secondary, !qr_open);
   show(ui.hint1, !qr_open);
   show(ui.action, ui.qr_available);
+#ifdef TORGET_BOARD_175
+  round_wifi_layout(true);
+#endif
+#ifdef TORGET_BOARD_191_TOUCH
+  if (qr_open) {
+    lv_label_set_text(ui.lead, "1  SCAN TO JOIN WIFI");
+    lv_label_set_text(ui.hint1, "2  OPEN 192.168.4.1");
+    show(ui.hint1, true);
+  }
+  compact_layout(true, qr_open);
+#endif
 }
 
 void torget_wifi_ui_set_manual_details(bool visible) {
@@ -337,6 +409,9 @@ void torget_wifi_ui_set(tg_wifi_ui_state state, const char *primary,
     show(ui.hint1, false);
   }
 
+#ifdef TORGET_BOARD_175
+  round_wifi_layout(open);
+#endif
   show(ui.lead, open);
   /* Orsaksraden och lösenordsraden delar y — bara ett av lägena har båda. */
   show(ui.detail, !open && detail && detail[0]);
@@ -362,6 +437,9 @@ void torget_wifi_ui_set(tg_wifi_ui_state state, const char *primary,
                                         : TG_SETTINGS_HOLD_TEXT);
   }
 
+#ifdef TORGET_BOARD_191_TOUCH
+  if (!open) compact_layout(false, false);
+#endif
   lv_obj_remove_flag(ui.overlay, LV_OBJ_FLAG_HIDDEN);
   /* Framför apparna, men OTA-overlayn skapas EFTER det här lagret och
    * hämtar sig själv längst fram i sin egen set() — READY-ringen vinner. */

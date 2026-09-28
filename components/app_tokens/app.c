@@ -98,6 +98,11 @@ void tokens_apply_github(const tk_github_status *status) {
   usage_screen_apply_github(status);
 }
 
+void tokens_apply_lovable(const tk_lovable_status *status) {
+  if (!status) return;
+  usage_screen_apply_lovable(status, torget_now_us());
+}
+
 void tokens_show_view(int index) {
   usage_screen_show_view(index);
 }
@@ -160,6 +165,7 @@ static void create(lv_obj_t *root) {
   tokens_net_start();
   tokens_agent_net_start();
   tokens_github_net_start();
+  tokens_lovable_net_start();
   tokens_needs_you_net_start();
 #if CONFIG_TK_VIBEPULSE_INTERACTION_RELAY || \
     CONFIG_TK_VIBEPULSE_AGENT_STATUS_RELAY

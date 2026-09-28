@@ -1,5 +1,11 @@
 # Install VibePulse on Waveshare ESP32-S3-Touch-AMOLED-1.8 V2
 
+Current source is a USB-only development profile. OTA is disabled.
+Owner-reported operation does not establish four-corner touch acceptance or
+worst-case transform-layer memory safety under network/TLS load. Those checks
+remain required before full support is claimed.
+
+
 **Supported in current source: V2 only**, portrait **368 × 448**. VibePulse
 has been installed and the owner reports the display, touch, settings and
 network path working on one real unit. See the [physical review](superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md)

@@ -1,5 +1,124 @@
 # Lessons log
 
+## 2026-09-25 · Green checks do not close unresolved review findings
+
+Before merging, inspect every review thread as well as the exact-head CI result.
+The Lovable release review found unhandled CRLF SSE records, nested daily data
+leaking into the main credit period, a missing Windows startup switch and a
+retained LIVE label after the host disappeared. Fix the behavior and add the
+specific regression checks before resolving a thread. Keep browser lifecycle
+and physical touch claims separate from unit/build results. Release notes and
+a website announcement should publish only after the release dependency exists.
+
+## 2026-09-24 · Resolve the physical unit and build inputs before installation
+
+The Lovable session exposed a wrong display profile, an unwanted companion app,
+and an orientation mismatch. The intended unit was the round 1.75 (466 × 466),
+with USB down; using the default 2.16 profile could crop or enlarge its layout.
+Local companion checkouts also changed which apps were built.
+
+Before the next installation, use the recorded unit and current connection
+evidence, inspect the effective CMake profile and companion paths, and review
+native output. A serial port or ESP32-S3 chip identity does not establish panel
+geometry. Keep display and touch rotation paired. Read the board's controls:
+BOOT opens Settings on this unit; RESET restarts it. These checks are now in
+AGENTS.md so future sessions encounter them before hardware work.
+
+## 2026-09-24 · A manual reading does not verify automatic browser updates
+
+A real billing-page reading reached the display and was photographed. That
+proved the observed value's host-to-panel path, but did not prove extension
+installation or periodic refresh. Before calling the automatic integration
+verified, observe delivery from the installed extension, a later fresh reading,
+and honest aging when the source stops. Preserve the original observation time
+across restarts. Record missing browser/OS evidence explicitly in the guide and
+PR, and never substitute a fixture or refreshed timestamp for real data.
+
+## 2026-09-24 · Provider switches make an empty carousel valid
+
+When the previously permanent Claude/Codex pages became optional, every page
+could be disabled. An unbounded next-page search would loop forever. Navigation
+now checks at most one circuit and returns no view; an empty-state tile points
+back to Settings. The 256-mask policy/render checks include this case. Migrating
+a six-switch record preserves the owner's choices even if its upgraded write
+fails; a storage failure must not silently restore unrelated default pages.
+
+## 2026-09-24 · A documented credit balance was absent from the live MCP contract
+
+Lovable's public docs and server skill promised credits, but authenticated
+`tools/list`, `get_workspace`, `get_me` and `list_workspaces` exposed none.
+Do not assume missing OAuth scopes or manufacture a number from the plan.
+The opt-in browser fallback reads explicitly labelled DOM fields, binds them
+to the configured workspace and preserves observation age across host restarts.
+Daily chat percentage is not daily build credits; grant expiry is not renewal.
+The fallback is unofficial and needs live browser evidence independently of MCP.
+Its strict loopback ingress and three-minute stale cutoff preserve that boundary.
+
+## 2026-09-24 · A round display still has a physical up direction
+
+**What happened:** the native VibePulse image looked upright on the 1.75-inch
+panel, but USB pointed left. The owner wants the connector at the bottom.
+The first photograph also exposed LVGL's default `Text` labels; a numeric
+font rendered those letters as empty boxes before the first token payload.
+**The rule:** record the desired physical landmark, rotate the panel and touch
+together, and initialize every visible label to an honest no-data state before
+the network starts. Do not copy another board's IMU axis calibration. **Guard:**
+the fixed quarter-turn and inverse touch transform are paired in the round
+profile; native raster tests still cover the quota states. On-glass angle,
+touch and four-pose motion review remain separate acceptance evidence.
+
+## 2026-09-23 · A one-shot portal scan hid a network the radio had seen
+
+**What happened:** the round unit's boot scan logged six access points,
+including the owner's 2.4 GHz network, but the Wi-Fi setup page listed only a
+printer. **Root cause:** the portal trusted one later scan and rejected every
+SSID not in that snapshot; the reason that later scan returned only one record
+is not yet established. **The rule now:** offer an exact-name fallback for
+incomplete scans, and merge two scans before the setup AP opens. Treat a typed
+SSID as secured, require its password, validate both fields, and save nothing
+until the panel gets an IP from that trial. A retry improves coverage; it is
+not proof that the unexplained one-network scan cannot recur.
+**Guards:** portal form binding and ESP-IDF build checks, existing trial-before-
+NVS policy, and a physical retry on the round unit. **Watch for:** APSTA scans
+returning fewer networks than boot-time STA scans.
+
+## 2026-09-23 · A shared USB port concealed the wrong board image
+
+**What happened:** a round 1.75 panel stayed black after swapping displays,
+although USB still enumerated. **Root cause:** its flash held the recovery app
+for a 1.91 panel; the port name had been reused, so the port alone did not
+identify the hardware. A private full-flash read and the app descriptor tied
+the installed binary to the 1.91 build. **The rule now:** bind every install to
+the intended unit's ROM MAC and the built board profile in the same serial
+connection; verify the written segments, then inspect the real display and
+touch mapping. Treat a working USB endpoint as evidence only for the USB
+interface. **Guards:** the 1.75 installer checks board markers, ROM identity,
+security state and a matching double-read backup before writing; native
+466 × 466 full-app captures check the circular boundary. **Watch for:**
+cross-flashing when several ESP32-S3 panels share a cable or port name.
+
+## 2026-09-23 · A transient Wi-Fi error must not mask later DHCP success
+
+On the 1.91 port, the owner supplied valid credentials. The radio reported
+NO_AP_FOUND (201), retried, associated and obtained an IP; usage requests worked.
+The setup guard only processed success while status was CONNECTING, so its retry
+error became sticky and the working credentials never reached NVS. Keep observing
+a trial that actually started, accept fresh IP after transient errors, and write
+once. Never accept old IP from the submission tick or a failed/abandoned trial.
+The captured sequence and these negative cases are covered in test_wifi_slots.c.
+Physical revalidation passed on the 1.91 unit: credentials saved once, setup
+closed, and the panel rejoined after a controlled reset.
+
+## 2026-09-20 · A two-second status heartbeat consumes a daily request budget
+
+Cloudflare logs showed successful encrypted status PUTs roughly every two
+seconds. A continuously running publisher can use 43,200 requests/day even
+without approvals. Status publication now has a five-second success interval
+(17,280/day); snapshot changes cannot bypass it. A simulated full-day regression
+checks the budget and signed expiry. Approval publication and verdict polling
+keep their separate paths. This reduces one source, not an account-wide cap:
+panel polls, retries, other hosts, and other sites must also be counted.
+
 What has bitten this project, why, and the rule each bite taught. The
 full narratives live in the commit messages (keep writing them there —
 that practice is the best thing this repo does); this file is the index

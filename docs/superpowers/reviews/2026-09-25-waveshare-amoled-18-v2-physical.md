@@ -1,5 +1,11 @@
 # Physical review: Waveshare ESP32-S3-Touch-AMOLED-1.8 V2
 
+Current source is a USB-only development profile. OTA is disabled.
+Owner-reported operation does not establish four-corner touch acceptance or
+worst-case transform-layer memory safety under network/TLS load. Those checks
+remain required before full support is claimed.
+
+
 **Date:** 2026-09-25
 
 **Unit:** `vibepulse-amoled-18-v2-01`, owner-confirmed V2 label

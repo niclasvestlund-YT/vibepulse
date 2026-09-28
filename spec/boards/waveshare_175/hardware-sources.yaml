@@ -1,0 +1,37 @@
+schema_version: 1
+sources:
+- id: waveshare-175-docs
+  kind: vendor-documentation
+  rank: 4
+  title: Waveshare ESP32-S3-Touch-AMOLED-1.75 specification
+  publisher: Waveshare
+  locator: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.75
+  revision: accessed-2026-09-23
+  accessed: '2026-09-23'
+- id: waveshare-175-reference
+  kind: vendor-documentation
+  rank: 4
+  title: Waveshare 1.75 board hardware reference
+  publisher: Waveshare
+  locator: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75/blob/main/HARDWARE_REFERENCE.md
+  revision: e4344e70c2fa78a13e8a06566507f1ba8af6672a; maintained BSP and schematic
+  accessed: '2026-09-23'
+- id: vibepulse-175-preview
+  kind: source-code
+  rank: 3
+  title: Native round preview and physical bring-up record
+  publisher: VibePulse
+  locator: docs/waveshare-175-preview.md
+  revision: round-usb-down-trial-2026-09-24
+  accessed: '2026-09-23'
+- id: vibepulse-175-physical-2026-09-24
+  kind: physical-test
+  rank: 1
+  title: Owner-visible Codex quota page on round 1.75 unit
+  publisher: VibePulse
+  locator: docs/superpowers/reviews/2026-09-24-waveshare-175-round.md
+  revision: usb-down-trial-2026-09-24
+  accessed: '2026-09-24'
+  unit: vibepulse-175-01
+  tests:
+  - owner-photographed-codex-quota-page

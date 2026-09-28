@@ -86,6 +86,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: tools/relay/package-lock.json
+      - name: Check the optional Lovable browser scripts
+        run: |
+          for browser_script in tools/lovable-browser/*.js; do
+            node --check "$browser_script"
+          done
       - name: Run relay mailbox merge tests
         run: node --test tools/relay/test.mjs
       - name: Run relay Durable Object tests
@@ -232,6 +237,23 @@ jobs:
           command: >-
             idf.py -B build-241 -D TORGET_BOARD=waveshare_241_v2
             -D SDKCONFIG=sdkconfig.241-v2 build
+      - name: Build the 1.91 Touch profile with its own SDK config
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-191 -D TORGET_BOARD=waveshare_191_touch
+            -D SDKCONFIG=sdkconfig.191 build
+      - name: Build the round 1.75 profile with its own SDK config
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-175 -D TORGET_BOARD=waveshare_175
+            -D SDKCONFIG=sdkconfig.175
+            -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build
       - name: Build the 1.8 V2 profile with its own SDK config
         uses: espressif/esp-idf-ci-action@v1
         with:

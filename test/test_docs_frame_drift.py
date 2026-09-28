@@ -103,6 +103,8 @@ WIFI_BOX = (426, 28, 426 + 20, 28 + 18)
 PINNED = {
     "vibepulse-labs-analytics.png": "torget-settings-labs-analytics.bmp",
     "vibepulse-labs-github.png": "torget-settings-labs-github.bmp",
+    "vibepulse-labs-providers.png": "torget-settings-labs-providers.bmp",
+    "vibepulse-lovable.png": "torget-vibepulse-lovable-live.bmp",
     "vibepulse-labs-pending.png": "torget-settings-labs-pending.bmp",
     "vibepulse-settings-menu.png": "torget-settings-menu.bmp",
     "vibepulse-settings-about.png": "torget-settings-about-found.bmp",
@@ -203,13 +205,36 @@ BOARD_241_FRAMES = {
     "241-v2/settings.png": "settings-menu.png",
 }
 
+BOARD_175_FRAMES = {
+    "round-175-codex.png": "round-codex-live.png",
+    "round-175-claude.png": "round-claude-live.png",
+}
+
+# Native 536x240 captures must match the current 1.91 simulator byte for byte.
+# test_board_profiles.py owns that comparison, as it does for the V2 frames.
+BOARD_191_FRAMES = {
+    "191-touch/settings-menu.png": "settings-menu.png",
+    "191-touch/vibepulse-claude-fable.png": "vibepulse-claude-fable.png",
+    "191-touch/vibepulse-tracker-codex-full.png": "vibepulse-tracker-codex-full.png",
+    "191-touch/wifi-setup-qr.png": "wifi-setup-qr.png",
+}
+
 NOT_FRAMES = {
+    "175-round/glass-codex-angle.jpg": "owner photograph of the physical round 1.75 panel at an angle",
+    "175-round/glass-codex-front.jpg": "owner photograph of the physical round 1.75 Codex quota page",
+    "175-round/glass-codex-held.jpg": "owner photograph of the physical round 1.75 panel held in hand",
+    "191-touch/glass-boot-logo.jpg": "owner photograph of the physical 1.91 Touch boot logo",
+    "191-touch/glass-boot-stages.jpg": "owner photograph of the physical 1.91 Touch boot stages",
+    "191-touch/glass-codex-close.jpg": "owner close-up of Codex on the physical 1.91 Touch",
+    "191-touch/glass-codex-desk.jpg": "owner photograph of Codex on the physical 1.91 Touch on a desk",
+    "191-touch/glass-codex-held.jpg": "owner photograph of Codex on the physical 1.91 Touch held in hand",
     "241-v2/glass-codex.jpg": "owner photograph of the physical 2.41 V2 panel",
     "241-v2/glass-codex-detail.jpg": "owner close-up photograph of the physical 2.41 V2 panel",
     "github/glass-live.png": "a photograph of the physical panel",
     "hero.png": "the README banner, a composed graphic",
     "qr-repo.png": "a QR code, not a screen",
     "social-preview.png": "the repository's social card",
+    "vibepulse-desk-short.jpg": "YouTube video poster, not a firmware or simulator capture",
 }
 
 
@@ -245,7 +270,7 @@ def docs_frames():
     missed by hand.
     """
     for name, path in docs_images():
-        if name in NOT_FRAMES or name in BOARD_241_FRAMES or path.suffix != ".png":
+        if name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -280,12 +305,26 @@ class DocsFrameDriftTests(unittest.TestCase):
             cwd=ROOT,
             env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir)},
             check=True, text=True, capture_output=True)
+        subprocess.run(
+            [str(ROOT / "sim/build/torget-sim"), "--vibepulse-lovable-qa"],
+            cwd=ROOT,
+            env={**os.environ, "TORGET_CAPTURE_DIR": str(cls.capture_dir),
+                 "TORGET_LABS_MASK": "32"},
+            check=True, text=True, capture_output=True)
         cls.captures = sorted(cls.capture_dir.glob("*.bmp"))
         cls.frames = list(docs_frames())
 
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
+
+    def test_lovable_host_disconnect_changes_provenance_not_balance(self):
+        with Image.open(self.capture_dir / "torget-vibepulse-lovable-live.bmp") as live, \
+             Image.open(self.capture_dir / "torget-vibepulse-lovable-disconnected.bmp") as cached:
+            self.assertNotEqual(live.crop((350, 40, 465, 64)).tobytes(),
+                                cached.crop((350, 40, 465, 64)).tobytes())
+            self.assertEqual(live.crop((30, 120, 450, 255)).tobytes(),
+                             cached.crop((30, 120, 450, 255)).tobytes())
 
     def test_the_capture_set_actually_ran(self):
         """The QA mode writing nothing would make every other test in this
@@ -526,7 +565,9 @@ class DocsFrameDriftTests(unittest.TestCase):
             if name in NOT_FRAMES or path.suffix != ".png":
                 continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
-                expected = (600, 450) if name in BOARD_241_FRAMES else (480, 480)
+                expected = ((600, 450) if name in BOARD_241_FRAMES else
+                            (466, 466) if name in BOARD_175_FRAMES else
+                            (536, 240) if name in BOARD_191_FRAMES else (480, 480))
                 if im.size != expected:
                     wrong.append(f"{name} is {im.size[0]}x{im.size[1]}")
         self.assertEqual(wrong, [], "\n".join(

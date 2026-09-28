@@ -13,6 +13,7 @@
 #include "tokens.h"
 #include "agent_status.h"
 #include "github_status.h"
+#include "lovable_status.h"
 #include "max_tracker.h"
 
 /*
@@ -48,6 +49,9 @@ void tokens_apply_max_tracker(const tk_max_tracker *t);
  * persisted LABS switches; either can consume the same feed. */
 void tokens_apply_github(const tk_github_status *status);
 
+/* One strict /api/lovable payload (numbers only), under the UI lock. */
+void tokens_apply_lovable(const tk_lovable_status *status);
+
 /* Targetets 1 Hz-hämtning. Utan TK_AGENT_STATUS_URL loggas avstängt läge
  * och ingen task eller HTTP-klient skapas. */
 void tokens_agent_net_start(void);
@@ -55,6 +59,7 @@ void tokens_agent_net_start(void);
  * You uses it so a verdict returns to the same Mac/PC in a multi-host LAN. */
 bool tokens_agent_direct_origin(char *origin, size_t cap);
 void tokens_github_net_start(void);
+void tokens_lovable_net_start(void);
 
 /* Hoppa till en VibePulse-vy utan animation — bänkens och BMP-dumparnas
  * ratt. */

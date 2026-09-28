@@ -24,9 +24,32 @@ current across ordinary internet WiFi. Every cloud feature is off by default;
 only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
-Current source supports the original **2.16-inch square panel** and the
-**Waveshare 2.41 V2 in 600 × 450 landscape**. For V2 revision checks, build
-selection and phone Wi-Fi setup, use the [2.41 V2 guide](docs/waveshare-241-v2.md).
+An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
+The current MCP response omits balances despite the documentation; an opt-in
+local Chrome extension can read the visible balance while a Lovable project is
+open. Setup and freshness limits are documented in the linked guide.
+
+Current source includes the original **2.16-inch square panel**, the
+**Waveshare 2.41 V2**, a USB-installed **1.91 Touch** development port and
+the round **1.75** profile, and the USB-only **1.8 V2** development profile
+([guide](docs/waveshare-amoled-18-v2.md)).
+Each needs its own build profile. Start with the [2.41 V2 guide](docs/waveshare-241-v2.md)
+or the [1.91 Touch guide](docs/waveshare-191-touch.md) for the landscape boards.
+
+The round **1.75-inch model has a [physical quota checkpoint](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md)**
+and a [board-specific bring-up guide](docs/waveshare-175-preview.md).
+Its USB-installed profile shows a Codex quota ring, USED TODAY and D:H:M
+countdown on a real unit. Touch alignment, the fixed USB-down mounting and
+the latest Wi-Fi scan change still need final on-unit review.
+
+## Watch it on the desk
+
+<p align="center">
+  <a href="https://www.youtube.com/shorts/WhZPEq4w3WA"><img src="docs/img/vibepulse-desk-short.jpg" width="640" alt="Video poster: VibePulse quota screens and LED matrix art on Niclas's desk; the computer screen is blurred"></a>
+</p>
+<p align="center"><a href="https://www.youtube.com/shorts/WhZPEq4w3WA">▶ VibePulse: AI-agenterna på mitt skrivbord 🤖 — watch on YouTube</a></p>
+
+The thumbnail is from a [Niclas Testar Livet Short](https://www.youtube.com/shorts/WhZPEq4w3WA), not a simulator capture or a verification of every board profile.
 
 ## The problem
 
@@ -41,11 +64,13 @@ Both answers already exist, buried in a terminal you're not looking at.
 VibePulse moves them onto a screen you can't miss: one glance from across
 the room, no window to switch to, no menu bar to squint at.
 
-> **Status:** v1.1.0. The core shelf-screen loop is real and physically
+> **Status:** v1.2.0. The core shelf-screen loop is real and physically
 > exercised on macOS and Windows: see quota, see an agent waiting, and answer
 > a supported prompt on the glass. The Windows core, physical answer loop and
 > persistent sign-in/sleep/reboot lifecycle were verified at the v1.0.0 host
-> runtime and are not re-claimed for a later one. v1.1.0 adds SETTINGS on
+> runtime and are not re-claimed for a later one. v1.2.0 adds three
+> board-specific AMOLED builds with different physical verification limits;
+> the original 2.16 build remains. v1.1.0 added SETTINGS on
 > the glass, an honest warm-up, and crash evidence in the firmware. The
 > v1.1.0 SETTINGS menu has been on `torget-home-01` since the 2026-09-06 USB
 > flash of `v1.0.0-67-ge51b79f`, with its static on-panel review still unrun;
@@ -77,38 +102,26 @@ Codex. You do not need to read this whole page:
    are concepts. New installs start with quotas and activity; analytics are
    optional in SETTINGS → LABS.
 
-## Latest release: v1.1.0
+## Latest release: v1.3.0
 
-The first release after 1.0 gives the panel a menu and a memory. A
-three-second **KEY3** hold opens **SETTINGS** on the glass (UPDATE, WIFI,
-ABOUT), so the maintenance window is chosen rather than guessed. The service
-answers the panel at once after a restart while the first history scan runs,
-labelling the volume counters as placeholders instead of letting the glass go
-STALE. A panic now leaves an ELF coredump in flash and a reboot ledger in
-NVS, every device poller backs off from a dead service, and the logging
-configuration is pinned by a configure-time guard. The host quarantines a
-corrupt state file instead of wiping it, says why the Claude probe is idle,
-names the keychain failure, typesets any model id, and the whole tokenserver
-directory now reads in English. Never a number it did not measure, still.
+Lovable joins the optional Labs pages. An experimental Chrome extension reads
+explicitly labelled credits from the billing page and sends them through your
+local tokenserver. The [setup guide](docs/lovable-pulse.md) covers installation,
+workspace selection, freshness, removal and switching to the official API later.
+Lovable's MCP documentation describes credits, but the response we checked did
+not include them. Browser automation remains experimental; a real one-time
+reading reached the round display, while automatic refresh still needs confirmation.
 
-### v1.1.0 verification
+Labs now lets you hide Claude Code or Codex quota pages and apply saved choices
+with **RESTART NOW**. The existing quota designs stay the same. Source and native
+render checks cover all 256 combinations, including every page off. A release
+tag is not a physical flash of every final image; board-specific touch and
+installation checks remain separate.
 
-| Gate | Result |
-|---|---|
-| Host gate (`./test/run.sh`), tokenserver suite on ubuntu, macOS and Windows, both Workers, snapshot tool | **PASS** on every merged PR and on merged `main` |
-| ESP32-S3 firmware build | **PASS** in CI — a build, not a flash |
-| SETTINGS (UPDATE / WIFI / ABOUT) on the physical panel | **FLASHED, NOT REVIEWED** — `torget-home-01` runs `v1.0.0-67-ge51b79f` (USB, 2026-09-06), which carries the v1.1.0 menu; the static on-panel review, §3 of [`docs/manual-test-key3.md`](docs/manual-test-key3.md), has not been run |
-| Warm-up placeholders, coredump, reboot ledger, poller backoff, and the SETTINGS → LABS addition on the physical panel | **NOT YET FLASHED** — all landed after `e51b79f`; the run sheet is [`docs/flash-session-2026-09.md`](docs/flash-session-2026-09.md) |
-| Windows v1 host claim (core, physical answer loop, lifecycle) | **Pinned to v1.0.0's runtime `bee5d8c`** — not re-run for this release |
-
-The coredump partition is new in the table, and OTA never writes the table:
-one USB `idf.py -p <port> partition-table-flash` is needed before a dump can
-land, and the boot log says so until then.
-
-[Read the v1.1.0 notes](docs/releases/2026-09-10-settings-and-evidence.md)
-· [Windows v1 evidence](docs/superpowers/reviews/2026-08-28-windows-v1-full-lifecycle.md)
+[Illustrated v1.3.0 notes](docs/releases/2026-09-25-lovable-and-labs.md)
 · [Full changelog](CHANGELOG.md)
-· [Compare v1.0.0...v1.1.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.0.0...v1.1.0)
+· [Compare v1.2.0...v1.3.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.2.0...v1.3.0)
+· [Four-board v1.2.0 release](docs/releases/2026-09-24-four-amoled-shapes.md)
 
 Contributing or validating another host? Read
 [CONTRIBUTING.md](CONTRIBUTING.md), the
@@ -476,10 +489,13 @@ The support status below reflects our own verification of each model.
 |---|---|---|
 | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=179337) (affiliate) | 480×480 AMOLED, touch. Also on the board: an IMU, and an ES8311 codec with amplified speaker output; **whether a speaker is fitted is unconfirmed**, and neither is verified on the unit | **Display, touch, and Wi-Fi verified on a real unit** (`spec/hardware-capabilities.yaml` is the source of every such claim). Its simulator frames are exact 480×480 renders. No soldering. Same board Clawdmeter uses. |
 | [Waveshare ESP32-S3-Touch-AMOLED-2.41](https://www.waveshare.com/esp32-s3-touch-amoled-2.41.htm?&aff_id=179337) (affiliate), **V2 / Rev2.0 only** | 600×450 AMOLED in fixed landscape, capacitive touch; BOOT opens settings | **Supported in current source.** Display bring-up, portrait corner touch, Wi-Fi and owner-visible Codex/Claude usage verified. [Install guide](docs/waveshare-241-v2.md) · [exact evidence](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md). V1, automatic rotation, OTA and physical answer replies are not validated by this port. |
-| [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=179337) (affiliate), **V2 only** | 368×448 portrait CO5300 AMOLED, CST820 touch; BOOT opens settings | **Supported in current source.** Owner reports display, touch, Wi-Fi/data path and settings working on one unit. [Install guide](docs/waveshare-amoled-18-v2.md) · [physical review](docs/superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md). V1, OTA, Windows, audio, IMU, RTC, battery and microSD are not verified. iPhone Wi-Fi onboarding still needs UX work. |
+| [Waveshare ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate), **touch variant** | 536×240 AMOLED in fixed landscape; BOOT opens settings | **USB-installed development port in current source.** Four touch corners, phone Wi-Fi setup, saved-network reconnect and visible Codex usage checked on one real unit. [Install guide](docs/waveshare-191-touch.md) · [physical report](docs/superpowers/reviews/2026-09-23-waveshare-191-touch.md). Needs You decisions stay on the computer until a safe compact button layout is verified. Menu navigation, OTA and rotation remain unverified. |
+| [Waveshare ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate), marking **1.75** only | 466×466 round AMOLED; PCB revision unknown | **USB-installed round quota profile in current source.** A real unit boots, joins Wi-Fi and displays Codex usage, USED TODAY and reset countdown in [owner photographs](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md). [Bring-up guide](docs/waveshare-175-preview.md). Needs You decisions remain on the computer and OTA is disabled in current source; use USB updates. Fixed USB-down orientation, touch and the latest portal scan still need final on-unit checks; automatic rotation is unverified. |
+| [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=179337) (affiliate), **V2 only** | 368×448 portrait CO5300 AMOLED, CST820 touch; BOOT opens settings | **USB-only development profile.** Owner reports display, touch, Wi-Fi/data path and settings working on one unit. [Install guide](docs/waveshare-amoled-18-v2.md) · [physical review](docs/superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md). V1, OTA, Windows, audio, IMU, RTC, battery and microSD are not verified. Four-corner touch and transform-memory stress remain unverified. iPhone Wi-Fi onboarding still needs UX work. |
 
-The v1.1.0 tag predates the V2 port. Use current source and the explicit
-`waveshare_241_v2` build profile; firmware images are board-specific.
+The v1.2.0 tag includes the 2.41, 1.91 and 1.75 ports. The 1.8 V2 profile requires current source. Check the exact model and explicitly
+select `waveshare_241_v2`, `waveshare_191_touch`, `waveshare_175` or `waveshare_18_v2`;
+firmware images are board-specific.
 More boards are added after physical verification, following
 [Adding a display](docs/adding-a-display.md). The 2.16 registry remains under
 [`spec/`](spec/hardware.md); V2 has its own
@@ -499,6 +515,28 @@ The 1.8 product label covers incompatible revisions: V1 is not supported.
 Use the [V2 install guide](docs/waveshare-amoled-18-v2.md) and check the rear
 label before building. The shared 480×480 UI is viewport-scaled to the native
 368×448 panel; runtime memory high-water is not measured yet.
+
+#### 1.91 Touch landscape
+
+<p align="center">
+  <img src="docs/img/191-touch/glass-codex-held.jpg" width="420" alt="Owner photograph of live Codex weekly usage on the physical 1.91 Touch panel">
+</p>
+
+*Real 1.91-inch panel, photographed September 23, 2026. The 9% quota was a
+momentary account reading; red room lighting limits color judgment. Follow the
+[1.91 Touch guide](docs/waveshare-191-touch.md) for USB flashing and the exact
+phone Wi-Fi steps. This profile is included in v1.2.0.*
+
+#### 1.75 round
+
+<p align="center">
+  <img src="docs/img/175-round/glass-codex-front.jpg" width="420" alt="Owner photograph of the real round 1.75 panel displaying Codex usage at 18 percent">
+</p>
+
+*Real 1.75-inch panel, photographed September 24, 2026. The 18% reading was
+momentary. Current source keeps updates on USB and Needs You decisions on the
+computer. [Physical evidence and open checks](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md)
+include touch, USB-down mounting and the new two-scan setup behavior.*
 
 #### 2.41 V2 landscape
 
@@ -522,19 +560,10 @@ recovery, sources and troubleshooting.
 
 ### Coming soon — hardware on the workbench
 
-These boards have arrived for development. **No VibePulse firmware is available
-for the boards listed here yet**, and there is no release date. Each port must
-pass the
-[display bring-up and physical verification checklist](docs/adding-a-display.md)
-before moving into the supported table above.
-
-The product links below are **affiliate links**: Niclas Vestlund may earn a
-commission. Waveshare supplied this development hardware.
-
-| Planned VibePulse port | Status |
-|---|---|
-| [ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate) | Received · coming soon · not supported yet |
-| [ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate) | Received · coming soon · not supported yet; link selects the touch variant |
+The 1.8 V2 development profile is now listed above. Each new port must pass
+the [display bring-up and physical verification checklist](docs/adding-a-display.md)
+before full support is claimed. Waveshare supplied the development hardware;
+product links marked affiliate may earn a commission.
 
 Also received for **VibeMatrix experiments**: the controller, three LED panels
 and a power adapter below. This is an exploratory direction; it does not yet
@@ -606,8 +635,8 @@ understand how the pieces fit together.
 ## Setup, the manual way
 
 **Select the board first.** The commands below build the original 2.16 profile.
-For 2.41 V2 use the separate [V2 build/flash sequence](docs/waveshare-241-v2.md);
-do not flash the default image to it.
+For a landscape board use its own sequence: [2.41 V2](docs/waveshare-241-v2.md)
+or [1.91 Touch](docs/waveshare-191-touch.md). Do not flash the default image to it.
 
 The commands below show the macOS path. Windows is supported for the host
 service too; use the Windows ESP-IDF environment and the OS-specific
@@ -669,7 +698,9 @@ host address, firewall, Task Scheduler, startup health, and recovery steps.
 
 New installations using `secrets.h.example` show quotas with reset information
 and local activity when available. In **SETTINGS → LABS**, add burn rate,
-Max Tracker, API-equivalent value, a GitHub page or independent star popups.
+Max Tracker, API-equivalent value, a GitHub page, independent star popups, or Lovable credits.
+Use **MORE → MORE** to hide the Claude Code or Codex quota pages and select
+**RESTART NOW** to apply saved changes.
 Tap to save a choice, then restart the panel to apply it. GitHub needs a
 repository configured on the computer; Value needs prices and a plan cost for
 its comparison. These choices do not start cloud services.
@@ -688,11 +719,41 @@ has shared LVGL simulator coverage; physical memory and touch review are
 pending before release. [Setup, defaults and future experiments](docs/labs/README.md).
 Countdown clocks and coding quotes remain concepts for a later Labs addition.
 
+## Lovable credits (experimental)
+
+An opt-in Chrome extension reads the balance shown on Lovable's billing page
+while a project is open. It sends only the workspace name and named credit/plan
+fields to the local tokenserver; the screen receives a compact credit snapshot.
+It does not read browser credentials, project source or chats. Missing data stays
+missing, and a reading becomes **CACHED** after three minutes without an update.
+
+<p align="center">
+  <img src="docs/img/vibepulse-lovable.png" width="45%" alt="Native 480 by 480 Lovable page rendered with simulator example data">
+  <img src="docs/img/vibepulse-labs-providers.png" width="45%" alt="Labs controls for Claude Code and Codex page visibility">
+</p>
+
+*Native LVGL captures, with illustrative credit data. The browser source does
+not currently provide the reset countdown shown in this example.* A real browser reading
+has also reached the round 1.75-inch panel. Automatic Chrome refresh and the
+Windows browser integration still need end-to-end confirmation.
+
+**[Install the Lovable browser integration](docs/lovable-pulse.md#browser-fallback-chrome-optional)**
+for workspace selection, custom ports, startup configuration, verification,
+removal and the round display's BOOT/Labs controls. No MCP login is needed for
+`--lovable --lovable-source browser`. Lovable's documentation describes a credit
+balance in `get_workspace`, but the authenticated response checked on
+2026-09-24 omitted it. Source modes `auto` and `mcp` allow a later switch to the
+official API without changing the display contract.
+
 ## One button, one menu
 
 **2.41 V2:** hold **BOOT for three seconds** to open SETTINGS, then choose
 WIFI, LABS or ABOUT. Use the [V2 guide](docs/waveshare-241-v2.md) for USB
 updates; OTA is not validated on this model.
+
+**1.91 Touch:** hold **BOOT while the application runs** to open SETTINGS;
+use the [1.91 Touch guide](docs/waveshare-191-touch.md) for setup and USB
+updates. Its menu navigation still needs a final physical review.
 
 The details and 480×480 captures below describe the **original 2.16**.
 **KEY3** is that panel's one user button — BOOT and reset are recovery
@@ -759,8 +820,8 @@ cannot keep.
 
 ## Over-the-air updates
 
-This section describes **2.16**. The **2.41 V2** port currently uses
-[board-specific USB updates](docs/waveshare-241-v2.md#4-back-up-and-install-over-usb).
+This section describes **2.16**. The **2.41 V2** and **1.91 Touch** ports
+currently use board-specific USB updates; see their installation guides.
 
 After the first USB flash, the screen updates itself over WiFi. The consent
 chain is deliberate and three-factor: a **physical 3-second hold on KEY3**
@@ -857,7 +918,7 @@ tokenserver reachability, or relay health. During setup the complete symbol mean
 successful destination join.
 
 The setup window opens on its own after 90 seconds without a network, or
-at once from a 3-second button hold (**KEY3 on 2.16, BOOT on 2.41 V2**)
+at once from a 3-second button hold (**KEY3 on 2.16, BOOT on 2.41 V2 or 1.91 Touch**)
 followed by **WIFI** in SETTINGS. Before
 that, at 60 seconds, the glass stops being coy: it names the network it is
 hunting and what the radio actually answered ("NOT SEEN - 2.4 GHZ ONLY", "WRONG PASSWORD") instead of
@@ -929,8 +990,9 @@ platform and VibePulse against the real LVGL, and feeds it the recorded
 fixtures in `sim-fixtures/` through the same parsers the board runs. The
 flat UI captures in this README are unmodified simulator frames (the
 banner places three of them side by side). The separately captioned 2.41 V2
-photograph shows the owner's real panel; its evidence is recorded in the
-[V2 physical report](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md).
+and 1.91 Touch photographs show the owner's real panels; evidence is recorded
+in the [V2 physical report](docs/superpowers/reviews/2026-09-17-waveshare-241-v2-physical.md)
+and [1.91 physical report](docs/superpowers/reviews/2026-09-23-waveshare-191-touch.md).
 For the original 2.16, the
 [2026-08-13 physical review](docs/superpowers/reviews/2026-08-13-max-tracker-physical-static.md)
 covered the quota pages, agent monitor states and Max Tracker pages in that
@@ -1070,10 +1132,12 @@ by default; set `PYTHON_BIN` to point at a different 3.11+ interpreter.
   `main` still needs XDG paths, Linux credential selection, systemd user
   service lifecycle, and a real-host + panel validation report. See
   [Host platform support](docs/platform-support.md).
-- **Other boards or panel sizes?** Current source supports Waveshare **2.16**,
-  **2.41 V2** and **1.8 V2**, each with its own build profile and native layout.
-  AMOLED 1.75 and 1.91 are [planned ports](#coming-soon--hardware-on-the-workbench),
-  without firmware support yet. See [adding a display](docs/adding-a-display.md)
+- **Other boards or panel sizes?** Current source includes Waveshare **2.16**,
+  **2.41 V2**, the USB-installed **1.91 Touch** development port and the
+  **round 1.75** quota profile, each with its own build and native layout.
+  The **1.8 V2** USB-only development profile is also available; corner-touch
+  and runtime-memory acceptance remain open.
+  See [adding a display](docs/adding-a-display.md)
   and [#5](https://github.com/niclasvestlund-YT/vibepulse/issues/5).
 - **Cursor, Gemini CLI, other providers?** Not yet —
   [#4](https://github.com/niclasvestlund-YT/vibepulse/issues/4).
@@ -1096,3 +1160,17 @@ This is my first open source release. Issues and PRs are very welcome, and
 if VibePulse ends up on your shelf, a ⭐ helps others find it.
 
 Built by [Niclas Vestlund](https://niclasvestlund.se).
+
+## Round 1.75 on the glass
+
+The physical 466 × 466 round panel now shows Codex weekly usage, USED TODAY
+and the D:H:M countdown in the owner's photographs. Serial logs confirm Wi-Fi
+join and token fetches. The screen uses a board-specific USB-installed source
+profile; [physical evidence](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md)
+names the remaining touch, mounting and setup checks. The separate image below
+is native LVGL output with sample data, useful for exact layout review.
+[Bring-up and recovery guide](docs/waveshare-175-preview.md).
+
+![Real round 1.75 VibePulse display showing a momentary Codex 18 percent reading](docs/img/175-round/glass-codex-held.jpg)
+
+![Round 1.75 native LVGL design preview, sample Codex quota](docs/img/round-175-codex.png)

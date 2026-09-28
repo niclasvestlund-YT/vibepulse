@@ -149,7 +149,7 @@ The repository's Worker logs only route kind, status, and duration.
 
 For live status the Worker sees the same kind of metadata plus one fixed-size
 latest-value status ciphertext. It cannot see project basenames or activity.
-The Mac replaces that slot about every two seconds; the encrypted inner copy
+The host replaces that slot no more often than every five seconds; the encrypted inner copy
 expires after **15 seconds**, and the Worker deletes the outer slot after no
 more than **20 seconds**.
 
@@ -188,8 +188,19 @@ accept, an offline network, DNS failure, TLS interception, or blocked Worker
 domains still prevents delivery. The direct LAN path can continue working at
 the same time. If both paths fail, the decision stays on the computer.
 
-At the default five-second panel poll, one panel can make roughly 17,280 idle
-requests per day. Cloudflare pricing and quotas change, so check the current
+At the default five-second panel poll, each enabled poll stream can make up to
+17,280 idle requests per day (jitter lowers the actual rate). Enabling both
+request and live-status polling can therefore add up to 34,560 panel requests.
+Each status-publishing host adds up to 17,280 successful PUTs per day, even when
+its snapshot changes continuously. Approval traffic, retries, the independent
+numbers relay, and other sites on the account are extra; these are not a hard
+account-wide spending or request cap. Compared with the previous two-second
+publisher, this reduces normal status PUTs by 60%, at the cost of up to three
+additional seconds before a changed status is published. Approval publication
+and verdict polling are unchanged. No firmware update is needed for this host
+change; restart each publishing tokenserver after updating it.
+
+Cloudflare pricing and quotas change, so check the current
 [Cloudflare pricing for SQLite Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/),
 [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/),
 and [Cloudflare Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/)

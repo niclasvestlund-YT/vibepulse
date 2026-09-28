@@ -59,8 +59,8 @@ capabilities:
       board_wired: 'yes'
       bsp_support: 'yes'
       firmware_enabled: 'yes'
-      unit_verified: 'yes'
-    confidence: measured
+      unit_verified: unknown
+    confidence: source_inspected
     resources:
       - I2C touch controller
       - Waveshare 1.8 V2 managed BSP 2.0.3
@@ -89,7 +89,7 @@ capabilities:
         value: 'yes'
         source: vibepulse-amoled-18-port
       - field: unit_verified
-        value: 'yes'
+        value: unknown
         source: vibepulse-amoled-18-v2-physical-2026-09-25
     verification:
       unit: vibepulse-amoled-18-v2-01
@@ -177,5 +177,4 @@ capabilities:
     verification:
       unit: vibepulse-amoled-18-v2-01
       test: boot-settings-owner-confirmation
-    last_verified: '2026-09-25'
     last_verified: '2026-09-25'

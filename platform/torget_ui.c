@@ -81,7 +81,11 @@ static void wifi_status_timer(lv_timer_t *timer) {
 static void wifi_status_create(void) {
   tg.wifi_mode = TG_WIFI_STATUS_HIDDEN;
   tg.wifi_group = bare(tg.shift);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(tg.wifi_group, 230, 43);
+#else
   lv_obj_set_pos(tg.wifi_group, 426, 28);
+#endif
   lv_obj_set_size(tg.wifi_group, 20, 18);
   /* One muted, native-size image sits in the same translated page shell as
    * every app.  It therefore follows burn-in drift and cannot float above a
@@ -152,7 +156,7 @@ static void icon_clicked(lv_event_t *e) {
  * proportioner som bänkens ikon (96-platta, radie 22). */
 static void launcher_build(void) {
   tg.launcher = bare(tg.shift);
-  lv_obj_set_size(tg.launcher, 480, 480);
+  lv_obj_set_size(tg.launcher, 480, TG_DISPLAY_HEIGHT < 480 ? TG_DISPLAY_HEIGHT : 480);
   lv_obj_set_flex_flow(tg.launcher, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(tg.launcher, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                         LV_FLEX_ALIGN_CENTER);
@@ -264,7 +268,11 @@ void torget_ui_create(void) {
 
   launcher_build();
   wifi_status_create();
+#if !defined(TORGET_BOARD_191_TOUCH) && !defined(TORGET_BOARD_175)
   lv_timer_create(drift_timer, 60000, NULL);
+#else
+  (void)drift_timer;
+#endif
 
   /* Boota rakt in i första appen — skärmen på hyllan ska visa data, inte en
    * meny. Launchern är ett långtryck bort. */

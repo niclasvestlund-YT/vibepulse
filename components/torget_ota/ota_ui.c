@@ -34,6 +34,9 @@ extern const lv_font_t plex_num_118;
 extern const lv_font_t plex_num_84;
 extern const lv_font_t plex_num_50;
 extern const lv_font_t plex_ui_21;
+#ifdef TORGET_BOARD_175
+extern const lv_font_t plex_ui_16;
+#endif
 
 /* Färgerna är studio-tokens (design/vibepulse/studio-design.json): muted
  * och track därifrån, inte de äldre lokala nyanserna — rastret på glaset
@@ -109,7 +112,12 @@ void torget_ota_ui_create(void) {
   ui.word = lv_label_create(ui.overlay);
   lv_obj_set_style_text_font(ui.word, &plex_attention_52, 0);
   lv_obj_set_style_text_color(ui.word, lv_color_white(), 0);
+#ifdef TORGET_BOARD_175
+  lv_obj_align(ui.word, LV_ALIGN_TOP_MID, 0, 72);
+  lv_obj_set_style_text_align(ui.word, LV_TEXT_ALIGN_CENTER, 0);
+#else
   lv_obj_align(ui.word, LV_ALIGN_TOP_MID, 0, 52);
+#endif
   lv_label_set_text(ui.word, "");
 
   /* Bågen är ren visning: ingen knopp, inget klick — värdet sätts bara
@@ -151,6 +159,9 @@ void torget_ota_ui_create(void) {
    * även med de klippta hörnen (hörnlärdomen från brödsmulorna). */
   ui.version = lv_label_create(ui.overlay);
   lv_obj_set_style_text_font(ui.version, &plex_ui_21, 0);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_style_text_font(ui.version, &plex_ui_16, 0);
+#endif
   lv_obj_set_style_text_color(ui.version, COL_DETAIL, 0);
   lv_obj_set_style_text_letter_space(ui.version, 2, 0);
   lv_obj_align(ui.version, LV_ALIGN_TOP_MID, 0, 268 + ARC_SIZE / 2 + 10);
@@ -163,6 +174,10 @@ void torget_ota_ui_create(void) {
   lv_obj_remove_style_all(ui.later);
   lv_obj_set_size(ui.later, 340, 88);
   lv_obj_set_pos(ui.later, 240 - 170, 322);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_size(ui.later, 300, 70);
+  lv_obj_set_pos(ui.later, 90, 308);
+#endif
   lv_obj_set_style_radius(ui.later, 44, 0);
   lv_obj_set_style_border_width(ui.later, 2, 0);
   lv_obj_set_style_border_color(ui.later, COL_TRACK, 0);
@@ -178,6 +193,10 @@ void torget_ota_ui_create(void) {
   lv_obj_remove_style_all(ui.update);
   lv_obj_set_size(ui.update, 340, 88);
   lv_obj_set_pos(ui.update, 240 - 170, 210);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_size(ui.update, 300, 70);
+  lv_obj_set_pos(ui.update, 90, 222);
+#endif
   lv_obj_set_style_radius(ui.update, 44, 0);
   lv_obj_set_style_border_width(ui.update, 2, 0);
   lv_obj_set_style_border_color(ui.update, lv_color_white(), 0);
@@ -205,7 +224,12 @@ static const char *state_word(tg_ota_ui_state state) {
     case TG_OTA_UI_RECEIVING:  return "INSTALLING";
     case TG_OTA_UI_VERIFYING:  return "VERIFYING";
     case TG_OTA_UI_RESTARTING: return "RESTARTING";
-    case TG_OTA_UI_NOTICE:     return "UPDATE READY";
+    case TG_OTA_UI_NOTICE:
+#ifdef TORGET_BOARD_175
+      return "UPDATE\nREADY";
+#else
+      return "UPDATE READY";
+#endif
     default:                   return "";
   }
 }
@@ -317,7 +341,11 @@ void torget_ota_ui_set(tg_ota_ui_state state, unsigned percent,
   /* I NOTICE bor versionen INNE i ringen (under READY) — pillren äger
    * ytan under ringen. Övriga lägen behåller raden under ringen. */
   if (state == TG_OTA_UI_NOTICE)
+#ifdef TORGET_BOARD_175
+    lv_obj_align(ui.version, LV_ALIGN_TOP_MID, 0, 178);
+#else
     lv_obj_align(ui.version, LV_ALIGN_TOP_MID, 0, 130);
+#endif
   else
     lv_obj_align(ui.version, LV_ALIGN_TOP_MID, 0, 268 + ARC_SIZE / 2 + 10);
 

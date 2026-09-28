@@ -120,6 +120,11 @@ capabilities unchanged.
 - QR is not synonymous with easy setup. The iPhone flow requires a Wi-Fi
   approval and can require a manual return to the local portal. Track network
   functionality separately from onboarding usability.
+- A USB serial endpoint can survive a cross-flash. The round 1.75 unit stayed
+  black with a valid USB/ROM connection because its flash contained the 1.91
+  panel app. The transient port path did not identify the board. Read the app
+  descriptor before assuming hardware damage; bind the recovery writer to ROM
+  MAC and the exact profile, then verify the write without erasing NVS.
 
 Do not inherit motion, OTA, Windows physical-loop or long-soak approval from
 another model. Board-safe OTA identification is follow-up work; the V2 guide
@@ -136,3 +141,6 @@ owner-confirmed V2 marking. The native canvas is 368 × 448 portrait. The
 owner reports display, touch, Wi-Fi/data path and settings working on the
 named unit; the viewport transform's runtime high-water and 1.8-inch OTA
 remain unverified.
+## 1.91 Touch AMOLED development profile
+
+`waveshare_191_touch` uses its own five-file registry under `spec/boards/waveshare_191_touch/`. Native geometry is 536 × 240. See [the port notes](porting-waveshare-191-touch.md) and [installation guide](waveshare-191-touch.md) for measured results and remaining physical checks.

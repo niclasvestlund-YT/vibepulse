@@ -24,6 +24,7 @@ print("codex-path-ok" if os.environ["PATH"].split(os.pathsep)[0] ==
 print("codex-home-ok" if os.environ.get("CODEX_HOME") ==
       os.environ["VIBEPULSE_TEST_CODEX_HOME"] else "codex-home-bad")
 expected = [
+    "--lovable", "--lovable-source", "browser",
     "--github-repo", "owner/repository",
     "--claude-plan", "max5x",
     "--codex-plan", "pro",
@@ -51,7 +52,7 @@ print("optional-pages-ok" if sys.argv[1:] == expected else
     [System.IO.File]::AppendAllText($LogPath, "rotation-sentinel")
 
     & $Runner -Python $Python -Server $Fixture -CodexBinDir $CodexDir `
-        -CodexHome $CodexHome -GithubRepo "owner/repository" `
+        -CodexHome $CodexHome -GithubRepo "owner/repository" -Lovable -LovableSource browser `
         -ClaudePlan max5x -CodexPlan pro `
         -ClaudePlanCostUsd "100" -CodexPlanCostUsd "20"
     if ($LASTEXITCODE -ne 0) {

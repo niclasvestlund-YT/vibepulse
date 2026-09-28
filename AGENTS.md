@@ -7,9 +7,16 @@ symptom→fix table. This file is maintainer context for working *on* the
 platform, and it is mostly Swedish.
 
 Det här repot är **VibePulse**: appen som visar Claude Code- och
-Codex-kvoter på en Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480) och **2.41 V2** i liggande 600×450. V2 väljs uttryckligen med
-`-DTORGET_BOARD=waveshare_241_v2`; samma val gäller firmware och simulator.
-[Installera V2](docs/waveshare-241-v2.md), [nästa display](docs/adding-a-display.md).
+Codex-kvoter på Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480), **2.41 V2**
+(600×450), en USB-installerad **1.91 Touch**-utvecklingsport (536×240)
+och den runda **1.75**-kvotprofilen (466×466).
+Liggande modeller väljs uttryckligen med `-DTORGET_BOARD=waveshare_241_v2`
+respektive `-DTORGET_BOARD=waveshare_191_touch`; den runda modellen väljs
+med `-DTORGET_BOARD=waveshare_175`. Samma val gäller firmware
+och simulator. [Installera V2](docs/waveshare-241-v2.md),
+[installera 1.91 Touch](docs/waveshare-191-touch.md),
+[rund 1.75-guide](docs/waveshare-175-preview.md),
+[nästa display](docs/adding-a-display.md).
 Appen kör
 på **Torget**, en liten LVGL-appplattform som bor i samma repo och äger
 panelen, WiFi, ljuset och launchern — därav alla `torget_*`-namn i koden och
@@ -27,7 +34,15 @@ Designsystemet: **spec/ui-spec.md**. Hårdvarusanningen routas under
 `Hardware-aware work` nedan; läs den kanoniska femfilslistan där före
 hårdvaruarbete.
 
-## Status (2026-09-10, v1.1.0)
+## Status (2026-09-24, v1.2.0)
+
+`v1.2.0` packages board-specific source for 2.16, 2.41 V2, 1.91 Touch and
+round 1.75, with photographs, native layouts and individual USB guides. The
+2.41 V2 has physical display/touch/Wi-Fi/quota evidence; 1.91 Touch is a
+physically exercised development port; 1.75 has a photographed physical quota
+checkpoint. Their unverified interaction, OTA and rotation paths are recorded
+in the [illustrated release notes](docs/releases/2026-09-24-four-amoled-shapes.md)
+and board guides. Do not inherit a physical PASS from one board to another.
 
 Plattformen bröts ut ur underhållarens tidigare solcells-firmware (den
 historiken ligger i ett privat repo och är inget du behöver) och stöptes om
@@ -108,9 +123,9 @@ AMOLED-skillen och mäts på panelen.
 
 ## Over-the-air-uppdateringar
 
-Det här arbetsflödet gäller originalmodellen 2.16. 2.41 V2 uppdateras tills
-vidare via USB enligt `docs/waveshare-241-v2.md`; OTA och modellkontroll i
-uppdateringskedjan är inte verifierade för V2.
+Det här arbetsflödet gäller originalmodellen 2.16. 2.41 V2, 1.91 Touch och 1.75
+uppdateras tills vidare via USB enligt sina boardguider; OTA och
+modellkontroll i uppdateringskedjan är inte verifierade för dem.
 
 Vardagsfirmware går över luften: `idf.py build && tools/ota-flash.sh`
 (enhetens IP i den git-ignorerade `.ota-device`). Hela loopen, samtyckes-
@@ -213,10 +228,36 @@ overifierad.
 
 ## Hardware-aware work
 
+Before each hardware build/install, resolve the intended physical unit from its
+board registry and the current session. The unit used in the 2026-09-24 Lovable
+session was `vibepulse-175-01`: round 1.75, `waveshare_175`, 466 × 466, USB down,
+BOOT held three seconds for Settings. This is a recorded unit, not a permanent
+assumption about whichever screen is connected next. A USB port name or the
+ESP32-S3 chip type alone cannot identify the panel. Bind the connected ROM
+identity to the intended unit using the board's installation workflow; clarify
+only if the available evidence cannot resolve the model.
+
+Inspect the effective CMake board and companion inputs before building. For a
+VibePulse-only install, explicitly exclude local Solelkollen/Buddy checkouts;
+do not let auto-discovery silently change the app registry. Review native-size
+output, pair display and touch rotation, and keep build, flash/hash verification,
+visual inspection and touch acceptance as separate evidence.
+
 Select the board first. The five root files below describe **2.16 only**.
+For the experimental **1.91 Touch AMOLED**, use the five files under
+`spec/boards/waveshare_191_touch/` and `docs/waveshare-191-touch.md`.
+Native geometry is 536 × 240; USB updates only. Keep its open physical
+verification items explicit.
+For the **1.8 V2** USB-only development profile, read the five files under
+`spec/boards/waveshare_18_v2/` and `docs/waveshare-amoled-18-v2.md`.
+Four-corner touch and runtime transform-memory acceptance remain open.
 For **2.41 V2**, read the same five filenames under
 `spec/boards/waveshare_241_v2/`; validate that directory separately. Never
 transfer installed firmware or physical verification between board registries.
+For the round **1.75**, read the five files under
+`spec/boards/waveshare_175/` and `docs/waveshare-175-preview.md`.
+PCB revision remains unknown; quota display is photographed on one unit,
+while touch decisions, OTA and automatic rotation remain unverified.
 
 Before proposing external hardware, declaring a device limitation, or designing
 a hardware-dependent feature, read `spec/hardware.md`,

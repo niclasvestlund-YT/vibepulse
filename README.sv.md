@@ -5,15 +5,21 @@
 > hårdvarufällorna.
 
 Appplattformen för hyllskärmen (Waveshare ESP32-S3-Touch-AMOLED-2.16,
-480×480) och Waveshare 2.41 **V2** i liggande 600×450.
+480×480), Waveshare 2.41 **V2** i liggande 600×450 och en separat
+utvecklingsport för Waveshare 1.91 Touch i liggande 536×240.
 [Installationsguide för V2](docs/waveshare-241-v2.md),
-[kortregister](spec/boards/waveshare_241_v2/hardware.md) och
+[installationsguide för 1.91 Touch](docs/waveshare-191-touch.md),
+[kortregister för V2](spec/boards/waveshare_241_v2/hardware.md),
+[kortregister för 1.91 Touch](spec/boards/waveshare_191_touch/hardware.md) och
 [lärdomar inför nästa modell](docs/adding-a-display.md).
-V1 stöds inte; V2 har fast rotation och BOOT som inställningsknapp.
+2.41 V1 stöds inte; V2 har fast rotation och BOOT som inställningsknapp.
 
 Se [stödda modeller](README.md#supported-screens) och
 [kommande modeller och experiment](README.md#coming-soon--hardware-on-the-workbench).
-AMOLED 1.75, 1.8 och 1.91 finns på arbetsbänken men stöds ännu inte.
+AMOLED 1.75 och 1.8 finns på arbetsbänken men stöds ännu inte. 1.91-porten
+är fysiskt provad med Wi-Fi och en statisk Codex-vy. Svar på agentfrågor
+hanteras på datorn tills en säker layout för minst 90 px höga tryckytor
+har provats fysiskt; meny och OTA återstår också att verifiera.
 **Reklam/affiliatelänkar:** Märkta köplänkar kan ge Niclas Vestlund provision.
 Waveshare har tillhandahållit hårdvara för utveckling och test.
 
@@ -103,6 +109,10 @@ idf.py set-target esp32s3          # engångs, skapar sdkconfig
 idf.py build
 idf.py -p /dev/cu.usbmodem101 flash monitor
 ```
+
+Kommandona ovan bygger standardprofilen för 2.16. För 1.91 Touch ska du
+följa [kortets installationsguide](docs/waveshare-191-touch.md) och välja
+`waveshare_191_touch` samt dess separata `sdkconfig.191` före flashning.
 
 Hittas inget `/dev/cu.usbmodem*`: håll BOOT (GPIO0) nere, tryck och släpp
 RESET, släpp BOOT — då räknas kortet upp i nedladdningsläge. `idf.py monitor`

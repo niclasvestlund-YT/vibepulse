@@ -13,6 +13,9 @@ param(
     [string]$CodexBinDir = "",
     [string]$CodexHome = "",
     [string]$GithubRepo = "",
+    [switch]$Lovable,
+    [ValidateSet("auto", "browser", "mcp")]
+    [string]$LovableSource = "auto",
     [string]$ClaudePlan = "",
     [string]$CodexPlan = "",
     [string]$ClaudePlanCostUsd = "",
@@ -99,6 +102,9 @@ function Write-VibePulseLogLine {
 Rotate-VibePulseLog
 
 $ServerArgs = @("-u", $Server)
+if ($Lovable) {
+    $ServerArgs += @("--lovable", "--lovable-source", $LovableSource)
+}
 if ($GithubRepo) {
     $ServerArgs += @("--github-repo", $GithubRepo)
 }

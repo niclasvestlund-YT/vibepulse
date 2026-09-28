@@ -45,6 +45,9 @@ param(
     [string]$PublishUrl = "",
     [string]$PublishName = "",
     [string]$GithubRepo = "",
+    [switch]$Lovable,
+    [ValidateSet("auto", "browser", "mcp")]
+    [string]$LovableSource = "auto",
     [string]$ClaudePlan = "",
     [string]$CodexPlan = "",
     [string]$ClaudePlanCostUsd = "",
@@ -207,6 +210,9 @@ if ($CodexBinDir) {
 }
 if ($CodexHome) {
     $RunnerArgs += " -CodexHome `"$CodexHome`""
+}
+if ($Lovable) {
+    $RunnerArgs += " -Lovable -LovableSource $LovableSource"
 }
 if ($GithubRepo) {
     $RunnerArgs += " -GithubRepo `"$GithubRepo`""

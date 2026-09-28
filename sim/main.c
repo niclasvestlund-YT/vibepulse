@@ -39,6 +39,7 @@
 #include "needs_you_send_policy.h"
 #include "agent_status_parse.h"
 #include "github_status_parse.h"
+#include "lovable_status_parse.h"
 #include "max_tracker_parse.h"
 #include "boot_screen.h"
 #include "ota_ui.h"
@@ -454,6 +455,19 @@ static void apply_max_tracker_fixture(int idx) {
       (int)(sizeof MAX_TRACKER_FIXTURES / sizeof MAX_TRACKER_FIXTURES[0]);
   max_tracker_fixture_idx = (idx % count + count) % count;
   feed_max_tracker_file(MAX_TRACKER_FIXTURES[max_tracker_fixture_idx]);
+}
+
+static void apply_lovable_file(const char *file) {
+  size_t len = 0;
+  char *json = read_fixture(file, &len);
+  tk_lovable_status status;
+  if (json && tk_lovable_status_parse(json, len, &status)) {
+    tokens_apply_lovable(&status);
+    printf("lovable: %s (%s)\n", file, status.has_data ? "data" : "waiting");
+  } else {
+    printf("lovable: %s avvisad\n", file);
+  }
+  free(json);
 }
 
 static void apply_github_file(const char *file, bool unique_event) {
@@ -1752,6 +1766,41 @@ static int run_vibepulse_needs_you_render_qa(void) {
   return 0;
 }
 
+/* Lovable page captures. Its own mode, run with LABS bit 32 set
+ * (TORGET_LABS_MASK=32 or more), so the pinned default frames and their pager
+ * rows stay byte-identical to a build without the page. */
+static int run_vibepulse_lovable_qa(void) {
+  capture_failures = 0;
+  torget_app_show(SIM_APP_VIBEPULSE);
+  apply_agent_file("agent-status-idle.json");
+  feed_tokens_file("tokens.json");
+  if (tk_labs_view_position(VIEW_LOVABLE) < 0) {
+    printf("lovable: page is off -- set TORGET_LABS_MASK with bit 32\n");
+    return 1;
+  }
+  /* Lovable: credits left dominate; plan, provenance and data age are the
+   * only other facts. Waiting and sign-in never draw a number. */
+  apply_lovable_file("lovable-waiting.json");
+  tokens_show_view(VIEW_LOVABLE);
+  dump_frame("vibepulse-lovable-waiting");
+  apply_lovable_file("lovable-login.json");
+  dump_frame("vibepulse-lovable-login");
+  apply_lovable_file("lovable.json");
+  dump_frame("vibepulse-lovable-live");
+  usage_screen_tick(torget_now_us() + 181000000LL);
+  dump_frame("vibepulse-lovable-disconnected");
+  apply_lovable_file("lovable-stale.json");
+  dump_frame("vibepulse-lovable-cached");
+  apply_lovable_file("lovable-daily-empty.json");
+  dump_frame("vibepulse-lovable-daily-empty");
+  apply_lovable_file("lovable-large.json");
+  dump_frame("vibepulse-lovable-large");
+  apply_lovable_file("lovable-small.json");
+  dump_frame("vibepulse-lovable-small");
+
+  return capture_failures == 0 ? 0 : 1;
+}
+
 /* Run in a fresh process for every mask; hit the real shared renderer and
  * update paths with pages absent. Pure policy tests alone cannot catch a NULL
  * label dereference or a tileview column mistaken for a semantic ID. */
@@ -1760,6 +1809,7 @@ static int run_vibepulse_labs_qa(bool catalogue) {
   apply_agent_file("agent-status-idle.json");
   feed_tokens_file("tokens.json");
   apply_github_file("github.json", false);
+  apply_lovable_file("lovable.json");
   apply_max_tracker_fixture(0);
   usage_screen_tick(torget_now_us());
   usage_screen_set_stale(true);
@@ -1789,10 +1839,112 @@ static int run_vibepulse_labs_qa(bool catalogue) {
   torget_settings_click_slot(3);
   dump_frame(catalogue ? "settings-labs-github" : "labs-github");
   torget_settings_click_slot(3);
+  dump_frame(catalogue ? "settings-labs-providers" : "labs-providers");
+  torget_settings_click_slot(3);
   if (catalogue) dump_frame("settings-labs-return");
   printf("LABS: %d dense tiles verified\n", visited);
   return capture_failures == 0 ? 0 : 1;
 }
+
+#ifdef TORGET_BOARD_175
+#include "round_diagnostic.h"
+static int run_round_quota_qa(void) {
+  capture_failures = 0;
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
+  torget_app_show(SIM_APP_VIBEPULSE);
+  tk_tokens data = {0};
+  data.codex_week = forecast_limit(43, 2549);
+  data.codex_week.has_delta = 1;
+  data.codex_week.delta_pct = 8;
+  data.claude_model_week = forecast_limit(73, 3129);
+  data.claude_model_week.has_delta = 1;
+  data.claude_model_week.delta_pct = 12;
+  tokens_apply(&data);
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  dump_frame("round-codex-live");
+  data.codex_week.stale = 1;
+  tokens_apply(&data);
+  dump_frame("round-codex-stale");
+  data.codex_week.stale = 0;
+  data.codex_forecast.state = TK_FORECAST_EXHAUSTS;
+  data.codex_forecast.has_offset_min = 1;
+  data.codex_forecast.offset_min = -540;
+  tokens_apply(&data);
+  dump_frame("round-codex-to-empty");
+  memset(&data.codex_forecast, 0, sizeof data.codex_forecast);
+  data.codex_week.stale = 0;
+  data.codex_week.has_delta = 0;
+  tokens_apply(&data);
+  dump_frame("round-codex-today-missing");
+  data.codex_week.has_delta = 1;
+  data.codex_week.delta_pct = 44;
+  tokens_apply(&data);
+  dump_frame("round-codex-today-invalid");
+  data.codex_week.pct = 100;
+  data.codex_week.delta_pct = 100;
+  data.codex_week.reset_min = 59;
+  tokens_apply(&data);
+  dump_frame("round-codex-full");
+  data.codex_week.reset_min = 143999;
+  tokens_apply(&data);
+  dump_frame("round-codex-long-reset");
+  data.codex_week.reset_min = 59;
+  data.codex_week.pct = 0;
+  data.codex_week.delta_pct = 0;
+  tokens_apply(&data);
+  dump_frame("round-codex-zero");
+  memset(&data.codex_week, 0, sizeof data.codex_week);
+  tokens_apply(&data);
+  dump_frame("round-codex-missing");
+  tokens_show_view(VIEW_CLAUDE_FABLE);
+  dump_frame("round-claude-live");
+  data.claude_week = data.claude_model_week;
+  tokens_apply(&data);
+  tokens_show_view(VIEW_CLAUDE_ALL);
+  dump_frame("round-claude-wide-label");
+  data.claude_week.has_reset = 0;
+  tokens_apply(&data);
+  dump_frame("round-claude-reset-missing");
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_HIDDEN);
+  lv_obj_t *probe = tg_round_diagnostic_create(lv_layer_top());
+  dump_frame("round-diagnostic");
+  lv_obj_delete(probe);
+  torget_settings_open("v1.1.0-round-preview", "192.168.100.100");
+  dump_frame("round-settings-menu");
+  /* A reachable IP must not turn this USB-only board's UPDATE row into OTA. */
+  torget_settings_click_row(TG_SETTINGS_ROW_UPDATE);
+  if (torget_settings_take_intent() != TG_SETTINGS_INTENT_NONE ||
+      !torget_settings_open_p()) return 1;
+  torget_settings_click_row(TG_SETTINGS_ROW_ABOUT);
+  dump_frame("round-settings-about");
+  torget_settings_close();
+  torget_settings_open("preview", NULL);
+  torget_settings_click_slot(TG_SETTINGS_ROW_LABS);
+  dump_frame("round-settings-labs");
+  torget_settings_click_slot(3); /* More: GitHub, popup, Lovable. */
+  torget_settings_click_slot(3); /* More: provider visibility switches. */
+  dump_frame("round-settings-labs-providers");
+  torget_settings_click_slot(0); /* Hide Claude Code until the next boot. */
+  dump_frame("round-settings-labs-providers-pending");
+  torget_settings_click_slot(3); /* The visible RESTART NOW action. */
+  if (torget_settings_take_intent() != TG_SETTINGS_INTENT_RESTART ||
+      torget_settings_open_p()) return 1;
+  torget_settings_close();
+  torget_wifi_ui_set(TG_WIFI_UI_OPEN, "VibePulse-setup", "A1B2C3D4E5F6", NULL, 583);
+  dump_frame("round-wifi-qr");
+  torget_wifi_ui_set_manual_details(true);
+  dump_frame("round-wifi-manual");
+  torget_wifi_ui_set(TG_WIFI_UI_SEARCHING, "A network with a long sample name", NULL,
+                    "NOT SEEN - 2.4 GHZ ONLY", 24);
+  dump_frame("round-wifi-searching");
+  torget_wifi_ui_set(TG_WIFI_UI_FAILED, "A network with a long sample name", NULL,
+                    "CHECK THE PASSWORD", 0);
+  dump_frame("round-wifi-failed");
+  torget_wifi_ui_set(TG_WIFI_UI_HIDDEN, NULL, NULL, NULL, 0);
+  return capture_failures ? 1 : 0;
+}
+#endif
+#include "board_diagnostic.h"
 
 int main(int argc, char **argv) {
   /* Radbuffrat även vid pipe: fixtureloggen ska överleva en kill. */
@@ -1802,6 +1954,11 @@ int main(int argc, char **argv) {
   lv_sdl_window_set_title(disp, "Torget — G GitHub-star, S agentstatus, T VibePulse, M Max Tracker, [ och ] vy, N nästa app, L launcher");
   lv_sdl_mouse_create();
 
+  if (argc == 2 && strcmp(argv[1], "--board-diagnostic") == 0) {
+    tg_board_diagnostic_create();
+    dump_frame("board-diagnostic");
+    return 0;
+  }
   const char *labs_mask = getenv("TORGET_LABS_MASK");
   if (labs_mask) {
     char *end;
@@ -1821,6 +1978,13 @@ int main(int argc, char **argv) {
   torget_settings_create();
   torget_ota_ui_create();
 
+#ifdef TORGET_BOARD_175
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-round-qa") == 0)
+    return run_round_quota_qa();
+#endif
+
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-lovable-qa") == 0)
+    return run_vibepulse_lovable_qa();
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-qa") == 0)
     return run_vibepulse_labs_qa(false);
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-captures") == 0)

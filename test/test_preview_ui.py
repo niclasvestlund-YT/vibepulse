@@ -87,6 +87,7 @@ EXPECTED_BMPS = {
     "torget-settings-labs-analytics.bmp",
     "torget-settings-labs-pending.bmp",
     "torget-settings-labs-github.bmp",
+    "torget-settings-labs-providers.bmp",
     "torget-settings-labs-return.bmp",
     "torget-settings-over-wifi-searching.bmp",
     "torget-settings-notice-takes-over.bmp",

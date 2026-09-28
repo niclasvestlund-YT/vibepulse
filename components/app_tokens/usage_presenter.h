@@ -61,7 +61,13 @@ typedef struct {
   char countdown_text[USAGE_CARD_SHORT_CAP];
   char countdown_caption[USAGE_CARD_LABEL_CAP];
   int counts_to_empty;
+  int has_countdown;
+  int countdown_minutes;
 } usage_quota_page_view;
+
+/* Alternate presentation of the same selected deadline; never parse prose. */
+void usage_presenter_format_dhm(int minutes, int available,
+                                char *out, size_t capacity);
 
 typedef struct {
   int row_count;

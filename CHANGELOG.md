@@ -7,7 +7,7 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
-- **Waveshare ESP32-S3-Touch-AMOLED-1.8 V2 support**, selected with
+- **Waveshare ESP32-S3-Touch-AMOLED-1.8 V2 development profile**, selected with
   `TORGET_BOARD=waveshare_18_v2`: CO5300 QSPI at native 368×448 portrait,
   CST820 touch via Waveshare BSP 2.0.3, BOOT settings input, and a viewport
   transform for the shared 480×480 app. The owner reports display, touch,
@@ -17,10 +17,70 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   V1 and untested peripherals, OTA, Windows, long-running memory/network
   stress remain outside the support claim. iPhone Wi-Fi setup needs a simpler
   onboarding experience.
+
+## v1.3.0 — 2026-09-25
+
+Release notes: [Lovable credits and Labs controls](docs/releases/2026-09-25-lovable-and-labs.md).
+
+### Added
+
+- Optional Lovable build-credit page and an experimental local Chrome bridge
+  that reads labelled values from the logged-in billing page. Credentials stay
+  in the browser; only allowlisted display data reaches the loopback receiver
+  and existing LAN endpoint. Cached readings preserve their age across restarts.
+  [Setup, troubleshooting and removal](docs/lovable-pulse.md) include the
+  current official MCP documentation/service mismatch and verification limits.
+- `--lovable-source browser|mcp|auto` selects the source independently of the
+  firmware. Browser mode needs no MCP login; the official OAuth path remains
+  available for future API support.
+- LABS provider visibility switches for Claude Code and Codex, plus a
+  **RESTART NOW** action to apply saved page choices. Existing Labs choices
+  migrate; disabling all pages leaves a usable empty state.
+
+### Fixed
+
+- Keep nested daily balances and reset dates out of the main credit period.
+- Accept CRLF-delimited MCP event streams and retain Lovable source options in
+  the Windows task runner. Mark retained panel readings CACHED if host polling stops.
+- Disabled quota pages are skipped safely during updates and header refreshes;
+  carousel navigation is bounded even when every page is off.
+- Round preview tooling keeps the correct 466 × 466 profile and explicitly
+  enables its quota fixtures. Documentation names BOOT as the round Settings
+  shortcut and requires identifying the board before any flash.
+
+## v1.2.0 — 2026-09-24
+
+Release notes:
+[v1.2.0 — VibePulse on four AMOLED shapes](docs/releases/2026-09-24-four-amoled-shapes.md).
+
+### Changed
+
+- Encrypted live-status publishing runs at most every five seconds instead of
+  two, reducing normal host status uploads by 60%. Changed activity can appear
+  up to three seconds later; approval delivery and signed expiry are unchanged.
+
+### Added
+
+- Round 1.75 bring-up profile at 466 × 466: one quota ring with today’s
+  contribution, USED TODAY and a D:H:M reset/exhaustion countdown. Native
+  boundary-state and full-app captures now cover quota, attention, analytics,
+  settings, Wi-Fi and OTA. A five-target diagnostic and the normal app have
+  booted on the named unit. Its quota page has been photographed, and Wi-Fi
+  and token fetches work. A fixed USB-down orientation is installed; its
+  angle, touch alignment, value accuracy and reply flow need physical review
+  before public support is claimed.
+- Development port for Waveshare 1.91 Touch AMOLED: native 536 × 240 layout,
+  QSPI display, mapped touch, BOOT settings and a USB installation guide. One
+  real unit passed four-corner touch, phone Wi-Fi setup, saved-network
+  reconnect and visible Codex usage. Owner photographs and the physical report
+  show the result and remaining checks. Needs You decisions stay on the
+  computer until a compact 90 px touch-target layout passes physical review;
+  full menu acceptance is separate.
+
 - Owner photographs of the working 2.41 V2, disclosed Waveshare affiliate
   product links, and a [coming-soon hardware list](README.md#coming-soon--hardware-on-the-workbench).
-  AMOLED 1.75/1.91 ports are planned; RGB matrix hardware is experimental.
-  Neither listing claims additional firmware support.
+  The 1.8 AMOLED port is still planned; RGB matrix hardware is a separate
+  experiment. Neither listing claims additional VibePulse firmware support.
 - **Waveshare ESP32-S3-Touch-AMOLED-2.41 V2 support**, selected with
   `TORGET_BOARD=waveshare_241_v2`: fixed 600×450 landscape, V2 QSPI/I2C/reset
   wiring, paired touch rotation, BOOT settings input and native UI margins.
