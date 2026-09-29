@@ -50,7 +50,11 @@ Open <http://127.0.0.1:8739/connect>. Paste the **existing API key whose usage y
 want to see**, enter a display name and monthly display budget, and save. A new
 API key has its own new usage; it will not inherit another key's history. The
 form saves secrets via macOS Security.framework in Keychain, under service
-`org.openpulse.openrouter` and the configured key id. Keys never appear in
+`org.openpulse.openrouter`. Each save stages new credential references and
+atomically publishes the non-secret configuration only after all writes succeed.
+A failed save keeps the previous connection and budget active, including in
+other running service processes. Old Keychain entries remain available until
+those processes restart; setup never overwrites them. Keys never appear in
 process arguments, firmware, fixtures, JSON configuration or request logs.
 A denied/locked Keychain produces a safe error; it never falls back to plain text.
 
@@ -78,7 +82,13 @@ checkout's ignored `.openpulse/config.json`, with no VibePulse paths or services
   disables the display budget. Reload the foreground process after config edits.
 - The form intentionally starts with one key. Add further key entries to the
   config, and save each secret using the hidden terminal prompt below.
-- Optional account view uses the separate Keychain account `management`.
+- Manual configuration defaults to Keychain account `management` for credits.
+  The connection form creates separate, versioned references for both secrets
+  (`credential_id` per key and `management_credential_id` for the account).
+  References are non-secret; use the form again to replace a saved connection.
+  Restart any separate LAN service after saving. Unused older entries may be
+  removed from the OpenPulse namespace in Keychain Access after those processes
+  stop. A failed cleanup can leave an inactive entry, never a switched account.
 - No local spend history or persisted source cache in v0.1. Restart starts with
   dashes until a new response, avoiding stale cache/credential mixups.
 - The service polls each source every 60 seconds, with bounded 8-second network
@@ -86,13 +96,15 @@ checkout's ignored `.openpulse/config.json`, with no VibePulse paths or services
   waiting for provider I/O. Key and account freshness/error states are separate.
 - Foreground only: no automatic start/sleep-resume certification yet.
 
+For manual configuration without credential references:
+
 ```sh
 python3.12 -m tools.openpulse.service --save-key default
 python3.12 -m tools.openpulse.service --save-key management  # optional
 ```
 
 The terminal prompt hides input. For temporary development only, a namespaced
-`OPENPULSE_KEY_<ID IN UPPERCASE>` environment value can override a saved key;
+`OPENPULSE_KEY_<CREDENTIAL ID IN UPPERCASE>` environment value can override a saved key;
 never write it in shell history, Git or a launch script. Keychain is preferred.
 
 ## Meaning of the numbers (official documentation checked 2026-09-29)

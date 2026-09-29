@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from tools.openpulse.client import Client, NoRedirect, SourceError
 from tools.openpulse.credentials import SERVICE, load
 from tools.openpulse.model import key_view, normalize_credits, normalize_key
-from tools.openpulse.service import DEMO_KEY, EXAMPLE, Monitor, make_server, read_config
+from tools.openpulse.service import DEMO_KEY, EXAMPLE, Monitor, make_server, read_config, save_connection
 
 
 class ModelTests(unittest.TestCase):
@@ -180,7 +180,9 @@ class MonitorTests(unittest.TestCase):
             for mutate in (lambda c:c.update(api_key="secret"),
                            lambda c:c["keys"][0].update(monthly_budget_usd=0),
                            lambda c:c["keys"][0].update(warning_at=.95),
-                           lambda c:c["keys"][0].update(id="management")):
+                           lambda c:c["keys"][0].update(id="management"),
+                           lambda c:c["keys"][0].update(credential_id="invalid/key"),
+                           lambda c:c.update(management_credential_id=True)):
                 config = read_config(EXAMPLE);mutate(config);path.write_text(json.dumps(config))
                 with self.assertRaises(ValueError):
                     read_config(path)
@@ -204,7 +206,10 @@ class MonitorTests(unittest.TestCase):
                     self.assertEqual(post("http://"+authority,"attacker.test"),403)
                     save.assert_not_called()
                     self.assertEqual(post("http://"+authority),204)
-                    save.assert_called_once_with("default","private-test-sentinel")
+                    saved_config = read_config(path)
+                    ref = saved_config["keys"][0]["credential_id"]
+                    self.assertNotEqual(ref, "default")
+                    save.assert_called_once_with(ref,"private-test-sentinel")
                     self.assertNotIn("private-test-sentinel",path.read_text())
                     self.assertEqual(read_config(path)["keys"][0]["monthly_budget_usd"],25)
                     self.assertEqual(self.monitor.snapshot()["state"],"no_data")
@@ -213,6 +218,84 @@ class MonitorTests(unittest.TestCase):
                     self.assertEqual(post("http://"+authority),403)
             finally:
                 server.shutdown();server.server_close();thread.join()
+
+    def test_failed_connection_never_replaces_active_credentials(self):
+        for failure in ("key", "management", "config", "cleanup"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                monitor = Monitor(read_config(EXAMPLE), client=self.client)
+                path = Path(directory) / "config.json"
+                path.write_text(json.dumps(monitor.config))
+                original_config = path.read_bytes()
+                store = {"default": "old-key", "management": "old-management"}
+                monitor.loader = Mock(side_effect=store.get)
+                monitor.refresh("default")
+                original = monitor.snapshot()
+
+                def keychain(account, secret=None, *, remove=False,
+                             failure=failure, store=store, monitor=monitor):
+                    self.assertNotIn(account, ("default", "management"))
+                    if remove:
+                        if failure == "cleanup":
+                            raise RuntimeError("cleanup denied")
+                        store.pop(account, None)
+                    else:
+                        if failure == "key" or (failure == "management" and account.startswith("mgmt_")):
+                            raise RuntimeError("write denied")
+                        store[account] = secret
+                        # A concurrent poll still uses the old immutable reference.
+                        monitor.refresh("default")
+                        monitor.loader.assert_called_with("default")
+
+                with patch("tools.openpulse.credentials.keychain", side_effect=keychain), \
+                     patch("tools.openpulse.service.os.replace", side_effect=OSError("replace denied")):
+                    with self.assertRaisesRegex(RuntimeError, "connection_not_saved"):
+                        save_connection(monitor, path, "new-key", "new-management", "New account", 100)
+                self.assertEqual(path.read_bytes(), original_config)
+                self.assertEqual(store["default"], "old-key")
+                self.assertEqual(store["management"], "old-management")
+                self.assertEqual(monitor.snapshot()["name"], original["name"])
+                self.assertEqual(monitor.snapshot()["budget"], original["budget"])
+                self.assertEqual(monitor.snapshot()["month"], original["month"])
+                self.assertNotIn("credential_id", monitor.config["keys"][0])
+                self.assertEqual(monitor.generation, 0)
+                self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_successful_connection_commits_both_references_and_discards_inflight_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            store = {"default": "old-key", "management": "old-management"}
+            self.monitor.loader = Mock(side_effect=store.get)
+
+            def stage(account, secret):
+                self.assertNotIn(account, store)
+                store[account] = secret
+
+            def old_request(endpoint, token):
+                self.assertEqual(token, "old-key")
+                with patch("tools.openpulse.credentials.keychain", side_effect=stage):
+                    save_connection(self.monitor, path, "new-key", "new-management", "New account", 100)
+                return DEMO_KEY
+
+            self.client.get.side_effect = old_request
+            self.monitor.refresh("default")
+            self.assertIsNone(self.monitor.snapshot()["month"])
+            self.assertEqual(self.monitor.snapshot()["name"], "New account")
+            config = read_config(path)
+            self.assertEqual(config, self.monitor.config)
+            self.assertEqual(store["default"], "old-key")
+            self.assertEqual(store["management"], "old-management")
+            self.client.get.side_effect = None
+            self.client.get.return_value = DEMO_KEY
+            self.monitor.refresh("default")
+            self.client.get.assert_called_with("key", "new-key")
+            self.monitor.loader.assert_called_with(config["keys"][0]["credential_id"])
+            self.client.get.return_value = {"total_credits": 40, "total_usage": 3}
+            self.monitor.refresh("management")
+            self.client.get.assert_called_with("credits", "new-management")
+            self.assertEqual(self.monitor.snapshot()["accountBalance"], 37)
+            self.assertNotIn("new-key", path.read_text())
+            self.assertNotIn("new-management", path.read_text())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_keychain_namespace_and_env_are_isolated(self):
         self.assertEqual(SERVICE, b"org.openpulse.openrouter")

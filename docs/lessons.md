@@ -1462,3 +1462,20 @@ tests, both firmware profiles in CI, isolated hardware registries, the
 Automatic rotation, board-safe OTA, physical answer replies and sustained
 motion/network stress remain separate follow-ups; they were not established
 by displaying usage.
+
+
+## 2026-09-29 — Publish credential references only after setup succeeds
+
+OpenPulse setup originally overwrote the active API credential before saving the
+optional management credential and config. A later denied write could report
+failure while pollers silently switched account under the old name and budget.
+Restoring in an exception handler is insufficient when Keychain access itself
+is denied, or another foreground process can read the overwritten entry.
+
+Setup now stages separate immutable Keychain entries and atomically replaces
+the non-secret config only after both writes succeed. Failure leaves previous
+references untouched; even failed cleanup leaves only inactive entries. Pollers
+capture a credential reference and generation together, and discard an older
+in-flight response after successful setup. Other running services keep their
+old entries until explicitly restarted. Tests inject first/second Keychain-write
+failure, config replacement failure, cleanup denial and concurrent old polling.

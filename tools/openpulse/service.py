@@ -8,6 +8,8 @@ import sys
 import os
 from pathlib import Path
 import re
+import secrets
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,18 +30,21 @@ DEMO_KEY = {"usage_daily": 1.84, "usage_weekly": 12.36, "usage_monthly": 38.42,
 def read_config(path):
     try:
         value = json.loads(Path(path).read_text())
-        if not isinstance(value, dict) or set(value) - {"keys", "account_view"}:
+        if not isinstance(value, dict) or set(value) - {"keys", "account_view", "management_credential_id"}:
             raise ValueError
         keys = value["keys"]
         if not isinstance(keys, list) or not 1 <= len(keys) <= 8:
             raise ValueError
         ids = set()
         for key in keys:
-            if not isinstance(key, dict) or set(key) != {"id", "name", "monthly_budget_usd", "warning_at", "critical_at"}:
+            required = {"id", "name", "monthly_budget_usd", "warning_at", "critical_at"}
+            if not isinstance(key, dict) or not required <= set(key) or set(key) - required - {"credential_id"}:
                 raise ValueError
             if not credentials.valid_id(key["id"]) or key["id"] == "management" or key["id"] in ids:
                 raise ValueError
             ids.add(key["id"])
+            if "credential_id" in key and not credentials.valid_id(key["credential_id"]):
+                raise ValueError
             if not isinstance(key["name"], str) or not re.fullmatch(r"[A-Za-z0-9 _.-]{1,24}", key["name"]):
                 raise ValueError
             budget = key["monthly_budget_usd"]
@@ -49,6 +54,8 @@ def read_config(path):
             if warning is None or critical is None or not 0 < warning < critical <= 1:
                 raise ValueError
         if not isinstance(value.get("account_view", False), bool):
+            raise ValueError
+        if "management_credential_id" in value and not credentials.valid_id(value["management_credential_id"]):
             raise ValueError
         return value
     except (OSError, ValueError, KeyError, TypeError):
@@ -61,6 +68,7 @@ class Monitor:
         self.client, self.loader = client or Client(), loader or credentials.load
         self.clock, self.monotonic = clock or time.time, monotonic or time.monotonic
         self.lock = threading.Lock()
+        self.setup_lock = threading.Lock()
         self.slots = {key["id"]: self.empty() for key in config["keys"]}
         self.slots["management"] = self.empty()
         self.stop = threading.Event()
@@ -73,12 +81,19 @@ class Monitor:
     def refresh(self, account):
         with self.lock:
             generation = self.generation
+            if account == "management":
+                credential_id = self.config.get("management_credential_id", "management")
+            else:
+                key = next((key for key in self.config["keys"] if key["id"] == account), None)
+                if key is None:
+                    return
+                credential_id = key.get("credential_id", account)
         management = account == "management"
         try:
             if self.demo:
                 raw = {"total_credits": 200, "total_usage": 138.42} if management else DEMO_KEY
             else:
-                raw = self.client.get("credits" if management else "key", self.loader(account))
+                raw = self.client.get("credits" if management else "key", self.loader(credential_id))
             values = normalize_credits(raw) if management else normalize_key(raw)
             error = None
         except SourceError as exc:
@@ -109,8 +124,9 @@ class Monitor:
             self.stop.wait(1)
 
     def snapshot(self, index=0):
-        config = self.config["keys"][index]
         with self.lock:
+            configuration = self.config
+            config = configuration["keys"][index]
             key, account = copy.deepcopy((self.slots[config["id"]], self.slots["management"]))
         now, mono = self.clock(), self.monotonic()
         age = max(0, mono - key["mono"]) if key["mono"] is not None else None
@@ -118,8 +134,8 @@ class Monitor:
         if age is not None:
             age = max(age, now - key["observed"])
         result = key_view(key["values"], key["observed"], now, config, key["error"], age)
-        result.update(demo=self.demo, keyIndex=index, keyCount=len(self.config["keys"]))
-        enabled = self.config.get("account_view", False)
+        result.update(demo=self.demo, keyIndex=index, keyCount=len(configuration["keys"]))
+        enabled = configuration.get("account_view", False)
         account_age = max(0, mono - account["mono"], now - account["observed"]) if account["mono"] is not None else None
         result.update(accountEnabled=enabled,
                       accountBalance=(account["values"] or {}).get("accountBalance") if enabled else None,
@@ -127,6 +143,58 @@ class Monitor:
                                     "no_data" if account_age is None or (account["values"] or {}).get("accountBalance") is None else "stale" if account_age >= 180 else "fresh"),
                       accountAgeSeconds=account_age, accountError=account["error"] if enabled else None)
         return result
+
+
+def save_connection(monitor, path, token, management, name, budget):
+    """Stage new immutable Keychain entries; publish their references last.
+
+    Existing entries are never overwritten. A denied Keychain write or failed
+    config replace leaves every running service on its previous credentials.
+    Keep previous entries for other processes until they reload the config.
+    """
+    with monitor.setup_lock:
+        with monitor.lock:
+            config = copy.deepcopy(monitor.config)
+        config["keys"][0].update(name=name, monthly_budget_usd=budget)
+        config["account_view"] = bool(management)
+        key_ref = "key_" + secrets.token_hex(8)
+        config["keys"][0]["credential_id"] = key_ref
+        config.pop("management_credential_id", None)
+        writes = [(key_ref, token)]
+        if management:
+            management_ref = "mgmt_" + secrets.token_hex(8)
+            config["management_credential_id"] = management_ref
+            writes.append((management_ref, management))
+        slots = {key["id"]: monitor.empty() for key in config["keys"]}
+        slots["management"] = monitor.empty()
+        staged, temp = [], None
+        try:
+            for account, secret in writes:
+                staged.append(account)
+                credentials.keychain(account, secret)
+            path = Path(path)
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd, temp = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+            with os.fdopen(fd, "w") as stream:
+                json.dump(config, stream)
+            os.replace(temp, path)
+        except Exception:
+            # Cleanup may be denied too; an orphan stays inactive in Keychain.
+            for account in staged:
+                try:
+                    credentials.keychain(account, remove=True)
+                except Exception:  # noqa: S110 - never log credential-bearing errors
+                    pass
+            if temp is not None:
+                try:
+                    Path(temp).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise RuntimeError("connection_not_saved") from None
+        with monitor.lock:
+            monitor.generation += 1
+            monitor.config = config
+            monitor.slots = slots
 
 
 def make_server(monitor, host, port, *, connect_path=None):
@@ -159,23 +227,7 @@ def make_server(monitor, host, port, *, connect_path=None):
                         not re.fullmatch(r"[A-Za-z0-9 _.-]{1,24}", name) or
                         number(budget) is None or not 0.01 <= budget <= 1e9 or len(monitor.config["keys"]) != 1):
                     raise ValueError
-                config = copy.deepcopy(monitor.config)
-                config["keys"][0].update(name=name, monthly_budget_usd=budget)
-                config["account_view"] = bool(management)
-                credentials.keychain(config["keys"][0]["id"], token)
-                if management:
-                    credentials.keychain("management", management)
-                path = Path(connect_path)
-                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                temp = path.with_suffix(".tmp")
-                fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(fd, "w") as stream:
-                    json.dump(config, stream)
-                os.replace(temp, path)
-                with monitor.lock:
-                    monitor.generation += 1
-                    monitor.config = config
-                    monitor.slots = {key: monitor.empty() for key in monitor.slots}
+                save_connection(monitor, connect_path, token, management, name, budget)
             except Exception:
                 self.send_error(400, "Unable to save connection")
                 return
