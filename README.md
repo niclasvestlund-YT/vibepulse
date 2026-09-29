@@ -4,8 +4,9 @@ An optional Labs source preview adds **OpenPulse**, an OpenRouter spend and
 budget page first verified on the round 1.75-inch display. With compatible
 source-built firmware, enable **OPENROUTER** in VibePulse
 **SETTINGS → LABS → MORE → MORE**, then restart. Its Mac service and key storage
-remain separate. [Start its Mac demo or connect
-OpenRouter](docs/openpulse/README.md). Existing VibePulse is the default build.
+remain separate. [Install for OpenRouter only, try the Mac demo or connect your
+key](docs/openpulse/README.md#install-for-openrouter-only). Existing VibePulse
+is the default build. This preview is not included in the v1.3.0 release.
 
 ![OpenPulse round native LVGL demo, synthetic values](docs/img/openpulse/round-spend.png)
 
@@ -110,6 +111,21 @@ Codex. You do not need to read this whole page:
    the base installation, optional analytics/integrations and future ideas. GitHub Stars is available; standalone reset clocks and coding quotes
    are concepts. New installs start with quotas and activity; analytics are
    optional in SETTINGS → LABS.
+
+## OpenRouter only
+
+You can use the round panel for OpenRouter without a Claude Code or Codex
+account. Follow the [OpenRouter-only installation guide](docs/openpulse/README.md#install-for-openrouter-only)
+from the `codex/openpulse` preview branch, rather than the general Claude/Codex
+setup below. It covers the Mac demo, Keychain connection, LAN service, exact
+round firmware build, Labs choices and troubleshooting.
+
+The data path is **OpenRouter API → OpenPulse service on your Mac → Wi-Fi →
+display**. Browser login is not required. The Mac must be awake and the separate
+service running; USB supplies power, not OpenRouter data. This preview has no
+automatic service startup or OpenRouter relay. A Labs switch alone does not
+install the service. [If the screen shows dashes, NO DATA or an error](docs/openpulse/README.md#troubleshooting-dashes-and-no-data),
+check the selected page, source status and panel reachability separately.
 
 ## Latest release: v1.3.0
 

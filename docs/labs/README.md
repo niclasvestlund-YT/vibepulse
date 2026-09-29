@@ -47,6 +47,7 @@ anything on the computer.
 | LOVABLE PAGE | Remaining build credits, plan and freshness | [Lovable browser setup](../lovable-pulse.md) | Off |
 | CLAUDE CODE | Show or hide the Claude quota pages | Claude quota source | On |
 | CODEX | Show or hide the Codex quota page | Codex quota source | On |
+| OPENROUTER | API-key spend, display budget and allowance | [Separate OpenPulse Mac service](../openpulse/README.md#install-for-openrouter-only); preview firmware required | Off |
 
 The ON label is a saved display preference, not a claim that its data source
 is ready. Configure the computer first using the linked guides. Missing data
@@ -56,6 +57,13 @@ For a Lovable-only carousel, turn LOVABLE PAGE on and CLAUDE CODE/CODEX off,
 then tap RESTART NOW on the provider page. If every page is off, an empty-state message
 points back to Settings; the agent overlay remains independent. Version-1 Labs
 records retain their existing choices and migrate with both provider pages on.
+
+For an OpenRouter-only carousel on compatible preview firmware, turn
+OPENROUTER on, CLAUDE CODE/CODEX off, and the other optional pages off; then
+choose RESTART NOW. The normal agent overlay remains independent. OpenRouter
+is not in the v1.3.0 release, and the Labs switch does not start its Mac service.
+Use the [OpenRouter-only guide](../openpulse/README.md#install-for-openrouter-only)
+for firmware, data transport and dashes/NO DATA checks.
 
 ### Existing installations and saved choices
 

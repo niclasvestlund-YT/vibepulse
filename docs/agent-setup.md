@@ -23,6 +23,16 @@ For a Windows host, keep
 runbook. It covers the standalone Codex CLI, Task Scheduler, Private firewall,
 startup health, lifecycle proof, and the exact public evidence boundary.
 
+## OpenRouter-only setup takes a separate path
+
+If the user wants only OpenRouter, use the [OpenRouter-only installation guide](openpulse/README.md#install-for-openrouter-only)
+in the `codex/openpulse` source preview. Do not require Claude/Codex accounts,
+install their tokenserver, or follow the default 2.16 build commands below for
+the round 1.75. OpenRouter needs its own Mac Keychain connection, LAN service
+and explicitly enabled preview firmware. There is no automatic OpenPulse
+service startup or relay in this preview. Preserve any existing VibePulse
+installation and confirm the exact board before any user-authorized flash.
+
 ## What is not part of this repo
 
 `AGENTS.md`, `README.sv.md` and some code comments refer to things the

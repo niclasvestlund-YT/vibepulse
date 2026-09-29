@@ -11,6 +11,177 @@ unit. Full touch-grid, swipe and menu acceptance remain pending.
 ![Native shared LVGL spend page, synthetic data](../img/openpulse/round-spend.png)
 ![Native shared LVGL details page, synthetic data](../img/openpulse/round-details.png)
 
+## Install for OpenRouter only
+
+**Current scope:** a source preview on macOS, first physically checked on the
+round **Waveshare ESP32-S3-Touch-AMOLED-1.75**. It is not included in the
+v1.3.0 release. Square 2.16 has bench checks, not physical OpenRouter acceptance;
+the other board profiles cannot enable this preview. You do not need Claude
+Code, Codex or Lovable accounts to use OpenRouter.
+
+The connection is **OpenRouter API → OpenPulse service on your Mac → local
+Wi-Fi → display**. Signing in to OpenRouter in a browser does not feed the
+panel. The existing API key is read from Mac Keychain. The Mac needs internet,
+must stay awake, and must run the service. The display needs 2.4 GHz Wi-Fi and
+LAN access to that Mac; a guest network can block this even when Wi-Fi shows
+connected. USB supplies power, not the data. The preview has no OpenRouter
+relay or automatic service startup.
+
+### 1. Get a separate checkout
+
+Keep existing VibePulse installations untouched. Until this preview is merged
+and released, use its branch, not the v1.3.0 download:
+
+```sh
+git clone --branch codex/openpulse --single-branch \
+  https://github.com/niclasvestlund-YT/vibepulse.git openpulse-panel
+cd openpulse-panel
+python3.12 -m venv .venv
+```
+
+Python 3.11 or newer is required; 3.12 was tested. Substitute your installed
+3.11+ interpreter if needed. The OpenPulse service uses Python's standard
+library; it does not need the Claude/Codex tokenserver, browser extension or
+provider plugins. Firmware tools have their own dependencies in the board guide.
+
+### 2. Try the demo before connecting hardware
+
+```sh
+.venv/bin/python -m tools.openpulse.service --demo
+```
+
+Open <http://127.0.0.1:8738> on the Mac. Values are labelled DEMO. This reads no
+credentials, makes no OpenRouter requests and does not install anything on the
+panel. Stop it with Ctrl-C before continuing.
+
+### 3. Save the existing OpenRouter key locally
+
+```sh
+.venv/bin/python -m tools.openpulse.service --connect \
+  --config .openpulse/config.json --port 8739
+```
+
+Open <http://127.0.0.1:8739/connect> on the same Mac. Save the **existing key
+whose spend you want**, a display name and a monthly display budget. The key
+stays in Mac Keychain, not in the configuration file. Browser login is not
+required after saving. A new key does not inherit another key's spend.
+The optional management key is needed only for account-wide credits; leave it
+blank for key spend and remaining allowance. Never paste keys into chat or Git.
+
+The form is loopback-only. Stop this setup process with Ctrl-C after saving;
+its port 8739 is not the physical display endpoint.
+
+### 4. Start the service that the panel can reach
+
+Find the Mac's current private LAN IPv4 address in System Settings → Wi-Fi →
+Details → TCP/IP. Reserve it in the router if possible, because the firmware's
+OpenPulse address is fixed. Replace `YOUR_MAC_LAN_IP` below with that address:
+
+```sh
+.venv/bin/python -m tools.openpulse.service \
+  --config .openpulse/config.json --host YOUR_MAC_LAN_IP --port 8740
+```
+
+Keep this terminal running. Open `http://YOUR_MAC_LAN_IP:8740/` on the Mac;
+verify that the reading is marked fresh and is not DEMO. Also open it from a
+phone on the display's Wi-Fi: that checks another device can reach the Mac.
+If it cannot, fix the network path before installing firmware. Setup stays on
+127.0.0.1; do not add `--connect` to the LAN command. Use a trusted private
+network and do not expose port 8740 to the internet.
+
+### 5. Build and install the exact round preview firmware
+
+Follow the [round board guide](../waveshare-175-preview.md) for ESP-IDF setup,
+unit identification, a verified private backup and recovery. Use this guide's
+OpenPulse build commands below, not the board guide's default quota build:
+
+```sh
+test -f secrets.h || cp secrets.h.example secrets.h
+test -f openpulse_panel_config.h || cp openpulse_panel_config.h.example openpulse_panel_config.h
+```
+
+In the ignored `openpulse_panel_config.h`, set the origin to
+`http://YOUR_MAC_LAN_IP:8740` — the **same address and port** used in step 4.
+Do not put an OpenRouter API key there. Leave the first-install seed defaults
+at 0; enable the page in Labs after installation. Keep `secrets.h` private,
+and use the board's phone provisioning or your private Wi-Fi configuration.
+
+```sh
+. ~/esp/esp-idf/export.sh
+idf.py -B build-openpulse-round -D TORGET_OPENPULSE=ON \
+  -D TORGET_BOARD=waveshare_175 -D SDKCONFIG=sdkconfig.openpulse.175 \
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.175' \
+  -D TORGET_SOLELKOLLEN_DIR=/nonexistent -D TORGET_WITH_BUDDY=OFF build
+```
+
+Your ESP-IDF path may differ. Confirm the build is for `waveshare_175`, with
+OpenPulse enabled and no companion apps. **Only after the owner authorizes the
+install and the exact unit/backup checks pass**, install over USB using the
+same `build-openpulse-round` directory. Follow the board guide's flash/identity
+procedure; do not substitute a default `build/`, another board's binary or OTA.
+A successful build alone is not an installation or physical acceptance.
+When those checks and authorization are complete, replace the port placeholder
+with the identified unit's port:
+
+```sh
+idf.py -B build-openpulse-round -p /dev/cu.usbmodemYOURPORT flash monitor
+```
+
+This command writes the device; do not run it just to test the Mac service.
+
+### 6. Show only OpenRouter
+
+Hold **BOOT for about three seconds → LABS → MORE → MORE**. Set OPENROUTER ON
+and CLAUDE CODE/CODEX OFF. Keep the other optional pages off if you want only
+the OpenRouter carousel, then tap **RESTART NOW**. Saved Labs choices apply
+at restart. Hiding Claude/Codex quota pages does not independently disable
+agent-activity monitoring or other previously configured integrations.
+
+The switch exists only in compatible preview firmware. Labs does not download
+firmware, save the API key or install/start the Mac service. If OPENROUTER is
+missing, check the source branch, board and build flags before changing accounts.
+
+### 7. Verify and keep it running
+
+With the LAN service running and both devices connected, the panel polls every
+10 seconds; the service refreshes OpenRouter every 60 seconds. Check the month
+reading and UPDATED status, then tap the bottom indicator for key allowance.
+Zero spend can be a correct reading; dashes mean a missing value. Account
+credits remain off unless a management key was explicitly supplied.
+
+After stopping the terminal, rebooting the Mac or waking it if the process
+ended, run the **step 4 LAN command again** from this checkout. Keep the Mac
+awake for continuous readings. OpenPulse automatic login/reboot startup and
+sleep recovery have not been implemented or certified. The VibePulse
+Claude/Codex service installer does not install OpenPulse. If you save a new
+key/budget using step 3, restart the separate LAN service to reload its config.
+Changing the Mac address requires matching the firmware origin again; a router
+reservation avoids ordinary DHCP address changes.
+
+## Troubleshooting dashes and NO DATA
+
+Check **which provider page** is visible first. Claude/Codex dashes are not
+OpenRouter spend; choose the OPENPULSE page, or use the OpenRouter-only Labs
+choices above. Then check `http://YOUR_MAC_LAN_IP:8740/` and, if needed,
+`http://YOUR_MAC_LAN_IP:8740/api/openpulse?key=0` on the Mac. The API contains
+summaries, never the OpenRouter key.
+
+| What you see | What to check |
+| --- | --- |
+| Connection refused / no page on the Mac | Is the step 4 process running, on the correct address/port? Start it again. The demo or setup process alone does not serve the panel's configured endpoint. |
+| Source error in the Mac preview/API | Check the configured key in the local connection page and Mac Keychain access. An auth error is different from the display failing to reach the Mac. Browser login does not repair an API key. |
+| Fresh on the Mac, unreachable from a phone on the same Wi-Fi | Check LAN address, firewall permission for the service and guest/client isolation. Keep security protections in place; allow only the intended private-network service. |
+| Fresh on the Mac, NO DATA or CONNECTION ERROR on the panel | Check the OPENPULSE page, panel Wi-Fi/time readiness, exact compiled origin/port and whether this panel actually polls the service. Fresh host data alone does not prove receipt or successful parsing on the panel. Inspect passive device logs; do not reflash or erase settings as a first step. |
+| STALE / old update age | Data is at least 180 seconds old, or the current UTC period needs a refresh. Check Mac sleep, stopped service and provider/network errors. Retained values are last known, not current live spend. |
+| 0 USD with UPDATED | This key's current-period usage can be zero. A new/unused key does not show usage incurred by other keys. |
+| Account credits absent or error | Account view is optional and needs a management key; key spend/allowance can work without it. A key limit, display budget and account balance are different values. |
+| OPENROUTER absent in Labs | v1.3.0 does not contain this preview. Use the preview source, supported board and `TORGET_OPENPULSE=ON`; installation is a separate, user-authorized USB step. |
+
+A Wi-Fi icon only shows network association, not OpenRouter source health.
+No OpenRouter browser session is required. A successful HTTP response still
+needs panel parsing/rendering and an on-glass observation before claiming the
+physical screen is working. USB does not provide a fallback data path.
+
 ## Enable on the round panel
 
 In a build with `TORGET_OPENPULSE=ON`, hold BOOT for about three seconds, then
@@ -166,8 +337,8 @@ The standard VibePulse registry stays unchanged. The OpenRouter view and poller
 are created only when the compiled-in Labs option is active.
 
 ```sh
-cp secrets.h.example secrets.h                 # only in this fresh checkout
-cp openpulse_panel_config.h.example openpulse_panel_config.h
+test -f secrets.h || cp secrets.h.example secrets.h
+test -f openpulse_panel_config.h || cp openpulse_panel_config.h.example openpulse_panel_config.h
 # Edit only the local Mac origin in openpulse_panel_config.h, no OpenRouter keys.
 . ~/esp/esp-idf/export.sh
 idf.py -B build-openpulse-round -D TORGET_OPENPULSE=ON \
