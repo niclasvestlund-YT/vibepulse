@@ -227,6 +227,7 @@ BOARD_191_FRAMES = {
 }
 
 NOT_FRAMES = {
+    "openpulse/round-photo.jpg": "owner photograph of the physical round OpenRouter Labs view",
     "175-round/glass-codex-angle.jpg": "owner photograph of the physical round 1.75 panel at an angle",
     "175-round/glass-codex-front.jpg": "owner photograph of the physical round 1.75 Codex quota page",
     "175-round/glass-codex-held.jpg": "owner photograph of the physical round 1.75 panel held in hand",
