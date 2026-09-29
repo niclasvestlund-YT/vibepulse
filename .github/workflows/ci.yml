@@ -220,6 +220,7 @@ jobs:
       - name: Create CI secrets.h with optional GitHub module enabled
         run: |
           cp secrets.h.example secrets.h
+          cp openpulse_panel_config.h.example openpulse_panel_config.h
           sed -i 's/TK_GITHUB_SCREEN_ENABLED 0/TK_GITHUB_SCREEN_ENABLED 1/' secrets.h
           sed -i 's/TK_GITHUB_NOTIFICATIONS_ENABLED 0/TK_GITHUB_NOTIFICATIONS_ENABLED 1/' secrets.h
           sed -i 's/TK_GITHUB_SOUND_ENABLED 0/TK_GITHUB_SOUND_ENABLED 1/' secrets.h
@@ -237,7 +238,7 @@ jobs:
         with:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
-          command: idf.py build
+          command: idf.py -D TORGET_OPENPULSE=ON build
       - name: Build the 2.41 V2 profile with its own SDK config
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -261,5 +262,5 @@ jobs:
           target: esp32s3
           command: >-
             idf.py -B build-175 -D TORGET_BOARD=waveshare_175
-            -D SDKCONFIG=sdkconfig.175
+            -D SDKCONFIG=sdkconfig.175 -D TORGET_OPENPULSE=ON
             -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build

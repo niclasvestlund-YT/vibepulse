@@ -1,12 +1,12 @@
-# OpenPulse (experimental Mac branch)
+# OpenRouter in VibePulse Labs (OpenPulse preview)
 
 OpenRouter spend on the round Waveshare 1.75 (466 × 466). An optional **OPENROUTER** switch in VibePulse Labs adds the page while keeping
 Claude Code, Codex and existing Labs choices. A separate Python service fetches
 data; the panel receives only normalized numbers. The first
 page puts month spend and the display budget inside the circular glass. Tap
 the page indicator/background for key allowance and optional account credits.
-Tap the key name to cycle configured keys. Touch on physical hardware is not
-verified in this work.
+Tap the key name to cycle configured keys. The owner verified upright output and the bottom page switch on one round
+unit. Full touch-grid, swipe and menu acceptance remain pending.
 
 ![Native shared LVGL spend page, synthetic data](../img/openpulse/round-spend.png)
 ![Native shared LVGL details page, synthetic data](../img/openpulse/round-details.png)
@@ -186,3 +186,21 @@ preview; the actual panel runs the complete VibePulse app with the optional page
 
 The authorized installation and its acceptance limits are recorded in the
 [round 1.75 checkpoint](physical-2026-09-29.md).
+
+## Display validation
+
+| Display | OpenRouter status |
+| --- | --- |
+| 1.75 round, 466 × 466 | Native LVGL states and Labs on/off tested; live reading, upright output and bottom page switch confirmed on one physical unit. |
+| 2.16 square, 480 × 480 | Native LVGL bench checks; firmware compiled in CI. No physical OpenRouter acceptance yet. |
+| 2.41 V2, 1.91 Touch, 1.8 V2 | Existing VibePulse builds remain covered by CI. OpenRouter is not enabled: these need their own layout and physical acceptance. |
+
+OpenRouter remains a source-build preview, not part of the v1.3.0 release.
+Its optional host service is currently documented and connected on macOS only.
+The Labs switch does not install firmware or configure the host automatically.
+
+![Owner photograph of OpenRouter on the round display in its pink enclosure](../img/openpulse/round-photo.jpg)
+
+Owner photo, 29 September 2026, an actual reading at capture time. This is not
+a live website reading or evidence for other displays. Re-encoded at web size
+without camera/GPS metadata; no retouching.
