@@ -44,7 +44,7 @@ jobs:
         run: >
           sudo apt-get update &&
           sudo apt-get install -y --no-install-recommends
-          libsdl2-dev ninja-build xvfb
+          libsdl2-dev libcurl4-openssl-dev ninja-build xvfb
       # The vectors test compiles the panel's AES-GCM/HKDF boundary against
       # ESP-IDF's bundled Mbed TLS. Only those sources are needed — no
       # xtensa toolchain — so a sparse clone (~70 MB, seconds) suffices.

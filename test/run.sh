@@ -58,6 +58,11 @@ if ! "$PYTHON_BIN" -m ruff --version >/dev/null 2>&1; then
 fi
 (cd .. && "$PYTHON_BIN" -m ruff check .)
 echo "OK: ruff hittade inget"
+(cd .. && "$PYTHON_BIN" -m unittest tools.openpulse.test_openpulse)
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_openpulse/model.c ../third_party/cjson/cJSON.c \
+  test_openpulse.c -I../third_party/cjson -lm -o /tmp/openpulse-model-test
+/tmp/openpulse-model-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/torget_fmt/fmt_sv.c \

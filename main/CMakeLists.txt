@@ -9,6 +9,11 @@
 # torget_wifi: nätverkslistan i NVS + setupfönstret som lägger till en ny
 # plats utan ombygge (docs/wifi.md).
 set(TORGET_MAIN_REQUIRES torget_app app_tokens torget_ota torget_wifi torget_board)
+set(TORGET_MAIN_REGISTRY "registry.c")
+if("$ENV{TORGET_OPENPULSE}" STREQUAL "ON")
+  set(TORGET_MAIN_REGISTRY "../components/app_openpulse/registry.c")
+  list(APPEND TORGET_MAIN_REQUIRES app_openpulse)
+endif()
 # OBS $ENV{}: den här filen körs TVÅ gånger — en gång i ESP-IDF:s
 # early-expansion (då REQUIRES läses ut) och en gång i det riktiga bygget. I
 # expansionspasset syns INTE cache-/normalvariablerna som rot-CMakeLists.txt
@@ -27,7 +32,7 @@ endif()
 idf_component_register(
   SRCS "main.c"
        "rotation.c"
-       "registry.c"
+       ${TORGET_MAIN_REGISTRY}
        "../platform/torget_ui.c"
        "../platform/wifi_status_assets.c"
        "../platform/board_diagnostic.c"

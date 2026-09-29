@@ -137,3 +137,15 @@ endif()
 # m: presenterarnas lround/llround. På macOS bor libm i libSystem, så detta
 # är en no-op där; på Linux (headless CI) är det länkfel utan.
 target_link_libraries(torget-sim PRIVATE lvgl SDL2::SDL2 m)
+
+# Independent OpenPulse bench, reusing the pinned LVGL, SDL and Plex fonts.
+# The normal torget-sim target and VibePulse sources are unchanged.
+option(TORGET_BUILD_OPENPULSE_SIM "Build the independent OpenPulse simulator" OFF)
+if(TORGET_BUILD_OPENPULSE_SIM)
+find_package(CURL REQUIRED)
+add_executable(openpulse-sim openpulse_main.c ../platform/wifi_status_assets.c
+  ../components/app_openpulse/app.c ../components/app_openpulse/model.c
+  ../third_party/cjson/cJSON.c ${FONTS})
+target_include_directories(openpulse-sim PRIVATE . ../platform ../components/app_openpulse ../third_party/cjson)
+target_link_libraries(openpulse-sim PRIVATE lvgl SDL2::SDL2 CURL::libcurl m)
+endif()

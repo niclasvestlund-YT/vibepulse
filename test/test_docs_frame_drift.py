@@ -78,6 +78,7 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -205,6 +206,12 @@ BOARD_241_FRAMES = {
     "241-v2/settings.png": "settings-menu.png",
 }
 
+OPENPULSE_FRAMES = {
+    "openpulse/round-spend.png": "demo.png",
+    "openpulse/round-details.png": "demo-details.png",
+    "openpulse/round-stale.png": "stale.png",
+}
+
 BOARD_175_FRAMES = {
     "round-175-codex.png": "round-codex-live.png",
     "round-175-claude.png": "round-claude-live.png",
@@ -270,7 +277,7 @@ def docs_frames():
     missed by hand.
     """
     for name, path in docs_images():
-        if name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
+        if name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -566,7 +573,7 @@ class DocsFrameDriftTests(unittest.TestCase):
                 continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
                 expected = ((600, 450) if name in BOARD_241_FRAMES else
-                            (466, 466) if name in BOARD_175_FRAMES else
+                            (466, 466) if name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES else
                             (536, 240) if name in BOARD_191_FRAMES else (480, 480))
                 if im.size != expected:
                     wrong.append(f"{name} is {im.size[0]}x{im.size[1]}")
@@ -591,6 +598,35 @@ class DocsFrameDriftTests(unittest.TestCase):
                              if frame not in PINNED
                              and frame not in STALE_CHROME)
         self.assertEqual(unaccounted, [])
+
+
+class OpenPulseFrameTests(unittest.TestCase):
+    def test_round_docs_match_native_renderer(self):
+        """OpenPulse has its own app registry and deterministic shared-C captures."""
+        build = "sim/build-openpulse-round"
+        configure = ["cmake", "-S", "sim", "-B", build, "-G", "Ninja",
+                     "-DTORGET_BOARD=waveshare_175", "-DTORGET_BUILD_OPENPULSE_SIM=ON",
+                     "-DTORGET_SOLELKOLLEN_DIR=/nonexistent", "-DTORGET_WITH_BUDDY=OFF"]
+        lvgl = ROOT / "sim/build/_deps/lvgl-src"
+        if lvgl.is_dir():
+            configure.append(f"-DFETCHCONTENT_SOURCE_DIR_LVGL={lvgl}")
+        for command in (configure, ["cmake", "--build", build, "--target", "openpulse-sim", "--parallel", "2"]):
+            subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+        env = dict(os.environ)
+        if sys.platform == "linux":
+            env.setdefault("SDL_VIDEODRIVER", "offscreen")
+        with tempfile.TemporaryDirectory(prefix="openpulse-docs-") as directory:
+            subprocess.run([sys.executable, "-m", "tools.openpulse.preview", "--out", directory],
+                           cwd=ROOT, env=env, check=True, capture_output=True, text=True)
+            for document, capture in OPENPULSE_FRAMES.items():
+                with self.subTest(document=document):
+                    with Image.open(ROOT / "docs/img" / document) as actual, \
+                         Image.open(Path(directory) / capture) as expected:
+                        self.assertEqual(actual.size, (466, 466))
+                        self.assertEqual(actual.convert("RGBA").tobytes(), expected.convert("RGBA").tobytes())
+                        self.assertEqual(getattr(actual, "n_frames", 1), 1)
+                        for metadata in DISPLAY_METADATA:
+                            self.assertNotIn(metadata, actual.info)
 
 
 if __name__ == "__main__":

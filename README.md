@@ -1,5 +1,11 @@
 # VibePulse
 
+This development branch also contains **OpenPulse**, an isolated OpenRouter spend
+and budget panel for the round 1.75-inch display. [Start its Mac demo or connect
+OpenRouter](docs/openpulse/README.md). Existing VibePulse is the default build.
+
+![OpenPulse round native LVGL demo, synthetic values](docs/img/openpulse/round-spend.png)
+
 [![CI](https://github.com/niclasvestlund-YT/vibepulse/actions/workflows/ci.yml/badge.svg)](https://github.com/niclasvestlund-YT/vibepulse/actions/workflows/ci.yml)
 
 ![VibePulse: quota, a NEEDS YOU alert, and the Max Tracker heatmap](docs/img/hero.png)

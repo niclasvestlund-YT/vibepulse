@@ -1,0 +1,2 @@
+/* Local service address only. NEVER put OpenRouter keys in firmware. */
+#define OPENPULSE_SERVICE_ORIGIN "http://YOUR_MAC_LAN_IP:8738"

@@ -41,3 +41,8 @@ docs/img/mockups/*.svg
 
 /sdkconfig.175*
 /sdkconfig.191*
+
+# OpenPulse local-only setup
+openpulse_panel_config.h
+.openpulse/
+sdkconfig.openpulse.*

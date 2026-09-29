@@ -1,0 +1,7 @@
+{
+  "keys": [
+    {"id": "default", "name": "My API key", "monthly_budget_usd": 50,
+     "warning_at": 0.75, "critical_at": 0.9}
+  ],
+  "account_view": false
+}

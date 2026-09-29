@@ -7,6 +7,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ### Added
 
+- Experimental OpenPulse: isolated Mac OpenRouter service, local Keychain setup,
+  per-key USD spend/budget/allowance, optional account credits, explicit demo and
+  round 1.75 native LVGL spend/details pages. Build and simulator evidence only;
+  no hardware flash or release. See [OpenPulse](docs/openpulse/README.md).
+
 - **Waveshare ESP32-S3-Touch-AMOLED-1.8 V2 development profile**, selected with
   `TORGET_BOARD=waveshare_18_v2`: CO5300 QSPI at native 368×448 portrait,
   CST820 touch via Waveshare BSP 2.0.3, BOOT settings input, and a viewport

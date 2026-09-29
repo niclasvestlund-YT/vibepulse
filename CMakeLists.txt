@@ -8,6 +8,15 @@
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
 include(cmake/torget_board.cmake)
+option(TORGET_OPENPULSE "Build the isolated OpenPulse panel" OFF)
+if(TORGET_OPENPULSE)
+  set(ENV{TORGET_OPENPULSE} "ON")
+else()
+  set(ENV{TORGET_OPENPULSE} "OFF")
+endif()
+if(TORGET_OPENPULSE AND NOT TORGET_BOARD STREQUAL "waveshare_216" AND NOT TORGET_BOARD STREQUAL "waveshare_175")
+  message(FATAL_ERROR "OpenPulse v0.1 supports only waveshare_175 and waveshare_216")
+endif()
 # ESP-IDF discovers component requirements in a separate early CMake pass.
 # Mirror the selector just as we do for the optional companion paths below.
 set(ENV{TORGET_BOARD} "${TORGET_BOARD}")
