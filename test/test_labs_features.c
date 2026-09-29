@@ -22,7 +22,7 @@ int main(void) {
   tk_labs_init();
   assert(tk_labs_view_count() == (TK_LABS_ANALYTICS_DEFAULT ? 7 : 3) +
                                 TK_GITHUB_SCREEN_ENABLED +
-                                TK_LOVABLE_SCREEN_ENABLED);
+                                TK_LOVABLE_SCREEN_ENABLED + (TK_OPENPULSE_AVAILABLE && OPENPULSE_FIRST_INSTALL_ON));
   assert(tk_labs_active(TK_LABS_LOVABLE) == !!TK_LOVABLE_SCREEN_ENABLED);
   assert(tk_labs_active(TK_LABS_GITHUB) == !!TK_GITHUB_SCREEN_ENABLED);
   assert(tk_labs_active(TK_LABS_STAR_POPUP) == !!TK_GITHUB_NOTIFICATIONS_ENABLED);
@@ -34,7 +34,8 @@ int main(void) {
     tk_labs_init();
     int expected_count = 2 * !!(mask & 64) + !!(mask & 128) +
                          !!(mask & 1) + 2 * !!(mask & 2) +
-                         !!(mask & 4) + !!(mask & 8) + !!(mask & 32);
+                         !!(mask & 4) + !!(mask & 8) + !!(mask & 32) +
+                         (TK_OPENPULSE_AVAILABLE && !!(mask & 256));
     assert(tk_labs_view_count() == expected_count);
     int pos = 0, previous = -1, first = -1;
     for (int view = 0; view < TK_USAGE_SCREEN_VIEWS; view++) {
@@ -54,6 +55,10 @@ int main(void) {
     assert(tk_labs_view_position(-1) == -1);
     assert(tk_labs_view_position(TK_USAGE_SCREEN_VIEWS) == -1);
     for (int feature = 0; feature < TK_LABS_COUNT; feature++) {
+      if (feature == TK_LABS_OPENPULSE && !TK_OPENPULSE_AVAILABLE) {
+        assert(!tk_labs_active(feature) && !tk_labs_toggle(feature));
+        continue;
+      }
       bool before = !!(mask & (1u << feature));
       assert(tk_labs_active(feature) == before);
       assert(tk_labs_toggle(feature));
@@ -105,12 +110,29 @@ int main(void) {
   assert(!tk_labs_storage_error() && !tk_labs_active(TK_LABS_LOVABLE));
   assert(tk_labs_active(TK_LABS_GITHUB) && tk_labs_active(TK_LABS_STAR_POPUP));
   assert(tk_labs_active(TK_LABS_CLAUDE_CODE) && tk_labs_active(TK_LABS_CODEX));
-  assert(saved == (TK_LABS_RECORD_VERSION | 223u));
+  assert(saved == (TK_LABS_RECORD_VERSION | 223u |
+      (TK_OPENPULSE_AVAILABLE && OPENPULSE_FIRST_INSTALL_ON ? 256u : 0u)));
   saved = TK_LABS_PREVIOUS_RECORD_VERSION | 32u;
   fail_write = true;
   tk_labs_init();
   assert(tk_labs_storage_error() && tk_labs_active(TK_LABS_LOVABLE));
   assert(!tk_labs_active(TK_LABS_GITHUB));
   assert(saved == (TK_LABS_PREVIOUS_RECORD_VERSION | 32u));
-  puts("OK: LABS migration, 256 dense page combinations, restart and storage failures");
+  fail_write = false;
+  for (unsigned old = 0; old <= TK_LABS_EIGHT_ALL; old++) {
+    saved = TK_LABS_EIGHT_RECORD_VERSION | old;
+    tk_labs_init();
+    assert(!tk_labs_storage_error());
+    assert((saved & TK_LABS_EIGHT_ALL) == old);
+    assert(tk_labs_active(TK_LABS_OPENPULSE) ==
+           !!(TK_OPENPULSE_AVAILABLE && OPENPULSE_FIRST_INSTALL_ON));
+    if (TK_OPENPULSE_AVAILABLE) {
+      assert(tk_labs_toggle(TK_LABS_OPENPULSE));
+      bool chosen = tk_labs_selected(TK_LABS_OPENPULSE);
+      tk_labs_init();
+      assert(tk_labs_active(TK_LABS_OPENPULSE) == chosen);
+      assert((saved & TK_LABS_EIGHT_ALL) == old);
+    }
+  }
+  puts("OK: LABS migration, 512 dense page combinations, restart and storage failures");
 }

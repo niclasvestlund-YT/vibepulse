@@ -149,3 +149,10 @@ add_executable(openpulse-sim openpulse_main.c ../platform/wifi_status_assets.c
 target_include_directories(openpulse-sim PRIVATE . ../platform ../components/app_openpulse ../third_party/cjson)
 target_link_libraries(openpulse-sim PRIVATE lvgl SDL2::SDL2 CURL::libcurl m)
 endif()
+
+option(TORGET_OPENPULSE "Enable OpenRouter in VibePulse Labs" OFF)
+if(TORGET_OPENPULSE)
+  target_sources(torget-sim PRIVATE ../components/app_openpulse/app.c ../components/app_openpulse/model.c)
+  target_include_directories(torget-sim PRIVATE ../components/app_openpulse ../third_party/cjson)
+  target_compile_definitions(torget-sim PRIVATE TK_OPENPULSE_AVAILABLE=1)
+endif()

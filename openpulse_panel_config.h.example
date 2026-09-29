@@ -1,2 +1,6 @@
 /* Local service address only. NEVER put OpenRouter keys in firmware. */
 #define OPENPULSE_SERVICE_ORIGIN "http://YOUR_MAC_LAN_IP:8738"
+
+/* Optional owner-requested first-install seed; saved Labs OFF always wins. */
+#define OPENPULSE_FIRST_INSTALL_ON 0
+#define OPENPULSE_START_ON_BOOT 0

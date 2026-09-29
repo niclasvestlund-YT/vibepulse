@@ -1,7 +1,9 @@
 # VibePulse
 
-This development branch also contains **OpenPulse**, an isolated OpenRouter spend
-and budget panel for the round 1.75-inch display. [Start its Mac demo or connect
+This development branch adds **OpenPulse**, an optional OpenRouter spend and
+budget page for the round 1.75-inch display. Enable **OPENROUTER** in VibePulse
+**SETTINGS → LABS → MORE → MORE**, then restart. Its Mac service and key storage
+remain separate. [Start its Mac demo or connect
 OpenRouter](docs/openpulse/README.md). Existing VibePulse is the default build.
 
 ![OpenPulse round native LVGL demo, synthetic values](docs/img/openpulse/round-spend.png)

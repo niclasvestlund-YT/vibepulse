@@ -1,3 +1,7 @@
+#include "app_tokens_config.h"
+#if TK_OPENPULSE_AVAILABLE
+#include "app_openpulse.h"
+#endif
 #include "display_geometry.h"
 #include "usage_screen.h"
 
@@ -1872,6 +1876,12 @@ void usage_screen_create(lv_obj_t *root) {
   if (tk_labs_active(TK_LABS_GITHUB)) create_github_page();
   if (tk_labs_active(TK_LABS_VALUE)) create_value_page();
   if (tk_labs_active(TK_LABS_LOVABLE)) create_lovable_page();
+#if TK_OPENPULSE_AVAILABLE
+  if (tk_labs_active(TK_LABS_OPENPULSE)) {
+    openpulse_app.create(new_tile(VIEW_OPENPULSE));
+    if (OPENPULSE_START_ON_BOOT) usage_screen_show_view(VIEW_OPENPULSE);
+  }
+#endif
   if (tk_labs_view_count() == 0) {
     lv_obj_t *empty = lv_tileview_add_tile(ui.tileview, 0, 0, LV_DIR_NONE);
     lv_obj_set_style_bg_color(empty, COL_BLACK, 0);

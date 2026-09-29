@@ -1,3 +1,7 @@
+#if TK_OPENPULSE_AVAILABLE
+#include "app_openpulse.h"
+void openpulse_net_start(void) {}
+#endif
 #include "display_geometry.h"
 /*
  * Torgets värdlager på Macen: hela plattformen + båda apparna i ett
@@ -1801,6 +1805,44 @@ static int run_vibepulse_lovable_qa(void) {
   return capture_failures == 0 ? 0 : 1;
 }
 
+
+#if TK_OPENPULSE_AVAILABLE
+static int run_openpulse_labs_qa(void) {
+  torget_app_show(SIM_APP_VIBEPULSE);
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
+  if (!tk_labs_active(TK_LABS_OPENPULSE)) return 1;
+  size_t length;
+  char *json = read_fixture("openpulse-demo.json", &length);
+  op_snapshot snapshot;
+  if (!json || !op_parse(json, length, &snapshot)) { free(json); return 1; }
+  free(json);
+  openpulse_apply(&snapshot);
+  tokens_show_view(VIEW_OPENPULSE);
+  if (usage_screen_current_view() != VIEW_OPENPULSE || !openpulse_layout_valid()) return 1;
+  dump_frame("openpulse-labs-spend");
+  openpulse_set_page(1);
+  if (!openpulse_layout_valid()) return 1;
+  dump_frame("openpulse-labs-details");
+  tokens_show_view(VIEW_CODEX_WEEKLY);
+  if (usage_screen_current_view() != VIEW_CODEX_WEEKLY) return 1;
+  dump_frame("openpulse-labs-codex");
+  torget_settings_open("OPENPULSE LABS", "192.168.1.42");
+  torget_settings_click_slot(TG_SETTINGS_ROW_LABS);
+  torget_settings_click_slot(3);
+  torget_settings_click_slot(3);
+  dump_frame("openpulse-labs-on");
+  if (!tk_labs_selected(TK_LABS_OPENPULSE)) return 1;
+  torget_settings_click_slot(2);
+  if (tk_labs_selected(TK_LABS_OPENPULSE) || !tk_labs_pending()) return 1;
+  dump_frame("openpulse-labs-off-pending");
+  torget_settings_click_slot(3);
+  if (torget_settings_take_intent() != TG_SETTINGS_INTENT_RESTART) return 1;
+  tk_labs_init();
+  if (tk_labs_active(TK_LABS_OPENPULSE) || tk_labs_view_position(VIEW_OPENPULSE) >= 0) return 1;
+  return capture_failures == 0 ? 0 : 1;
+}
+#endif
+
 /* Run in a fresh process for every mask; hit the real shared renderer and
  * update paths with pages absent. Pure policy tests alone cannot catch a NULL
  * label dereference or a tileview column mistaken for a semantic ID. */
@@ -1985,6 +2027,10 @@ int main(int argc, char **argv) {
 
   if (argc == 2 && strcmp(argv[1], "--vibepulse-lovable-qa") == 0)
     return run_vibepulse_lovable_qa();
+#if TK_OPENPULSE_AVAILABLE
+  if (argc == 2 && strcmp(argv[1], "--openpulse-labs-qa") == 0)
+    return run_openpulse_labs_qa();
+#endif
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-qa") == 0)
     return run_vibepulse_labs_qa(false);
   if (argc == 2 && strcmp(argv[1], "--vibepulse-labs-captures") == 0)

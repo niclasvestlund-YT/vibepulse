@@ -64,10 +64,14 @@ endif()
 # VibePulse som Torget-app: usage + statisk agentmonitor för Claude/Codex.
 # app.c, parsrar och monitorlogik delas byte-identiskt med simulatorn;
 # nätadaptrarna finns bara i det här bygget.
+set(TK_OPTIONAL_REQUIRES "")
+if("$ENV{TORGET_OPENPULSE}" STREQUAL "ON")
+  list(APPEND TK_OPTIONAL_REQUIRES app_openpulse)
+endif()
 idf_component_register(
   SRCS ${TK_APP_TOKEN_SRCS}
   INCLUDE_DIRS "."
-  REQUIRES torget_app torget_fmt cjson
+  REQUIRES torget_app torget_fmt cjson ${TK_OPTIONAL_REQUIRES}
   # secrets.h bor i repytroten (gitignorad), därav "../..".
   PRIV_INCLUDE_DIRS "../.."
   PRIV_REQUIRES torget_net esp_http_client nvs_flash)
@@ -83,3 +87,7 @@ if(CONFIG_TK_VIBEPULSE_INTERACTION_RELAY OR CONFIG_TK_VIBEPULSE_AGENT_STATUS_REL
 endif()
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_LVGL_H_INCLUDE_SIMPLE)
+
+if("$ENV{TORGET_OPENPULSE}" STREQUAL "ON")
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE TK_OPENPULSE_AVAILABLE=1)
+endif()

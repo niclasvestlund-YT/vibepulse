@@ -3,15 +3,16 @@
 
 _Static_assert(TK_LABS_ALL == (1u << TK_LABS_COUNT) - 1u,
                "Update the persisted Labs mask when adding a feature");
-static uint8_t active, selected;
+static uint16_t active, selected;
 static bool read_only, storage_error;
 
-static uint8_t defaults(void) {
+static uint16_t defaults(void) {
   return (TK_LABS_ANALYTICS_DEFAULT ? 7u : 0u) |
          (TK_GITHUB_SCREEN_ENABLED ? 8u : 0u) |
          (TK_GITHUB_NOTIFICATIONS_ENABLED ? 16u : 0u) |
          (TK_LOVABLE_SCREEN_ENABLED ? 32u : 0u) |
-         (1u << TK_LABS_CLAUDE_CODE) | (1u << TK_LABS_CODEX);
+         (1u << TK_LABS_CLAUDE_CODE) | (1u << TK_LABS_CODEX) |
+         (TK_OPENPULSE_AVAILABLE && OPENPULSE_FIRST_INSTALL_ON ? 256u : 0u);
 }
 
 void tk_labs_init(void) {
@@ -23,13 +24,17 @@ void tk_labs_init(void) {
   if (result == TK_LABS_STORE_FOUND) {
     uint32_t version = record & ~TK_LABS_ALL;
     if (version == TK_LABS_RECORD_VERSION) {
-      active = selected = (uint8_t)(record & TK_LABS_ALL);
+      active = selected = (uint16_t)(record & TK_LABS_ALL);
+    } else if ((record & ~TK_LABS_EIGHT_ALL) == TK_LABS_EIGHT_RECORD_VERSION) {
+      active = selected = (record & TK_LABS_EIGHT_ALL) | (defaults() & 256u);
+      if (!tk_labs_store_write(TK_LABS_RECORD_VERSION | selected))
+        read_only = storage_error = true;
     } else if ((record & ~TK_LABS_PREVIOUS_ALL) ==
                TK_LABS_PREVIOUS_RECORD_VERSION) {
       /* Upgrade existing six-switch records without changing the owner's
        * saved Labs choices. Claude Code and Codex remain enabled by default. */
-      uint8_t migrated = (uint8_t)(record & TK_LABS_PREVIOUS_ALL) |
-          (1u << TK_LABS_CLAUDE_CODE) | (1u << TK_LABS_CODEX);
+      uint16_t migrated = (uint16_t)(record & TK_LABS_PREVIOUS_ALL) |
+          (1u << TK_LABS_CLAUDE_CODE) | (1u << TK_LABS_CODEX) | (defaults() & 256u);
       active = selected = migrated;
       if (!tk_labs_store_write(TK_LABS_RECORD_VERSION | migrated)) {
         read_only = storage_error = true;
@@ -42,7 +47,8 @@ void tk_labs_init(void) {
     storage_error = !tk_labs_store_write(TK_LABS_RECORD_VERSION | selected);
 }
 
-static bool valid(int feature) { return feature >= 0 && feature < TK_LABS_COUNT; }
+static bool valid(int feature) { return feature >= 0 && feature < TK_LABS_COUNT &&
+    (feature != TK_LABS_OPENPULSE || TK_OPENPULSE_AVAILABLE); }
 bool tk_labs_active(tk_labs_feature feature) {
   return valid(feature) && (active & (1u << feature));
 }
@@ -51,7 +57,7 @@ bool tk_labs_selected(int feature) {
 }
 bool tk_labs_toggle(int feature) {
   if (!valid(feature) || read_only) return false;
-  uint8_t next = selected ^ (1u << feature);
+  uint16_t next = selected ^ (1u << feature);
   if (!tk_labs_store_write(TK_LABS_RECORD_VERSION | next)) {
     storage_error = true;
     return false;
@@ -65,7 +71,7 @@ bool tk_labs_storage_error(void) { return storage_error; }
 const char *tk_labs_name(int feature) {
   static const char *const names[] = {
     "BURN RATE", "MAX TRACKER", "API VALUE", "GITHUB PAGE", "STAR POPUP",
-    "LOVABLE PAGE", "CLAUDE CODE", "CODEX"
+    "LOVABLE PAGE", "CLAUDE CODE", "CODEX", "OPENROUTER"
   };
   return valid(feature) ? names[feature] : "";
 }
@@ -80,6 +86,7 @@ static bool view_enabled(int view) {
     case VIEW_GITHUB: return tk_labs_active(TK_LABS_GITHUB);
     case VIEW_VALUE: return tk_labs_active(TK_LABS_VALUE);
     case VIEW_LOVABLE: return tk_labs_active(TK_LABS_LOVABLE);
+    case VIEW_OPENPULSE: return tk_labs_active(TK_LABS_OPENPULSE);
     default: return false;
   }
 }

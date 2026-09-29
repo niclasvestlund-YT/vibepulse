@@ -77,4 +77,19 @@
 #error "TK_GITHUB_SOUND_ENABLED must be 0 or 1"
 #endif
 
+/* OpenPulse is optional at build time and remains a persisted Labs choice.
+ * A private install config can seed it ON when upgrading an older Labs record. */
+#ifndef TK_OPENPULSE_AVAILABLE
+#define TK_OPENPULSE_AVAILABLE 0
+#endif
+#if TK_OPENPULSE_AVAILABLE && defined(ESP_PLATFORM)
+#include "openpulse_panel_config.h"
+#endif
+#ifndef OPENPULSE_FIRST_INSTALL_ON
+#define OPENPULSE_FIRST_INSTALL_ON 0
+#endif
+#ifndef OPENPULSE_START_ON_BOOT
+#define OPENPULSE_START_ON_BOOT 0
+#endif
+
 #endif

@@ -8,7 +8,7 @@
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
 include(cmake/torget_board.cmake)
-option(TORGET_OPENPULSE "Build the isolated OpenPulse panel" OFF)
+option(TORGET_OPENPULSE "Enable OpenRouter in VibePulse Labs" OFF)
 if(TORGET_OPENPULSE)
   set(ENV{TORGET_OPENPULSE} "ON")
 else()

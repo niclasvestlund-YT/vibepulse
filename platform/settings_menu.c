@@ -183,7 +183,7 @@ void torget_settings_click_slot(unsigned slot) {
     if (slot < 3) ui.labs.toggle((int)slot + 3);
     else ui.view = VIEW_LABS_PROVIDERS;
   } else if (ui.view == VIEW_LABS_PROVIDERS) {
-    if (slot < 2) ui.labs.toggle((int)slot + 6);
+    if (slot < 2 || (slot == 2 && ui.labs.name(8)[0])) ui.labs.toggle((int)slot + 6);
     else if (slot == 2) ui.view = VIEW_LABS_GITHUB;
     else if (ui.labs.pending && ui.labs.pending()) {
       ui.pending = TG_SETTINGS_INTENT_RESTART;
@@ -306,7 +306,7 @@ static void render(void) {
                     ui.view == VIEW_LABS_GITHUB ? i + 3 : i + 6;
       bool choice = (ui.view == VIEW_LABS_ANALYTICS && i < 3) ||
                     (ui.view == VIEW_LABS_GITHUB && i < 3) ||
-                    (ui.view == VIEW_LABS_PROVIDERS && i < 2);
+                    (ui.view == VIEW_LABS_PROVIDERS && (i < 2 || (i == 2 && ui.labs.name(8)[0])));
       if (choice) {
         char text[40];
         bool enabled = ui.labs.selected(feature);

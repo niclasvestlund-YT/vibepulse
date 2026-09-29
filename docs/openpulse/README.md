@@ -1,7 +1,8 @@
 # OpenPulse (experimental Mac branch)
 
-OpenRouter spend on the round Waveshare 1.75 (466 × 466). A separate Python
-service fetches data; the panel receives only normalized numbers. The first
+OpenRouter spend on the round Waveshare 1.75 (466 × 466). An optional **OPENROUTER** switch in VibePulse Labs adds the page while keeping
+Claude Code, Codex and existing Labs choices. A separate Python service fetches
+data; the panel receives only normalized numbers. The first
 page puts month spend and the display budget inside the circular glass. Tap
 the page indicator/background for key allowance and optional account credits.
 Tap the key name to cycle configured keys. Touch on physical hardware is not
@@ -9,6 +10,22 @@ verified in this work.
 
 ![Native shared LVGL spend page, synthetic data](../img/openpulse/round-spend.png)
 ![Native shared LVGL details page, synthetic data](../img/openpulse/round-details.png)
+
+## Enable on the round panel
+
+In a build with `TORGET_OPENPULSE=ON`, hold BOOT for about three seconds, then
+choose **LABS → MORE → MORE → OPENROUTER ON → RESTART NOW**. Swipe horizontally
+between enabled provider pages. Tap OpenPulse's bottom indicator for spend or
+details. OFF and RESTART NOW removes its page and poller. The normal VibePulse
+app registry is retained; this is not a replacement app or a separate launcher.
+
+Existing six- and eight-switch Labs records migrate without changing their
+choices. OpenRouter is off by default. For this owner's explicitly requested
+installation, the ignored `openpulse_panel_config.h` sets
+`OPENPULSE_FIRST_INSTALL_ON=1` to seed it on once during migration, and
+`OPENPULSE_START_ON_BOOT=1` to open it on boot when enabled. A later saved OFF
+wins. No other provider switch is changed. Recovery to older firmware must use
+the verified full backup, including its older Labs record.
 
 ## Quick start on this Mac
 
@@ -126,14 +143,15 @@ this Mac's offscreen/dummy SDL exits before capture. Linux CI may use offscreen.
 The legacy host visual test detects an installed Solelkollen companion under
 HOME. On this Mac, the **legacy test simulator** must keep its default companion
 path for those existing tests. The OpenPulse simulator and firmware explicitly
-exclude companions and use a separate application registry.
+exclude companions; the Labs build retains VibePulse's normal application registry.
 
-## Firmware build only — no flash
+## Firmware build and authorized installation
 
 The first target is `waveshare_175`; `waveshare_216` can also compile the same
 composition, but the round profile is the reviewed layout. Other OpenPulse board
 profiles fail early. Reuse Torget's existing board/display/Wi-Fi/HTTP support.
-The standard VibePulse registry stays unchanged when OpenPulse is disabled.
+The standard VibePulse registry stays unchanged. The OpenRouter view and poller
+are created only when the compiled-in Labs option is active.
 
 ```sh
 cp secrets.h.example secrets.h                 # only in this fresh checkout
@@ -155,7 +173,13 @@ the explicitly configured OpenPulse origin every ten seconds; it does not use
 VibePulse discovery, relays or API keys. USB currently supplies power, not the
 OpenPulse data transport.
 
-No hardware is flashed here. Device identity, verified backup, USB-down display
-orientation, touch alignment, memory/network soak and the whole physical data
-path need their separate authorized acceptance. Existing VibePulse physical
+Physical installation requires explicit authorization, exact ROM identity and
+a verified full backup. USB-down display orientation, touch alignment, memory/network
+soak and the whole physical data path need their separate acceptance. Existing VibePulse physical
 verification is not inherited by OpenPulse. No release or Windows support claim.
+
+The integrated round Labs test is `python test/test_openpulse_labs.py`. It drives
+ON/OFF, the restart action, the existing Codex page and both OpenPulse pages
+through shared LVGL. The policy tests cover all 512 masks, migration and durable
+OFF behavior. `sim/build-openpulse-round/openpulse-sim` remains a focused design
+preview; the actual panel runs the complete VibePulse app with the optional page.
