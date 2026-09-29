@@ -11,6 +11,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OpenPulseLabsTests(unittest.TestCase):
+    def test_unsupported_boards_rejected_before_rendering(self):
+        for board in ("waveshare_241_v2", "waveshare_191_touch", "waveshare_18_v2"):
+            for option in ("TORGET_OPENPULSE", "TORGET_BUILD_OPENPULSE_SIM"):
+                with self.subTest(board=board, option=option), tempfile.TemporaryDirectory() as build:
+                    result = subprocess.run(
+                        ["cmake", "-S", "sim", "-B", build, "-G", "Ninja",
+                         f"-DTORGET_BOARD={board}", f"-D{option}=ON"],
+                        cwd=ROOT, text=True, capture_output=True, timeout=30)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("OpenPulse v0.1 supports only", result.stderr)
+                    self.assertFalse((Path(build) / "_deps").exists())
+
     def test_round_labs_toggle_and_preserved_provider_pages(self):
         build = "sim/build-openpulse-labs"
         commands = [

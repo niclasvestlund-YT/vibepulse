@@ -7,6 +7,15 @@ project(torget-sim C)
 set(CMAKE_C_STANDARD 11)
 include(../cmake/torget_board.cmake)
 
+# Reject unreviewed OpenRouter geometry before fetching or compiling LVGL.
+option(TORGET_BUILD_OPENPULSE_SIM "Build the independent OpenPulse simulator" OFF)
+option(TORGET_OPENPULSE "Enable OpenRouter in VibePulse Labs" OFF)
+if((TORGET_OPENPULSE OR TORGET_BUILD_OPENPULSE_SIM) AND
+   NOT TORGET_BOARD STREQUAL "waveshare_216" AND
+   NOT TORGET_BOARD STREQUAL "waveshare_175")
+  message(FATAL_ERROR "OpenPulse v0.1 supports only waveshare_175 and waveshare_216")
+endif()
+
 include(FetchContent)
 # P20: samma minor som targetets BSP löser till (dependencies.lock) — en
 # pixel som stämmer på Macen ska stämma på panelen. Vid BSP-bump: uppdatera här.
@@ -140,7 +149,6 @@ target_link_libraries(torget-sim PRIVATE lvgl SDL2::SDL2 m)
 
 # Independent OpenPulse bench, reusing the pinned LVGL, SDL and Plex fonts.
 # The normal torget-sim target and VibePulse sources are unchanged.
-option(TORGET_BUILD_OPENPULSE_SIM "Build the independent OpenPulse simulator" OFF)
 if(TORGET_BUILD_OPENPULSE_SIM)
 find_package(CURL REQUIRED)
 add_executable(openpulse-sim openpulse_main.c ../platform/wifi_status_assets.c
@@ -150,7 +158,6 @@ target_include_directories(openpulse-sim PRIVATE . ../platform ../components/app
 target_link_libraries(openpulse-sim PRIVATE lvgl SDL2::SDL2 CURL::libcurl m)
 endif()
 
-option(TORGET_OPENPULSE "Enable OpenRouter in VibePulse Labs" OFF)
 if(TORGET_OPENPULSE)
   target_sources(torget-sim PRIVATE ../components/app_openpulse/app.c ../components/app_openpulse/model.c)
   target_include_directories(torget-sim PRIVATE ../components/app_openpulse ../third_party/cjson)
