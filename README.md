@@ -1,7 +1,8 @@
 # VibePulse
 
-This development branch adds **OpenPulse**, an optional OpenRouter spend and
-budget page for the round 1.75-inch display. Enable **OPENROUTER** in VibePulse
+An optional Labs source preview adds **OpenPulse**, an OpenRouter spend and
+budget page first verified on the round 1.75-inch display. With compatible
+source-built firmware, enable **OPENROUTER** in VibePulse
 **SETTINGS → LABS → MORE → MORE**, then restart. Its Mac service and key storage
 remain separate. [Start its Mac demo or connect
 OpenRouter](docs/openpulse/README.md). Existing VibePulse is the default build.

@@ -603,7 +603,7 @@ class DocsFrameDriftTests(unittest.TestCase):
 
 class OpenPulseFrameTests(unittest.TestCase):
     def test_round_docs_match_native_renderer(self):
-        """OpenPulse has its own app registry and deterministic shared-C captures."""
+        """The focused OpenPulse simulator produces deterministic shared-C captures."""
         build = "sim/build-openpulse-round"
         configure = ["cmake", "-S", "sim", "-B", build, "-G", "Ninja",
                      "-DTORGET_BOARD=waveshare_175", "-DTORGET_BUILD_OPENPULSE_SIM=ON",

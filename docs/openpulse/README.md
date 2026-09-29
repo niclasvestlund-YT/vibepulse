@@ -147,8 +147,8 @@ exclude companions; the Labs build retains VibePulse's normal application regist
 
 ## Firmware build and authorized installation
 
-The first target is `waveshare_175`; `waveshare_216` can also compile the same
-composition, but the round profile is the reviewed layout. Other OpenPulse board
+The first physical target is `waveshare_175`. Native round and `waveshare_216`
+square compositions have bench checks; square physical acceptance is pending. Other OpenPulse board
 profiles fail early. Reuse Torget's existing board/display/Wi-Fi/HTTP support.
 The standard VibePulse registry stays unchanged. The OpenRouter view and poller
 are created only when the compiled-in Labs option is active.
