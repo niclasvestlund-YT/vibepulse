@@ -183,3 +183,6 @@ ON/OFF, the restart action, the existing Codex page and both OpenPulse pages
 through shared LVGL. The policy tests cover all 512 masks, migration and durable
 OFF behavior. `sim/build-openpulse-round/openpulse-sim` remains a focused design
 preview; the actual panel runs the complete VibePulse app with the optional page.
+
+The authorized installation and its acceptance limits are recorded in the
+[round 1.75 checkpoint](physical-2026-09-29.md).
