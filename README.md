@@ -1,15 +1,5 @@
 # VibePulse
 
-An optional Labs source preview adds **OpenPulse**, an OpenRouter spend and
-budget page first verified on the round 1.75-inch display. With compatible
-source-built firmware, enable **OPENROUTER** in VibePulse
-**SETTINGS → LABS → MORE → MORE**, then restart. Its Mac service and key storage
-remain separate. [Install for OpenRouter only, try the Mac demo or connect your
-key](docs/openpulse/README.md#install-for-openrouter-only). Existing VibePulse
-is the default build. This preview is not included in the v1.3.0 release.
-
-![OpenPulse round native LVGL demo, synthetic values](docs/img/openpulse/round-spend.png)
-
 [![CI](https://github.com/niclasvestlund-YT/vibepulse/actions/workflows/ci.yml/badge.svg)](https://github.com/niclasvestlund-YT/vibepulse/actions/workflows/ci.yml)
 
 ![VibePulse: quota, a NEEDS YOU alert, and the Max Tracker heatmap](docs/img/hero.png)
@@ -38,6 +28,12 @@ An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
 The current MCP response omits balances despite the documentation; an opt-in
 local Chrome extension can read the visible balance while a Lovable project is
 open. Setup and freshness limits are documented in the linked guide.
+
+**OpenRouter spend and budgets** are also available as an optional Labs page
+in `main`. OpenPulse shows API-key spend, a monthly display budget, remaining
+key allowance and optional account credits. A separate Mac service keeps API
+keys in Keychain and sends only summaries to the panel.
+[See the OpenRouter page and setup](#openrouter-spend-and-budget).
 
 Current source includes the original **2.16-inch square panel**, the
 **Waveshare 2.41 V2**, a USB-installed **1.91 Touch** development port and
@@ -74,7 +70,9 @@ Both answers already exist, buried in a terminal you're not looking at.
 VibePulse moves them onto a screen you can't miss: one glance from across
 the room, no window to switch to, no menu bar to squint at.
 
-> **Status:** v1.2.0. The core shelf-screen loop is real and physically
+> **Status:** latest release v1.3.0. OpenRouter is available in `main` as an
+> optional source-build preview and is not included in that release.
+> The core shelf-screen loop is real and physically
 > exercised on macOS and Windows: see quota, see an agent waiting, and answer
 > a supported prompt on the glass. The Windows core, physical answer loop and
 > persistent sign-in/sleep/reboot lifecycle were verified at the v1.0.0 host
@@ -112,13 +110,33 @@ Codex. You do not need to read this whole page:
    are concepts. New installs start with quotas and activity; analytics are
    optional in SETTINGS → LABS.
 
-## OpenRouter only
+## OpenRouter spend and budget
 
-You can use the round panel for OpenRouter without a Claude Code or Codex
-account. Follow the [OpenRouter-only installation guide](docs/openpulse/README.md#install-for-openrouter-only)
-from the `codex/openpulse` preview branch, rather than the general Claude/Codex
-setup below. It covers the Mac demo, Keychain connection, LAN service, exact
-round firmware build, Labs choices and troubleshooting.
+**OpenPulse is now in `main`**, adding an optional **OPENROUTER** page to
+VibePulse Labs. The spend page shows daily, weekly and monthly spend for the
+selected API key, compared with a monthly display budget you choose. The
+details page shows remaining API-key allowance and optional account credits;
+BYOK usage stays separate. The display budget is a reminder, not a provider cap.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/img/openpulse/round-spend.png" alt="Native round OpenPulse spend page with synthetic monthly spend and display budget" width="100%"></td>
+<td width="50%"><img src="docs/img/openpulse/round-details.png" alt="Native round OpenPulse details page with synthetic key allowance and account credits" width="100%"></td>
+</tr>
+</table>
+
+*Native 466 × 466 shared LVGL captures with synthetic demo values.*
+
+Build compatible firmware from `main` with `-DTORGET_OPENPULSE=ON`, then
+enable **OPENROUTER** under **SETTINGS → LABS → MORE → MORE** and tap
+**RESTART NOW**. OpenRouter is off by default. Tap the bottom page indicator
+to switch between spend and details, or the key name to cycle configured keys.
+Missing readings show dashes; stale readings and connection errors are explicit.
+
+You can use OpenRouter without a Claude Code or Codex account. Follow the
+[OpenRouter-only installation guide](docs/openpulse/README.md#install-for-openrouter-only)
+for the Mac demo, Keychain connection, separate LAN service, round firmware
+build, Labs choices and troubleshooting.
 
 The data path is **OpenRouter API → OpenPulse service on your Mac → Wi-Fi →
 display**. Browser login is not required. The Mac must be awake and the separate
@@ -126,6 +144,17 @@ service running; USB supplies power, not OpenRouter data. This preview has no
 automatic service startup or OpenRouter relay. A Labs switch alone does not
 install the service. [If the screen shows dashes, NO DATA or an error](docs/openpulse/README.md#troubleshooting-dashes-and-no-data),
 check the selected page, source status and panel reachability separately.
+
+The round **1.75** has an [owner-confirmed physical checkpoint](docs/openpulse/physical-2026-09-29.md)
+for upright live readings and the bottom page switch. Square **2.16** has native
+simulator checks and a CI firmware build; physical OpenRouter acceptance is
+pending. The other three display profiles cannot enable OpenRouter yet.
+This remains a macOS source-build preview, outside the **v1.3.0** release.
+
+![OpenRouter on the owner's round display in its pink enclosure](docs/img/openpulse/round-photo.jpg)
+
+*Owner photograph, 29 September 2026. Full touch-grid, swipe/menu and stress
+acceptance remain pending; see the linked checkpoint for the tested build.*
 
 ## Latest release: v1.3.0
 

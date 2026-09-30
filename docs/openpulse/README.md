@@ -13,8 +13,8 @@ unit. Full touch-grid, swipe and menu acceptance remain pending.
 
 ## Install for OpenRouter only
 
-**Current scope:** a source preview on macOS, first physically checked on the
-round **Waveshare ESP32-S3-Touch-AMOLED-1.75**. It is not included in the
+**Current scope:** a source-build preview in `main` on macOS, first physically
+checked on the round **Waveshare ESP32-S3-Touch-AMOLED-1.75**. It is not included in the
 v1.3.0 release. Square 2.16 has bench checks, not physical OpenRouter acceptance;
 the other board profiles cannot enable this preview. You do not need Claude
 Code, Codex or Lovable accounts to use OpenRouter.
@@ -29,11 +29,11 @@ relay or automatic service startup.
 
 ### 1. Get a separate checkout
 
-Keep existing VibePulse installations untouched. Until this preview is merged
-and released, use its branch, not the v1.3.0 download:
+Keep existing VibePulse installations untouched. OpenPulse is merged into
+`main` but is not in the v1.3.0 download. Use a separate checkout of `main`:
 
 ```sh
-git clone --branch codex/openpulse --single-branch \
+git clone --branch main --single-branch \
   https://github.com/niclasvestlund-YT/vibepulse.git openpulse-panel
 cd openpulse-panel
 python3.12 -m venv .venv
