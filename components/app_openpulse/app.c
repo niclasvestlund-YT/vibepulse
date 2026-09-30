@@ -11,7 +11,7 @@ static op_snapshot data;
 static bool has_data,failed;
 static int selected,page;
 static uint32_t received;
-static uint32_t accent(void) {return data.level==2 ? 0xff697a : data.level==1 ? 0xeeb861 : 0x63d6c5;}
+static uint32_t accent(void) {return has_data && data.level==2 ? 0xff697a : has_data && data.level==1 ? 0xeeb861 : 0x63d6c5;}
 static void money(char *out,size_t cap,double value) {
     if(!isfinite(value)) snprintf(out,cap,"--");
     else if(fabs(value)>=1e6) snprintf(out,cap,"$%.1fM",value/1e6);

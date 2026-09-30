@@ -363,7 +363,9 @@ verification is not inherited by OpenPulse. No release or Windows support claim.
 
 The integrated round Labs test is `python test/test_openpulse_labs.py`. It drives
 ON/OFF, the restart action, the existing Codex page and both OpenPulse pages
-through shared LVGL. The policy tests cover all 512 masks, migration and durable
+through shared LVGL. It also clicks the key selector from warning and critical
+states and verifies that the empty display uses the neutral accent until the
+new key's data arrives. The policy tests cover all 512 masks, migration and durable
 OFF behavior. `sim/build-openpulse-round/openpulse-sim` remains a focused design
 preview; the actual panel runs the complete VibePulse app with the optional page.
 

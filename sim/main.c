@@ -1807,6 +1807,16 @@ static int run_vibepulse_lovable_qa(void) {
 
 
 #if TK_OPENPULSE_AVAILABLE
+static lv_obj_t *openpulse_find_label(lv_obj_t *root, const char *text) {
+  if (lv_obj_check_type(root, &lv_label_class) &&
+      strcmp(lv_label_get_text(root), text) == 0) return root;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+    lv_obj_t *found = openpulse_find_label(lv_obj_get_child(root, i), text);
+    if (found) return found;
+  }
+  return NULL;
+}
+
 static int run_openpulse_labs_qa(void) {
   torget_app_show(SIM_APP_VIBEPULSE);
   torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
@@ -1820,6 +1830,26 @@ static int run_openpulse_labs_qa(void) {
   tokens_show_view(VIEW_OPENPULSE);
   if (usage_screen_current_view() != VIEW_OPENPULSE || !openpulse_layout_valid()) return 1;
   dump_frame("openpulse-labs-spend");
+  /* Click the shared key selector from both retained severity states. */
+  for (int severity = 1; severity <= 2; severity++) {
+    snapshot.key_index = openpulse_key_index();
+    snapshot.key_count = 2;
+    snapshot.level = severity;
+    openpulse_apply(&snapshot);
+    char tag[64];
+    snprintf(tag, sizeof tag, "openpulse-key-%d-before", severity);
+    dump_frame(tag);
+    lv_obj_t *key = openpulse_find_label(lv_screen_active(), "DEMO / My API key");
+    if (!key) return 1;
+    lv_obj_send_event(key, LV_EVENT_CLICKED, NULL);
+    if (openpulse_key_index() != (snapshot.key_index + 1) % 2 ||
+        !openpulse_find_label(lv_screen_active(), "NO DATA") ||
+        !openpulse_find_label(lv_screen_active(), "Display budget --")) return 1;
+    snprintf(tag, sizeof tag, "openpulse-key-%d-after", severity);
+    dump_frame(tag);
+  }
+  snapshot.key_index = openpulse_key_index();
+  openpulse_apply(&snapshot);
   openpulse_set_page(1);
   if (!openpulse_layout_valid()) return 1;
   dump_frame("openpulse-labs-details");

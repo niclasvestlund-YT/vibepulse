@@ -41,7 +41,7 @@ class OpenPulseLabsTests(unittest.TestCase):
             subprocess.run([str(ROOT / build / "torget-sim"), "--openpulse-labs-qa"],
                            cwd=ROOT, env=env, check=True, capture_output=True, timeout=30)
             frames = list(Path(directory).glob("*.bmp"))
-            self.assertEqual(len(frames), 5)
+            self.assertEqual(len(frames), 9)
             for frame in frames:
                 with Image.open(frame) as image:
                     self.assertEqual(image.size, (466, 466))
@@ -50,6 +50,15 @@ class OpenPulseLabsTests(unittest.TestCase):
                         for x in range(466):
                             if (x - 232.5)**2 + (y - 232.5)**2 > 232.5**2:
                                 self.assertLess(max(rgb.getpixel((x, y))), 16, str(frame))
+            for severity, color in ((1, (238, 184, 97)), (2, (255, 105, 122))):
+                with self.subTest(severity=severity), \
+                     Image.open(Path(directory) / f"torget-openpulse-key-{severity}-before.bmp") as before, \
+                     Image.open(Path(directory) / f"torget-openpulse-key-{severity}-after.bmp") as after:
+                    before_budget = before.convert("RGB").crop((70, 268, 390, 300))
+                    after_budget = after.convert("RGB").crop((70, 268, 390, 300))
+                    self.assertIn(color, before_budget.get_flattened_data())
+                    self.assertNotIn(color, after_budget.get_flattened_data())
+                    self.assertIn((99, 214, 197), after_budget.get_flattened_data())
             with Image.open(Path(directory) / "torget-openpulse-labs-on.bmp") as enabled, \
                  Image.open(Path(directory) / "torget-openpulse-labs-off-pending.bmp") as pending:
                 self.assertNotEqual(enabled.crop((90, 244, 380, 300)).tobytes(),

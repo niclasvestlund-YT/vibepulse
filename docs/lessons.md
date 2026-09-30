@@ -1,5 +1,15 @@
 # Lessons log
 
+## 2026-09-30 · Empty key states must not retain another key's severity
+
+OpenPulse cleared its data-valid flag when switching API keys, but the accent
+helper still read the retained snapshot's warning or critical level. The result
+was missing values with the previous key's warning color. Gate severity colors
+on data validity too. The shared LVGL regression clicks the selector from both
+severity levels, checks the empty-state labels and inspects native budget pixels;
+both cases fail before the fix and pass afterward. This is simulator evidence,
+not a new physical-panel acceptance.
+
 ## 2026-09-25 · Green checks do not close unresolved review findings
 
 Before merging, inspect every review thread as well as the exact-head CI result.
