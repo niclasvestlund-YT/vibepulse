@@ -35,6 +35,37 @@ class GrokFixture(unittest.TestCase):
 
 
 class GrokTests(GrokFixture):
+    def test_file_growing_after_fstat_is_read_bounded_and_retains_data(self):
+        path = self.write('grok.json', {'v': 1, 'usedPct': 12})
+        reader = grok.JsonFile(path)
+        validate = Mock(side_effect=lambda data: data)
+        expected = reader.read(validate)
+        stamp, generation = reader.mtime, reader.generation
+        fstat = os.fstat
+
+        def grow_after_stat(fd):
+            stat = fstat(fd)
+            with open(path, 'ab') as writer:
+                writer.write(b' ' * 1000000)
+            return stat
+
+        with path.open('rb') as handle, \
+                patch.object(Path, 'open', return_value=handle) as opened, \
+                patch.object(grok.os, 'fstat', side_effect=grow_after_stat) as stat, \
+                patch.object(handle, 'read', wraps=handle.read) as read, \
+                self.assertLogs('tokenserver.grok') as logs:
+            fd = handle.fileno()
+            self.assertEqual(reader.read(validate), expected)
+            read.assert_called_once_with(65537)
+            stat.assert_called_once_with(fd)
+        opened.assert_called_once_with('rb')
+        self.assertTrue(reader.invalid)
+        self.assertIsNone(reader.signature)
+        self.assertEqual((reader.mtime, reader.generation), (stamp, generation))
+        validate.assert_called_once()
+        self.assertEqual(logs.output, [
+            'WARNING:tokenserver.grok:grok.json: invalid input ignored'])
+
     def test_same_stat_rewrite_and_unchanged_content_validation(self):
         path = self.write('grok.json', {'v': 1, 'usedPct': 10})
         reader = grok.JsonFile(path)
@@ -693,12 +724,10 @@ class GrokTests(GrokFixture):
     def test_transient_read_error_is_retried_without_file_change(self):
         self.write('grok-bots.json', {'v': 1, 'bots': [
             {'bot': 'filebot', 'state': 'working', 'updatedAt': self.now}]})
-        real = Path.read_bytes
-        with patch.object(Path, 'read_bytes', side_effect=PermissionError('locked')), \
+        with patch.object(Path, 'open', side_effect=PermissionError('locked')), \
                 self.assertLogs('tokenserver.grok'):
             self.assertEqual(self.store.snapshot()['bots'], [])
-        with patch.object(Path, 'read_bytes', real):
-            self.assertEqual(self.store.snapshot()['bots'][0]['name'], 'filebot')
+        self.assertEqual(self.store.snapshot()['bots'][0]['name'], 'filebot')
 
     def test_billing_request_refuses_redirects(self):
         from urllib.request import Request

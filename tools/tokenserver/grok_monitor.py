@@ -76,11 +76,12 @@ class JsonFile:
 
     def read(self, validate):
         try:
-            stat = self.path.stat()
-            if stat.st_size > 65536:
-                self.signature = None
-                raise ValueError('oversized file')
-            raw = self.path.read_bytes()
+            with self.path.open('rb') as handle:
+                stat = os.fstat(handle.fileno())
+                if stat.st_size > 65536:
+                    self.signature = None
+                    raise ValueError('oversized file')
+                raw = handle.read(65537)
             if len(raw) > 65536:
                 self.signature = None
                 raise ValueError('oversized file')
