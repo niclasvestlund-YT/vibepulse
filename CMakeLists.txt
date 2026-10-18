@@ -8,6 +8,8 @@
 # kärnkomponenterna — samma kod på Macen som på hyllan, per design.
 cmake_minimum_required(VERSION 3.16)
 include(cmake/torget_board.cmake)
+option(TORGET_GROK "Enable Grok panel page" OFF)
+set(ENV{TORGET_GROK} "${TORGET_GROK}")
 option(TORGET_OPENPULSE "Enable OpenRouter in VibePulse Labs" OFF)
 if(TORGET_OPENPULSE)
   set(ENV{TORGET_OPENPULSE} "ON")

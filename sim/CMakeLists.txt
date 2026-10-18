@@ -96,6 +96,7 @@ add_executable(torget-sim
   ../components/app_tokens/agent_assets.c
   ../components/app_tokens/github_status_parse.c
   ../components/app_tokens/lovable_status_parse.c
+  ../components/app_tokens/grok_status_parse.c
   ../components/app_tokens/project_star_popup_policy.c
   ../components/app_tokens/project_star_assets.c
   ../components/app_tokens/project_star_chime.c
@@ -162,4 +163,9 @@ if(TORGET_OPENPULSE)
   target_sources(torget-sim PRIVATE ../components/app_openpulse/app.c ../components/app_openpulse/model.c)
   target_include_directories(torget-sim PRIVATE ../components/app_openpulse ../third_party/cjson)
   target_compile_definitions(torget-sim PRIVATE TK_OPENPULSE_AVAILABLE=1)
+endif()
+
+option(TORGET_GROK "Enable Grok panel page" OFF)
+if(TORGET_GROK)
+  target_compile_definitions(torget-sim PRIVATE TK_GROK_SCREEN_ENABLED=1)
 endif()

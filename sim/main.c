@@ -44,6 +44,7 @@ void openpulse_net_start(void) {}
 #include "agent_status_parse.h"
 #include "github_status_parse.h"
 #include "lovable_status_parse.h"
+#include "grok_status_parse.h"
 #include "max_tracker_parse.h"
 #include "boot_screen.h"
 #include "ota_ui.h"
@@ -470,6 +471,19 @@ static void apply_lovable_file(const char *file) {
     printf("lovable: %s (%s)\n", file, status.has_data ? "data" : "waiting");
   } else {
     printf("lovable: %s avvisad\n", file);
+  }
+  free(json);
+}
+static void apply_grok_file(const char *file) {
+  size_t len = 0;
+  char *json = read_fixture(file, &len);
+  tk_grok_status status;
+  if (json && tk_grok_status_parse(json, len, &status)) {
+    tokens_apply_grok(&status);
+    printf("grok: %s (%s)\n", file, status.enabled ? "data" : "waiting");
+  } else {
+    printf("grok: %s avvisad\n", file);
+    capture_failures++;
   }
   free(json);
 }
@@ -1770,9 +1784,31 @@ static int run_vibepulse_needs_you_render_qa(void) {
   return 0;
 }
 
-/* Lovable page captures. Its own mode, run with LABS bit 32 set
- * (TORGET_LABS_MASK=32 or more), so the pinned default frames and their pager
- * rows stay byte-identical to a build without the page. */
+/* Grok build-time opt-in captures; no persisted Labs choice. */
+static int run_vibepulse_grok_qa(void) {
+  capture_failures = 0;
+  torget_app_show(SIM_APP_VIBEPULSE);
+  apply_agent_file("agent-status-idle.json");
+  feed_tokens_file("tokens.json");
+  if (tk_labs_view_position(VIEW_GROK) < 0) {
+    fprintf(stderr,"grok: page is off -- configure -DTORGET_GROK=ON\n");
+    return 1;
+  }
+  /* "live" is the combined usage + bots frame used for POC renders. */
+  const char *states[]={"empty","xai","manual","bots","stale","disabled","live"};
+  tokens_show_view(VIEW_GROK);
+  for (unsigned i=0;i<sizeof states/sizeof states[0];i++) {
+    char file[64], frame[64];
+    snprintf(file,sizeof file,"grok-%s.json",states[i]);
+    snprintf(frame,sizeof frame,"vibepulse-grok-%s",states[i]);
+    apply_grok_file(file);
+    lv_refr_now(NULL);
+    dump_frame(frame);
+  }
+  return capture_failures ? 1:0;
+}
+
+/* Lovable captures require Labs bit 32; keep their default build unchanged. */
 static int run_vibepulse_lovable_qa(void) {
   capture_failures = 0;
   torget_app_show(SIM_APP_VIBEPULSE);
@@ -2055,6 +2091,8 @@ int main(int argc, char **argv) {
     return run_round_quota_qa();
 #endif
 
+  if (argc == 2 && strcmp(argv[1], "--vibepulse-grok-qa") == 0)
+    return run_vibepulse_grok_qa();
   if (argc == 2 && strcmp(argv[1], "--vibepulse-lovable-qa") == 0)
     return run_vibepulse_lovable_qa();
 #if TK_OPENPULSE_AVAILABLE

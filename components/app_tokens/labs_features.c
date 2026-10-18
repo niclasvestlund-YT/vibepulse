@@ -85,6 +85,7 @@ static bool view_enabled(int view) {
     case VIEW_TRACKER_CODEX: return tk_labs_active(TK_LABS_TRACKER);
     case VIEW_GITHUB: return tk_labs_active(TK_LABS_GITHUB);
     case VIEW_VALUE: return tk_labs_active(TK_LABS_VALUE);
+    case VIEW_GROK: return TK_GROK_SCREEN_ENABLED;
     case VIEW_LOVABLE: return tk_labs_active(TK_LABS_LOVABLE);
     case VIEW_OPENPULSE: return tk_labs_active(TK_LABS_OPENPULSE);
     default: return false;

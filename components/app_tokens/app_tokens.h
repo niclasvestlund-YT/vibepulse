@@ -14,6 +14,7 @@
 #include "agent_status.h"
 #include "github_status.h"
 #include "lovable_status.h"
+#include "grok_status.h"
 #include "max_tracker.h"
 
 /*
@@ -60,6 +61,8 @@ void tokens_agent_net_start(void);
 bool tokens_agent_direct_origin(char *origin, size_t cap);
 void tokens_github_net_start(void);
 void tokens_lovable_net_start(void);
+void tokens_grok_net_start(void);
+void tokens_apply_grok(const tk_grok_status *status);
 
 /* Hoppa till en VibePulse-vy utan animation — bänkens och BMP-dumparnas
  * ratt. */

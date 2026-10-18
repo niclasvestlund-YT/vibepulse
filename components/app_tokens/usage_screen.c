@@ -14,6 +14,7 @@
 #include "app_tokens_config.h"
 #include "github_status.h"
 #include "lovable_status.h"
+#include "grok_status.h"
 #include "max_tracker.h"
 #include "max_tracker_presenter.h"
 #include "project_star_event.h"
@@ -852,6 +853,221 @@ static void refresh_lovable_age(int64_t now_us) {
     lv_label_set_text(page->age, text);
   }
 }
+
+#if TK_GROK_SCREEN_ENABLED
+#define COL_GROK lv_color_hex(0x7AA2FF)
+static struct {
+  lv_obj_t *tile, *provenance, *caption, *hero, *sub, *empty;
+  lv_obj_t *dot[4], *name[4], *activity[4], *state[4];
+  tk_grok_status status;
+  int64_t applied_at_us;
+  bool has_data, has_snapshot;
+} grok_page;
+
+static void create_grok_page(void) {
+  memset(&grok_page,0,sizeof grok_page);
+  grok_page.tile = new_tile(VIEW_GROK);
+  lv_obj_t *tile = grok_page.tile;
+  int hx=VP_SAFE_X+22, hy=23, px=210, py=34, pw=198;
+  int cx=VP_SAFE_X, cy=84, cw=VP_CONTENT_W, hero_y=112, hero_x=16, hero_w=448;
+  int sy=244, row_x=VP_SAFE_X, row_y=284, row_w=VP_CONTENT_W, step=40;
+#ifdef TORGET_BOARD_175
+  hx=212; hy=70; px=100; py=100; pw=280;
+  /* Round glass: hero sits a clear line below its caption; three bot rows
+   * stay inside the bezel chord (x 74..406 at the last row's baseline). */
+  cx=60; cy=124; cw=360; hero_x=48; hero_y=164; hero_w=384;
+  sy=288; row_x=100; row_y=320; row_w=280; step=30;
+#endif
+#ifdef TORGET_BOARD_191_TOUCH
+  cx=22; cy=62; cw=270; hero_x=16; hero_y=88; hero_w=280;
+  sy=186; row_x=300; row_y=64; row_w=170; step=38;
+#endif
+  lv_obj_t *mark=label(tile,&plex_ui_21,COL_WHITE,hx-20,hy,18,30);
+  lv_label_set_text(mark,"/");
+  lv_obj_t *heading=label(tile,&plex_ui_21,COL_WHITE,hx,hy,140,30);
+  lv_obj_set_style_text_letter_space(heading,2,0);
+  lv_label_set_text(heading,"GROK");
+  grok_page.provenance=label(tile,&plex_ui_12,COL_MUTED,px,py,pw,18);
+  lv_obj_set_style_text_align(grok_page.provenance,LV_TEXT_ALIGN_RIGHT,0);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_style_text_align(grok_page.provenance,LV_TEXT_ALIGN_CENTER,0);
+#else
+  create_header_hairline(tile);
+#endif
+  grok_page.caption=label(tile,&plex_ui_21,COL_GROK,cx,cy,cw,30);
+  grok_page.hero=label(tile,&plex_num_118,COL_WHITE,hero_x,hero_y,hero_w,130);
+  grok_page.sub=label(tile,&plex_ui_14,COL_META,cx,sy,cw,34);
+  lv_obj_set_style_text_align(grok_page.caption,LV_TEXT_ALIGN_CENTER,0);
+  lv_obj_set_style_text_align(grok_page.hero,LV_TEXT_ALIGN_CENTER,0);
+  lv_obj_set_style_text_align(grok_page.sub,LV_TEXT_ALIGN_CENTER,0);
+#ifdef TORGET_BOARD_191_TOUCH
+  lv_obj_set_style_text_font(grok_page.caption,&plex_ui_16,0);
+  lv_obj_set_style_text_align(grok_page.caption,LV_TEXT_ALIGN_LEFT,0);
+  lv_obj_set_style_text_align(grok_page.sub,LV_TEXT_ALIGN_LEFT,0);
+#else
+#ifdef TORGET_BOARD_175
+  create_hairline_span(tile,308,280);
+#else
+  create_hairline(tile,270);
+#endif
+#endif
+  grok_page.empty=label(tile,&plex_ui_12,COL_MUTED,row_x,row_y,row_w,20);
+  lv_obj_set_style_text_align(grok_page.empty,LV_TEXT_ALIGN_CENTER,0);
+  lv_label_set_text(grok_page.empty,"NO BOTS REPORTING");
+  for (unsigned i=0;i<4;i++) {
+    int y=row_y+(int)i*step;
+    grok_page.dot[i]=bare(tile);
+    lv_obj_set_pos(grok_page.dot[i],row_x,y+5);
+    lv_obj_set_size(grok_page.dot[i],10,10);
+    lv_obj_set_style_radius(grok_page.dot[i],5,0);
+    lv_obj_set_style_bg_opa(grok_page.dot[i],LV_OPA_COVER,0);
+    grok_page.name[i]=label(tile,&plex_ui_16,COL_WHITE,row_x+18,y,row_w-120,22);
+    lv_label_set_long_mode(grok_page.name[i],LV_LABEL_LONG_DOT);
+    grok_page.state[i]=label(tile,&plex_ui_14,COL_META,row_x+row_w-100,y,100,22);
+    lv_obj_set_style_text_align(grok_page.state[i],LV_TEXT_ALIGN_RIGHT,0);
+    grok_page.activity[i]=label(tile,&plex_ui_12,COL_MUTED,row_x+18,y+20,row_w-18,16);
+    lv_label_set_long_mode(grok_page.activity[i],LV_LABEL_LONG_DOT);
+#ifdef TORGET_BOARD_175
+    lv_obj_set_y(grok_page.activity[i],y+17);
+#endif
+#ifdef TORGET_BOARD_191_TOUCH
+    lv_obj_set_width(grok_page.name[i],row_w-18);
+    lv_obj_set_style_text_font(grok_page.name[i],&plex_ui_12,0);
+    /* Activity left, state word right on the second line: no overlap. */
+    lv_obj_set_pos(grok_page.state[i],row_x+row_w-80,y+17);
+    lv_obj_set_width(grok_page.state[i],80);
+    lv_obj_set_style_text_font(grok_page.state[i],&plex_ui_12,0);
+    lv_obj_set_y(grok_page.activity[i],y+17);
+    lv_obj_set_width(grok_page.activity[i],row_w-18-84);
+#endif
+  }
+  lv_label_set_text(grok_page.provenance,"WAITING");
+  lv_label_set_text(grok_page.caption,"NO USAGE SOURCE");
+  lv_label_set_text(grok_page.hero,"–");
+  lv_label_set_text(grok_page.sub,"RUN TOKENSERVER WITH --GROK");
+  for (unsigned i=0;i<4;i++) {
+    lv_obj_add_flag(grok_page.dot[i],LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(grok_page.name[i],LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(grok_page.activity[i],LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(grok_page.state[i],LV_OBJ_FLAG_HIDDEN);
+  }
+  create_pager(tile,VIEW_GROK);
+}
+
+static void grok_dollars(char *out, size_t cap, int32_t cents, bool full_precision) {
+  if (cents<100000 && !full_precision && cents%100==0) snprintf(out,cap,"$%ld",(long)(cents/100));
+  else if (cents<100000) snprintf(out,cap,"$%ld.%02ld",(long)(cents/100),(long)(cents%100));
+  else if (cents>=100000000) snprintf(out,cap,"$%ld,%03ld,%03ld",(long)(cents/100000000),(long)(cents/100000%1000),(long)(cents/100%1000));
+  else snprintf(out,cap,"$%ld,%03ld",(long)(cents/100000),(long)(cents/100%1000));
+}
+static void refresh_grok_age(int64_t now_us) {
+  if (!grok_page.tile || !grok_page.has_snapshot) return;
+  const tk_grok_status *s=&grok_page.status;
+  int64_t elapsed=now_us>grok_page.applied_at_us ? (now_us-grok_page.applied_at_us)/1000000 : 0;
+  bool stale=s->stale || elapsed>600 || (s->has_age && s->age_seconds+elapsed>600) || !s->enabled ||
+    (!strcmp(s->source,"xai") && !s->has_spent) ||
+    (!strcmp(s->source,"manual") && !s->has_used) || !strcmp(s->source,"none");
+  char text[96];
+  if (!s->enabled) snprintf(text,sizeof text,"OFF ON COMPUTER");
+  else if (!strcmp(s->source,"xai")) snprintf(text,sizeof text,"XAI API · %s",stale ? "CACHED":"LIVE");
+  else if (!strcmp(s->source,"manual")) {
+    if (s->has_age) snprintf(text,sizeof text,"MANUAL · %lld MIN",(long long)((s->age_seconds+elapsed)/60));
+    else snprintf(text,sizeof text,"MANUAL · AGE UNKNOWN");
+  } else snprintf(text,sizeof text,"%s",!strcmp(s->source,"bots") ? "BOT ACTIVITY":"WAITING");
+  lv_label_set_text(grok_page.provenance,text);
+  lv_obj_set_style_text_opa(grok_page.hero,stale ? LV_OPA_50:LV_OPA_COVER,0);
+  if (s->enabled && !strcmp(s->source,"manual") && s->has_reset) {
+    int64_t left=s->reset_seconds>elapsed ? s->reset_seconds-elapsed:0;
+    snprintf(text,sizeof text,"RESETS IN %lld D %lld H",(long long)(left/86400),(long long)(left/3600%24));
+    lv_label_set_text(grok_page.sub,text);
+  }
+}
+static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
+  char hero[48], sub[128]="", a[32], b[32];
+  bool xai=!strcmp(s->source,"xai"), manual=!strcmp(s->source,"manual"), bots=!strcmp(s->source,"bots");
+  bool data=s->enabled && ((xai && s->has_spent) || (manual && s->has_used) || bots);
+  grok_page.has_snapshot=true;
+  grok_page.status=*s;
+  grok_page.applied_at_us=now_us;
+  if (data || !grok_page.has_data) {
+    lv_label_set_text(grok_page.caption,xai ? "API SPEND THIS MONTH":manual ? (s->label[0] ? s->label:"WEEKLY POOL USED"):bots ? "BOTS ACTIVE":"NO USAGE SOURCE");
+    const lv_font_t *font=xai ? &plex_money_118:&plex_num_118;
+#ifdef TORGET_BOARD_191_TOUCH
+    font=xai ? &plex_money_35:&plex_quota_84;
+#endif
+    lv_obj_set_style_text_font(grok_page.hero,font,0);
+    if (!data) snprintf(hero,sizeof hero,"–");
+    else if (xai) grok_dollars(hero,sizeof hero,s->spent_cents,true);
+    else snprintf(hero,sizeof hero,"%ld%s",(long)(manual ? s->used_pct:s->active),manual ? "%":"");
+    /* Fit the full bounded wire value; never clip a digit or a dollar sign. */
+    lv_point_t measured;
+    int spacing=0;
+#ifdef TORGET_BOARD_175
+    spacing=-3;
+#endif
+    lv_text_get_size(&measured,hero,font,spacing,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    if (measured.x > lv_obj_get_style_width(grok_page.hero,0)) {
+      font=xai ? &plex_money_35:&plex_quota_84;
+      spacing=0;
+    }
+    lv_text_get_size(&measured,hero,font,spacing,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    if (measured.x > lv_obj_get_style_width(grok_page.hero,0) && !xai) font=&plex_num_38;
+    lv_obj_set_style_text_font(grok_page.hero,font,0);
+    lv_obj_set_style_text_letter_space(grok_page.hero,spacing,0);
+    lv_label_set_text(grok_page.hero,hero);
+    if (xai) {
+      if (s->has_limit) { grok_dollars(a,sizeof a,s->limit_cents,false); snprintf(sub,sizeof sub,"OF %s LIMIT",a); }
+      if (s->has_prepaid) { grok_dollars(b,sizeof b,s->prepaid_cents,false); size_t n=strlen(sub); snprintf(sub+n,sizeof sub-n,"%s%s PREPAID LEFT",n ? " · ":"",b); }
+    } else if (bots) snprintf(sub,sizeof sub,"%ld DONE TODAY",(long)s->done_today);
+    else if (!manual) snprintf(sub,sizeof sub,"RUN TOKENSERVER WITH --GROK");
+    lv_point_t sub_size;
+    lv_text_get_size(&sub_size,sub,&plex_ui_14,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    lv_obj_set_style_text_font(grok_page.sub,sub_size.x>lv_obj_get_style_width(grok_page.sub,0) ? &plex_ui_12:&plex_ui_14,0);
+    lv_label_set_long_mode(grok_page.sub,LV_LABEL_LONG_WRAP);
+    lv_label_set_text(grok_page.sub,sub);
+    grok_page.has_data=data;
+  }
+  unsigned count=s->enabled ? s->bot_count:0;
+#ifdef TORGET_BOARD_175
+  if (count>3) count=3;
+#endif
+  if (count) lv_obj_add_flag(grok_page.empty,LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_remove_flag(grok_page.empty,LV_OBJ_FLAG_HIDDEN);
+  for (unsigned i=0;i<4;i++) {
+    lv_obj_t *objects[]={grok_page.dot[i],grok_page.name[i],grok_page.state[i],grok_page.activity[i]};
+    unsigned shown=4;
+#ifdef TORGET_BOARD_175
+    shown=3; /* round glass: name + state only; activity would crowd the bezel */
+#endif
+    for (unsigned j=0;j<4;j++) {
+      if (i<count && j<shown) lv_obj_remove_flag(objects[j],LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(objects[j],LV_OBJ_FLAG_HIDDEN);
+    }
+    if (i>=count) continue;
+    const tk_grok_bot *bot=&s->bots[i];
+    const char *word="IDLE"; lv_color_t color=COL_MUTED;
+    if (!strcmp(bot->state,"working")) { word="WORKING"; color=COL_GROK; }
+    if (!strcmp(bot->state,"waiting")) { word="NEEDS YOU"; color=lv_color_hex(0xFFB020); }
+    if (!strcmp(bot->state,"done")) { word="DONE"; color=lv_color_hex(0x3DDC84); }
+    if (!strcmp(bot->state,"error")) { word="ERROR"; color=lv_color_hex(0xFF5A5A); }
+    lv_label_set_text(grok_page.name[i],bot->name);
+#if !defined(TORGET_BOARD_175) && !defined(TORGET_BOARD_191_TOUCH)
+    lv_point_t name_size;
+    lv_text_get_size(&name_size,bot->name,&plex_ui_16,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    int activity_x=VP_SAFE_X+18+name_size.x+10;
+    int activity_w=VP_SAFE_X+VP_CONTENT_W-110-activity_x;
+    lv_obj_set_pos(grok_page.activity[i],activity_x,284+(int)i*40+2);
+    lv_obj_set_width(grok_page.activity[i],activity_w>0 ? activity_w:1);
+    lv_label_set_long_mode(grok_page.activity[i],LV_LABEL_LONG_DOT);
+#endif
+    lv_label_set_text(grok_page.activity[i],bot->activity);
+    lv_label_set_text(grok_page.state[i],word);
+    lv_obj_set_style_text_color(grok_page.state[i],color,0);
+    lv_obj_set_style_bg_color(grok_page.dot[i],color,0);
+  }
+  refresh_grok_age(now_us);
+}
+#endif
 
 static void create_lovable_page(void) {
   lovable_page *page = &ui.lovable;
@@ -1876,6 +2092,9 @@ void usage_screen_create(lv_obj_t *root) {
   if (tk_labs_active(TK_LABS_GITHUB)) create_github_page();
   if (tk_labs_active(TK_LABS_VALUE)) create_value_page();
   if (tk_labs_active(TK_LABS_LOVABLE)) create_lovable_page();
+#if TK_GROK_SCREEN_ENABLED
+  create_grok_page();
+#endif
 #if TK_OPENPULSE_AVAILABLE
   if (tk_labs_active(TK_LABS_OPENPULSE)) {
     openpulse_app.create(new_tile(VIEW_OPENPULSE));
@@ -1967,6 +2186,13 @@ void usage_screen_apply_github(const tk_github_status *status) {
   }
 }
 
+void usage_screen_apply_grok(const tk_grok_status *status, int64_t now_us) {
+#if TK_GROK_SCREEN_ENABLED
+  if (status && grok_page.tile) apply_grok_page(status, now_us);
+#else
+  (void)status; (void)now_us;
+#endif
+}
 void usage_screen_apply_lovable(const tk_lovable_status *status,
                                 int64_t now_us) {
   if (!status || !ui.lovable.tile) return;
@@ -2005,6 +2231,9 @@ void usage_screen_tick(int64_t now_us) {
   for (int i = 0; i < 2; i++) refresh_tracker_header(&ui.trackers[i], now_us);
   tk_agent_monitor_tick(now_us);
   refresh_lovable_age(now_us);
+#if TK_GROK_SCREEN_ENABLED
+  refresh_grok_age(now_us);
+#endif
   if (tk_labs_active(TK_LABS_STAR_POPUP)) tk_project_star_popup_tick(now_us);
 }
 

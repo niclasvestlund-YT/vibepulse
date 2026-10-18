@@ -22,7 +22,7 @@ int main(void) {
   tk_labs_init();
   assert(tk_labs_view_count() == (TK_LABS_ANALYTICS_DEFAULT ? 7 : 3) +
                                 TK_GITHUB_SCREEN_ENABLED +
-                                TK_LOVABLE_SCREEN_ENABLED + (TK_OPENPULSE_AVAILABLE && OPENPULSE_FIRST_INSTALL_ON));
+                                TK_LOVABLE_SCREEN_ENABLED + TK_GROK_SCREEN_ENABLED + (TK_OPENPULSE_AVAILABLE && OPENPULSE_FIRST_INSTALL_ON));
   assert(tk_labs_active(TK_LABS_LOVABLE) == !!TK_LOVABLE_SCREEN_ENABLED);
   assert(tk_labs_active(TK_LABS_GITHUB) == !!TK_GITHUB_SCREEN_ENABLED);
   assert(tk_labs_active(TK_LABS_STAR_POPUP) == !!TK_GITHUB_NOTIFICATIONS_ENABLED);
@@ -32,7 +32,7 @@ int main(void) {
   for (unsigned mask = 0; mask <= TK_LABS_ALL; mask++) {
     saved = TK_LABS_RECORD_VERSION | mask;
     tk_labs_init();
-    int expected_count = 2 * !!(mask & 64) + !!(mask & 128) +
+    int expected_count = TK_GROK_SCREEN_ENABLED + 2 * !!(mask & 64) + !!(mask & 128) +
                          !!(mask & 1) + 2 * !!(mask & 2) +
                          !!(mask & 4) + !!(mask & 8) + !!(mask & 32) +
                          (TK_OPENPULSE_AVAILABLE && !!(mask & 256));
@@ -76,7 +76,7 @@ int main(void) {
   assert(tk_labs_toggle(TK_LABS_VALUE));
   tk_labs_init(); /* reboot: saved choice wins over any template default */
   assert(tk_labs_active(TK_LABS_VALUE) && !tk_labs_pending());
-  assert(tk_labs_view_count() == 4);
+  assert(tk_labs_view_count() == 4 + TK_GROK_SCREEN_ENABLED);
   assert(tk_labs_view_position(VIEW_VALUE) == 3);
   fail_write = true;
   assert(!tk_labs_toggle(TK_LABS_VALUE));

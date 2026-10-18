@@ -5,9 +5,9 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
-- Add OpenRouter to the optional Grok host sources: per-key UTC month spend, budget/key limit and optional management-key account credits; auto selection is xAI → OpenRouter → bots → manual.
+- Add OpenRouter to the optional Grok host sources: spend and limit from the same window (effective budget, or key limit with matching daily/weekly/monthly usage, or UTC month spend for unlimited keys) and optional management-key account credits; auto selection is xAI → OpenRouter → bots → manual.
 
-- Add an optional, default-off host Grok preview: xAI API billing, manual quota and local bot status with bounded LAN payloads. See [Grok setup](docs/grok-pulse.md); no firmware changes.
+- Add an optional, default-off host Grok preview: xAI API billing, manual quota and local bot status with bounded LAN payloads. Adds a build-time opt-in GROK firmware/simulator page for all five board profiles, strict payload validation, source/freshness and bot states. See [Grok setup](docs/grok-pulse.md); simulator/build evidence only, no physical panel verification.
 
 - OpenPulse now appears as the optional OPENROUTER switch in Labs; existing provider choices are preserved on upgrade.
 

@@ -24,6 +24,9 @@ current across ordinary internet WiFi. Every cloud feature is off by default;
 only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
+A build-time opt-in [Grok page](docs/grok-pulse.md#panel-page-build-time-opt-in)
+shows explicitly sourced API spend, manual quota, or local bot activity.
+
 An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
 The current MCP response omits balances despite the documentation; an opt-in
 local Chrome extension can read the visible balance while a Lovable project is
@@ -798,6 +801,22 @@ removal and the round display's BOOT/Labs controls. No MCP login is needed for
 balance in `get_workspace`, but the authenticated response checked on
 2026-09-24 omitted it. Source modes `auto` and `mcp` allow a later switch to the
 official API without changing the display contract.
+
+## Grok usage and bot activity (experimental)
+
+The default-off **GROK** page shows xAI monthly API spend, a manually copied
+Grok quota, or bot activity. Source and freshness stay visible; missing values
+show dashes, and unavailable updates retain the last real reading. Waiting
+bots show **NEEDS YOU**, without an approval action.
+
+![Grok API spend: native 480×480 simulator example](docs/img/grok-216-spend.png)
+
+![Grok bots: native 600×450 simulator example](docs/img/grok-241-bots.png)
+
+Enable firmware with `-D TORGET_GROK=ON` or `TK_GROK_SCREEN_ENABLED 1` in
+`secrets.h`, and enable the host separately with `--grok`. This page is not a
+Labs switch. All five board profiles have simulator layouts; none has physical
+Grok verification. See [Grok setup and simulator commands](docs/grok-pulse.md).
 
 ## One button, one menu
 

@@ -11,7 +11,7 @@ set(TK_APP_TOKEN_SRCS
        "agent_net_policy.c" "tokens_net_recovery_policy.c"
        "poll_backoff_policy.c"
        "net.c" "agent_net.c" "needs_you_net.c"
-       "github_net.c" "lovable_net.c"
+       "github_net.c" "lovable_net.c" "grok_net.c" "grok_status_parse.c"
        "max_tracker_parse.c" "max_tracker_presenter.c")
 if(CONFIG_TK_VIBEPULSE_INTERACTION_RELAY OR CONFIG_TK_VIBEPULSE_AGENT_STATUS_RELAY)
   # Shape contracts (not values): URL=https origin, mailbox
@@ -90,4 +90,8 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_LVGL_H_INCLUDE_SIMPLE)
 
 if("$ENV{TORGET_OPENPULSE}" STREQUAL "ON")
   target_compile_definitions(${COMPONENT_LIB} PRIVATE TK_OPENPULSE_AVAILABLE=1)
+endif()
+
+if("$ENV{TORGET_GROK}" STREQUAL "ON")
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE TK_GROK_BUILD_ENABLED=1)
 endif()

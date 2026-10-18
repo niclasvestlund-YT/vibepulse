@@ -1,0 +1,1 @@
+{"v": 1, "enabled": true, "source": "bots", "stale": false, "active": 2, "doneToday": 8, "bots": [{"name": "RESEARCH-AGENT01", "state": "working", "activity": "SEARCHING"}, {"name": "BUILD", "state": "waiting", "activity": "WAITING FOR USER"}, {"name": "CHECK", "state": "error", "activity": "FAILED"}, {"name": "REPORT", "state": "done", "activity": "READY"}]}

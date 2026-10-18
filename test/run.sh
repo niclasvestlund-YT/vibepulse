@@ -73,16 +73,19 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 /tmp/torget-core-test
 
 # Both the legacy header fallback and fresh-install template seed.
-for labs_default in 0 1; do
-  for github_default in 0 1 2 3 4 5 6 7; do
-    cc -std=c11 -Wall -Wextra -Werror -O1 \
-      -DTK_LABS_ANALYTICS_DEFAULT=$labs_default \
-      -DTK_GITHUB_SCREEN_ENABLED=$((github_default & 1)) \
-      -DTK_GITHUB_NOTIFICATIONS_ENABLED=$(((github_default >> 1) & 1)) \
-      -DTK_LOVABLE_SCREEN_ENABLED=$(((github_default >> 2) & 1)) \
-      ../components/app_tokens/labs_features.c test_labs_features.c \
-      -o /tmp/torget-labs-test
-    /tmp/torget-labs-test
+for grok_default in 0 1; do
+  for labs_default in 0 1; do
+    for github_default in 0 1 2 3 4 5 6 7; do
+      cc -std=c11 -Wall -Wextra -Werror -O1 \
+        -DTK_GROK_SCREEN_ENABLED=$grok_default \
+        -DTK_LABS_ANALYTICS_DEFAULT=$labs_default \
+        -DTK_GITHUB_SCREEN_ENABLED=$((github_default & 1)) \
+        -DTK_GITHUB_NOTIFICATIONS_ENABLED=$(((github_default >> 1) & 1)) \
+        -DTK_LOVABLE_SCREEN_ENABLED=$(((github_default >> 2) & 1)) \
+        ../components/app_tokens/labs_features.c test_labs_features.c \
+        -o /tmp/torget-labs-test
+      /tmp/torget-labs-test
+    done
   done
 done
 
@@ -191,6 +194,13 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
   -lm \
   -o /tmp/torget-lovable-status-test
 /tmp/torget-lovable-status-test
+
+cc -std=c11 -Wall -Wextra -Werror -O1 \
+  ../components/app_tokens/grok_status_parse.c \
+  test_grok_status.c /tmp/torget-cjson.o \
+  -lm \
+  -o /tmp/torget-grok-status-test
+/tmp/torget-grok-status-test
 
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_tokens/project_star_popup_policy.c \

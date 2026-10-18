@@ -54,6 +54,21 @@
 #define TK_GITHUB_SOUND_ENABLED 0
 #endif
 
+/* The Grok page (usage + bot status from the computer's /api/grok feed).
+ * A build-time opt-in, not a Labs switch: TK_GROK_SCREEN_ENABLED 1 in
+ * secrets.h or -D TORGET_GROK=ON (which defines TK_GROK_BUILD_ENABLED). The
+ * feed is LAN-only: no relay address exists for it. */
+#ifdef TK_GROK_BUILD_ENABLED
+#undef TK_GROK_SCREEN_ENABLED
+#define TK_GROK_SCREEN_ENABLED 1
+#endif
+#ifndef TK_GROK_SCREEN_ENABLED
+#define TK_GROK_SCREEN_ENABLED 0
+#endif
+#if TK_GROK_SCREEN_ENABLED != 0 && TK_GROK_SCREEN_ENABLED != 1
+#error "TK_GROK_SCREEN_ENABLED must be 0 or 1"
+#endif
+
 /* The Lovable page (plan + credits from the Mac's read-only get_workspace
  * feed). Off on a fresh clone; seeds LABS on the first boot only. The feed is
  * LAN-only: no relay address exists for it. */

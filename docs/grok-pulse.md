@@ -1,8 +1,8 @@
 # Grok Pulse (host preview)
 
 An optional, default-off tokenserver source for Grok usage and bot activity.
-This part adds the **host endpoints**; the panel page is a separate,
-build-time opt-in (see the firmware section once merged). macOS and Windows use the same stdlib implementation. Automated tests
+The host endpoints and panel page are separate, default-off options
+(see [Panel page](#panel-page-build-time-opt-in)). macOS and Windows use the same stdlib implementation. Automated tests
 are separate from real-host and physical-panel verification.
 
 Enable with `--grok` (or `VIBEPULSE_GROK=1`) on your existing tokenserver
@@ -148,3 +148,48 @@ Grok data is never sent to VibePulse relays. Management keys stay on the host
 and are never returned or logged; only the corresponding provider billing requests carry its key.
 Bot names/activity and manual labels are visible to LAN clients, so avoid
 sensitive task descriptions. Neither prompts nor chat history are collected.
+
+## Panel page (build-time opt-in)
+
+The optional **GROK** page displays xAI monthly API spend, a manually observed
+quota percentage, or bot activity, with explicit source and freshness. Unknown
+numbers show a dash; a later unavailable reading retains the last real value.
+Stale values dim. Manual resets count down locally. Bot states include
+WORKING, NEEDS YOU, DONE, IDLE and ERROR; this page cannot approve actions.
+
+Enable `#define TK_GROK_SCREEN_ENABLED 1` in `secrets.h`, or configure firmware
+with `-D TORGET_GROK=ON`. The default is **0**. An optional `TK_GROK_URL`
+can name the LAN `/api/grok` endpoint; otherwise service discovery is used.
+The computer must separately enable `--grok`. This is a build option, **not a
+Labs switch**, and does not change saved Labs settings. Polling starts after
+30 seconds, repeats every 15 seconds and backs off to two minutes on failure.
+
+| Board | Composition |
+| --- | --- |
+| `waveshare_216` | 480×480, hero above four bot rows |
+| `waveshare_241_v2` | 600×450, centred 480 composition |
+| `waveshare_18_v2` | 368×448, platform-scaled 480 composition |
+| `waveshare_175` | 466×466 round, centred header and three narrower bot rows |
+| `waveshare_191_touch` | 536×240, 480×240 viewport with metric left and four bot rows right |
+
+Render each profile with the actual `torget-sim` binary:
+
+```sh
+cmake -S sim -B sim/build-grok -G Ninja -DTORGET_BOARD=<board> -DTORGET_GROK=ON
+ninja -C sim/build-grok
+xvfb-run -a ./sim/build-grok/torget-sim --vibepulse-grok-qa
+```
+
+On a desktop, `xvfb-run -a` can be omitted. Offline builds can add
+`-DFETCHCONTENT_SOURCE_DIR_LVGL=/path/to/cached/lvgl-src` to CMake.
+The six fixtures produce `/tmp/torget-vibepulse-grok-<state>.bmp` for
+`xai`, `manual`, `bots`, `empty`, `stale`, and `disabled`.
+Set `TORGET_CAPTURE_DIR` to an existing directory to retain captures from
+multiple board builds. QA returns nonzero with a clear message if Grok was
+not compiled in. Empty is rendered first to verify the initial dash;
+disabled after real readings exercises retention.
+
+Evidence is limited to simulator output and automated build coverage (including
+the opt-in firmware path in CI). **Grok is not physically verified on any
+panel.** Native simulator captures do not certify touch, rotation, OTA or
+physical AMOLED rendering.

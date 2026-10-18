@@ -20,7 +20,8 @@ enum {
   VIEW_CLAUDE_FABLE = 0, VIEW_CLAUDE_ALL = 1, VIEW_CODEX_WEEKLY = 2,
   VIEW_BURN_RATE = 3, VIEW_TRACKER_CLAUDE = 4, VIEW_TRACKER_CODEX = 5,
   VIEW_GITHUB = 6, VIEW_VALUE = 7, VIEW_LOVABLE = 8, VIEW_OPENPULSE = 9,
-  TK_USAGE_SCREEN_VIEWS = 10
+  VIEW_GROK = 10,
+  TK_USAGE_SCREEN_VIEWS = 11
 };
 
 /* Init before creating UI/tasks. Active is immutable until the next boot.

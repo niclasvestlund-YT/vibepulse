@@ -44,7 +44,7 @@ anything on the computer.
 | API VALUE | API-equivalent value page | Current model prices; plan cost for a multiple | Off |
 | GITHUB PAGE | Repository stars and forks | One public repository in tokenserver | Off |
 | STAR POPUP | New-star moments, independent of the page | The same repository feed | Off |
-| GROK PAGE (preview) | Host-only usage and bot activity; no firmware switch yet | [Grok source setup](../grok-pulse.md) | Off |
+| GROK PAGE (preview) | Build-time opt-in usage and bot activity; not a Labs switch | [Grok source setup](../grok-pulse.md) | Off |
 | LOVABLE PAGE | Remaining build credits, plan and freshness | [Lovable browser setup](../lovable-pulse.md) | Off |
 | CLAUDE CODE | Show or hide the Claude quota pages | Claude quota source | On |
 | CODEX | Show or hide the Codex quota page | Codex quota source | On |
