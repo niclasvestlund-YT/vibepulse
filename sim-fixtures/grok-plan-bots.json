@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "enabled": true,
+  "source": "plan",
+  "stale": false,
+  "active": 0,
+  "doneToday": 0,
+  "bots": [],
+  "estimated": true,
+  "label": "DAILY",
+  "planName": "SUPERGROK",
+  "usedPct": 24,
+  "windowSeconds": 86400,
+  "resetSeconds": 30000,
+  "planUsed": 12,
+  "planLimit": 50
+}

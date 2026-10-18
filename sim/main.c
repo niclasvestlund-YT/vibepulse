@@ -1798,7 +1798,7 @@ static int run_vibepulse_grok_qa(void) {
   torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
   torget_wifi_status_foreground();
   /* "live" is the combined usage + bots frame used for POC renders. */
-  const char *states[]={"empty","xai","openrouter","manual","bots","stale","disabled","live"};
+  const char *states[]={"empty","xai","openrouter","plan","plan-est","plan-bots","bots","stale","disabled","live"};
   tokens_show_view(VIEW_GROK);
   lv_refr_now(NULL);
   dump_frame("vibepulse-grok-startup");
@@ -1818,11 +1818,11 @@ static int run_vibepulse_grok_qa(void) {
   apply_grok_file("grok-empty.json");
   lv_refr_now(NULL);
   dump_frame("vibepulse-grok-retained");
-  /* Retained bot/manual readings must carry CACHED, even without source age. */
-  const char *retained_sources[]={"bots","manual","manual-unknown-age"};
+  /* Retained bot/plan readings must carry CACHED, even without source age. */
+  const char *retained_sources[]={"bots","plan","plan-unknown-age"};
   for(unsigned i=0;i<3;i++) {
     size_t len=0;
-    char *json=read_fixture(i==0 ? "grok-bots.json":"grok-manual.json",&len);
+    char *json=read_fixture(i==0 ? "grok-bots.json":"grok-plan.json",&len);
     tk_grok_status status;
     if(!json || !tk_grok_status_parse(json,len,&status)) { free(json); return 1; }
     free(json);

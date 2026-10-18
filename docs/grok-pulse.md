@@ -193,16 +193,21 @@ sensitive task descriptions. Neither prompts nor chat history are collected.
 
 ## Panel page (build-time opt-in)
 
-The optional **GROK** page displays xAI or OpenRouter percent of budget with
-spent and limit dollars below. Without a positive limit, the hero shows dollars.
-It also supports a manually observed
-quota percentage, or bot activity, with explicit source and freshness. Unknown
+The optional **GROK** page defaults to the subscription plan. Its hero is
+percent of the plan; **EST** marks a count or bot-task estimate. Copied readings
+show **PLAN · GROK.COM** with their age; estimates show **PLAN · EST** with age
+or **PLAN · EST FROM BOTS** when estimated from current bot tasks. There is no
+public usage API for Grok subscriptions or Grok Bot; these are observations or
+estimates, never live usage measurements. Counts show used and remaining values
+when provided, and the reset counts down locally. Optional secondary xAI and
+OpenRouter sources show percent of budget with spent and limit dollars below,
+or a dollar hero without a positive limit. Bot activity remains visible. Unknown
 numbers show a dash; a later unavailable reading retains the last real value.
 Stale values dim. If the panel gets no successful `/api/grok` read for 90
 seconds, the bot rows dim and the provenance says `CACHED` (or `NO
 CONNECTION`), so old WORKING/NEEDS YOU states never look live. A retained
 number that the latest payload no longer carries keeps its own source label
-and is shown dimmed. Manual resets count down locally. Bot states include
+and is shown dimmed. Plan resets count down locally. Bot states include
 WORKING, NEEDS YOU, DONE, IDLE and ERROR; this page cannot approve actions.
 
 Enable `#define TK_GROK_SCREEN_ENABLED 1` in `secrets.h`, or configure firmware
@@ -231,10 +236,10 @@ SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software ./sim/build-grok/torget-sim --v
 On a desktop, the SDL environment variables can be omitted. Offline builds can add
 `-DFETCHCONTENT_SOURCE_DIR_LVGL=/path/to/cached/lvgl-src` to CMake.
 The fixtures produce `/tmp/torget-vibepulse-grok-<state>.bmp` for
-`startup` (before any Grok payload), `empty`, `xai`, `openrouter`, `manual`, `bots`, `stale`, `disabled` and `live` (budget percentage
+`startup` (before any Grok payload), `empty`, `xai`, `openrouter`, `plan`, `plan-est`, `plan-bots`, `bots`, `stale`, `disabled` and `live` (estimated plan percentage
 plus four bots), followed by `offline` (91 s without a read) and `retained`
 (a payload without numbers after real readings). Additional captures cover
-retained bot/manual readings, manual age unknown, maximum wire values,
+retained bot/plan readings, plan age unknown, maximum wire values,
 `huge-percent` (INT32_MAX cents against a one-cent budget), and `unlimited`
 (the dollar-hero fallback with no limit).
 `test/test_grok_render.py`
@@ -258,5 +263,5 @@ OpenRouter captions use DAY, WEEK or MONTH for reported 1-day, 7-day or
 SPEND · DAY/WEEK/MONTH without one. Other or missing windows show BUDGET
 or SPEND respectively. Optional `windowSeconds`
 is an integer from 1 to 2678400. Pace uses this window when supplied, otherwise
-xAI uses 30 days and manual uses 7 days. OpenRouter without a window has no
+xAI uses 30 days and plan uses 7 days. OpenRouter without a window has no
 pace marker, including on the round ring.

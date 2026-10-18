@@ -1,14 +1,10 @@
 {
   "v": 1,
   "enabled": true,
-  "source": "xai",
+  "source": "plan",
   "stale": false,
-  "ageSeconds": 40,
-  "spentCents": 4718,
-  "limitCents": 20000,
-  "prepaidCents": 2500,
-  "active": 2,
-  "doneToday": 3,
+  "active": 1,
+  "doneToday": 12,
   "bots": [
     {
       "name": "Grok Bot",
@@ -27,9 +23,16 @@
     },
     {
       "name": "Research",
-      "state": "idle",
-      "activity": ""
+      "state": "idle"
     }
   ],
-  "resetSeconds": 1137600
+  "estimated": true,
+  "label": "WEEKLY",
+  "planName": "SUPERGROK",
+  "ageSeconds": 300,
+  "usedPct": 28,
+  "windowSeconds": 604800,
+  "resetSeconds": 187200,
+  "planUsed": 57,
+  "planLimit": 200
 }

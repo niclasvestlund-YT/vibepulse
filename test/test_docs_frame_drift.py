@@ -208,7 +208,7 @@ BOARD_241_FRAMES = {
 
 # Opt-in Grok captures are reproduced by test_grok_render.py.
 GROK_FRAMES = {
-    "grok-216-spend.png": ("waveshare_216", "live", (480, 480)),
+    "grok-216-plan.png": ("waveshare_216", "live", (480, 480)),
     "grok-241-bots.png": ("waveshare_241_v2", "bots", (600, 450)),
 }
 

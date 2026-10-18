@@ -11,9 +11,9 @@ static void parse(const char *json, bool valid) {
 }
 #define BASE "\"v\":1,\"enabled\":true,\"source\":\"none\",\"stale\":false,\"active\":0,\"doneToday\":0,\"bots\":[]"
 static void numeric_rejections(void) {
-  const char *keys[]={"ageSeconds","spentCents","limitCents","prepaidCents","usedPct","resetSeconds","windowSeconds"};
+  const char *keys[]={"ageSeconds","spentCents","limitCents","prepaidCents","usedPct","resetSeconds","windowSeconds","planUsed","planLimit"};
   const char *values[]={"-1","0.5","2147483648","true","null","\"1\"","[]","{}"};
-  for (unsigned k=0;k<7;k++) for (unsigned v=0;v<8;v++) {
+  for (unsigned k=0;k<9;k++) for (unsigned v=0;v<8;v++) {
     char json[768];
     snprintf(json,sizeof json,"{" BASE ",\"%s\":%s}",keys[k],values[v]);
     parse(json,false);
@@ -54,6 +54,24 @@ int main(void) {
   parse(deep,false);
   parse("]",false);
   parse("{\"v\":1,\"enabled\":true,\"source\":\"bots\",\"stale\":false,\"active\":1,\"doneToday\":0,\"bots\":[{\"name\":\"A\",\"state\":\"idle\",\"activity\":\"[[[[\"}]}",true);
+  const char *plan="{\"v\":1,\"enabled\":true,\"source\":\"plan\",\"stale\":false,\"active\":0,\"doneToday\":0,\"bots\":[],\"estimated\":true,\"planUsed\":57,\"planLimit\":200,\"planName\":\"SUPERGROK\",\"usedPct\":28,\"label\":\"WEEKLY\",\"windowSeconds\":604800,\"resetSeconds\":187200,\"ageSeconds\":300}";
+  tk_grok_status plan_status;
+  assert(tk_grok_status_parse(plan,strlen(plan),&plan_status));
+  assert(plan_status.has_estimated && plan_status.estimated);
+  assert(plan_status.has_plan_used && plan_status.plan_used==57);
+  assert(plan_status.has_plan_limit && plan_status.plan_limit==200);
+  assert(!strcmp(plan_status.plan_name,"SUPERGROK"));
+  parse("{" BASE ",\"estimated\":false,\"planName\":\"\",\"planUsed\":0,\"planLimit\":1}",true);
+  const char *plan_bad[]={"\"estimated\":0","\"estimated\":\"true\"","\"estimated\":null",
+    "\"estimated\":[]","\"estimated\":{}","\"estimated\":true,\"estimated\":false",
+    "\"planLimit\":0","\"planLimit\":1,\"planLimit\":2","\"planUsed\":1,\"planUsed\":2",
+    "\"planName\":\"1234567890123\"","\"planName\":true","\"planName\":null",
+    "\"planName\":\"é\"","\"planName\":\"\\n\"","\"planName\":\"\\u0000\"",
+    "\"planName\":\"A\",\"planName\":\"B\""};
+  for(unsigned i=0;i<sizeof plan_bad/sizeof plan_bad[0];i++) {
+    char json[768]; snprintf(json,sizeof json,"{" BASE ",%s}",plan_bad[i]); parse(json,false);
+  }
+  parse("{\"v\":1,\"enabled\":true,\"source\":\"manual\",\"stale\":false,\"active\":0,\"doneToday\":0,\"bots\":[]}",false);
   numeric_rejections();
   schema_rejections();
   const char *windows[]={"0","2678401","2147483647","1.5","1e100"};
@@ -89,7 +107,7 @@ int main(void) {
   }
   parse("{\"v\":1,\"enabled\":false}",true);
   parse("{" BASE "}",true);
-  const char *sources[]={"xai","openrouter","manual","bots","none"};
+  const char *sources[]={"xai","openrouter","plan","bots","none"};
   for (unsigned i=0;i<5;i++) {
     char json[768];
     snprintf(json,sizeof json,"{\"v\":1,\"enabled\":true,\"source\":\"%s\",\"stale\":true,\"active\":2,\"doneToday\":3,\"bots\":[{\"name\":\"A\",\"state\":\"waiting\",\"activity\":\"\"}],\"usedPct\":100,\"spentCents\":2147483647,\"limitCents\":0,\"prepaidCents\":1,\"resetSeconds\":0,\"ageSeconds\":5,\"label\":\"\"}",sources[i]);

@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "enabled": true,
+  "source": "plan",
+  "stale": false,
+  "active": 0,
+  "doneToday": 0,
+  "bots": [],
+  "estimated": true,
+  "label": "WEEKLY",
+  "planName": "SUPERGROK",
+  "ageSeconds": 300,
+  "usedPct": 28,
+  "windowSeconds": 604800,
+  "resetSeconds": 187200,
+  "planUsed": 57,
+  "planLimit": 200
+}

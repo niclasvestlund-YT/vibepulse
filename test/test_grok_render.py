@@ -15,10 +15,10 @@ from pathlib import Path
 from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parents[1]
-FRAMES = ("startup", "empty", "xai", "openrouter", "manual", "bots", "stale", "disabled", "live",
+FRAMES = ("startup", "empty", "xai", "openrouter", "plan", "plan-est", "plan-bots", "bots", "stale", "disabled", "live",
           "offline", "retained", "bots-live", "bots-retained",
-          "manual-live", "manual-retained", "manual-unknown-age-live",
-          "manual-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited")
+          "plan-live", "plan-retained", "plan-unknown-age-live",
+          "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited")
 
 
 def brightness(image, box):
@@ -85,18 +85,24 @@ class GrokRenderTests(unittest.TestCase):
             self.assertGreater(brightness(retained, hero), 0)
 
     def test_native_quota_bar_uses_silver_fill_and_white_pace_tick(self):
-        with self.frame("live") as live, self.frame("manual") as manual:
+        with self.frame("live") as live, self.frame("plan") as plan:
             self.assertEqual(live.convert("RGB").getpixel((40, 270)), (201, 212, 232))
             self.assertEqual(live.convert("RGB").getpixel((200, 270)), (48, 50, 56))
-            self.assertEqual(live.convert("RGB").getpixel((268, 256)), (255, 255, 255))
-            self.assertEqual(manual.convert("RGB").getpixel((180, 270)), (201, 212, 232))
+            self.assertEqual(live.convert("RGB").getpixel((324, 256)), (255, 255, 255))
+            self.assertEqual(plan.convert("RGB").getpixel((180, 270)), (201, 212, 232))
+
+    def test_est_tag_is_only_on_estimated_plan(self):
+        tag = (410, 75, 444, 93)
+        with self.frame("plan-est") as estimate, self.frame("plan") as copied:
+            self.assertGreater(brightness(estimate, tag), 0)
+            self.assertEqual(brightness(copied, tag), 0)
 
     def test_budget_details_and_unlimited_fallback(self):
         detail = (22, 232, 458, 252)
-        with self.frame("live") as budget, self.frame("unlimited") as unlimited, self.frame("manual") as manual:
+        with self.frame("live") as budget, self.frame("unlimited") as unlimited, self.frame("plan") as plan:
             self.assertGreater(brightness(budget, detail), 0)
             self.assertEqual(brightness(unlimited, detail), 0)
-            self.assertEqual(brightness(manual, detail), 0)
+            self.assertEqual(brightness(plan, detail), 0)
             self.assertEqual(brightness(unlimited, (22, 254, 458, 282)), 0)
             self.assertGreater(brightness(unlimited, (16, 105, 464, 232)), 0)
 
@@ -120,8 +126,8 @@ class GrokRenderTests(unittest.TestCase):
                 self.assertEqual(max(x for x, _ in ink) - min(x for x, _ in ink), 7)
                 self.assertEqual(max(row for _, row in ink) - min(row for _, row in ink), 7)
 
-    def test_retained_bot_and_manual_readings_show_cached_provenance(self):
-        for source in ("bots", "manual", "manual-unknown-age"):
+    def test_retained_bot_and_plan_readings_show_cached_provenance(self):
+        for source in ("bots", "plan", "plan-unknown-age"):
             with self.subTest(source=source), self.frame(source + "-live") as live, self.frame(source + "-retained") as retained:
                 # The source prefix stays in place; CACHED adds visible suffix ink.
                 footer = (22, 429, 458, 447)

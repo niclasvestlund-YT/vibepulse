@@ -1249,7 +1249,7 @@ static void create_quota_page(quota_page *page, int index,
 #if TK_GROK_SCREEN_ENABLED
 static struct {
   quota_page gauge;
-  lv_obj_t *tile, *context, *provenance, *caption, *hero, *sub, *empty, *currency;
+  lv_obj_t *tile, *context, *provenance, *caption, *hero, *sub, *empty, *currency, *est, *bot_counts;
   lv_obj_t *left, *left_caption, *reset, *reset_caption;
   lv_obj_t *dot[4], *name[4], *activity[4], *state[4];
   tk_grok_status status, shown;
@@ -1272,7 +1272,7 @@ static void grok_visible(lv_obj_t *obj, bool visible) {
 static void apply_grok_page(const tk_grok_status *s, int64_t now_us);
 static int grok_window_seconds(const tk_grok_status *s) {
   if (s->has_window) return s->window_seconds;
-  if (!strcmp(s->source,"manual")) return 7*86400;
+  if (!strcmp(s->source,"plan")) return 7*86400;
   if (!strcmp(s->source,"xai")) return 30*86400;
   return 0;
 }
@@ -1330,6 +1330,8 @@ static void create_grok_page(void) {
   lv_obj_set_style_text_align(title,LV_TEXT_ALIGN_CENTER,0);
   lv_obj_set_style_text_letter_space(title,3,0);
   lv_label_set_text(title,"GROK");
+  grok_page.bot_counts=label(tile,&plex_ui_12,COL_META,70,155,340,18);
+  lv_obj_set_style_text_align(grok_page.bot_counts,LV_TEXT_ALIGN_CENTER,0);
   grok_page.caption=g->quota;
   grok_page.hero=g->percent;
   lv_obj_set_size(g->percent,340,115);
@@ -1376,13 +1378,17 @@ static void create_grok_page(void) {
   grok_page.currency=label(tile,&plex_ui_21,COL_WHITE,22,103,20,30);
   lv_label_set_text(grok_page.currency,"$");
   grok_visible(grok_page.currency,false);
-  lv_obj_set_width(grok_page.caption,266);
+  lv_obj_set_width(grok_page.caption,212);
+  lv_label_set_long_mode(grok_page.caption,LV_LABEL_LONG_DOT);
   lv_obj_set_pos(grok_page.hero,16,VP_PERCENT_Y);
   lv_obj_set_size(grok_page.hero,266,90);
   lv_obj_set_style_text_font(grok_page.hero,&plex_money_35,0);
   grok_visible(grok_page.left,false); grok_visible(grok_page.left_caption,false);
   grok_visible(grok_page.reset,false); grok_visible(grok_page.reset_caption,false);
-  lv_obj_set_pos(grok_page.sub,22,174); lv_obj_set_width(grok_page.sub,260);
+  lv_obj_set_pos(grok_page.sub,22,154); lv_obj_set_width(grok_page.sub,260);
+  lv_obj_set_pos(grok_page.left,22,174); lv_obj_set_size(grok_page.left,130,18);
+  lv_obj_set_pos(grok_page.reset,152,174); lv_obj_set_size(grok_page.reset,130,18);
+  lv_obj_set_style_text_font(grok_page.reset,&plex_ui_12,0);
   lv_obj_set_pos(grok_page.provenance,22,208);
   lv_obj_set_pos(grok_page.empty,286,100); lv_obj_set_width(grok_page.empty,172);
 #else
@@ -1397,7 +1403,7 @@ static void create_grok_page(void) {
   for (unsigned i=0;i<4;i++) {
     int x=VP_SAFE_X,y=350+i*25,w=VP_CONTENT_W;
 #ifdef TORGET_BOARD_191_TOUCH
-    x=302; y=66+i*40; w=156;
+    x=302; y=60+i*43; w=156;
 #endif
     grok_page.dot[i]=bare(tile);
     lv_obj_set_pos(grok_page.dot[i],x,y+4); lv_obj_set_size(grok_page.dot[i],8,8);
@@ -1412,7 +1418,9 @@ static void create_grok_page(void) {
     grok_page.state[i]=label(tile,&plex_ui_14,COL_META,x+w-104,y+1,104,22);
     lv_obj_set_style_text_align(grok_page.state[i],LV_TEXT_ALIGN_RIGHT,0);
 #ifdef TORGET_BOARD_191_TOUCH
-    lv_obj_set_pos(grok_page.state[i],x+14,y+19); lv_obj_set_width(grok_page.state[i],w-14);
+    lv_obj_set_pos(grok_page.activity[i],x+14,y+17); lv_obj_set_size(grok_page.activity[i],w-14,14);
+    lv_obj_set_pos(grok_page.state[i],x+14,y+30); lv_obj_set_size(grok_page.state[i],w-14,14);
+    lv_obj_set_style_text_font(grok_page.state[i],&plex_ui_12,0);
     lv_obj_set_style_text_align(grok_page.state[i],LV_TEXT_ALIGN_LEFT,0);
 #endif
     lv_label_set_long_mode(grok_page.name[i],LV_LABEL_LONG_DOT);
@@ -1422,6 +1430,17 @@ static void create_grok_page(void) {
   grok_visible(grok_page.empty,false);
   lv_obj_t *center[]={grok_page.left_caption,grok_page.context,grok_page.provenance,grok_page.empty};
   for(unsigned i=0;i<4;i++) lv_obj_set_style_text_align(center[i],LV_TEXT_ALIGN_CENTER,0);
+#endif
+  grok_page.est=label(tile,&plex_ui_12,COL_GROK,410,VP_QUOTA_Y+3,34,18);
+  lv_obj_set_style_text_align(grok_page.est,LV_TEXT_ALIGN_CENTER,0);
+  lv_obj_set_style_border_width(grok_page.est,1,0);
+  lv_obj_set_style_border_color(grok_page.est,COL_GROK,0);
+  lv_obj_set_style_radius(grok_page.est,5,0);
+  lv_label_set_text(grok_page.est,"EST");
+#ifdef TORGET_BOARD_175
+  lv_obj_set_pos(grok_page.est,355,234);
+#elif defined(TORGET_BOARD_191_TOUCH)
+  lv_obj_set_x(grok_page.est,245);
 #endif
   lv_label_set_text(grok_page.empty,"NO BOTS REPORTING");
   lv_label_set_text(grok_page.reset,"–");
@@ -1453,14 +1472,14 @@ static void refresh_grok_age(int64_t now_us) {
   bool stale=feed_stale || superseded || s->stale || elapsed>600 ||
     (s->has_age && s->age_seconds+elapsed>600) || !feed->enabled ||
     ((!strcmp(s->source,"xai") || !strcmp(s->source,"openrouter")) && !s->has_spent) ||
-    (!strcmp(s->source,"manual") && !s->has_used) || !strcmp(s->source,"none");
+    (!strcmp(s->source,"plan") && !s->has_used) || !strcmp(s->source,"none");
   char text[48];
   if (!feed->enabled) snprintf(text,sizeof text,"OFF ON COMPUTER%s",stale ? " · CACHED":"");
   else if (!strcmp(s->source,"xai")) snprintf(text,sizeof text,"XAI API · %s",stale ? "CACHED":"LIVE");
   else if (!strcmp(s->source,"openrouter")) snprintf(text,sizeof text,"OPENROUTER · %s",stale ? "CACHED":"LIVE");
-  else if (!strcmp(s->source,"manual")) {
-    if (s->has_age) snprintf(text,sizeof text,"MANUAL · %lld MIN%s",(long long)((s->age_seconds+elapsed)/60),stale ? " · CACHED":"");
-    else snprintf(text,sizeof text,"MANUAL · AGE UNKNOWN%s",stale ? " · CACHED":"");
+  else if (!strcmp(s->source,"plan")) {
+    if (s->has_age) snprintf(text,sizeof text,"PLAN · %s · %lld MIN%s",s->estimated ? "EST":"GROK.COM",(long long)((s->age_seconds+elapsed)/60),stale ? " · CACHED":"");
+    else snprintf(text,sizeof text,"PLAN · %s%s",s->estimated ? "EST FROM BOTS":"GROK.COM · AGE UNKNOWN",stale ? " · CACHED":"");
   } else if (!strcmp(s->source,"bots")) snprintf(text,sizeof text,"BOT ACTIVITY%s",stale ? " · CACHED":"");
   else snprintf(text,sizeof text,"%s%s",feed_stale ? "NO CONNECTION":"WAITING",stale ? " · CACHED":"");
   /* Only touch LVGL when the rendered text actually changes (100 ms tick). */
@@ -1478,6 +1497,7 @@ static void refresh_grok_age(int64_t now_us) {
   if (feed_stale!=grok_page.rendered_rows_stale) {
 #ifdef TORGET_BOARD_175
     lv_obj_set_style_text_opa(grok_page.context,feed_stale ? LV_OPA_40:LV_OPA_COVER,0);
+    lv_obj_set_style_text_opa(grok_page.bot_counts,feed_stale ? LV_OPA_40:LV_OPA_COVER,0);
 #endif
     grok_page.rendered_rows_stale=feed_stale;
     for (unsigned i=0;i<4;i++) {
@@ -1490,12 +1510,15 @@ static void refresh_grok_age(int64_t now_us) {
   }
   if (grok_page.has_data
 #ifdef TORGET_BOARD_175
-      && !feed->bot_count
+      && (!feed->bot_count || !strcmp(s->source,"plan"))
 #endif
       ) {
     int64_t left=s->reset_seconds>elapsed ? s->reset_seconds-elapsed:0;
     if (s->has_reset) snprintf(text,sizeof text,"%lldD %lldH",(long long)(left/86400),(long long)(left/3600%24));
     else snprintf(text,sizeof text,"–");
+#ifdef TORGET_BOARD_191_TOUCH
+    if(s->has_reset) snprintf(text,sizeof text,"%lldD %lldH TO RESET",(long long)(left/86400),(long long)(left/3600%24));
+#endif
     grok_text(grok_page.reset,text);
   }
 }
@@ -1509,8 +1532,8 @@ static const char *grok_state(const tk_grok_bot *bot, lv_color_t *color) {
 }
 static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   bool money=!strcmp(s->source,"xai") || !strcmp(s->source,"openrouter");
-  bool manual=!strcmp(s->source,"manual"), bots=!strcmp(s->source,"bots");
-  bool data=s->enabled && ((money && s->has_spent) || (manual && s->has_used) || bots);
+  bool plan=!strcmp(s->source,"plan"), bots=!strcmp(s->source,"bots");
+  bool data=s->enabled && ((money && s->has_spent) || (plan && s->has_used) || bots);
   grok_page.has_snapshot=true; grok_page.status=*s; grok_page.applied_at_us=now_us;
   char text[96],amount[32];
   if (data || !grok_page.has_data) {
@@ -1522,11 +1545,22 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
 #endif
     grok_page.shown=*s; grok_page.shown_at_us=now_us;
     bool budget=money && s->has_limit && s->limit_cents>0;
-    bool percent=manual || budget;
-    int64_t basis_points=manual && data ? (int64_t)s->used_pct*100:
+    bool percent=plan || budget;
+    int64_t basis_points=plan && data ? (int64_t)s->used_pct*100:
       budget && data ? (int64_t)s->spent_cents*10000/s->limit_cents:-1;
     int64_t pct=basis_points<0 ? -1:(basis_points+50)/100;
-    grok_text(grok_page.caption,money ? grok_money_caption(s,budget):manual ? (s->label[0] ? s->label:"WEEKLY USAGE"):bots ? "BOTS · TODAY":"GROK");
+    char caption[48];
+    snprintf(caption,sizeof caption,"%s",s->label[0] ? s->label:"WEEKLY");
+#if !defined(TORGET_BOARD_175) && !defined(TORGET_BOARD_191_TOUCH)
+    if(plan && s->plan_name[0]) {
+      snprintf(caption,sizeof caption,"%s · %s",s->label[0] ? s->label:"WEEKLY",s->plan_name);
+      lv_point_t caption_size;
+      lv_text_get_size(&caption_size,caption,&plex_ui_21,2,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+      if(caption_size.x>380) snprintf(caption,sizeof caption,"%s",s->label[0] ? s->label:"WEEKLY");
+    }
+#endif
+    grok_visible(grok_page.est,plan && data && s->estimated);
+    grok_text(grok_page.caption,money ? grok_money_caption(s,budget):plan ? caption:bots ? "BOTS · TODAY":"GROK");
     if (!data) snprintf(text,sizeof text,"–");
     else if (percent) snprintf(text,sizeof text,"%lld%%",(long long)pct);
     else if (money) grok_dollars(text,sizeof text,s->spent_cents,true);
@@ -1594,31 +1628,43 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     int fill=basis_points<0 ? 0:basis_points>10000 ? 10000:(int)basis_points;
     amount[0]=0;
     if(money && data && s->has_limit) grok_dollars(amount,sizeof amount,s->limit_cents,false);
-#ifndef TORGET_BOARD_175
     if (money && data && s->has_limit) {
       grok_dollars(amount,sizeof amount,s->limit_cents,false);
       snprintf(text,sizeof text,"LEFT OF %s",amount); grok_text(grok_page.left_caption,text);
       grok_dollars(text,sizeof text,s->spent_cents<s->limit_cents ? s->limit_cents-s->spent_cents:0,false);
+    } else if (plan && data && s->has_plan_used && s->has_plan_limit) {
+      snprintf(text,sizeof text,"OF %ld",(long)s->plan_limit); grok_text(grok_page.left_caption,text);
+      snprintf(text,sizeof text,"%ld LEFT",(long)(s->plan_used<s->plan_limit ? s->plan_limit-s->plan_used:0));
     } else if (bots && data) {
       grok_text(grok_page.left_caption,"DONE TODAY"); snprintf(text,sizeof text,"%ld",(long)s->done_today);
     } else {
       grok_text(grok_page.left_caption,"LEFT");
-      if(manual && data) snprintf(text,sizeof text,"%ld%%",(long)(100-s->used_pct));
+      if(plan && data) snprintf(text,sizeof text,"%ld%%",(long)(100-s->used_pct));
       else snprintf(text,sizeof text,"–");
     }
     const lv_font_t *stat_font=money ? &plex_money_35:&plex_stat_35;
     lv_text_get_size(&size,text,stat_font,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
     if(size.x>210) stat_font=&plex_ui_21;
+#ifdef TORGET_BOARD_175
+    if(size.x>128) stat_font=&plex_ui_21;
+#endif
+#ifdef TORGET_BOARD_191_TOUCH
+    stat_font=&plex_ui_14;
+    if(plan && data && !(s->has_plan_used && s->has_plan_limit)) snprintf(text,sizeof text,"%ld%% LEFT",(long)(100-s->used_pct));
+    grok_visible(grok_page.left,data);
+    grok_visible(grok_page.reset,data);
+#endif
     if(lv_obj_get_style_text_font(grok_page.left,0)!=stat_font) lv_obj_set_style_text_font(grok_page.left,stat_font,0);
     grok_text(grok_page.left,text);
     grok_text(grok_page.reset_caption,"TO RESET");
-#endif
     text[0]=0;
     if (budget && data) {
       char spent[32]; grok_dollars(spent,sizeof spent,s->spent_cents,true);
       snprintf(text,sizeof text,"%s of %s",spent,amount);
     }
-    grok_visible(grok_page.sub,budget && data);
+    if(plan && data && s->has_plan_used && s->has_plan_limit)
+      snprintf(text,sizeof text,"%ld OF %ld USED",(long)s->plan_used,(long)s->plan_limit);
+    grok_visible(grok_page.sub,data && (budget || (plan && s->has_plan_used && s->has_plan_limit)));
     grok_text(grok_page.sub,text);
     quota_page *g=&grok_page.gauge;
 #ifdef TORGET_BOARD_175
@@ -1649,21 +1695,32 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   unsigned max_rows=3;
 #ifdef TORGET_BOARD_175
   max_rows=0;
-  grok_text(grok_page.left_caption,"WORKING");
-  if(s->enabled && strcmp(s->source,"none")) snprintf(text,sizeof text,"%ld",(long)s->active);
-  else snprintf(text,sizeof text,"–");
-  grok_text(grok_page.left,text);
-  const lv_font_t *reset_font=count ? &plex_round_32:&plex_stat_35;
-  if(lv_obj_get_style_text_font(grok_page.reset,0)!=reset_font) lv_obj_set_style_text_font(grok_page.reset,reset_font,0);
+  bool shown_plan=!strcmp(grok_page.shown.source,"plan");
+  grok_visible(grok_page.bot_counts,shown_plan && grok_page.has_data);
+  snprintf(text,sizeof text,"%ld WORKING · %u NEEDS YOU",(long)(s->enabled ? s->active:0),waiting);
+  grok_text(grok_page.bot_counts,text);
+  if(shown_plan) {
+    lv_obj_set_style_text_font(grok_page.reset,&plex_stat_35,0);
+    lv_obj_set_style_text_color(grok_page.reset,COL_WHITE,0);
+  } else {
+    grok_text(grok_page.left_caption,"WORKING");
+    if(s->enabled && strcmp(s->source,"none")) snprintf(text,sizeof text,"%ld",(long)s->active);
+    else snprintf(text,sizeof text,"–");
+    grok_text(grok_page.left,text);
+    const lv_font_t *reset_font=count ? &plex_round_32:&plex_stat_35;
+    if(lv_obj_get_style_text_font(grok_page.reset,0)!=reset_font) lv_obj_set_style_text_font(grok_page.reset,reset_font,0);
+  }
   if(!count) {
     grok_text(grok_page.reset_caption,"TO RESET");
     grok_text(grok_page.context,"NO BOTS");
     if(!lv_color_eq(lv_obj_get_style_text_color(grok_page.reset,0),COL_WHITE)) lv_obj_set_style_text_color(grok_page.reset,COL_WHITE,0);
   }
   if(count) {
-    grok_text(grok_page.reset_caption,"NEEDS YOU"); snprintf(text,sizeof text,"%u",waiting); grok_text(grok_page.reset,text);
-    lv_color_t reset_color=waiting ? COL_STAR:COL_WHITE;
-    if(!lv_color_eq(lv_obj_get_style_text_color(grok_page.reset,0),reset_color)) lv_obj_set_style_text_color(grok_page.reset,reset_color,0);
+    if(!shown_plan) {
+      grok_text(grok_page.reset_caption,"NEEDS YOU"); snprintf(text,sizeof text,"%u",waiting); grok_text(grok_page.reset,text);
+      lv_color_t reset_color=waiting ? COL_STAR:COL_WHITE;
+      if(!lv_color_eq(lv_obj_get_style_text_color(grok_page.reset,0),reset_color)) lv_obj_set_style_text_color(grok_page.reset,reset_color,0);
+    }
     lv_color_t color; if(priority<0) priority=0;
     snprintf(text,sizeof text,"%s · %s",s->bots[priority].name,grok_state(&s->bots[priority],&color));
     grok_text(grok_page.context,text);
@@ -1674,7 +1731,7 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   for(unsigned i=0;i<4;i++) {
     bool show=i<count && i<max_rows;
     grok_visible(grok_page.dot[i],show); grok_visible(grok_page.name[i],show); grok_visible(grok_page.state[i],show);
-#if defined(TORGET_BOARD_175) || defined(TORGET_BOARD_191_TOUCH)
+#if defined(TORGET_BOARD_175)
     grok_visible(grok_page.activity[i],false);
 #else
     grok_visible(grok_page.activity[i],show);

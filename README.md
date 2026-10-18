@@ -25,7 +25,7 @@ only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
 A build-time opt-in [Grok page](docs/grok-pulse.md#panel-page-build-time-opt-in)
-shows percent of budget with dollars below, manual quota, or local bot activity.
+defaults to subscription plan percentage, with EST for estimates and local bot activity.
 Without a positive budget limit, the hero shows dollars instead.
 
 An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
@@ -163,14 +163,17 @@ acceptance remain pending; see the linked checkpoint for the tested build.*
 ## Grok quota and bot activity (build-time preview)
 
 The opt-in **GROK** page uses VibePulse's quota header, gauge and stat widgets.
-Money sources show percent of budget with dollars below; without a positive
-limit, the hero shows dollars instead.
+The subscription plan is the default source; the hero shows percent of the plan.
+**EST** marks estimates; copied readings say **GROK.COM** with their age.
+There is no public usage API for Grok subscriptions or Grok Bot.
+xAI and OpenRouter are optional secondary sources showing percent of budget
+with dollars below, or a dollar hero without a positive limit.
 Square and rectangular profiles show up to three bot rows; round 1.75 uses the
 quota edge ring and one priority bot line. Sources and cached readings remain
 explicit. Enable `-DTORGET_GROK=ON` and the host's `--grok` option; both are off
 by default. [Setup and source limits](docs/grok-pulse.md#panel-page-build-time-opt-in).
 
-![Grok budget percentage and bot activity, native 480 × 480 simulator capture](docs/img/grok-216-spend.png)
+![Grok plan percentage and bot activity, native 480 × 480 simulator capture](docs/img/grok-216-plan.png)
 ![Grok bot activity, native 600 × 450 simulator capture](docs/img/grok-241-bots.png)
 
 *Shared LVGL captures with synthetic readings. Grok has no physical panel acceptance.*
@@ -820,13 +823,15 @@ official API without changing the display contract.
 
 ## Grok usage and bot activity (experimental)
 
-The default-off **GROK** page shows xAI or OpenRouter percent of budget with
-dollars below (a dollar hero without a positive limit), a manually copied
-Grok quota, or bot activity. Source and freshness stay visible; missing values
+The default-off **GROK** page defaults to subscription plan percentage.
+**EST** marks estimates; copied readings say **GROK.COM** with their age.
+There is no public usage API for Grok subscriptions or Grok Bot. Optional
+xAI/OpenRouter secondary sources show percent of budget with dollars below
+(a dollar hero without a positive limit), alongside bot activity. Source and freshness stay visible; missing values
 show dashes, and unavailable updates retain the last real reading. Waiting
 bots show **NEEDS YOU**, without an approval action.
 
-![Grok budget percentage: native 480×480 simulator example](docs/img/grok-216-spend.png)
+![Grok plan percentage: native 480×480 simulator example](docs/img/grok-216-plan.png)
 
 ![Grok bots: native 600×450 simulator example](docs/img/grok-241-bots.png)
 
