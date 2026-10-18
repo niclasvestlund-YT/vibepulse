@@ -101,35 +101,35 @@ class GrokTests(GrokFixture):
         self.now += 1800
         self.assertEqual(self.store.snapshot()['bots'], [])
 
-    def test_manual_and_auto_selection(self):
+    def test_plan_and_auto_selection(self):
         monitor = grok.GrokMonitor(clock=self.clock)
         self.assertEqual(monitor.snapshot()['source'], 'none')
-        self.write('grok.json', {'v': 1, 'usedPct': 42.9, 'resetAt': self.now + 90,
+        self.write('grok.json', {'v': 1, 'usedPct': 42, 'resetAt': self.now + 90,
                                  'label': 'weekly'})
         data = monitor.snapshot()
         self.assertEqual((data['source'], data['usedPct'], data['resetSeconds']),
-                         ('manual', 42, 90))
+                         ('plan', 42, 90))
         self.assertEqual(data['label'], 'WEEKLY')
         self.now += 601
         self.assertTrue(monitor.snapshot()['stale'])
         self.assertEqual(monitor.snapshot()['ageSeconds'], 601)
         self.assertEqual(grok.GrokMonitor('bots', self.clock).snapshot()['source'], 'bots')
         self.assertEqual(grok.GrokMonitor('xai', self.clock).snapshot()['source'], 'none')
-        for bad in (True, -1, 101, float('nan'), '42'):
+        for bad in (True, -1, 101, 42.9, float('nan'), '42'):
             self.now += 1
             self.write('grok.json', {'v': 1, 'usedPct': bad})
-            with self.assertLogs('tokenserver.grok') if not monitor.manual._file.warned else patch.object(grok.log, 'warning'):
+            with self.assertLogs('tokenserver.grok') if not monitor.plan._file.warned else patch.object(grok.log, 'warning'):
                 self.assertEqual(monitor.snapshot()['source'], 'none')
-        # Auto order: xai, then live bot activity, then the manual file.
+        # A valid plan wins over bot activity.
         self.now += 1
         self.write('grok.json', {'v': 1, 'usedPct': 10})
-        self.assertEqual(monitor.snapshot()['source'], 'manual')
+        self.assertEqual(monitor.snapshot()['source'], 'plan')
         monitor.store.accept({'v': 1, 'bot': 'Research', 'state': 'working'})
         data = monitor.snapshot()
-        self.assertEqual((data['source'], data['active']), ('bots', 1))
-        self.assertNotIn('usedPct', data)
+        self.assertEqual((data['source'], data['active']), ('plan', 1))
+        self.assertFalse(data['estimated'])
         self.assertEqual(grok.GrokMonitor('manual', self.clock).snapshot()['source'],
-                         'manual')
+                         'plan')
         self.now += 1
         self.write('grok.json', {'v': 1, 'usedPct': 'bad'})
         with self.assertLogs('tokenserver.grok'):
@@ -204,8 +204,8 @@ class GrokTests(GrokFixture):
         self.assertEqual(data['active'], 16)
         self.assertEqual(grok.grok_snapshot(), {'v': 1, 'enabled': False})
 
-    def test_manual_schema_and_recovery(self):
-        source = grok.ManualQuotaSource(self.clock)
+    def test_plan_schema_and_recovery(self):
+        source = grok.PlanQuotaSource(self.clock)
         self.assertIsNone(source.snapshot())
         for extra in ({'label': 'x' * 17}, {'resetAt': True}, {'resetAt': -1},
                       {'label': 123}, {'extra': 'secret'}, {'v': True}):
@@ -221,6 +221,75 @@ class GrokTests(GrokFixture):
         self.assertNotIn('label', data)
         path.unlink()
         self.assertIsNone(source.snapshot())
+
+    def test_plan_counts_and_live_bot_estimate(self):
+        monitor = grok.GrokMonitor('subscription', self.clock)
+        self.write('grok.json', {'v': 1, 'window': 'weekly', 'used': 25,
+                                 'limit': 20, 'plan': 'supergrok'})
+        data = monitor.snapshot()
+        self.assertEqual((data['usedPct'], data['planUsed'], data['planLimit']),
+                         (100, 25, 20))
+        self.assertTrue(data['estimated'])
+        self.assertEqual(data['planName'], 'SUPERGROK')
+        self.assertEqual(data['windowSeconds'], 604800)
+        self.assertNotIn('resetSeconds', data)
+        self.now += 1
+        self.write('grok.json', {'v': 1, 'window': 'daily', 'limit': 2,
+                                 'estimateFrom': 'bots'})
+        monitor.store.accept({'v': 1, 'bot': 'a', 'state': 'done'})
+        self.now += 601
+        data = monitor.snapshot()
+        self.assertEqual((data['usedPct'], data['planUsed']), (50, 1))
+        self.assertTrue(data['estimated'])
+        self.assertFalse(data['stale'])
+        self.assertNotIn('ageSeconds', data)
+        from datetime import datetime, timedelta
+        tomorrow = datetime.fromtimestamp(self.now).date() + timedelta(days=1)
+        midnight = datetime.combine(tomorrow, datetime.min.time()).timestamp()
+        self.assertEqual(data['resetSeconds'], int(midnight - self.now))
+        self.assertEqual((data['windowSeconds'], data['label']), (86400, 'DAILY'))
+        self.now = midnight
+        self.assertEqual(monitor.snapshot()['planUsed'], 0)
+
+    def test_plan_rejects_mixed_and_unbounded_forms(self):
+        monitor = grok.GrokMonitor('subscription', self.clock)
+        cases = [
+            {'usedPct': 1, 'used': 1},
+            {'window': 'weekly', 'limit': 5, 'estimateFrom': 'bots'},
+            {'window': 'daily', 'limit': 0, 'used': 0},
+            {'window': 'daily', 'limit': 10**400, 'used': 0},
+            {'window': 'daily', 'limit': 1, 'used': 10**400},
+            {'window': 'daily', 'limit': True, 'used': 0},
+            {'window': 'daily', 'limit': 1, 'used': False},
+            {'usedPct': 10**400}, {'usedPct': 5, 'unknown': 'secret'},
+            {'window': 'daily', 'limit': 1, 'estimateFrom': 'bots', 'resetAt': 1},
+        ]
+        with patch.object(grok.log, 'warning') as warning:
+            for fields in cases:
+                self.now += 1
+                self.write('grok.json', {'v': 1, **fields})
+                self.assertEqual(monitor.snapshot()['source'], 'none')
+            self.assertEqual(warning.call_count, 1)
+            self.assertEqual(warning.call_args.args,
+                             ('%s: invalid input ignored', 'grok.json'))
+
+    def test_plan_priority_and_payload_bound(self):
+        os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
+        monitor = grok.GrokMonitor(clock=self.clock, fetch=lambda: {
+            'coreInvoice': {'amountAfterVat': '10'}})
+        monitor.xai.poll()
+        self.write('grok.json', {'v': 1, 'window': 'weekly', 'used': 10000000,
+                                 'limit': 1000000, 'resetAt': grok.MAX_EPOCH,
+                                 'plan': '\\"' * 1000})
+        for i in range(16):
+            monitor.store.accept({'v': 1, 'bot': str(i), 'state': 'working',
+                                  'activity': '\\"' * 16})
+        data = monitor.snapshot()
+        self.assertEqual(data['source'], 'plan')
+        self.assertLessEqual(len(data['planName']), 12)
+        self.assertLess(len(json.dumps(data).encode()), 480)
+        (self.directory / 'grok.json').unlink()
+        self.assertEqual(monitor.snapshot()['source'], 'xai')
 
     def test_xai_unconfigured_never_fetches(self):
         fetch = Mock()
@@ -281,7 +350,7 @@ class GrokTests(GrokFixture):
         self.assertEqual(self.store.snapshot()['doneToday'], 1)
         self.assertNotIn('SOLO', self.store._bots)
 
-    def test_oversized_manual_reset_is_invalid_and_logged_once(self):
+    def test_oversized_plan_reset_is_invalid_and_logged_once(self):
         self.now = float(self.now)
         monitor = grok.GrokMonitor('manual', clock=self.clock)
         self.write('grok.json', {'v': 1, 'usedPct': 5, 'resetAt': 10**400})
@@ -484,8 +553,10 @@ class OpenRouterTests(GrokFixture):
             'coreInvoice': {'amountAfterVat': '10'}})
         monitor.openrouter = self.source
         self.write('grok.json', {'v': 1, 'usedPct': 10})
-        self.assertEqual(monitor.snapshot()['source'], 'manual')
+        self.assertEqual(monitor.snapshot()['source'], 'plan')
         monitor.store.accept({'v': 1, 'bot': 'bot', 'state': 'working'})
+        self.assertEqual(monitor.snapshot()['source'], 'plan')
+        (self.directory / 'grok.json').unlink()
         self.assertEqual(monitor.snapshot()['source'], 'bots')
         self.reply({'usage_monthly': 10**20, 'limit': 10**20})
         self.source.poll()

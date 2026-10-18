@@ -7,32 +7,86 @@ are separate from real-host and physical-panel verification.
 
 Enable with `--grok` (or `VIBEPULSE_GROK=1`) on your existing tokenserver
 command. `--grok-source auto` is the default; `VIBEPULSE_GROK_SOURCE` accepts
-`auto`, `xai`, `openrouter`, `manual`, or `bots`. Restart the existing service after changing
+`auto`, `subscription`, `xai`, `openrouter`, or `bots` (`manual` remains an alias of `subscription`). Restart the existing service after changing
 code or its environment: use the restart instructions in
 [macOS setup](agent-setup.md) or [Windows setup](windows-setup.md#restarting-the-scheduled-task).
 Do not rerun the Windows installer merely to restart the task.
 
-## Four sources
+## Sources
 
-- **xai:** xAI API spend from **console.x.ai**, using the
-  [documented Management API invoice preview](https://docs.x.ai/developers/rest-api-reference/management/billing).
-  It reports month-to-date invoice spend, optional prepaid balance and an
-  explicitly supplied positive spending limit, all in USD cents. This is
-  **not the X Subscription weekly pool**, which has no documented usage API.
-- **openrouter:** per-key UTC month spend, effective budget or key limit, and
-  optional account credits from the OpenRouter API.
-- **manual:** the percentage you copy from grok.com **Settings → Usage**.
-  This remains a manual observation, with age measured from file modification.
-- **bots:** current working/waiting count and locally observed completions
-  today. Activity is not a quota measurement.
+### Subscription plan (default)
 
-`auto` selects xai, then openrouter, then live bot activity (once any bot
-has reported or completed today), then a valid manual file. API sources must
-be configured and have a fresh or cached reading; until then they fall through.
-An API failure keeps the last successful API values marked stale. An explicit
-unavailable source reports `source: "none"` and omits its numbers.
-Missing values are omitted, never filled with invented zeroes. API/manual
-readings become stale after ten minutes; API failures mark stale immediately.
+Most Grok users have a subscription plan. There is **no public usage API for
+Grok subscriptions or Grok Bot**. This source never claims a live subscription
+reading. Select `--grok-source subscription`, or leave the default `auto`.
+Its payload is labelled `source: "plan"`.
+
+Use `state_files.state_dir()` for the service account:
+`~/Library/Application Support/VibePulse` on macOS,
+`%LOCALAPPDATA%\VibePulse` on Windows. Write exactly one of these three
+forms to `grok.json`:
+
+1. **Copied percentage** from grok.com **Settings → Usage**:
+
+   ```json
+   {"v":1,"usedPct":42,"resetAt":1790200000,"label":"WEEKLY","plan":"SUPERGROK","window":"weekly"}
+   ```
+
+   `usedPct` must be an integer 0–100. Only `v` and `usedPct` are required.
+   This is a manual observation with its file age, `estimated:false`.
+
+2. **User-counted usage against your own plan limit**:
+
+   ```json
+   {"v":1,"plan":"SUPERGROK","window":"weekly","limit":100,"used":42}
+   ```
+
+   `window`, `limit` and `used` are required. The limit is user-set, never
+   inferred from a subscription name. `limit` is an integer 1–1,000,000 and
+   `used` an integer 0–10,000,000. The percentage is floored and capped at
+   100. This carries file age and `estimated:true` (display as **EST**).
+
+3. **Estimate from Grok Bot activity**:
+
+   ```json
+   {"v":1,"plan":"SUPERGROK","window":"daily","limit":100,"estimateFrom":"bots"}
+   ```
+
+   Uses the bot store's completed tasks today in the computer's local timezone,
+   against your user-set limit (the same bound as above). Only `daily` is
+   accepted: weekly estimates would need durable history. This is **EST**
+   (`estimated:true`), with a live local count, `stale:false` and no file age.
+   It does not measure provider usage; service restarts reset the count.
+
+For all forms, `plan` is optional and displayed as uppercase ASCII, at most
+12 characters (`planName`). `window` is `daily` or `weekly` and supplies
+`windowSeconds` (86400 or 604800) and the default DAILY/WEEKLY label.
+The copied-percentage form also accepts a custom `label` up to 16 characters.
+Display text folds accents and drops unsupported characters.
+`resetAt` is optional epoch seconds from 0 through 2^32 in forms 1 and 2;
+otherwise daily windows count down to the next **local midnight** (including
+local daylight-saving changes). Weekly windows omit an unknown reset.
+Forms 2 and 3 include `planUsed` and `planLimit`.
+
+Unknown keys, mixed forms and invalid numbers are rejected with one sanitized
+warning. Files use the existing modification-time/size cache; replace them
+atomically to avoid partial reads. Copied observations and user counts become
+stale after 600 seconds. No automatic grok.com access is implied.
+
+### Source selection
+
+`auto` selects a valid plan file first, then **xAI API**, then **OpenRouter**,
+then bot activity once a bot has reported. Without a source it reports `none`.
+API sources must be configured and have a fresh or cached reading; until then
+they fall through. An API failure retains its last successful values marked
+stale; API readings also become stale after 600 seconds. An explicit unavailable
+source reports `source: "none"` and omits its numbers. Missing values are
+never filled with invented zeroes. Bot activity alone is not a quota reading.
+
+### xAI API (optional secondary source)
+
+This measures console.x.ai API billing, not subscription usage. It uses the
+[Management API invoice preview](https://docs.x.ai/developers/rest-api-reference/management/billing).
 
 ### xAI Management key
 
@@ -53,7 +107,7 @@ It reads `coreInvoice.totalWithCorr.val` (falling back to `amountAfterVat`),
 negates `prepaidCredits.val` for the available credit balance, and uses a
 positive `effectiveSpendingLimit` only. No limit is inferred from a plan.
 
-### OpenRouter API key
+### OpenRouter (optional secondary source)
 
 Set `OPENROUTER_API_KEY` in the service environment and restart the service.
 Select `--grok-source openrouter` explicitly, or use `auto`. Optionally set
@@ -84,24 +138,10 @@ the management key. A credits failure omits credits and marks the reading
 stale. Unknown countdowns and missing numbers are omitted. All monetary values
 are rounded to USD cents. No limit is inferred from a plan.
 
-### Manual quota file
+## Grok Bot status and local scripts
 
-Use `state_files.state_dir()` for the service account:
-`~/Library/Application Support/VibePulse` on macOS,
-`%LOCALAPPDATA%\VibePulse` on Windows. Write `grok.json` there:
-
-```json
-{"v":1,"usedPct":42,"resetAt":1790200000,"label":"WEEKLY"}
-```
-
-`usedPct` is a number from 0 to 100. `resetAt` is optional epoch seconds;
-`label` is optional, up to 16 characters (displayed uppercase ASCII; accents
-are folded and other characters dropped, because the panel fonts are ASCII). The host reports integer percentages and remaining reset seconds.
-Files are reread when their modification time changes. Invalid files are
-ignored with one sanitized warning; replacing a file atomically avoids partial
-reads. This manual snapshot never claims automatic grok.com access.
-
-## Bot agents and local scripts
+Grok Bot has no public usage API. These local reports supply activity status
+and, only when configured above, a daily plan estimate.
 
 An agent or user can post status from the computer running tokenserver:
 
@@ -148,7 +188,7 @@ It offers no browser CORS access. Local processes can submit statuses.
 
 Grok data is never sent to VibePulse relays. Management keys stay on the host
 and are never returned or logged; only the corresponding provider billing requests carry its key.
-Bot names/activity and manual labels are visible to LAN clients, so avoid
+Bot names/activity and plan labels are visible to LAN clients, so avoid
 sensitive task descriptions. Neither prompts nor chat history are collected.
 
 ## Panel page (build-time opt-in)

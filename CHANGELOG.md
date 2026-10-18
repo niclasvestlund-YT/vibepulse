@@ -5,9 +5,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
-- Add OpenRouter to the optional Grok host sources: spend and limit from the same window (effective budget, or key limit with matching daily/weekly/monthly usage, or UTC month spend for unlimited keys) and optional management-key account credits; auto selection is xAI → OpenRouter → bots → manual.
+- Make subscription plans the primary Grok host source: strict copied-percentage, user-counted and daily bot-estimate files, honest estimate/age labels, and optional secondary xAI/OpenRouter billing sources. `manual` remains a compatibility alias for `subscription`.
 
-- Add an optional, default-off host Grok preview: xAI API billing, manual quota and local bot status with bounded LAN payloads. Adds a build-time opt-in GROK firmware/simulator page for all five board profiles, strict payload validation, source/freshness and bot states. Money sources show percent of budget with dollars as secondary text, falling back to a dollar hero without a positive limit. See [Grok setup](docs/grok-pulse.md); simulator/build evidence only, no physical panel verification.
+- Add OpenRouter to the optional Grok host sources: spend and limit from the same window (effective budget, or key limit with matching daily/weekly/monthly usage, or UTC month spend for unlimited keys) and optional management-key account credits; auto selection is subscription plan → xAI → OpenRouter → bots.
+
+- Add an optional, default-off Grok preview: subscription plan observations/estimates, optional xAI API billing and local bot status with bounded LAN payloads. Adds a build-time opt-in GROK firmware/simulator page for all five board profiles, strict payload validation, source/freshness and bot states. The hero is a percentage (plan or budget) with dollars as secondary text, falling back to a dollar hero without a positive limit. See [Grok setup](docs/grok-pulse.md); simulator/build evidence only, no physical panel verification.
 
 - OpenPulse now appears as the optional OPENROUTER switch in Labs; existing provider choices are preserved on upgrade.
 

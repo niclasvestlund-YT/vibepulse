@@ -3800,7 +3800,7 @@ def _build_arg_parser():
         default=os.environ.get("VIBEPULSE_GROK") == "1",
         help="optional local Grok source; never published to relays")
     ap.add_argument(
-        "--grok-source", choices=["auto", "xai", "openrouter", "manual", "bots"],
+        "--grok-source", choices=["auto", "subscription", "xai", "openrouter", "manual", "bots"],
         default=os.environ.get("VIBEPULSE_GROK_SOURCE", "auto"),
         help="Grok source (requires --grok)")
     ap.add_argument(

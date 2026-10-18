@@ -7,7 +7,7 @@ import threading
 import time
 import unicodedata
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -192,23 +192,45 @@ class BotActivitySource:
                 'active': data['active'], 'doneToday': data['doneToday']}
 
 
-class ManualQuotaSource:
-    def __init__(self, clock=time.time):
+class PlanQuotaSource:
+    def __init__(self, clock=time.time, store=None):
         self.clock = clock
+        self.store = store
         self._file = JsonFile(state_dir() / 'grok.json')
         self._lock = threading.Lock()
 
     @staticmethod
     def _validate(data):
-        if (not isinstance(data, dict) or not {'v', 'usedPct'} <= data.keys() or
-                data.keys() - {'v', 'usedPct', 'resetAt', 'label'} or
-                type(data['v']) is not int or data['v'] != 1 or
-                not 0 <= number(data['usedPct']) <= 100):
-            raise ValueError('invalid quota')
+        if (not isinstance(data, dict) or type(data.get('v')) is not int or
+                data['v'] != 1):
+            raise ValueError('invalid plan')
+        common = {'v', 'plan', 'window', 'resetAt'}
+        if 'usedPct' in data:
+            allowed, required = common | {'usedPct', 'label'}, {'usedPct'}
+            if type(data['usedPct']) is not int or not 0 <= data['usedPct'] <= 100:
+                raise ValueError('invalid percentage')
+        elif 'estimateFrom' in data:
+            allowed = {'v', 'plan', 'window', 'limit', 'estimateFrom'}
+            required = {'window', 'limit', 'estimateFrom'}
+            if data['estimateFrom'] != 'bots' or data.get('window') != 'daily':
+                raise ValueError('invalid estimate')
+        else:
+            allowed, required = common | {'used', 'limit'}, {'window', 'used', 'limit'}
+            if type(data.get('used')) is not int or not 0 <= data['used'] <= 10000000:
+                raise ValueError('invalid usage')
+        if data.keys() - allowed or not required <= data.keys():
+            raise ValueError('invalid plan schema')
+        if 'limit' in data and (type(data['limit']) is not int or
+                               not 1 <= data['limit'] <= 1000000):
+            raise ValueError('invalid limit')
+        if 'window' in data and data['window'] not in ('daily', 'weekly'):
+            raise ValueError('invalid window')
         if 'resetAt' in data and not 0 <= number(data['resetAt']) <= MAX_EPOCH:
             raise ValueError('invalid reset')
         if 'label' in data and len(text(data['label'])) > 16:
             raise ValueError('invalid label')
+        if 'plan' in data:
+            text(data['plan'])
         return data
 
     def snapshot(self):
@@ -216,13 +238,31 @@ class ManualQuotaSource:
             data = self._file.read(self._validate)
             if data is None:
                 return None
-            age = bounded(self.clock() - self._file.mtime)
-            result = {'source': 'manual', 'stale': age > 600,
-                      'ageSeconds': age, 'usedPct': int(data['usedPct'])}
+            live = data.get('estimateFrom') == 'bots'
+            result = {'source': 'plan', 'stale': False,
+                      'estimated': 'usedPct' not in data}
+            if not live:
+                age = bounded(self.clock() - self._file.mtime)
+                result.update(ageSeconds=age, stale=age > 600)
+            if 'usedPct' in data:
+                result['usedPct'] = data['usedPct']
+            else:
+                used = self.store.snapshot()['doneToday'] if live else data['used']
+                result.update(usedPct=min(100, used * 100 // data['limit']),
+                              planUsed=used, planLimit=data['limit'])
+            window = data.get('window')
+            if window:
+                result['windowSeconds'] = 86400 if window == 'daily' else 604800
             if 'resetAt' in data:
                 result['resetSeconds'] = bounded(data['resetAt'] - self.clock())
-            if 'label' in data:
-                result['label'] = display(data['label'], upper=True)
+            elif window == 'daily':
+                tomorrow = datetime.fromtimestamp(self.clock()).date() + timedelta(days=1)
+                midnight = datetime.combine(tomorrow, datetime.min.time()).timestamp()
+                result['resetSeconds'] = bounded(midnight - self.clock())
+            if 'label' in data or window:
+                result['label'] = display(data.get('label', window), upper=True)
+            if 'plan' in data:
+                result['planName'] = display(data['plan'], upper=True)[:12].strip()
             return result
 
 
@@ -438,13 +478,13 @@ def grok_snapshot(monitor=None):
 
 class GrokMonitor:
     def __init__(self, source='auto', clock=time.time, fetch=None):
-        if source not in ('auto', 'xai', 'openrouter', 'manual', 'bots'):
+        if source not in ('auto', 'subscription', 'xai', 'openrouter', 'manual', 'bots'):
             raise ValueError('invalid Grok source')
-        self.source = source
+        self.source = 'plan' if source in ('subscription', 'manual') else source
         self.store = GrokBotStore(clock)
         self.xai = XaiApiUsageSource(fetch, clock)
         self.openrouter = OpenRouterUsageSource(clock=clock)
-        self.manual = ManualQuotaSource(clock)
+        self.plan = PlanQuotaSource(clock, self.store)
         self.bots = BotActivitySource(self.store)
         self._lock = threading.Lock()
 
@@ -462,13 +502,12 @@ class GrokMonitor:
     def snapshot(self):
         with self._lock:
             data = None
-            # Auto: measured xAI, then OpenRouter, then live bot activity, then
-            # the owner's manually copied quota. Nothing configured -> 'none'.
-            for name in (('xai', 'openrouter', 'bots', 'manual') if self.source == 'auto'
+            # A valid subscription plan takes priority over optional API sources.
+            for name in (('plan', 'xai', 'openrouter', 'bots') if self.source == 'auto'
                          else (self.source,)):
                 source = getattr(self, name)
                 # An explicitly chosen bot source reports real zeros; in auto
-                # mode an empty bot store defers to the manual quota.
+                # mode an empty bot store supplies no reading.
                 data = (source.snapshot(allow_empty=self.source == 'bots')
                         if name == 'bots' else source.snapshot())
                 if (self.source == 'auto' and name == 'xai' and

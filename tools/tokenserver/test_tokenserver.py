@@ -5523,6 +5523,20 @@ class GrokEndpointTests(unittest.TestCase):
         self.addCleanup(self.poll.stop)
         self.port = 8737
 
+    def test_subscription_plan_forms_on_endpoint(self):
+        self.monitor.source = 'plan'
+        path = Path(self.temp.name) / 'grok.json'
+        forms = [({'usedPct': 42}, False, 42),
+                 ({'window': 'weekly', 'used': 12, 'limit': 10}, True, 100),
+                 ({'window': 'daily', 'limit': 10, 'estimateFrom': 'bots'}, True, 0)]
+        for fields, estimated, percentage in forms:
+            path.write_text(json.dumps({'v': 1, **fields}), encoding='utf-8')
+            status, data = self.request()
+            self.assertEqual(status, 200)
+            self.assertEqual(data['source'], 'plan')
+            self.assertEqual(data['estimated'], estimated)
+            self.assertEqual(data['usedPct'], percentage)
+
     def request(self, method='GET', path='/api/grok', body=None, headers=None):
         # Run BaseHTTPRequestHandler's actual HTTP parser and response writer
         # over bytes, without requiring a local socket or any external network.
