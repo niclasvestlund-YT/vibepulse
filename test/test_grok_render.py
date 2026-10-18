@@ -71,12 +71,15 @@ class GrokRenderTests(unittest.TestCase):
             self.assertIsNotNone(ImageChops.difference(
                 empty.convert("RGB"), live.convert("RGB")).getbbox())
 
-    def test_outage_dims_bot_rows_and_hero(self):
+    def test_outage_dims_bot_rows_hero_and_context(self):
         rows = (16, 348, 464, 425)
         hero = (16, 112, 464, 242)
+        # create_header_context: x=180, VP_PROVIDER_Y(22)+5, 228x20.
+        context = (180, 27, 408, 47)
         with self.frame("live") as live, self.frame("offline") as offline:
             self.assertLess(brightness(offline, rows), 0.7 * brightness(live, rows))
             self.assertLess(brightness(offline, hero), 0.8 * brightness(live, hero))
+            self.assertLess(brightness(offline, context), 0.7 * brightness(live, context))
 
     def test_retained_reading_stays_dimmed(self):
         hero = (16, 112, 464, 242)

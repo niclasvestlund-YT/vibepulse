@@ -1532,8 +1532,8 @@ static void refresh_grok_age(int64_t now_us) {
 #endif
   }
   if (feed_stale!=grok_page.rendered_rows_stale) {
-#ifdef TORGET_BOARD_175
     lv_obj_set_style_text_opa(grok_page.context,feed_stale ? LV_OPA_40:LV_OPA_COVER,0);
+#ifdef TORGET_BOARD_175
     lv_obj_set_style_text_opa(grok_page.bot_counts,feed_stale ? LV_OPA_40:LV_OPA_COVER,0);
 #endif
     grok_page.rendered_rows_stale=feed_stale;
