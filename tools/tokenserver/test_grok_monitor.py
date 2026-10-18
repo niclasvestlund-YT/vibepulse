@@ -83,6 +83,51 @@ class GrokTests(GrokFixture):
         self.post('done')
         self.assertEqual(self.store.snapshot()['doneToday'], 1)
 
+    def test_full_file_replay_after_post_does_not_recount_done(self):
+        records = [{'bot': f'file{i}', 'state': 'done', 'updatedAt': self.now}
+                   for i in range(256)]
+        self.write('grok-bots.json', {'v': 1, 'bots': records})
+        self.assertEqual(self.store.snapshot()['doneToday'], 256)
+        self.post(bot='post')
+        self.now += 1
+        self.write('grok-bots.json', {'v': 1, 'bots': records})
+        self.assertEqual(self.store.snapshot()['doneToday'], 256)
+        self.write('grok.json', {'v': 1, 'window': 'daily', 'limit': 1000,
+                                 'estimateFrom': 'bots'})
+        self.assertEqual(grok.PlanQuotaSource(self.clock, self.store).snapshot()['planUsed'],
+                         256)
+
+    def test_full_daily_history_fails_closed_without_eviction(self):
+        self.assertEqual(grok.MAX_BOT_HISTORY, 4096)
+        for i in range(grok.MAX_BOT_HISTORY):
+            self.post('done', bot=f'bot{i}')
+        self.assertEqual(self.store.snapshot()['doneToday'], grok.MAX_BOT_HISTORY)
+        for iteration in range(2):
+            self.now += 1
+            records = [{'bot': f'bot{i}', 'state': 'done', 'updatedAt': self.now}
+                       for i in range(255)]
+            records.append({'bot': 'unknown-file', 'state': 'done',
+                            'updatedAt': self.now})
+            self.write('grok-bots.json', {'v': 1, 'bots': records})
+            self.assertEqual(self.store.snapshot()['doneToday'], grok.MAX_BOT_HISTORY)
+            self.assertIn('UNKNOWN-FILE', self.store._bots)
+            self.post('working', bot='unknown-post')
+            self.post('done', bot='unknown-post')
+            self.assertIn('UNKNOWN-POST', self.store._bots)
+            self.assertEqual(len(self.store._bots), 16)
+            self.assertEqual(len(self.store._last_state), grok.MAX_BOT_HISTORY)
+            self.assertNotIn('UNKNOWN-FILE', self.store._last_state)
+            self.assertNotIn('UNKNOWN-POST', self.store._last_state)
+            self.assertEqual(self.store.snapshot()['doneToday'], grok.MAX_BOT_HISTORY)
+        # Known names still count legitimate transitions even at capacity.
+        self.post('working', bot='bot0')
+        self.post('done', bot='bot0')
+        self.assertEqual(self.store.snapshot()['doneToday'], grok.MAX_BOT_HISTORY + 1)
+        self.now += 86400
+        self.post('done', bot='unknown-post')
+        self.assertEqual(self.store.snapshot()['doneToday'], 1)
+        self.assertEqual(len(self.store._last_state), 1)
+
     def test_bot_file_and_invalid_logged_once(self):
         path = self.write('grok-bots.json', {'v': 1, 'bots': [
             {'bot': 'File', 'state': 'done', 'updatedAt': self.now}]})
@@ -437,6 +482,32 @@ class OpenRouterTests(GrokFixture):
         self.assertEqual(calls[0].kwargs['timeout'], 8)
         self.now += 601
         self.assertTrue(self.source.snapshot()['stale'])
+
+    def test_invalid_credits_keep_key_spend_but_mark_stale(self):
+        self.source._management_key = 'fake-management-secret'
+        invalid = [{}, {'total_credits': 80}, {'total_usage': 12}]
+        for field in ('total_credits', 'total_usage'):
+            for value in (None, True, 'fake-management-secret', [], {},
+                          float('nan'), float('inf')):
+                invalid.append({'total_credits': 80, 'total_usage': 12, field: value})
+        for credits in invalid:
+            with self.subTest(credits=credits):
+                self.reply({'usage_monthly': 1},
+                           {'total_credits': 80, 'total_usage': 12})
+                self.source.poll()
+                self.assertFalse(self.source.snapshot()['stale'])
+                self.assertIn('prepaidCents', self.source.snapshot())
+                self.reply({'usage_monthly': 2}, credits)
+                with self.assertLogs('tokenserver.grok') as logs:
+                    self.source.poll()
+                data = self.source.snapshot()
+                self.assertEqual(data['spentCents'], 200)
+                self.assertNotIn('prepaidCents', data)
+                self.assertTrue(data['stale'])
+                self.assertTrue(self.source._failed)
+                self.assertEqual(logs.output, [
+                    'WARNING:tokenserver.grok:OpenRouter credits poll failed; '
+                    'omitting account credits'])
 
     def test_limits_missing_values_and_month_math(self):
         from datetime import datetime, timezone

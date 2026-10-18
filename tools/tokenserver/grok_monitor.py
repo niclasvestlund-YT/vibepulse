@@ -6,7 +6,6 @@ import os
 import threading
 import time
 import unicodedata
-from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -19,6 +18,7 @@ else:
     from openrouter_client import Client
 
 log = logging.getLogger('tokenserver.grok')
+MAX_BOT_HISTORY = 4096
 MAX_INT = 2147483647
 MAX_EPOCH = 2**32  # Through 2106; safe for arithmetic and datetime conversion.
 STATES = ('waiting', 'error', 'working', 'done', 'idle')
@@ -101,7 +101,7 @@ class GrokBotStore:
         self._done = 0
         # Last accepted record per bot name for today, apart from display leases
         # and eviction so an expired or replayed "done" never counts twice.
-        self._last_state = OrderedDict()
+        self._last_state = {}
         self._file = JsonFile(state_dir() / 'grok-bots.json')
         self._loaded = None
 
@@ -135,13 +135,13 @@ class GrokBotStore:
             # Live updates may share a clock tick; exact file replays cannot.
             if old == bot or old['updatedAt'] > bot['updatedAt']:
                 return
-        previous = self._last_state.pop(name, None)
-        if bot['state'] == 'done' and (previous is None or previous['state'] != 'done'):
-            if datetime.fromtimestamp(bot['updatedAt']).date() == self._day:
-                self._done = min(MAX_INT, self._done + 1)
-        self._last_state[name] = bot
-        while len(self._last_state) > 256:
-            self._last_state.popitem(last=False)
+        # Never evict daily history: replaying an evicted name would recount it.
+        # At capacity, unknown names remain visible but cannot affect the count.
+        if old is not None or len(self._last_state) < MAX_BOT_HISTORY:
+            if bot['state'] == 'done' and (old is None or old['state'] != 'done'):
+                if datetime.fromtimestamp(bot['updatedAt']).date() == self._day:
+                    self._done = min(MAX_INT, self._done + 1)
+            self._last_state[name] = bot
         self._bots[name] = bot
         if len(self._bots) > 16:
             del self._bots[min(self._bots, key=lambda key: self._bots[key]['updatedAt'])]
@@ -447,8 +447,7 @@ class OpenRouterUsageSource(XaiApiUsageSource):
             try:
                 credits = self._client.get('credits', self._management_key)
                 total, used = credits.get('total_credits'), credits.get('total_usage')
-                if total is not None and used is not None:
-                    result['prepaidCents'] = self._cents(number(total) - number(used))
+                result['prepaidCents'] = self._cents(number(total) - number(used))
             except Exception:
                 log.warning('OpenRouter credits poll failed; omitting account credits')
                 failed = True
