@@ -53,6 +53,16 @@ def number(value):
     return value
 
 
+def integral_cents(value):
+    if isinstance(value, str):
+        return int(value)
+    value = number(value)
+    cents = int(value)
+    if value != cents:
+        raise ValueError('non-integral cents')
+    return cents
+
+
 class JsonFile:
     """Validate only changed content; malformed input never leaks into logs."""
     def __init__(self, path):
@@ -353,19 +363,19 @@ class XaiApiUsageSource:
             if value is None:
                 value = core.get('amountAfterVat')
             if value is not None:
-                value = number(int(value) if isinstance(value, str) else value)
+                value = integral_cents(value)
                 if value < 0:
                     raise ValueError('negative spend')
                 result['spentCents'] = bounded(int(value))
             value = core.get('prepaidCredits', {}).get('val')
             if value is not None:
-                value = number(int(value) if isinstance(value, str) else value)
+                value = integral_cents(value)
                 if value > 0:
                     raise ValueError('positive prepaid invoice component')
                 result['prepaidCents'] = bounded(-int(value))
             value = reply.get('effectiveSpendingLimit')
             if value is not None:
-                value = number(int(value) if isinstance(value, str) else value)
+                value = integral_cents(value)
                 if value > 0:
                     result['limitCents'] = bounded(int(value))
             if not result:

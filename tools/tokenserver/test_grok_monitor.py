@@ -420,7 +420,7 @@ class GrokTests(GrokFixture):
     def test_xai_invalid_money_retains_last_good_reading(self):
         os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
         invalid = []
-        for value in (True, False, [], {}, float('nan'), float('inf')):
+        for value in (True, False, [], {}, float('nan'), float('inf'), 0.5):
             invalid.extend([
                 {'coreInvoice': {'totalWithCorr': {'val': value}}},
                 {'coreInvoice': {'amountAfterVat': value}},
@@ -432,6 +432,8 @@ class GrokTests(GrokFixture):
             invalid.extend([
                 {'coreInvoice': {'totalWithCorr': {'val': value}}},
                 {'coreInvoice': {'amountAfterVat': value}}])
+        invalid.append({'coreInvoice': {'amountAfterVat': 10,
+                                         'prepaidCredits': {'val': -0.5}}})
         for reply in invalid:
             with self.subTest(reply=reply):
                 fetch = Mock(return_value={'coreInvoice': {'amountAfterVat': 123}})
@@ -447,6 +449,22 @@ class GrokTests(GrokFixture):
                 self.assertEqual(data['ageSeconds'], 30)
                 self.assertTrue(data['stale'])
                 self.assertTrue(source._failed)
+
+    def test_xai_integral_float_cents(self):
+        os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
+        for spend in ({'amountAfterVat': 123.0},
+                      {'totalWithCorr': {'val': 123.0}}):
+            with self.subTest(spend=spend):
+                fetch = Mock(return_value={
+                    'coreInvoice': {**spend, 'prepaidCredits': {'val': -4500.0}},
+                    'effectiveSpendingLimit': 20000.0})
+                source = grok.XaiApiUsageSource(fetch, self.clock)
+                source.poll()
+                data = source.snapshot()
+                self.assertFalse(data['stale'])
+                self.assertEqual([data[k] for k in
+                                  ('spentCents', 'prepaidCents', 'limitCents')],
+                                 [123, 4500, 20000])
 
     def test_positive_prepaid_component_retains_last_good_reading(self):
         os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
