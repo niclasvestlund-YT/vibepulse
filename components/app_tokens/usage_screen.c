@@ -1106,7 +1106,7 @@ static void draw_quota_ring(lv_event_t *event, quota_page *page,
   arc.center.y = coords.y1 + VP_ROUND_RING_SIZE / 2;
   arc.radius = VP_ROUND_RING_SIZE / 2;
   arc.width = VP_ROUND_RING_WIDTH;
-  arc.opa = LV_OPA_COVER;
+  arc.opa = lv_obj_get_style_arc_opa(page->track,0);
   arc.start_angle = 270;
   arc.end_angle = 630;
   arc.color = COL_TRACK;
@@ -1284,7 +1284,13 @@ static int grok_pace(int32_t reset_seconds, int window, int span) {
   return (int)pace;
 }
 static const char *grok_money_caption(const tk_grok_status *s, bool budget) {
-  if (!strcmp(s->source,"xai")) return budget ? "MONTHLY BUDGET":"SPEND · MONTH";
+  if (!strcmp(s->source,"xai")) {
+    const char *caption=budget ? "POSTPAID LIMIT":"POSTPAID · MONTH";
+    lv_point_t size;
+    lv_text_get_size(&size,caption,lv_obj_get_style_text_font(grok_page.caption,0),
+                     lv_obj_get_style_text_letter_space(grok_page.caption,0),0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    return size.x>lv_obj_get_style_width(grok_page.caption,0) ? "POSTPAID":caption;
+  }
   if (s->has_window) {
     if (s->window_seconds==86400) return budget ? "DAILY BUDGET":"SPEND · DAY";
     if (s->window_seconds==604800) return budget ? "WEEKLY BUDGET":"SPEND · WEEK";
@@ -1308,6 +1314,7 @@ static void grok_ring_draw(lv_event_t *event) {
   tick.center.y=coords.y1+VP_ROUND_RING_SIZE/2;
   tick.radius=VP_ROUND_RING_SIZE/2;
   tick.width=13;
+  tick.opa=lv_obj_get_style_arc_opa(page->track,0);
   tick.color=COL_WHITE;
   int pace=grok_pace(s->reset_seconds,window,360);
   tick.start_angle=269+pace; tick.end_angle=270+pace;
@@ -1445,7 +1452,8 @@ static void create_grok_page(void) {
   const tk_grok_status empty={.source="none"};
   apply_grok_page(&empty,0);
   grok_page.has_snapshot=false;
-  grok_page.rendered_stale=false;
+  /* Empty initialization dimmed the gauge; the first live reading restores it. */
+  grok_page.rendered_stale=true;
   grok_page.rendered_rows_stale=false;
   lv_obj_set_style_text_opa(grok_page.hero,LV_OPA_COVER,0);
 #ifdef TORGET_BOARD_175
@@ -1460,6 +1468,16 @@ static void grok_dollars(char *out, size_t cap, int32_t cents, bool full_precisi
   else if (cents<100000) snprintf(out,cap,"$%ld.%02ld",(long)(cents/100),(long)(cents%100));
   else if (cents>=100000000) snprintf(out,cap,"$%ld,%03ld,%03ld",(long)(cents/100000000),(long)(cents/100000%1000),(long)(cents/100%1000));
   else snprintf(out,cap,"$%ld,%03ld",(long)(cents/100000),(long)(cents/100%1000));
+  if (full_precision && cents>=100000) {
+    size_t len=strlen(out);
+    snprintf(out+len,cap-len,".%02ld",(long)(cents%100));
+  }
+}
+/* Comparing the rendered opacity also handles round labels changing roles. */
+static void grok_dim_text(lv_obj_t *obj, bool stale) {
+  if (!obj) return;
+  lv_opa_t opa=stale ? LV_OPA_50:LV_OPA_COVER;
+  if (lv_obj_get_style_text_opa(obj,0)!=opa) lv_obj_set_style_text_opa(obj,opa,0);
 }
 static void refresh_grok_age(int64_t now_us) {
   if (!grok_page.tile || !grok_page.has_snapshot) return;
@@ -1488,11 +1506,29 @@ static void refresh_grok_age(int64_t now_us) {
     snprintf(grok_page.rendered_provenance,sizeof grok_page.rendered_provenance,"%s",text);
     lv_label_set_text(grok_page.provenance,text);
   }
+  grok_dim_text(grok_page.hero,stale);
+  grok_dim_text(grok_page.currency,stale);
+  grok_dim_text(grok_page.sub,stale);
+  bool left_stale=stale, reset_stale=stale;
+#ifdef TORGET_BOARD_175
+  grok_dim_text(grok_page.gauge.percent_unit,stale);
+  if (strcmp(s->source,"plan")) {
+    left_stale=feed_stale;
+    if (feed->bot_count) reset_stale=feed_stale;
+  }
+#endif
+  grok_dim_text(grok_page.left,left_stale);
+  grok_dim_text(grok_page.left_caption,left_stale);
+  grok_dim_text(grok_page.reset,reset_stale);
+  grok_dim_text(grok_page.reset_caption,reset_stale);
   if (stale!=grok_page.rendered_stale) {
     grok_page.rendered_stale=stale;
-    lv_obj_set_style_text_opa(grok_page.hero,stale ? LV_OPA_50:LV_OPA_COVER,0);
 #ifdef TORGET_BOARD_175
-    lv_obj_set_style_text_opa(grok_page.gauge.percent_unit,stale ? LV_OPA_50:LV_OPA_COVER,0);
+    lv_obj_set_style_arc_opa(grok_page.gauge.track,stale ? LV_OPA_50:LV_OPA_COVER,0);
+    lv_obj_invalidate(grok_page.gauge.track);
+#else
+    lv_obj_set_style_bg_opa(grok_page.gauge.baseline_fill,stale ? LV_OPA_50:LV_OPA_COVER,0);
+    lv_obj_set_style_bg_opa(grok_page.gauge.marker,stale ? LV_OPA_50:LV_OPA_COVER,0);
 #endif
   }
   if (feed_stale!=grok_page.rendered_rows_stale) {
@@ -1687,7 +1723,8 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   unsigned count=s->enabled ? s->bot_count:0,waiting=0;
   int priority=-1;
   for(unsigned i=0;i<count;i++) if(!strcmp(s->bots[i].state,"waiting")) {waiting++; if(priority<0) priority=(int)i;}
-  if(waiting) snprintf(text,sizeof text,"%u NEEDS YOU",waiting);
+  const char *waiting_suffix=waiting && waiting==count && s->active>(int32_t)count ? "+":"";
+  if(waiting) snprintf(text,sizeof text,"%u%s NEEDS YOU",waiting,waiting_suffix);
   else if(s->enabled && s->active) snprintf(text,sizeof text,"%ld BOTS ACTIVE",(long)s->active);
   else snprintf(text,sizeof text,"NO BOTS");
 #ifndef TORGET_BOARD_175
@@ -1700,7 +1737,7 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   max_rows=0;
   bool shown_plan=!strcmp(grok_page.shown.source,"plan");
   grok_visible(grok_page.bot_counts,shown_plan && grok_page.has_data);
-  snprintf(text,sizeof text,"%ld ACTIVE · %u NEEDS YOU",(long)(s->enabled ? s->active:0),waiting);
+  snprintf(text,sizeof text,"%ld ACTIVE · %u%s NEEDS YOU",(long)(s->enabled ? s->active:0),waiting,waiting_suffix);
   grok_text(grok_page.bot_counts,text);
   if(shown_plan) {
     lv_obj_set_style_text_font(grok_page.reset,&plex_stat_35,0);
@@ -1710,7 +1747,7 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     if(s->enabled && strcmp(s->source,"none")) snprintf(text,sizeof text,"%ld",(long)s->active);
     else snprintf(text,sizeof text,"–");
     grok_text(grok_page.left,text);
-    const lv_font_t *reset_font=count ? &plex_round_32:&plex_stat_35;
+    const lv_font_t *reset_font=count && !waiting_suffix[0] ? &plex_round_32:&plex_stat_35;
     if(lv_obj_get_style_text_font(grok_page.reset,0)!=reset_font) lv_obj_set_style_text_font(grok_page.reset,reset_font,0);
   }
   if(!count) {
@@ -1720,7 +1757,7 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   }
   if(count) {
     if(!shown_plan) {
-      grok_text(grok_page.reset_caption,"NEEDS YOU"); snprintf(text,sizeof text,"%u",waiting); grok_text(grok_page.reset,text);
+      grok_text(grok_page.reset_caption,"NEEDS YOU"); snprintf(text,sizeof text,"%u%s",waiting,waiting_suffix); grok_text(grok_page.reset,text);
       lv_color_t reset_color=waiting ? COL_STAR:COL_WHITE;
       if(!lv_color_eq(lv_obj_get_style_text_color(grok_page.reset,0),reset_color)) lv_obj_set_style_text_color(grok_page.reset,reset_color,0);
     }

@@ -85,7 +85,9 @@ never filled with invented zeroes. Bot activity alone is not a quota reading.
 
 ### xAI API (optional secondary source)
 
-This measures console.x.ai API billing, not subscription usage. It uses the
+This measures the postpaid invoice amount due this billing month, not subscription usage.
+Usage paid from prepaid credits is excluded. The host label is `XAI POSTPAID`;
+the panel captions are POSTPAID · MONTH and POSTPAID LIMIT (POSTPAID where space is limited). It uses the
 [Management API invoice preview](https://docs.x.ai/developers/rest-api-reference/management/billing).
 
 ### xAI Management key
@@ -105,7 +107,9 @@ key out of command-line arguments, source control and shared logs. The source
 polls immediately at startup, then every 300 seconds, with a 15-second timeout.
 It reads `coreInvoice.totalWithCorr.val` (falling back to `amountAfterVat`),
 negates `prepaidCredits.val` for the available credit balance, and uses a
-positive `effectiveSpendingLimit` only. No limit is inferred from a plan.
+positive `effectiveSpendingLimit` only. Credits are reported in `/api/grok` as
+`prepaidCents` for host consumers and are not drawn on the panel page.
+No limit is inferred from a plan.
 
 ### OpenRouter (optional secondary source)
 
@@ -133,8 +137,9 @@ request. The label is `OPENROUTER`. Spend and limit always come from the same wi
 Readings with a daily, weekly or monthly window also carry `windowSeconds`, so
 the panel can name the window and place its pace marker; lifetime budgets and
 never-resetting limits omit it. This is per-key spend, not account-wide spend. Credits are optional
-account-wide remaining credits (`total_credits - total_usage`), shown only with
-the management key. A credits failure omits credits and marks the reading
+account-wide remaining credits (`total_credits - total_usage`), reported in
+`/api/grok` as `prepaidCents` for host consumers only with the management key.
+They are not drawn on the panel page. A credits failure omits credits and marks the reading
 stale. Unknown countdowns and missing numbers are omitted. All monetary values
 are rounded to USD cents. No limit is inferred from a plan.
 
@@ -201,7 +206,9 @@ public usage API for Grok subscriptions or Grok Bot; these are observations or
 estimates, never live usage measurements. Counts show used and remaining values
 when provided, and the reset counts down locally. Optional secondary xAI and
 OpenRouter sources show percent of budget with spent and limit dollars below,
-or a dollar hero without a positive limit. Bot activity remains visible. Unknown
+or a dollar hero without a positive limit. Dollar heroes and spent amounts retain
+cents even above $1,000; secondary limit/remaining amounts keep their compact
+format. Bot activity remains visible. Unknown
 numbers show a dash; a later unavailable reading retains the last real value.
 Stale values dim. If the panel gets no successful `/api/grok` read for 90
 seconds, the bot rows dim and the provenance says `CACHED` (or `NO
@@ -210,7 +217,8 @@ number that the latest payload no longer carries keeps its own source label
 and is shown dimmed. Plan resets count down locally. Bot states include
 WORKING, NEEDS YOU, DONE, IDLE and ERROR; this page cannot approve actions.
 Aggregate ACTIVE counts include both working and waiting bots, even when the
-host truncates the displayed bot rows.
+host truncates the displayed bot rows. NEEDS YOU shows `N+` when every
+transmitted row is waiting and ACTIVE exceeds the row count; more bots may be waiting.
 
 Enable `#define TK_GROK_SCREEN_ENABLED 1` in `secrets.h`, or configure firmware
 with `-D TORGET_GROK=ON`. The default is **0**. An optional `TK_GROK_URL`
@@ -244,8 +252,10 @@ plus four bots), followed by `offline` (91 s without a read) and `retained`
 retained bot/plan readings, plan age unknown, maximum wire values,
 `huge-percent` (INT32_MAX cents against a one-cent budget), and `unlimited`
 (the dollar-hero fallback with no limit).
-`test/test_grok_render.py`
-builds the 2.16 variant in the host gate and checks those transitions.
+`test/test_grok_render.py` builds all five profiles and checks these transitions,
+caption and money widths/glyphs, and truncated NEEDS YOU counts. Additional
+QA captures include `restored` (fresh values after retention) and
+`dollar-millions` (a dollar hero retaining cents).
 Set `TORGET_CAPTURE_DIR` to an existing directory to retain captures from
 multiple board builds. QA returns nonzero with a clear message if Grok was
 not compiled in. Empty is rendered first to verify the initial dash;
@@ -264,6 +274,6 @@ OpenRouter captions use DAY, WEEK or MONTH for reported 1-day, 7-day or
 28–31-day windows: DAILY/WEEKLY/MONTHLY BUDGET with a limit,
 SPEND · DAY/WEEK/MONTH without one. Other or missing windows show BUDGET
 or SPEND respectively. Optional `windowSeconds`
-is an integer from 1 to 2678400. Pace uses this window when supplied, otherwise
-xAI uses 30 days and plan uses 7 days. OpenRouter without a window has no
-pace marker, including on the round ring.
+is an integer from 1 to 2678400. Pace uses this window when supplied. Without `windowSeconds` no pace marker
+is drawn, including on the round ring. xAI never sends it; plan supplies it
+only with `window`.

@@ -84,6 +84,23 @@ class GrokRenderTests(unittest.TestCase):
             self.assertLess(brightness(retained, hero), 0.8 * brightness(live, hero))
             self.assertGreater(brightness(retained, hero), 0)
 
+    def test_retained_reading_dims_all_derived_values(self):
+        regions = ((22, 232, 458, 252), (22, 258, 140, 280),
+                   (320, 254, 329, 282), (22, 286, 230, 338),
+                   (250, 286, 458, 338))
+        with self.frame("live") as live, self.frame("retained") as retained:
+            for region in regions:
+                with self.subTest(region=region):
+                    self.assertGreater(brightness(retained, region), 0)
+                    self.assertLess(brightness(retained, region),
+                                    .8 * brightness(live, region))
+
+    def test_fresh_reading_restores_every_value(self):
+        with self.frame("live") as live, self.frame("restored") as restored:
+            self.assertIsNone(ImageChops.difference(
+                live.crop((16, 105, 464, 338)).convert("RGB"),
+                restored.crop((16, 105, 464, 338)).convert("RGB")).getbbox())
+
     def test_native_quota_bar_uses_silver_fill_and_white_pace_tick(self):
         with self.frame("live") as live, self.frame("plan") as plan:
             self.assertEqual(live.convert("RGB").getpixel((40, 270)), (201, 212, 232))
@@ -171,8 +188,16 @@ class GrokFixtureTests(unittest.TestCase):
                 self.assertGreater(brightness(retained, unit), 0)
                 self.assertGreater(brightness(live, unit),
                                    1.5 * brightness(retained, unit))
+                for region in ((100, 305, 380, 365), (70, 280, 410, 304), (0, 0, 466, 35)):
+                    with self.subTest(region=region):
+                        self.assertGreater(brightness(retained, region), 0)
+                        self.assertLess(brightness(retained, region), .85 * brightness(live, region))
+                with Image.open(Path(directory) / "torget-vibepulse-grok-restored.bmp") as restored:
+                    self.assertIsNone(ImageChops.difference(
+                        live.convert("RGB"), restored.convert("RGB")).getbbox())
                 with Image.open(Path(directory) / "torget-vibepulse-grok-first-live.bmp") as first:
-                    self.assertEqual(brightness(first, unit), brightness(live, unit))
+                    for region in (unit, (100, 305, 380, 365), (70, 280, 410, 304), (0, 0, 466, 35)):
+                        self.assertEqual(brightness(first, region), brightness(live, region))
 
     def test_191_dollar_thousands_font_and_capture(self):
         build = ROOT / "sim/build-grok-waveshare_191_touch"
@@ -193,6 +218,23 @@ class GrokFixtureTests(unittest.TestCase):
                 self.assertEqual(image.size, (536, 240))
                 self.assertGreater(brightness(image, (16, 40, 282, 130)), 0)
 
+    def test_18_money_and_caption_fit(self):
+        build = ROOT / "sim/build-grok-waveshare_18_v2"
+        configure = ["cmake", "-S", "sim", "-B", str(build), "-G", "Ninja",
+                     "-DTORGET_BOARD=waveshare_18_v2", "-DTORGET_GROK=ON",
+                     "-DTORGET_SOLELKOLLEN_DIR=/nonexistent", "-DTORGET_WITH_BUDDY=OFF"]
+        lvgl = ROOT / "sim/build/_deps/lvgl-src"
+        if lvgl.is_dir():
+            configure.append(f"-DFETCHCONTENT_SOURCE_DIR_LVGL={lvgl}")
+        for command in (configure, ["cmake", "--build", str(build)]):
+            subprocess.run(command, cwd=ROOT, check=True, capture_output=True)
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run([str(build / "torget-sim"), "--vibepulse-grok-qa"],
+                           cwd=ROOT, check=True, capture_output=True,
+                           env={**os.environ, "TORGET_CAPTURE_DIR": directory})
+            with Image.open(Path(directory) / "torget-vibepulse-grok-dollar-millions.bmp") as image:
+                self.assertEqual(image.size, (368, 448))
+
     def test_active_includes_working_and_waiting(self):
         import json
 
@@ -203,6 +245,24 @@ class GrokFixtureTests(unittest.TestCase):
                     self.assertEqual(payload["active"], sum(
                         bot["state"] in ("working", "waiting")
                         for bot in payload.get("bots", [])))
+
+
+class GrokReviewWiringTests(unittest.TestCase):
+    def test_round_bot_fields_follow_feed_and_styles_only_change_on_transition(self):
+        source = (ROOT / "components/app_tokens/usage_screen.c").read_text()
+        self.assertIn('left_stale=feed_stale;', source)
+        self.assertIn('if (feed->bot_count) reset_stale=feed_stale;', source)
+        self.assertIn('if (lv_obj_get_style_text_opa(obj,0)!=opa)', source)
+        self.assertIn('if (stale!=grok_page.rendered_stale)', source)
+        self.assertIn('tick.opa=lv_obj_get_style_arc_opa(page->track,0)', source)
+
+    def test_docs_describe_postpaid_credits_and_no_window(self):
+        docs = (ROOT / "docs/grok-pulse.md").read_text()
+        self.assertIn('postpaid invoice amount due this billing month', docs)
+        self.assertIn('not drawn on the panel page', docs)
+        self.assertIn('Without `windowSeconds` no pace marker', docs)
+        self.assertNotIn('xAI uses 30 days', docs)
+        self.assertNotIn('shown only with', docs)
 
 
 class GrokDocsTests(unittest.TestCase):

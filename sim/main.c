@@ -1784,22 +1784,35 @@ static int run_vibepulse_needs_you_render_qa(void) {
   return 0;
 }
 
-#ifdef TORGET_BOARD_191_TOUCH
-/* Check the rendered hero's actual font, including punctuation and height. */
-static bool grok_dollar_hero_readable(lv_obj_t *root) {
-  if(lv_obj_check_type(root,&lv_label_class) &&
-     !strcmp(lv_label_get_text(root),"$1,234")) {
-    const lv_font_t *font=lv_obj_get_style_text_font(root,0);
-    lv_font_glyph_dsc_t glyph;
-    return font->line_height<=lv_obj_get_height(root) &&
-      lv_font_get_glyph_dsc(font,&glyph,'$',0) &&
-      lv_font_get_glyph_dsc(font,&glyph,',',0);
+/* QA inspects shared LVGL labels, not a second formatter. */
+static lv_obj_t *grok_find_label(lv_obj_t *root, const char *text) {
+  if(lv_obj_check_type(root,&lv_label_class) && !strcmp(lv_label_get_text(root),text)) return root;
+  for(uint32_t i=0;i<lv_obj_get_child_count(root);i++) {
+    lv_obj_t *found=grok_find_label(lv_obj_get_child(root,i),text);
+    if(found) return found;
   }
-  for(uint32_t i=0;i<lv_obj_get_child_count(root);i++)
-    if(grok_dollar_hero_readable(lv_obj_get_child(root,i))) return true;
-  return false;
+  return NULL;
 }
-#endif
+static void grok_check_label(const char *text, bool fits) {
+  lv_obj_t *obj=grok_find_label(lv_screen_active(),text);
+  bool ok=obj!=NULL;
+  if(obj && fits) {
+    const lv_font_t *font=lv_obj_get_style_text_font(obj,0);
+    lv_point_t size;
+    lv_text_get_size(&size,text,font,lv_obj_get_style_text_letter_space(obj,0),0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    ok=size.x<=lv_obj_get_width(obj) && font->line_height<=lv_obj_get_height(obj);
+    if(strchr(text,'+')) {
+      lv_font_glyph_dsc_t glyph;
+      ok=ok && lv_font_get_glyph_dsc(font,&glyph,'+',0);
+    }
+    if(text[0]=='$') {
+      lv_font_glyph_dsc_t glyph;
+      ok=ok && lv_font_get_glyph_dsc(font,&glyph,'$',0) &&
+        lv_font_get_glyph_dsc(font,&glyph,',',0) && lv_font_get_glyph_dsc(font,&glyph,'.',0);
+    }
+  }
+  if(!ok) { fprintf(stderr,"grok: missing or clipped QA label: %s\n",text); capture_failures++; }
+}
 
 /* Grok build-time opt-in captures; no persisted Labs choice. */
 static int run_vibepulse_grok_qa(void) {
@@ -1841,6 +1854,9 @@ static int run_vibepulse_grok_qa(void) {
   apply_grok_file("grok-empty.json");
   lv_refr_now(NULL);
   dump_frame("vibepulse-grok-retained");
+  apply_grok_file("grok-live.json");
+  lv_refr_now(NULL);
+  dump_frame("vibepulse-grok-restored");
   /* Retained bot/plan readings must carry CACHED, even without source age. */
   const char *retained_sources[]={"bots","plan","plan-unknown-age"};
   for(unsigned i=0;i<3;i++) {
@@ -1865,6 +1881,7 @@ static int run_vibepulse_grok_qa(void) {
     .has_limit=true,.limit_cents=INT32_MAX,.has_reset=true,.reset_seconds=1137600};
   snprintf(wide.source,sizeof wide.source,"openrouter");
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-wide");
+  grok_check_label("$21,474,836.47 of $21,474,836",false);
   wide.spent_cents=4718;
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-wide-left");
   wide.spent_cents=INT32_MAX; wide.limit_cents=1;
@@ -1876,11 +1893,68 @@ static int run_vibepulse_grok_qa(void) {
   wide.has_limit=false;
   wide.spent_cents=123456;
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-dollar-thousands");
+  grok_check_label("$1,234.56",true);
+  wide.spent_cents=123456789;
+  tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-dollar-millions");
+  grok_check_label("$1,234,567.89",true);
+  wide.spent_cents=INT32_MAX;
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
+  grok_check_label("$21,474,836.47",true);
+  snprintf(wide.source,sizeof wide.source,"xai");
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
 #ifdef TORGET_BOARD_191_TOUCH
-  if(!grok_dollar_hero_readable(lv_screen_active())) {
-    fprintf(stderr,"grok: dollar hero font lacks punctuation or exceeds its box\n");
-    capture_failures++;
+  grok_check_label("POSTPAID",true);
+#else
+  grok_check_label("POSTPAID · MONTH",true);
+#endif
+  wide.has_limit=true; wide.limit_cents=INT32_MAX;
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
+  grok_check_label("POSTPAID LIMIT",true);
+  wide.active=7; wide.bot_count=4;
+  for(unsigned i=0;i<4;i++) {
+    snprintf(wide.bots[i].name,sizeof wide.bots[i].name,"Bot %u",i);
+    snprintf(wide.bots[i].state,sizeof wide.bots[i].state,"waiting");
   }
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
+#ifdef TORGET_BOARD_175
+  grok_check_label("4+",true);
+#else
+  grok_check_label("4+ NEEDS YOU",true);
+#endif
+#ifdef TORGET_BOARD_175
+  wide.stale=true;
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
+  lv_obj_t *waiting=grok_find_label(lv_screen_active(),"4+");
+  if(!waiting || lv_obj_get_style_text_opa(waiting,0)!=LV_OPA_COVER) {
+    fprintf(stderr,"grok: stale reading dimmed live waiting count\n"); capture_failures++;
+  }
+  usage_screen_tick(torget_now_us()+91000000LL); lv_refr_now(NULL);
+  if(waiting && lv_obj_get_style_text_opa(waiting,0)!=LV_OPA_50) {
+    fprintf(stderr,"grok: feed outage did not dim waiting count\n"); capture_failures++;
+  }
+  wide.stale=false;
+#endif
+  wide.active=4;
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
+#ifdef TORGET_BOARD_175
+  grok_check_label("4",true);
+#else
+  grok_check_label("4 NEEDS YOU",true);
+#endif
+  wide.active=7;
+  snprintf(wide.bots[3].state,sizeof wide.bots[3].state,"working");
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
+#ifdef TORGET_BOARD_175
+  grok_check_label("3",true);
+#else
+  grok_check_label("3 NEEDS YOU",true);
+#endif
+  snprintf(wide.source,sizeof wide.source,"plan");
+  wide.has_used=true; wide.used_pct=42;
+  snprintf(wide.bots[3].state,sizeof wide.bots[3].state,"waiting");
+  tokens_apply_grok(&wide); lv_refr_now(NULL);
+#ifdef TORGET_BOARD_175
+  grok_check_label("7 ACTIVE · 4+ NEEDS YOU",true);
 #endif
   apply_grok_file("grok-plan-nowindow.json");
   lv_refr_now(NULL); dump_frame("vibepulse-grok-plan-nowindow");
