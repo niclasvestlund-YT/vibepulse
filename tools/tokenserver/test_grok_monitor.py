@@ -48,6 +48,42 @@ class GrokTests(GrokFixture):
         reader.read(validate)
         self.assertEqual(validate.call_count, 2)
 
+    def test_unchanged_plan_resave_refreshes_without_validation(self):
+        source = grok.PlanQuotaSource(self.clock)
+        content = {'v': 1, 'usedPct': 12}
+        self.write('grok.json', content)
+        with patch.object(source, '_validate', wraps=source._validate) as validate:
+            self.assertFalse(source.snapshot()['stale'])
+            generation = source._file.generation
+            self.now += 601
+            self.assertTrue(source.snapshot()['stale'])
+            self.write('grok.json', content)
+            data = source.snapshot()
+            self.assertEqual((data['usedPct'], data['ageSeconds'], data['stale']),
+                             (12, 0, False))
+            self.assertEqual(source._file.mtime, self.now)
+            self.assertEqual(source._file.generation, generation)
+            validate.assert_called_once()
+
+    def test_unchanged_invalid_resave_does_not_refresh_retained_reading(self):
+        source = grok.PlanQuotaSource(self.clock)
+        self.write('grok.json', {'v': 1, 'usedPct': 12})
+        source.snapshot()
+        stamp = source._file.mtime
+        self.now += 601
+        invalid = {'v': 1, 'usedPct': 101}
+        self.write('grok.json', invalid)
+        with patch.object(source, '_validate', wraps=source._validate) as validate, \
+                patch.object(grok.log, 'warning'):
+            self.assertTrue(source.snapshot()['stale'])
+            self.now += 1
+            self.write('grok.json', invalid)
+            data = source.snapshot()
+            self.assertEqual((data['usedPct'], data['ageSeconds'], data['stale']),
+                             (12, 602, True))
+            self.assertEqual(source._file.mtime, stamp)
+            validate.assert_called_once()
+
     def test_invalid_plan_retains_stale_reading_and_recovers(self):
         monitor = grok.GrokMonitor(clock=self.clock)
         path = self.write('grok.json', {'v': 1, 'usedPct': 12})
@@ -411,6 +447,27 @@ class GrokTests(GrokFixture):
                 self.assertEqual(data['ageSeconds'], 30)
                 self.assertTrue(data['stale'])
                 self.assertTrue(source._failed)
+
+    def test_positive_prepaid_component_retains_last_good_reading(self):
+        os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
+        for value in ('4500', 4500, 0.5):
+            with self.subTest(value=value):
+                fetch = Mock(return_value={'coreInvoice': {
+                    'amountAfterVat': '123', 'prepaidCredits': {'val': '-4500'}}})
+                source = grok.XaiApiUsageSource(fetch, self.clock)
+                source.poll()
+                self.now += 30
+                fetch.return_value = {'coreInvoice': {
+                    'amountAfterVat': '999', 'prepaidCredits': {'val': value}}}
+                with patch.object(source, '_record_failure',
+                                  wraps=source._record_failure) as failure, \
+                        self.assertLogs('tokenserver.grok'):
+                    source.poll()
+                self.assertIsInstance(failure.call_args.args[0], ValueError)
+                data = source.snapshot()
+                self.assertEqual((data['spentCents'], data['prepaidCents'],
+                                  data['ageSeconds'], data['stale']),
+                                 (123, 4500, 30, True))
 
     def test_thread_first_poll_and_stop(self):
         import threading

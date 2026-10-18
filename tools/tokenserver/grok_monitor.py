@@ -76,6 +76,8 @@ class JsonFile:
                 raise ValueError('oversized file')
             signature = raw
             if signature == self.signature:
+                if not self.invalid and stat.st_mtime > self.mtime:
+                    self.mtime = stat.st_mtime
                 return self.data
             # Only content is cached by signature. A transient I/O error
             # (locked file, permissions) must be retried on the next poll.
@@ -358,6 +360,8 @@ class XaiApiUsageSource:
             value = core.get('prepaidCredits', {}).get('val')
             if value is not None:
                 value = number(int(value) if isinstance(value, str) else value)
+                if value > 0:
+                    raise ValueError('positive prepaid invoice component')
                 result['prepaidCents'] = bounded(-int(value))
             value = reply.get('effectiveSpendingLimit')
             if value is not None:

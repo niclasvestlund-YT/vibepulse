@@ -75,7 +75,7 @@ replacements retain the last valid reading marked stale; a successful parse
 clears that invalid state, and deleting the file clears its reading. Bot file
 records are applied only after a new valid parse, preventing retained records
 from being replayed. Copied observations and user counts become stale after
-600 seconds or when their declared resetAt is reached. No automatic grok.com access is implied.
+600 seconds or when their declared resetAt is reached; re-saving unchanged valid plan content refreshes its file age. No automatic grok.com access is implied.
 
 ### Source selection
 
