@@ -102,7 +102,7 @@ class GrokTests(GrokFixture):
         for i in range(grok.MAX_BOT_HISTORY):
             self.post('done', bot=f'bot{i}')
         self.assertEqual(self.store.snapshot()['doneToday'], grok.MAX_BOT_HISTORY)
-        for iteration in range(2):
+        for _iteration in range(2):
             self.now += 1
             records = [{'bot': f'bot{i}', 'state': 'done', 'updatedAt': self.now}
                        for i in range(255)]
