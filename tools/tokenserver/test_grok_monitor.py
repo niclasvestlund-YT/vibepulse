@@ -132,6 +132,20 @@ class GrokTests(GrokFixture):
         self.now += 86400
         self.assertEqual(self.store.snapshot()['doneToday'], 0)
         self.post('done')
+        self.assertEqual(self.store.snapshot()['doneToday'], 0)
+        self.post('working')
+        self.post('done')
+        self.assertEqual(self.store.snapshot()['doneToday'], 1)
+
+    def test_roll_day_keeps_only_done_history(self):
+        self.post('done', bot='finished')
+        self.post('working', bot='running')
+        self.now += 86400
+        self.post('done', bot='finished')
+        self.assertEqual(self.store.snapshot()['doneToday'], 0)
+        self.assertEqual(set(self.store._last_state), {'FINISHED'})
+        self.post('working', bot='finished')
+        self.post('done', bot='finished')
         self.assertEqual(self.store.snapshot()['doneToday'], 1)
 
     def test_full_file_replay_after_post_does_not_recount_done(self):
@@ -176,8 +190,8 @@ class GrokTests(GrokFixture):
         self.assertEqual(self.store.snapshot()['doneToday'], grok.MAX_BOT_HISTORY + 1)
         self.now += 86400
         self.post('done', bot='unknown-post')
-        self.assertEqual(self.store.snapshot()['doneToday'], 1)
-        self.assertEqual(len(self.store._last_state), 1)
+        self.assertEqual(self.store.snapshot()['doneToday'], 0)
+        self.assertEqual(len(self.store._last_state), grok.MAX_BOT_HISTORY)
 
     def test_bot_file_and_invalid_logged_once(self):
         path = self.write('grok-bots.json', {'v': 1, 'bots': [
@@ -261,12 +275,44 @@ class GrokTests(GrokFixture):
         self.assertEqual(data['ageSeconds'], 30)
         self.assertEqual(data['spentCents'], 123)
         self.assertNotIn('supersecret', json.dumps(data) + ''.join(logs.output))
-        monitor.xai.poll()
-        self.assertFalse(monitor.snapshot()['stale'])
-        self.assertEqual(monitor.snapshot()['spentCents'], 0)
-        self.assertNotIn('limitCents', monitor.snapshot())
+        with self.assertLogs('tokenserver.grok'):
+            monitor.xai.poll()
+        self.assertTrue(monitor.snapshot()['stale'])
+        self.assertEqual(monitor.snapshot()['spentCents'], 123)
+        self.assertEqual(monitor.snapshot()['limitCents'], 20000)
         self.now += 601
         self.assertTrue(monitor.snapshot()['stale'])
+
+    def test_xai_invalid_money_retains_last_good_reading(self):
+        os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
+        invalid = []
+        for value in (True, False, [], {}, float('nan'), float('inf')):
+            invalid.extend([
+                {'coreInvoice': {'totalWithCorr': {'val': value}}},
+                {'coreInvoice': {'amountAfterVat': value}},
+                {'coreInvoice': {'amountAfterVat': 10,
+                                 'prepaidCredits': {'val': value}}},
+                {'coreInvoice': {'amountAfterVat': 10},
+                 'effectiveSpendingLimit': value}])
+        for value in (-5, -0.5, '-5'):
+            invalid.extend([
+                {'coreInvoice': {'totalWithCorr': {'val': value}}},
+                {'coreInvoice': {'amountAfterVat': value}}])
+        for reply in invalid:
+            with self.subTest(reply=reply):
+                fetch = Mock(return_value={'coreInvoice': {'amountAfterVat': 123}})
+                source = grok.XaiApiUsageSource(fetch, self.clock)
+                source.poll()
+                self.assertFalse(source.snapshot()['stale'])
+                self.now += 30
+                fetch.return_value = reply
+                with self.assertLogs('tokenserver.grok'):
+                    source.poll()
+                data = source.snapshot()
+                self.assertEqual(data['spentCents'], 123)
+                self.assertEqual(data['ageSeconds'], 30)
+                self.assertTrue(data['stale'])
+                self.assertTrue(source._failed)
 
     def test_thread_first_poll_and_stop(self):
         import threading
@@ -536,7 +582,8 @@ class OpenRouterTests(GrokFixture):
 
     def test_invalid_credits_keep_key_spend_but_mark_stale(self):
         self.source._management_key = 'fake-management-secret'
-        invalid = [{}, {'total_credits': 80}, {'total_usage': 12}]
+        invalid = [{}, {'total_credits': 80}, {'total_usage': 12},
+                   {'total_credits': 10, 'total_usage': 12}]
         for field in ('total_credits', 'total_usage'):
             for value in (None, True, 'fake-management-secret', [], {},
                           float('nan'), float('inf')):

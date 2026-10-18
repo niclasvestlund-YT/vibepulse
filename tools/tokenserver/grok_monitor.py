@@ -99,7 +99,7 @@ class GrokBotStore:
         self._bots = {}
         self._day = None
         self._done = 0
-        # Last accepted record per bot name for today, apart from display leases
+        # Last accepted record per bot name, apart from display leases
         # and eviction so an expired or replayed "done" never counts twice.
         self._last_state = {}
         self._file = JsonFile(state_dir() / 'grok-bots.json')
@@ -126,7 +126,8 @@ class GrokBotStore:
         day = datetime.fromtimestamp(self.clock()).date()
         if day != self._day:
             self._day, self._done = day, 0
-            self._last_state.clear()
+            self._last_state = {name: bot for name, bot in self._last_state.items()
+                                if bot['state'] == 'done'}
 
     def _put(self, name, bot, file=False):
         self._roll_day()
@@ -312,13 +313,19 @@ class XaiApiUsageSource:
             if value is None:
                 value = core.get('amountAfterVat')
             if value is not None:
+                value = number(int(value) if isinstance(value, str) else value)
+                if value < 0:
+                    raise ValueError('negative spend')
                 result['spentCents'] = bounded(int(value))
             value = core.get('prepaidCredits', {}).get('val')
             if value is not None:
+                value = number(int(value) if isinstance(value, str) else value)
                 result['prepaidCents'] = bounded(-int(value))
             value = reply.get('effectiveSpendingLimit')
-            if value is not None and int(value) > 0:
-                result['limitCents'] = bounded(int(value))
+            if value is not None:
+                value = number(int(value) if isinstance(value, str) else value)
+                if value > 0:
+                    result['limitCents'] = bounded(int(value))
             if not result:
                 raise ValueError('missing billing values')
         except Exception:
@@ -453,7 +460,10 @@ class OpenRouterUsageSource(XaiApiUsageSource):
             try:
                 credits = self._client.get('credits', self._management_key)
                 total, used = credits.get('total_credits'), credits.get('total_usage')
-                result['prepaidCents'] = self._cents(number(total) - number(used))
+                remaining = number(total) - number(used)
+                if remaining < 0:
+                    raise ValueError('negative balance')
+                result['prepaidCents'] = self._cents(remaining)
             except Exception:
                 log.warning('OpenRouter credits poll failed; omitting account credits')
                 failed = True
