@@ -46,6 +46,14 @@ static void schema_rejections(void) {
   parse("  {" BASE "} \n\t",true);
 }
 int main(void) {
+  parse("[[[[]]]]",false);
+  char deep[701];
+  memset(deep,'[',350);
+  memset(deep+350,']',350);
+  deep[700]='\0';
+  parse(deep,false);
+  parse("]",false);
+  parse("{\"v\":1,\"enabled\":true,\"source\":\"bots\",\"stale\":false,\"active\":1,\"doneToday\":0,\"bots\":[{\"name\":\"A\",\"state\":\"idle\",\"activity\":\"[[[[\"}]}",true);
   numeric_rejections();
   schema_rejections();
   const char *windows[]={"0","2678401","2147483647","1.5","1e100"};

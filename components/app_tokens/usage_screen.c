@@ -1341,6 +1341,7 @@ static void create_grok_page(void) {
   grok_page.reset_caption=g->reset_caption;
   grok_page.context=label(tile,&plex_ui_14,COL_META,70,372,340,22);
   grok_page.provenance=label(tile,&plex_ui_12,COL_META,90,402,300,18);
+  lv_label_set_long_mode(grok_page.provenance,LV_LABEL_LONG_DOT);
   grok_page.empty=label(tile,&plex_ui_12,COL_MUTED,90,350,300,18);
 #else
   lv_obj_t *badge=bare(tile);
@@ -1462,9 +1463,6 @@ static void refresh_grok_age(int64_t now_us) {
     else snprintf(text,sizeof text,"MANUAL · AGE UNKNOWN%s",stale ? " · CACHED":"");
   } else if (!strcmp(s->source,"bots")) snprintf(text,sizeof text,"BOT ACTIVITY%s",stale ? " · CACHED":"");
   else snprintf(text,sizeof text,"%s%s",feed_stale ? "NO CONNECTION":"WAITING",stale ? " · CACHED":"");
-#ifdef TORGET_BOARD_175
-  snprintf(text,sizeof text,"%s",stale ? "CACHED":"LIVE");
-#endif
   /* Only touch LVGL when the rendered text actually changes (100 ms tick). */
   if (strcmp(text,grok_page.rendered_provenance)) {
     snprintf(grok_page.rendered_provenance,sizeof grok_page.rendered_provenance,"%s",text);

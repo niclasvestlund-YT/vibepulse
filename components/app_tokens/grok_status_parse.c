@@ -17,10 +17,17 @@ static bool whitespace(unsigned char byte) {
 static bool lexical_guard(const char *json, size_t len) {
   bool in_string = false;
   bool escaped = false;
+  int depth = 0;
   for (size_t i = 0; i < len; i++) {
     unsigned char byte = (unsigned char)json[i];
     if (!in_string) {
       if (byte == '"') in_string = true;
+      /* Bound cJSON recursion to root object -> bots array -> bot object. */
+      else if (byte == '{' || byte == '[') {
+        if (++depth > 3) return false;
+      } else if (byte == '}' || byte == ']') {
+        if (--depth < 0) return false;
+      }
       else if (byte < 0x20 && !whitespace(byte)) return false;
       continue;
     }
@@ -37,7 +44,7 @@ static bool lexical_guard(const char *json, size_t len) {
       return false;
     }
   }
-  return !in_string && !escaped;
+  return !in_string && !escaped && depth == 0;
 }
 
 static bool trailing_whitespace(const char *json, size_t len,
