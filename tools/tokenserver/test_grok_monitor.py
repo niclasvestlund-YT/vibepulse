@@ -48,6 +48,57 @@ class GrokTests(GrokFixture):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.store.accept({'v': 1, 'bot': 'ok', 'state': 'idle', **change})
 
+    def test_bot_file_duplicate_names_rejects_whole_file(self):
+        self.write('grok-bots.json', {'v': 1, 'bots': [
+            {'bot': 'Research', 'state': 'working', 'updatedAt': self.now},
+            {'bot': 'research', 'state': 'done', 'updatedAt': self.now}]})
+        with self.assertLogs('tokenserver.grok'):
+            data = self.store.snapshot()
+        self.assertEqual(data['bots'], [])
+        self.assertEqual(data['doneToday'], 0)
+
+    def test_bot_file_conflicting_same_tick_rewrites_do_not_count(self):
+        stamp = self.now
+        self.post('working')
+        for state in ('done', 'working', 'done', 'working', 'done'):
+            self.now += 1
+            self.write('grok-bots.json', {'v': 1, 'bots': [
+                {'bot': 'Research', 'state': state, 'updatedAt': stamp}]})
+            data = self.store.snapshot()
+            self.assertEqual(data['doneToday'], 0)
+            self.assertEqual(data['bots'][0]['state'], 'working')
+        self.post('done')
+        self.assertEqual(self.store.snapshot()['doneToday'], 1)
+        stamp = self.now
+        for state in ('working', 'done', 'working', 'done'):
+            self.now += 1
+            self.write('grok-bots.json', {'v': 1, 'bots': [
+                {'bot': 'Research', 'state': state, 'updatedAt': stamp}]})
+            self.assertEqual(self.store.snapshot()['doneToday'], 1)
+
+    def test_xai_oversized_response_retains_last_reading(self):
+        from io import BytesIO
+        os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
+        source = grok.XaiApiUsageSource(clock=self.clock)
+        opener = Mock()
+        with patch.object(grok, 'build_opener', return_value=opener):
+            opener.open.return_value = BytesIO(b'{"coreInvoice":{"amountAfterVat":"10"}}')
+            source.poll()
+            self.assertFalse(source.snapshot()['stale'])
+            self.now += 30
+            response = BytesIO(b' ' * 65537)
+            opener.open.return_value = response
+            with patch.object(response, 'read', wraps=response.read) as read, \
+                    self.assertLogs('tokenserver.grok') as logs:
+                source.poll()
+            read.assert_called_once_with(65537)
+        data = source.snapshot()
+        self.assertEqual(data['spentCents'], 10)
+        self.assertEqual(data['ageSeconds'], 30)
+        self.assertTrue(data['stale'])
+        self.assertEqual(logs.output, [
+            'WARNING:tokenserver.grok:xAI billing poll failed; retaining last good reading'])
+
     def test_leases(self):
         for state, lease in grok.LEASES.items():
             with self.subTest(state=state):
@@ -550,6 +601,30 @@ class OpenRouterTests(GrokFixture):
                             'limit_reset': 'daily', 'include_byok_in_limit': flag})
                 self.source.poll()
                 self.assertEqual(self.source.snapshot()['spentCents'], spent)
+
+    def test_byok_requires_valid_number_when_included(self):
+        key = {'usage_daily': 1, 'limit': 10, 'limit_reset': 'daily',
+               'include_byok_in_limit': True}
+        for extra in ({}, {'byok_usage_daily': None}, {'byok_usage_daily': True},
+                      {'byok_usage_daily': False}, {'byok_usage_daily': '0'},
+                      {'byok_usage_daily': float('nan')},
+                      {'byok_usage_daily': float('inf')}):
+            with self.subTest(extra=extra):
+                self.reply({**key, 'byok_usage_daily': 0})
+                self.source.poll()
+                self.assertFalse(self.source.snapshot()['stale'])
+                self.assertEqual(self.source.snapshot()['spentCents'], 100)
+                self.now += 30
+                self.reply({**key, 'usage_daily': 2, **extra})
+                with self.assertLogs('tokenserver.grok') as logs:
+                    self.source.poll()
+                data = self.source.snapshot()
+                self.assertEqual(data['spentCents'], 100)
+                self.assertEqual(data['ageSeconds'], 30)
+                self.assertTrue(data['stale'])
+                self.assertEqual(logs.output, [
+                    'WARNING:tokenserver.grok:OpenRouter billing poll failed; '
+                    'retaining last good reading'])
 
     def test_key_limit_uses_spend_from_the_same_window(self):
         from datetime import datetime, timezone

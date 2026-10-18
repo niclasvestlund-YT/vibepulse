@@ -128,12 +128,12 @@ class GrokBotStore:
             self._day, self._done = day, 0
             self._last_state.clear()
 
-    def _put(self, name, bot):
+    def _put(self, name, bot, file=False):
         self._roll_day()
         old = self._last_state.get(name)
         if old and old['updatedAt'] >= bot['updatedAt']:
             # Live updates may share a clock tick; exact file replays cannot.
-            if old == bot or old['updatedAt'] > bot['updatedAt']:
+            if file or old == bot or old['updatedAt'] > bot['updatedAt']:
                 return
         # Never evict daily history: replaying an evicted name would recount it.
         # At capacity, unknown names remain visible but cannot affect the count.
@@ -158,12 +158,15 @@ class GrokBotStore:
                     type(data['v']) is not int or data['v'] != 1 or
                     not isinstance(data['bots'], list) or len(data['bots']) > 256):
                 raise ValueError('invalid bots file')
-            return [self._validate(bot, file=True) for bot in data['bots']]
+            records = [self._validate(bot, file=True) for bot in data['bots']]
+            if len({name for name, bot in records}) != len(records):
+                raise ValueError('duplicate bot names')
+            return records
         records = self._file.read(validate)
         if records is not None and self._file.signature != self._loaded:
             self._loaded = self._file.signature
             for name, bot in records:
-                self._put(name, bot)
+                self._put(name, bot, file=True)
         now = self.clock()
         self._bots = {k: b for k, b in self._bots.items()
                       if now - b['updatedAt'] < LEASES[b['state']]}
@@ -293,7 +296,10 @@ class XaiApiUsageSource:
                           quote(self._team, safe='') + '/postpaid/invoice/preview',
                           headers={'Authorization': 'Bearer ' + self._key})
         with opener.open(request, timeout=15) as response:
-            return json.load(response)
+            raw = response.read(65537)
+            if len(raw) > 65536:
+                raise ValueError('oversized response')
+            return json.loads(raw)
 
     def poll(self):
         if not self.configured:
@@ -427,7 +433,7 @@ class OpenRouterUsageSource(XaiApiUsageSource):
                     spent = number(key[field])
                     # BYOK spend counts against the key limit when the key says so.
                     if limit is not None and key.get('include_byok_in_limit') is True:
-                        spent += number(key.get('byok_' + field) or 0)
+                        spent += number(key.get('byok_' + field))
                     result['spentCents'] = self._cents(spent)
                 if limit is not None:
                     result['limitCents'] = self._cents(limit)
