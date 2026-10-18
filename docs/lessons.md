@@ -1489,3 +1489,15 @@ capture a credential reference and generation together, and discard an older
 in-flight response after successful setup. Other running services keep their
 old entries until explicitly restarted. Tests inject first/second Keychain-write
 failure, config replacement failure, cleanup denial and concurrent old polling.
+
+## 2026-10-18 · Retained readings carry their own freshness
+
+The Grok hero retained its last measured value when a fresh feed omitted the
+reading, but bot/manual provenance used only the feed's age to decide whether
+to append CACHED. A fresh transport could therefore label a superseded hero as
+current; manual readings without an age never appended CACHED at all. Derive
+provenance from the same computed stale state that dims the retained hero,
+including supersession, source age and source staleness. Keep the independent
+90-second feed timeout for bot rows. The Grok simulator QA now captures retained
+bot readings and manual readings both with and without an age; raster tests
+require the cached suffix and dimmed retained value.

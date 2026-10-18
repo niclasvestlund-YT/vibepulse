@@ -1794,8 +1794,11 @@ static int run_vibepulse_grok_qa(void) {
     fprintf(stderr,"grok: page is off -- configure -DTORGET_GROK=ON\n");
     return 1;
   }
+  sim_wifi_signal_bars=3;
+  torget_wifi_status_set_mode(TG_WIFI_STATUS_NORMAL);
+  torget_wifi_status_foreground();
   /* "live" is the combined usage + bots frame used for POC renders. */
-  const char *states[]={"empty","xai","manual","bots","stale","disabled","live"};
+  const char *states[]={"empty","xai","openrouter","manual","bots","stale","disabled","live"};
   tokens_show_view(VIEW_GROK);
   for (unsigned i=0;i<sizeof states/sizeof states[0];i++) {
     char file[64], frame[64];
@@ -1813,6 +1816,32 @@ static int run_vibepulse_grok_qa(void) {
   apply_grok_file("grok-empty.json");
   lv_refr_now(NULL);
   dump_frame("vibepulse-grok-retained");
+  /* Retained bot/manual readings must carry CACHED, even without source age. */
+  const char *retained_sources[]={"bots","manual","manual-unknown-age"};
+  for(unsigned i=0;i<3;i++) {
+    size_t len=0;
+    char *json=read_fixture(i==0 ? "grok-bots.json":"grok-manual.json",&len);
+    tk_grok_status status;
+    if(!json || !tk_grok_status_parse(json,len,&status)) { free(json); return 1; }
+    free(json);
+    if(i==2) status.has_age=false;
+    tokens_apply_grok(&status);
+    lv_refr_now(NULL);
+    char frame[80];
+    snprintf(frame,sizeof frame,"vibepulse-grok-%s-live",retained_sources[i]);
+    dump_frame(frame);
+    apply_grok_file("grok-empty.json");
+    lv_refr_now(NULL);
+    snprintf(frame,sizeof frame,"vibepulse-grok-%s-retained",retained_sources[i]);
+    dump_frame(frame);
+  }
+
+  tk_grok_status wide={.enabled=true,.has_spent=true,.spent_cents=INT32_MAX,
+    .has_limit=true,.limit_cents=INT32_MAX,.has_reset=true,.reset_seconds=1137600};
+  snprintf(wide.source,sizeof wide.source,"openrouter");
+  tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-wide");
+  wide.spent_cents=4718;
+  tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-wide-left");
   return capture_failures ? 1:0;
 }
 

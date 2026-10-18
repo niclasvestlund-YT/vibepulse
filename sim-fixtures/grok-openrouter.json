@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "enabled": true,
+  "source": "openrouter",
+  "stale": false,
+  "ageSeconds": 40,
+  "spentCents": 4718,
+  "limitCents": 20000,
+  "prepaidCents": 2500,
+  "active": 2,
+  "doneToday": 3,
+  "bots": [
+    {
+      "name": "Grok Bot",
+      "state": "working",
+      "activity": "drafting reply"
+    },
+    {
+      "name": "Hardvara",
+      "state": "waiting",
+      "activity": "approve BOM"
+    },
+    {
+      "name": "X-coach",
+      "state": "done",
+      "activity": "posted thread"
+    },
+    {
+      "name": "Research",
+      "state": "idle",
+      "activity": ""
+    }
+  ],
+  "resetSeconds": 1137600
+}

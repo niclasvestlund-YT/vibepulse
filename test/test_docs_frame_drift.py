@@ -206,6 +206,12 @@ BOARD_241_FRAMES = {
     "241-v2/settings.png": "settings-menu.png",
 }
 
+# Opt-in Grok captures are reproduced by test_grok_render.py.
+GROK_FRAMES = {
+    "grok-216-spend.png": ("waveshare_216", "live", (480, 480)),
+    "grok-241-bots.png": ("waveshare_241_v2", "bots", (600, 450)),
+}
+
 OPENPULSE_FRAMES = {
     "openpulse/round-spend.png": "demo.png",
     "openpulse/round-details.png": "demo-details.png",
@@ -278,7 +284,7 @@ def docs_frames():
     missed by hand.
     """
     for name, path in docs_images():
-        if name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
+        if name in GROK_FRAMES or name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -573,7 +579,8 @@ class DocsFrameDriftTests(unittest.TestCase):
             if name in NOT_FRAMES or path.suffix != ".png":
                 continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
-                expected = ((600, 450) if name in BOARD_241_FRAMES else
+                expected = (GROK_FRAMES[name][2] if name in GROK_FRAMES else
+                            (600, 450) if name in BOARD_241_FRAMES else
                             (466, 466) if name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES else
                             (536, 240) if name in BOARD_191_FRAMES else (480, 480))
                 if im.size != expected:

@@ -67,8 +67,8 @@ int main(void) {
   }
   parse("{\"v\":1,\"enabled\":false}",true);
   parse("{" BASE "}",true);
-  const char *sources[]={"xai","manual","bots","none"};
-  for (unsigned i=0;i<4;i++) {
+  const char *sources[]={"xai","openrouter","manual","bots","none"};
+  for (unsigned i=0;i<5;i++) {
     char json[768];
     snprintf(json,sizeof json,"{\"v\":1,\"enabled\":true,\"source\":\"%s\",\"stale\":true,\"active\":2,\"doneToday\":3,\"bots\":[{\"name\":\"A\",\"state\":\"waiting\",\"activity\":\"\"}],\"usedPct\":100,\"spentCents\":2147483647,\"limitCents\":0,\"prepaidCents\":1,\"resetSeconds\":0,\"ageSeconds\":5,\"label\":\"\"}",sources[i]);
     parse(json,true);

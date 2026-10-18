@@ -159,6 +159,19 @@ This remains a macOS source-build preview, outside the **v1.3.0** release.
 *Owner photograph, 29 September 2026. Full touch-grid, swipe/menu and stress
 acceptance remain pending; see the linked checkpoint for the tested build.*
 
+## Grok quota and bot activity (build-time preview)
+
+The opt-in **GROK** page uses VibePulse's quota header, gauge and stat widgets.
+Square and rectangular profiles show up to three bot rows; round 1.75 uses the
+quota edge ring and one priority bot line. Sources and cached readings remain
+explicit. Enable `-DTORGET_GROK=ON` and the host's `--grok` option; both are off
+by default. [Setup and source limits](docs/grok-pulse.md#panel-page-build-time-opt-in).
+
+![Grok monthly spend and bot activity, native 480 × 480 simulator capture](docs/img/grok-216-spend.png)
+![Grok bot activity, native 600 × 450 simulator capture](docs/img/grok-241-bots.png)
+
+*Shared LVGL captures with synthetic readings. Grok has no physical panel acceptance.*
+
 ## Latest release: v1.3.0
 
 Lovable joins the optional Labs pages. An experimental Chrome extension reads

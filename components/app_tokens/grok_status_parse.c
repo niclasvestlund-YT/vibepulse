@@ -95,7 +95,7 @@ bool tk_grok_status_parse(const char *json, size_t len, tk_grok_status *out) {
   static const char *const fields[] = {"v","enabled","source","stale","ageSeconds",
     "spentCents","limitCents","prepaidCents","usedPct","resetSeconds","label",
     "active","doneToday","bots",NULL};
-  static const char *const sources[] = {"xai","manual","bots","none",NULL};
+  static const char *const sources[] = {"xai","openrouter","manual","bots","none",NULL};
   static const char *const states[] = {"working","waiting","done","idle","error",NULL};
   static const char *const bot_fields[] = {"name","state","activity",NULL};
   tk_grok_status parsed = {0};
