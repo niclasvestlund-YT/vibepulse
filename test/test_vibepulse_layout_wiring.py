@@ -94,8 +94,13 @@ assert create.index("tk_project_star_popup_create(root);") < create.index(
 )
 assert "tk_agent_monitor_create(root);" in create
 
-quota = source[source.index("static void create_quota_page"):]
-quota = quota[:quota.index("static void create_burn_rate_page")]
+def function_source(name):
+    start = source.index(f"static void {name}(")
+    return source[start:source.index("\nstatic ", start + 1)]
+
+
+# The quota page and its bar helper (shared with the opt-in GROK page).
+quota = function_source("create_quota_page") + function_source("create_quota_bar")
 for copy in ("USED TODAY", "TO RESET"):
     assert f'"{copy}"' in quota
 assert "VP_BAR_Y" in quota and "VP_BAR_H" in quota
