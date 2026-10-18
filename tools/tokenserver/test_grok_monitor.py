@@ -649,6 +649,43 @@ class OpenRouterTests(GrokFixture):
                 self.source.poll()
                 self.assertEqual(self.source.snapshot()['spentCents'], spent)
 
+    def test_invalid_billing_values_retain_last_good_reading(self):
+        invalid = [
+            {'usage_monthly': -0.001},
+            {'effective_budget': {'spend_usd': -1, 'limit_usd': 10}},
+            {'effective_budget': {'spend_usd': 2, 'limit_usd': -1}},
+            {'usage': 2, 'limit': -1},
+        ]
+        for flag in (1, 'true', None):
+            invalid.append({'usage_daily': 2, 'limit': 10, 'limit_reset': 'daily',
+                            'include_byok_in_limit': flag})
+            invalid.append({'effective_budget': {'spend_usd': 2, 'limit_usd': 10},
+                            'include_byok_in_limit': flag})
+        for key in invalid:
+            with self.subTest(key=key):
+                self.reply({'usage': 3, 'limit': 10})
+                self.source.poll()
+                good = self.source.snapshot()
+                self.assertFalse(good['stale'])
+                self.now += 30
+                self.reply(key)
+                with self.assertLogs('tokenserver.grok') as logs:
+                    self.source.poll()
+                self.assertEqual(self.source.snapshot(),
+                                 {**good, 'stale': True, 'ageSeconds': 30})
+                self.assertEqual(logs.output, [
+                    'WARNING:tokenserver.grok:OpenRouter billing poll failed; '
+                    'retaining last good reading'])
+
+    def test_absent_byok_flag_excludes_byok_spend(self):
+        self.reply({'usage_daily': 1, 'byok_usage_daily': 8, 'limit': 10,
+                    'limit_reset': 'daily'})
+        self.source.poll()
+        data = self.source.snapshot()
+        self.assertFalse(data['stale'])
+        self.assertEqual(data['spentCents'], 100)
+        self.assertEqual(data['limitCents'], 1000)
+
     def test_byok_requires_valid_number_when_included(self):
         key = {'usage_daily': 1, 'limit': 10, 'limit_reset': 'daily',
                'include_byok_in_limit': True}

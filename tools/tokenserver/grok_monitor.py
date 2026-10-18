@@ -377,7 +377,10 @@ class OpenRouterUsageSource(XaiApiUsageSource):
 
     @staticmethod
     def _cents(value):
-        return bounded(round(number(value) * 100))
+        value = number(value)
+        if value < 0:
+            raise ValueError('negative billing value')
+        return bounded(round(value * 100))
 
     def _next_utc(self, window):
         now = datetime.fromtimestamp(self.clock(), timezone.utc)
@@ -405,6 +408,9 @@ class OpenRouterUsageSource(XaiApiUsageSource):
             return
         try:
             key = self._client.get('key', self._key)
+            if ('include_byok_in_limit' in key
+                    and not isinstance(key['include_byok_in_limit'], bool)):
+                raise ValueError('invalid BYOK flag')
             result = {}
             budget = key.get('effective_budget')
             if budget is not None and not isinstance(budget, dict):
