@@ -66,6 +66,14 @@ class GrokRenderTests(unittest.TestCase):
             self.assertGreater(brightness(startup, (16, 105, 464, 235)), 0)
             self.assertGreater(brightness(startup, (22, 429, 200, 447)), 0)
 
+    def test_disabled_hides_bot_rows_and_shows_header_dash(self):
+        with self.frame("disabled") as disabled:
+            self.assertEqual(brightness(disabled, (16, 348, 464, 425)), 0)
+            # A dash has only a few rows of ink; NO BOTS/numerals are taller.
+            context = disabled.convert("L").crop((180, 27, 408, 47)).getbbox()
+            self.assertIsNotNone(context)
+            self.assertLessEqual(context[3] - context[1], 3)
+
     def test_states_are_distinct(self):
         with self.frame("empty") as empty, self.frame("live") as live:
             self.assertIsNotNone(ImageChops.difference(
@@ -201,6 +209,18 @@ class GrokFixtureTests(unittest.TestCase):
                     with self.subTest(region=region):
                         self.assertGreater(brightness(retained, region), 0)
                         self.assertLess(brightness(retained, region), .85 * brightness(live, region))
+                with Image.open(Path(directory) / "torget-vibepulse-grok-disabled.bmp") as disabled:
+                    self.assertEqual(disabled.size, (466, 466))
+                    # The retained money layout hides plan bot_counts entirely.
+                    self.assertEqual(brightness(disabled, (110, 145, 356, 164)), 0)
+                    context = disabled.convert("L").crop((160, 369, 306, 381)).getbbox()
+                    self.assertIsNotNone(context)
+                    self.assertLessEqual(context[3] - context[1], 3)
+                    for region in ((110, 334, 170, 355), (270, 334, 330, 355)):
+                        # ACTIVE and NEEDS YOU values contain dash ink only.
+                        self.assertGreater(brightness(disabled, region), 0)
+                        ink = disabled.convert("L").crop(region).getbbox()
+                        self.assertLessEqual(ink[3] - ink[1], 5)
                 with Image.open(Path(directory) / "torget-vibepulse-grok-restored.bmp") as restored:
                     self.assertIsNone(ImageChops.difference(
                         live.convert("RGB"), restored.convert("RGB")).getbbox())
@@ -264,6 +284,15 @@ class GrokReviewWiringTests(unittest.TestCase):
         self.assertIn('if (lv_obj_get_style_text_opa(obj,0)!=opa)', source)
         self.assertIn('if (stale!=grok_page.rendered_stale)', source)
         self.assertIn('tick.opa=lv_obj_get_style_arc_opa(page->track,0)', source)
+
+    def test_disabled_aggregates_use_dashes_and_hide_empty_message(self):
+        source = (ROOT / "components/app_tokens/usage_screen.c").read_text()
+        self.assertIn('if(!s->enabled) snprintf(text,sizeof text,"–");', source)
+        self.assertIn('if(!s->enabled) snprintf(text,sizeof text,"– ACTIVE · – NEEDS YOU");', source)
+        self.assertIn('grok_visible(grok_page.empty,s->enabled && !count);', source)
+        self.assertIn('grok_text(grok_page.context,s->enabled ? "NO BOTS":"–");', source)
+        self.assertIn('grok_text(grok_page.reset,"–");', source)
+        self.assertIn('((feed->enabled && !feed->bot_count) || !strcmp(s->source,"plan"))', source)
 
     def test_docs_describe_postpaid_credits_and_no_window(self):
         docs = (ROOT / "docs/grok-pulse.md").read_text()

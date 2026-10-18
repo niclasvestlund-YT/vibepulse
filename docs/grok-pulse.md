@@ -278,10 +278,12 @@ Set `TORGET_CAPTURE_DIR` to an existing directory to retain captures from
 multiple board builds. QA returns nonzero with a clear message if Grok was
 not compiled in. Empty is rendered first to verify the initial dash;
 disabled after real readings exercises retention.
+When the feed is disabled, bot rows are hidden and bot aggregates show dashes.
 
 Evidence is limited to simulator output and build coverage. CI builds every
-board with Grok off, plus the Grok simulator in the host gate. Grok-on firmware
-builds were verified locally with ESP-IDF v5.5.2 for all five profiles.
+board with Grok off and with Grok on (`-D TORGET_GROK=ON`), plus the Grok
+simulator in the host gate. Grok-on firmware builds were also verified locally
+with ESP-IDF v5.5.2 for all five profiles.
 **Grok is not physically verified on any
 panel.** Native simulator captures do not certify touch, rotation, OTA or
 physical AMOLED rendering.

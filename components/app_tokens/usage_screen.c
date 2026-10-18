@@ -1548,7 +1548,7 @@ static void refresh_grok_age(int64_t now_us) {
   }
   if (grok_page.has_data
 #ifdef TORGET_BOARD_175
-      && (!feed->bot_count || !strcmp(s->source,"plan"))
+      && ((feed->enabled && !feed->bot_count) || !strcmp(s->source,"plan"))
 #endif
       ) {
     int64_t left=s->reset_seconds>elapsed ? s->reset_seconds-elapsed:0;
@@ -1725,7 +1725,8 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   int priority=-1;
   for(unsigned i=0;i<count;i++) if(!strcmp(s->bots[i].state,"waiting")) {waiting++; if(priority<0) priority=(int)i;}
   const char *waiting_suffix=waiting && waiting==count && s->active>(int32_t)count ? "+":"";
-  if(waiting) snprintf(text,sizeof text,"%u%s NEEDS YOU",waiting,waiting_suffix);
+  if(!s->enabled) snprintf(text,sizeof text,"–");
+  else if(waiting) snprintf(text,sizeof text,"%u%s NEEDS YOU",waiting,waiting_suffix);
   else if(s->enabled && s->active) snprintf(text,sizeof text,"%ld BOTS ACTIVE",(long)s->active);
   else snprintf(text,sizeof text,"NO BOTS");
 #ifndef TORGET_BOARD_175
@@ -1738,7 +1739,8 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   max_rows=0;
   bool shown_plan=!strcmp(grok_page.shown.source,"plan");
   grok_visible(grok_page.bot_counts,shown_plan && grok_page.has_data);
-  snprintf(text,sizeof text,"%ld ACTIVE · %u%s NEEDS YOU",(long)(s->enabled ? s->active:0),waiting,waiting_suffix);
+  if(!s->enabled) snprintf(text,sizeof text,"– ACTIVE · – NEEDS YOU");
+  else snprintf(text,sizeof text,"%ld ACTIVE · %u%s NEEDS YOU",(long)s->active,waiting,waiting_suffix);
   grok_text(grok_page.bot_counts,text);
   if(shown_plan) {
     lv_obj_set_style_text_font(grok_page.reset,&plex_stat_35,0);
@@ -1753,7 +1755,11 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   }
   if(!count) {
     grok_text(grok_page.reset_caption,"TO RESET");
-    grok_text(grok_page.context,"NO BOTS");
+    grok_text(grok_page.context,s->enabled ? "NO BOTS":"–");
+    if(!s->enabled && !shown_plan) {
+      grok_text(grok_page.reset_caption,"NEEDS YOU");
+      grok_text(grok_page.reset,"–");
+    }
     if(!lv_color_eq(lv_obj_get_style_text_color(grok_page.reset,0),COL_WHITE)) lv_obj_set_style_text_color(grok_page.reset,COL_WHITE,0);
   }
   if(count) {
@@ -1767,7 +1773,7 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     grok_text(grok_page.context,text);
   }
 #else
-  grok_visible(grok_page.empty,!count);
+  grok_visible(grok_page.empty,s->enabled && !count);
 #endif
   for(unsigned i=0;i<4;i++) {
     bool show=i<count && i<max_rows;
