@@ -1489,6 +1489,7 @@ static void refresh_grok_age(int64_t now_us) {
   /* A retained reading the latest feed no longer carries is cached. */
   bool superseded=grok_page.shown_at_us!=grok_page.applied_at_us;
   bool stale=feed_stale || superseded || s->stale || elapsed>600 ||
+    (s->has_reset && elapsed>=s->reset_seconds) ||
     (s->has_age && s->age_seconds+elapsed>600) || !feed->enabled ||
     ((!strcmp(s->source,"xai") || !strcmp(s->source,"openrouter")) && !s->has_spent) ||
     (!strcmp(s->source,"plan") && !s->has_used) || !strcmp(s->source,"none");

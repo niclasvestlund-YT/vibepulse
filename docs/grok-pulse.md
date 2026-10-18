@@ -271,7 +271,8 @@ retained bot/plan readings, plan age unknown, maximum wire values,
 (the dollar-hero fallback with no limit).
 `test/test_grok_render.py` builds all five profiles and checks these transitions,
 caption and money widths/glyphs, and truncated NEEDS YOU counts. Additional
-QA captures include `restored` (fresh values after retention) and
+QA captures include `window-expired` (a plan reading 11 seconds after a
+10-second reset, with the feed still fresh), `restored` (fresh values after retention) and
 `dollar-millions` (a dollar hero retaining cents).
 Set `TORGET_CAPTURE_DIR` to an existing directory to retain captures from
 multiple board builds. QA returns nonzero with a clear message if Grok was

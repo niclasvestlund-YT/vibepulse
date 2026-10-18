@@ -1877,6 +1877,21 @@ static int run_vibepulse_grok_qa(void) {
     dump_frame(frame);
   }
 
+  /* Expire the shown window while its feed is still fresh (<90 s). */
+  size_t plan_len=0;
+  char *plan_json=read_fixture("grok-plan.json",&plan_len);
+  tk_grok_status short_window;
+  if(!plan_json || !tk_grok_status_parse(plan_json,plan_len,&short_window)) {
+    free(plan_json); return 1;
+  }
+  free(plan_json);
+  short_window.reset_seconds=10;
+  tokens_apply_grok(&short_window);
+  usage_screen_tick(torget_now_us() + 11000000LL);
+  lv_refr_now(NULL);
+  dump_frame("vibepulse-grok-window-expired");
+  grok_check_label("PLAN · GROK.COM · 2 MIN · CACHED",false);
+
   tk_grok_status wide={.enabled=true,.has_spent=true,.spent_cents=INT32_MAX,
     .has_limit=true,.limit_cents=INT32_MAX,.has_reset=true,.reset_seconds=1137600};
   snprintf(wide.source,sizeof wide.source,"openrouter");

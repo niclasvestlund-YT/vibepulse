@@ -16,7 +16,7 @@ from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parents[1]
 FRAMES = ("startup", "empty", "xai", "openrouter", "plan", "plan-est", "plan-bots", "bots", "stale", "disabled", "live",
-          "offline", "retained", "bots-live", "bots-retained",
+          "offline", "retained", "window-expired", "bots-live", "bots-retained",
           "plan-live", "plan-retained", "plan-unknown-age-live",
           "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited", "zero-limit", "dollar-thousands", "plan-nowindow")
 
@@ -80,6 +80,12 @@ class GrokRenderTests(unittest.TestCase):
             self.assertLess(brightness(offline, rows), 0.7 * brightness(live, rows))
             self.assertLess(brightness(offline, hero), 0.8 * brightness(live, hero))
             self.assertLess(brightness(offline, context), 0.7 * brightness(live, context))
+
+    def test_expired_window_dims_hero_while_feed_is_fresh(self):
+        hero = (16, 112, 464, 242)
+        with self.frame("plan") as live, self.frame("window-expired") as expired:
+            self.assertGreater(brightness(expired, hero), 0)
+            self.assertLess(brightness(expired, hero), 0.8 * brightness(live, hero))
 
     def test_retained_reading_stays_dimmed(self):
         hero = (16, 112, 464, 242)
