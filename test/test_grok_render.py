@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRAMES = ("startup", "empty", "xai", "openrouter", "plan", "plan-est", "plan-bots", "bots", "stale", "disabled", "live",
           "offline", "retained", "bots-live", "bots-retained",
           "plan-live", "plan-retained", "plan-unknown-age-live",
-          "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited")
+          "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited", "plan-nowindow")
 
 
 def brightness(image, box):
@@ -90,6 +90,16 @@ class GrokRenderTests(unittest.TestCase):
             self.assertEqual(live.convert("RGB").getpixel((200, 270)), (48, 50, 56))
             self.assertEqual(live.convert("RGB").getpixel((324, 256)), (255, 255, 255))
             self.assertEqual(plan.convert("RGB").getpixel((180, 270)), (201, 212, 232))
+
+    def test_plan_without_window_has_neutral_caption_and_no_pace_tick(self):
+        with self.frame("plan-nowindow") as neutral, self.frame("plan") as plan:
+            caption = (22, 75, 400, 100)
+            self.assertIsNotNone(ImageChops.difference(
+                neutral.crop(caption).convert("RGB"),
+                plan.crop(caption).convert("RGB")).getbbox())
+            image = neutral.convert("RGB")
+            self.assertTrue(all(image.getpixel((x, 256)) != (255, 255, 255)
+                                for x in range(22, 458)))
 
     def test_est_tag_is_only_on_estimated_plan(self):
         tag = (410, 75, 444, 93)

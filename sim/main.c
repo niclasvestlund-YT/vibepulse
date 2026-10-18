@@ -1848,6 +1848,8 @@ static int run_vibepulse_grok_qa(void) {
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-huge-percent");
   wide.spent_cents=4718; wide.has_limit=false;
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-unlimited");
+  apply_grok_file("grok-plan-nowindow.json");
+  lv_refr_now(NULL); dump_frame("vibepulse-grok-plan-nowindow");
   return capture_failures ? 1:0;
 }
 

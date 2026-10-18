@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "enabled": true,
+  "source": "plan",
+  "usedPct": 42,
+  "estimated": false,
+  "ageSeconds": 60,
+  "stale": false,
+  "active": 0,
+  "doneToday": 0,
+  "bots": []
+}

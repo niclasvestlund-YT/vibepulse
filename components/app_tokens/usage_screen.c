@@ -1272,8 +1272,6 @@ static void grok_visible(lv_obj_t *obj, bool visible) {
 static void apply_grok_page(const tk_grok_status *s, int64_t now_us);
 static int grok_window_seconds(const tk_grok_status *s) {
   if (s->has_window) return s->window_seconds;
-  if (!strcmp(s->source,"plan")) return 7*86400;
-  if (!strcmp(s->source,"xai")) return 30*86400;
   return 0;
 }
 static int grok_pace(int32_t reset_seconds, int window, int span) {
@@ -1549,14 +1547,17 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     int64_t basis_points=plan && data ? (int64_t)s->used_pct*100:
       budget && data ? (int64_t)s->spent_cents*10000/s->limit_cents:-1;
     int64_t pct=basis_points<0 ? -1:(basis_points+50)/100;
+    const char *plan_caption=s->label[0] ? s->label:
+      s->has_window && s->window_seconds==604800 ? "WEEKLY":
+      s->has_window && s->window_seconds==86400 ? "DAILY":"PLAN";
     char caption[48];
-    snprintf(caption,sizeof caption,"%s",s->label[0] ? s->label:"WEEKLY");
+    snprintf(caption,sizeof caption,"%s",plan_caption);
 #if !defined(TORGET_BOARD_175) && !defined(TORGET_BOARD_191_TOUCH)
     if(plan && s->plan_name[0]) {
-      snprintf(caption,sizeof caption,"%s · %s",s->label[0] ? s->label:"WEEKLY",s->plan_name);
+      snprintf(caption,sizeof caption,"%s · %s",plan_caption,s->plan_name);
       lv_point_t caption_size;
       lv_text_get_size(&caption_size,caption,&plex_ui_21,2,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
-      if(caption_size.x>380) snprintf(caption,sizeof caption,"%s",s->label[0] ? s->label:"WEEKLY");
+      if(caption_size.x>380) snprintf(caption,sizeof caption,"%s",plan_caption);
     }
 #endif
     grok_visible(grok_page.est,plan && data && s->estimated);
@@ -1568,7 +1569,6 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     const lv_font_t *font=money && !percent ? &plex_money_118:&plex_num_118;
     int spacing=0;
 #ifdef TORGET_BOARD_175
-    if (money && !percent && data) memmove(text,text+1,strlen(text));
     if(percent && data) text[strlen(text)-1]=0;
 #else
     if(percent) { font=&plex_num_164; spacing=-9; }
