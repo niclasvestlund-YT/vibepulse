@@ -20,6 +20,7 @@ else:
 
 log = logging.getLogger('tokenserver.grok')
 MAX_INT = 2147483647
+MAX_EPOCH = 2**32  # Through 2106; safe for arithmetic and datetime conversion.
 STATES = ('waiting', 'error', 'working', 'done', 'idle')
 LEASES = {'working': 600, 'waiting': 7200, 'error': 1800, 'done': 1800, 'idle': 1800}
 
@@ -98,7 +99,7 @@ class GrokBotStore:
         self._bots = {}
         self._day = None
         self._done = 0
-        # Last state per bot name for today, kept apart from display leases
+        # Last accepted record per bot name for today, apart from display leases
         # and eviction so an expired or replayed "done" never counts twice.
         self._last_state = OrderedDict()
         self._file = JsonFile(state_dir() / 'grok-bots.json')
@@ -116,7 +117,7 @@ class GrokBotStore:
             raise ValueError('invalid bot')
         activity = display(data['activity']) if 'activity' in data else ''
         stamp = number(data['updatedAt']) if file else self.clock()
-        if stamp < 0 or stamp > self.clock():
+        if not 0 <= stamp <= MAX_EPOCH or stamp > self.clock():
             raise ValueError('invalid timestamp')
         return (name.upper(), {'name': display(name), 'state': data['state'],
                                'activity': activity, 'updatedAt': stamp})
@@ -129,16 +130,16 @@ class GrokBotStore:
 
     def _put(self, name, bot):
         self._roll_day()
-        old = self._bots.get(name)
+        old = self._last_state.get(name)
         if old and old['updatedAt'] >= bot['updatedAt']:
             # Live updates may share a clock tick; exact file replays cannot.
             if old == bot or old['updatedAt'] > bot['updatedAt']:
                 return
         previous = self._last_state.pop(name, None)
-        if bot['state'] == 'done' and previous != 'done':
+        if bot['state'] == 'done' and (previous is None or previous['state'] != 'done'):
             if datetime.fromtimestamp(bot['updatedAt']).date() == self._day:
                 self._done = min(MAX_INT, self._done + 1)
-        self._last_state[name] = bot['state']
+        self._last_state[name] = bot
         while len(self._last_state) > 256:
             self._last_state.popitem(last=False)
         self._bots[name] = bot
@@ -204,7 +205,7 @@ class ManualQuotaSource:
                 type(data['v']) is not int or data['v'] != 1 or
                 not 0 <= number(data['usedPct']) <= 100):
             raise ValueError('invalid quota')
-        if 'resetAt' in data and number(data['resetAt']) < 0:
+        if 'resetAt' in data and not 0 <= number(data['resetAt']) <= MAX_EPOCH:
             raise ValueError('invalid reset')
         if 'label' in data and len(text(data['label'])) > 16:
             raise ValueError('invalid label')

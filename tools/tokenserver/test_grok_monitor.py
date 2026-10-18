@@ -267,6 +267,45 @@ class GrokTests(GrokFixture):
         self.assertEqual(self.store.snapshot()['doneToday'], first)
         self.assertEqual(first, 2 + 17)
 
+    def test_older_done_replay_after_eviction_does_not_count(self):
+        self.post('done', 'solo')
+        done_at = self.now
+        self.now += 1
+        self.post('working', 'solo')
+        for i in range(16):
+            self.now += 1
+            self.post('working', f'bot{i}')
+        self.assertNotIn('SOLO', self.store._bots)
+        self.write('grok-bots.json', {'v': 1, 'bots': [
+            {'bot': 'solo', 'state': 'done', 'updatedAt': done_at}]})
+        self.assertEqual(self.store.snapshot()['doneToday'], 1)
+        self.assertNotIn('SOLO', self.store._bots)
+
+    def test_oversized_manual_reset_is_invalid_and_logged_once(self):
+        self.now = float(self.now)
+        monitor = grok.GrokMonitor('manual', clock=self.clock)
+        self.write('grok.json', {'v': 1, 'usedPct': 5, 'resetAt': 10**400})
+        with patch.object(grok.log, 'warning') as warning:
+            for _ in range(2):
+                self.assertEqual(monitor.snapshot()['source'], 'none')
+                monitor.summary()
+        self.assertEqual(warning.call_count, 1)
+        self.assertEqual(warning.call_args.args, ('%s: invalid input ignored', 'grok.json'))
+
+    def test_bot_file_rejects_unsafe_timestamps(self):
+        self.now = float(self.now)
+        for stamp in (10**400, 1e300, -10**400, -1e300,
+                      grok.MAX_EPOCH + 1, float('inf'), float('nan')):
+            with self.subTest(stamp=stamp):
+                self.write('grok-bots.json', {'v': 1, 'bots': [
+                    {'bot': 'bad', 'state': 'done', 'updatedAt': stamp}]})
+                with patch.object(grok.log, 'warning'):
+                    self.assertEqual(self.store.snapshot()['doneToday'], 0)
+                    self.assertEqual(self.store.snapshot()['bots'], [])
+                with self.assertRaises(ValueError):
+                    self.store._validate({'bot': 'bad', 'state': 'done',
+                                          'updatedAt': stamp}, file=True)
+
     def test_transient_read_error_is_retried_without_file_change(self):
         self.write('grok-bots.json', {'v': 1, 'bots': [
             {'bot': 'filebot', 'state': 'working', 'updatedAt': self.now}]})
