@@ -11,9 +11,9 @@ static void parse(const char *json, bool valid) {
 }
 #define BASE "\"v\":1,\"enabled\":true,\"source\":\"none\",\"stale\":false,\"active\":0,\"doneToday\":0,\"bots\":[]"
 static void numeric_rejections(void) {
-  const char *keys[]={"ageSeconds","spentCents","limitCents","prepaidCents","usedPct","resetSeconds"};
+  const char *keys[]={"ageSeconds","spentCents","limitCents","prepaidCents","usedPct","resetSeconds","windowSeconds"};
   const char *values[]={"-1","0.5","2147483648","true","null","\"1\"","[]","{}"};
-  for (unsigned k=0;k<6;k++) for (unsigned v=0;v<8;v++) {
+  for (unsigned k=0;k<7;k++) for (unsigned v=0;v<8;v++) {
     char json[768];
     snprintf(json,sizeof json,"{" BASE ",\"%s\":%s}",keys[k],values[v]);
     parse(json,false);
@@ -48,11 +48,25 @@ static void schema_rejections(void) {
 int main(void) {
   numeric_rejections();
   schema_rejections();
+  const char *windows[]={"0","2678401","2147483647","1.5","1e100"};
+  for (unsigned i=0;i<sizeof windows/sizeof windows[0];i++) {
+    char json[768];
+    snprintf(json,sizeof json,"{" BASE ",\"windowSeconds\":%s}",windows[i]);
+    parse(json,false);
+  }
+  const int valid_windows[]={1,86400,604800,28*86400,30*86400,2678400};
+  for (unsigned i=0;i<sizeof valid_windows/sizeof valid_windows[0];i++) {
+    char json[768]; tk_grok_status status;
+    snprintf(json,sizeof json,"{" BASE ",\"windowSeconds\":%d}",valid_windows[i]);
+    assert(tk_grok_status_parse(json,strlen(json),&status));
+    assert(status.has_window && status.window_seconds==valid_windows[i]);
+  }
+  parse("{" BASE ",\"windowSeconds\":1,\"windowSeconds\":1}",false);
   tk_grok_status known;
   const char *empty="{" BASE "}";
   assert(tk_grok_status_parse(empty,strlen(empty),&known));
   assert(known.enabled && !known.has_age && !known.has_spent && !known.has_limit &&
-         !known.has_prepaid && !known.has_used && !known.has_reset && !known.bot_count);
+         !known.has_prepaid && !known.has_used && !known.has_reset && !known.has_window && !known.bot_count);
   const char *full="{" BASE ",\"ageSeconds\":3,\"spentCents\":1234,\"limitCents\":20000,\"prepaidCents\":4500,\"usedPct\":42,\"resetSeconds\":187200}";
   assert(tk_grok_status_parse(full,strlen(full),&known));
   assert(known.has_age && known.age_seconds==3 && known.has_spent && known.spent_cents==1234);

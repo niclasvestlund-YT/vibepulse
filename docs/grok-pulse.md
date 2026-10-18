@@ -189,7 +189,7 @@ SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software ./sim/build-grok/torget-sim --v
 On a desktop, the SDL environment variables can be omitted. Offline builds can add
 `-DFETCHCONTENT_SOURCE_DIR_LVGL=/path/to/cached/lvgl-src` to CMake.
 The fixtures produce `/tmp/torget-vibepulse-grok-<state>.bmp` for
-`empty`, `xai`, `openrouter`, `manual`, `bots`, `stale`, `disabled` and `live` (API spend
+`startup` (before any Grok payload), `empty`, `xai`, `openrouter`, `manual`, `bots`, `stale`, `disabled` and `live` (API spend
 plus four bots), followed by `offline` (91 s without a read) and `retained`
 (a payload without numbers after real readings). Additional captures cover
 retained bot/manual readings, manual age unknown, and maximum wire values.
@@ -204,3 +204,11 @@ Evidence is limited to simulator output and automated build coverage (including
 the opt-in firmware path in CI). **Grok is not physically verified on any
 panel.** Native simulator captures do not certify touch, rotation, OTA or
 physical AMOLED rendering.
+
+Before the first successful poll, every profile shows a dash and WAITING, with
+bot rows and the usage bar hidden. No snapshot is recorded by initialization.
+OpenRouter captions use DAY, WEEK or MONTH for reported 1-day, 7-day or
+28–31-day windows; other or missing windows show SPEND. Optional `windowSeconds`
+is an integer from 1 to 2678400. Pace uses this window when supplied, otherwise
+xAI uses 30 days and manual uses 7 days. OpenRouter without a window has no
+pace marker, including on the round ring.

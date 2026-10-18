@@ -1269,12 +1269,29 @@ static void grok_visible(lv_obj_t *obj, bool visible) {
     else lv_obj_add_flag(obj,LV_OBJ_FLAG_HIDDEN);
   }
 }
+static void apply_grok_page(const tk_grok_status *s, int64_t now_us);
+static int grok_window_seconds(const tk_grok_status *s) {
+  if (s->has_window) return s->window_seconds;
+  if (!strcmp(s->source,"manual")) return 7*86400;
+  if (!strcmp(s->source,"xai")) return 30*86400;
+  return 0;
+}
+static const char *grok_openrouter_caption(const tk_grok_status *s) {
+  if (s->has_window) {
+    if (s->window_seconds==86400) return "OPENROUTER · DAY";
+    if (s->window_seconds==604800) return "OPENROUTER · WEEK";
+    if (s->window_seconds>=28*86400 && s->window_seconds<=31*86400)
+      return "OPENROUTER · MONTH";
+  }
+  return "OPENROUTER · SPEND";
+}
 #ifdef TORGET_BOARD_175
 static void grok_ring_draw(lv_event_t *event) {
   quota_page *page=&grok_page.gauge;
   draw_quota_ring(event,page,COL_GROK,COL_GROK);
   const tk_grok_status *s=&grok_page.shown;
-  if (!s->has_reset || !page->round_bar.has_total) return;
+  int window=grok_window_seconds(s);
+  if (!s->has_reset || !window || !page->round_bar.has_total) return;
   lv_area_t coords;
   lv_obj_get_coords(page->track,&coords);
   lv_draw_arc_dsc_t tick;
@@ -1284,7 +1301,6 @@ static void grok_ring_draw(lv_event_t *event) {
   tick.radius=VP_ROUND_RING_SIZE/2;
   tick.width=13;
   tick.color=COL_WHITE;
-  int window=!strcmp(s->source,"manual") ? 7*86400:30*86400;
   int pace=360-(int)((int64_t)s->reset_seconds*360/window);
   if (pace<0) pace=0;
   if (pace>360) pace=360;
@@ -1401,6 +1417,15 @@ static void create_grok_page(void) {
 #endif
   lv_label_set_text(grok_page.empty,"NO BOTS REPORTING");
   lv_label_set_text(grok_page.reset,"–");
+  const tk_grok_status empty={.source="none"};
+  apply_grok_page(&empty,0);
+  grok_page.has_snapshot=false;
+  grok_page.rendered_stale=false;
+  grok_page.rendered_rows_stale=false;
+  lv_obj_set_style_text_opa(grok_page.hero,LV_OPA_COVER,0);
+  grok_text(grok_page.context,"");
+  grok_text(grok_page.provenance,"WAITING");
+  snprintf(grok_page.rendered_provenance,sizeof grok_page.rendered_provenance,"WAITING");
 }
 static void grok_dollars(char *out, size_t cap, int32_t cents, bool full_precision) {
   if (cents<100000 && !full_precision && cents%100==0) snprintf(out,cap,"$%ld",(long)(cents/100));
@@ -1484,12 +1509,13 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
 #ifdef TORGET_BOARD_175
     bool pace_changed=s->has_reset!=grok_page.shown.has_reset ||
       s->reset_seconds!=grok_page.shown.reset_seconds ||
+      grok_window_seconds(s)!=grok_window_seconds(&grok_page.shown) ||
       strcmp(s->source,grok_page.shown.source);
 #endif
     grok_page.shown=*s; grok_page.shown_at_us=now_us;
-    const char *money_caption=!strcmp(s->source,"openrouter") ? "OPENROUTER · MONTH":"API SPEND · MONTH";
+    const char *money_caption=!strcmp(s->source,"openrouter") ? grok_openrouter_caption(s):"API SPEND · MONTH";
 #ifdef TORGET_BOARD_175
-    money_caption=!strcmp(s->source,"openrouter") ? "OPENROUTER · USD":"API SPEND · USD";
+    money_caption=!strcmp(s->source,"openrouter") ? grok_openrouter_caption(s):"API SPEND · USD";
 #endif
     grok_text(grok_page.caption,money ? money_caption:manual ? (s->label[0] ? s->label:"WEEKLY POOL"):bots ? "BOTS · TODAY":"GROK");
     if (!data) snprintf(text,sizeof text,"–");
@@ -1568,9 +1594,9 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     grok_visible(g->track,pct>=0);
     int width=fill*VP_CONTENT_W/10000;
     if (lv_obj_get_style_width(g->baseline_fill,0)!=width) lv_obj_set_width(g->baseline_fill,width);
-    grok_visible(g->marker,pct>=0 && s->has_reset);
-    int window=manual ? 7*86400:30*86400;
-    int pace=VP_CONTENT_W-(int)((int64_t)s->reset_seconds*VP_CONTENT_W/window);
+    int window=grok_window_seconds(s);
+    grok_visible(g->marker,pct>=0 && s->has_reset && window>0);
+    int pace=window ? VP_CONTENT_W-(int)((int64_t)s->reset_seconds*VP_CONTENT_W/window):0;
     if(pace<0) pace=0;
     if(pace>VP_CONTENT_W) pace=VP_CONTENT_W;
     if (lv_obj_get_style_x(g->marker,0)!=VP_SAFE_X+pace) lv_obj_set_x(g->marker,VP_SAFE_X+pace);

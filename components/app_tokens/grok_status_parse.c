@@ -94,7 +94,7 @@ bool tk_grok_status_parse(const char *json, size_t len, tk_grok_status *out) {
   cJSON *root = cJSON_ParseWithLengthOpts(json, len, &end, false);
   static const char *const fields[] = {"v","enabled","source","stale","ageSeconds",
     "spentCents","limitCents","prepaidCents","usedPct","resetSeconds","label",
-    "active","doneToday","bots",NULL};
+    "active","doneToday","bots","windowSeconds",NULL};
   static const char *const sources[] = {"xai","openrouter","manual","bots","none",NULL};
   static const char *const states[] = {"working","waiting","done","idle","error",NULL};
   static const char *const bot_fields[] = {"name","state","activity",NULL};
@@ -117,6 +117,12 @@ bool tk_grok_status_parse(const char *json, size_t len, tk_grok_status *out) {
     for (unsigned i=0; ok && i<6; i++) {
       cJSON *item = cJSON_GetObjectItemCaseSensitive(root,keys[i]);
       if (item) { ok = exact_int32(item,nums[i]); *flags[i] = ok; }
+    }
+    cJSON *window = cJSON_GetObjectItemCaseSensitive(root,"windowSeconds");
+    if (ok && window) {
+      ok = exact_int32(window,&parsed.window_seconds) &&
+        parsed.window_seconds >= 1 && parsed.window_seconds <= 31*86400;
+      parsed.has_window = ok;
     }
     ok = ok && parsed.used_pct <= 100;
     cJSON *label = cJSON_GetObjectItemCaseSensitive(root,"label");

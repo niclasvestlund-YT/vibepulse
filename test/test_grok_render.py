@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parents[1]
-FRAMES = ("empty", "xai", "openrouter", "manual", "bots", "stale", "disabled", "live",
+FRAMES = ("startup", "empty", "xai", "openrouter", "manual", "bots", "stale", "disabled", "live",
           "offline", "retained", "bots-live", "bots-retained",
           "manual-live", "manual-retained", "manual-unknown-age-live",
           "manual-unknown-age-retained", "wide", "wide-left")
@@ -57,6 +57,14 @@ class GrokRenderTests(unittest.TestCase):
         for name in FRAMES:
             with self.subTest(name=name), self.frame(name) as image:
                 self.assertEqual(image.size, (480, 480))
+
+    def test_startup_has_no_bar_or_bot_rows(self):
+        with self.frame("startup") as startup:
+            self.assertEqual(brightness(startup, (22, 234, 458, 266)), 0)
+            self.assertEqual(brightness(startup, (22, 375, 458, 425)), 0)
+            self.assertEqual(brightness(startup, (220, 24, 408, 48)), 0)
+            self.assertGreater(brightness(startup, (16, 105, 464, 235)), 0)
+            self.assertGreater(brightness(startup, (22, 429, 200, 447)), 0)
 
     def test_states_are_distinct(self):
         with self.frame("empty") as empty, self.frame("live") as live:

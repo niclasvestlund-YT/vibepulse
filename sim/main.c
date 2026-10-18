@@ -1800,6 +1800,8 @@ static int run_vibepulse_grok_qa(void) {
   /* "live" is the combined usage + bots frame used for POC renders. */
   const char *states[]={"empty","xai","openrouter","manual","bots","stale","disabled","live"};
   tokens_show_view(VIEW_GROK);
+  lv_refr_now(NULL);
+  dump_frame("vibepulse-grok-startup");
   for (unsigned i=0;i<sizeof states/sizeof states[0];i++) {
     char file[64], frame[64];
     snprintf(file,sizeof file,"grok-%s.json",states[i]);
