@@ -1448,6 +1448,9 @@ static void create_grok_page(void) {
   grok_page.rendered_stale=false;
   grok_page.rendered_rows_stale=false;
   lv_obj_set_style_text_opa(grok_page.hero,LV_OPA_COVER,0);
+#ifdef TORGET_BOARD_175
+  lv_obj_set_style_text_opa(grok_page.gauge.percent_unit,LV_OPA_COVER,0);
+#endif
   grok_text(grok_page.context,"");
   grok_text(grok_page.provenance,"WAITING");
   snprintf(grok_page.rendered_provenance,sizeof grok_page.rendered_provenance,"WAITING");

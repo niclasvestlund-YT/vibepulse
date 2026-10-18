@@ -147,6 +147,33 @@ class GrokRenderTests(unittest.TestCase):
 
 
 class GrokFixtureTests(unittest.TestCase):
+    def test_175_fresh_percent_unit_is_brighter_than_retained(self):
+        build = ROOT / "sim/build-grok-waveshare_175"
+        configure = ["cmake", "-S", "sim", "-B", str(build), "-G", "Ninja",
+                     "-DTORGET_BOARD=waveshare_175", "-DTORGET_GROK=ON",
+                     "-DTORGET_SOLELKOLLEN_DIR=/nonexistent", "-DTORGET_WITH_BUDDY=OFF"]
+        lvgl = ROOT / "sim/build/_deps/lvgl-src"
+        if lvgl.is_dir():
+            configure.append(f"-DFETCHCONTENT_SOURCE_DIR_LVGL={lvgl}")
+        for command in (configure, ["cmake", "--build", str(build)]):
+            subprocess.run(command, cwd=ROOT, check=True, capture_output=True)
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run([str(build / "torget-sim"), "--vibepulse-grok-qa"],
+                           cwd=ROOT, check=True, capture_output=True,
+                           env={**os.environ, "TORGET_CAPTURE_DIR": directory})
+            with Image.open(Path(directory) / "torget-vibepulse-grok-live.bmp") as live, Image.open(
+                Path(directory) / "torget-vibepulse-grok-retained.bmp"
+            ) as retained:
+                self.assertEqual(live.size, (466, 466))
+                self.assertEqual(retained.size, live.size)
+                # Same 28% reading and glyph position; only freshness changes.
+                unit = (286, 222, 323, 254)
+                self.assertGreater(brightness(retained, unit), 0)
+                self.assertGreater(brightness(live, unit),
+                                   1.5 * brightness(retained, unit))
+                with Image.open(Path(directory) / "torget-vibepulse-grok-first-live.bmp") as first:
+                    self.assertEqual(brightness(first, unit), brightness(live, unit))
+
     def test_191_dollar_thousands_font_and_capture(self):
         build = ROOT / "sim/build-grok-waveshare_191_touch"
         configure = ["cmake", "-S", "sim", "-B", str(build), "-G", "Ninja",

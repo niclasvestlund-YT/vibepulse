@@ -1819,6 +1819,12 @@ static int run_vibepulse_grok_qa(void) {
   tokens_show_view(VIEW_GROK);
   lv_refr_now(NULL);
   dump_frame("vibepulse-grok-startup");
+#ifdef TORGET_BOARD_175
+  /* Exercise initialization before any stale-to-fresh transition can mask it. */
+  apply_grok_file("grok-live.json");
+  lv_refr_now(NULL);
+  dump_frame("vibepulse-grok-first-live");
+#endif
   for (unsigned i=0;i<sizeof states/sizeof states[0];i++) {
     char file[64], frame[64];
     snprintf(file,sizeof file,"grok-%s.json",states[i]);
