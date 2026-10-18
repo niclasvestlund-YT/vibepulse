@@ -154,7 +154,11 @@ sensitive task descriptions. Neither prompts nor chat history are collected.
 The optional **GROK** page displays xAI monthly API spend, a manually observed
 quota percentage, or bot activity, with explicit source and freshness. Unknown
 numbers show a dash; a later unavailable reading retains the last real value.
-Stale values dim. Manual resets count down locally. Bot states include
+Stale values dim. If the panel gets no successful `/api/grok` read for 90
+seconds, the bot rows dim and the provenance says `CACHED` (or `NO
+CONNECTION`), so old WORKING/NEEDS YOU states never look live. A retained
+number that the latest payload no longer carries keeps its own source label
+and is shown dimmed. Manual resets count down locally. Bot states include
 WORKING, NEEDS YOU, DONE, IDLE and ERROR; this page cannot approve actions.
 
 Enable `#define TK_GROK_SCREEN_ENABLED 1` in `secrets.h`, or configure firmware
@@ -169,7 +173,7 @@ Labs switch**, and does not change saved Labs settings. Polling starts after
 | `waveshare_216` | 480×480, hero above four bot rows |
 | `waveshare_241_v2` | 600×450, centred 480 composition |
 | `waveshare_18_v2` | 368×448, platform-scaled 480 composition |
-| `waveshare_175` | 466×466 round, centred header and three narrower bot rows |
+| `waveshare_175` | 466×466 round, centred header and three bot rows (name + state; activity hidden to keep clear of the bezel) |
 | `waveshare_191_touch` | 536×240, 480×240 viewport with metric left and four bot rows right |
 
 Render each profile with the actual `torget-sim` binary:
@@ -182,8 +186,11 @@ xvfb-run -a ./sim/build-grok/torget-sim --vibepulse-grok-qa
 
 On a desktop, `xvfb-run -a` can be omitted. Offline builds can add
 `-DFETCHCONTENT_SOURCE_DIR_LVGL=/path/to/cached/lvgl-src` to CMake.
-The six fixtures produce `/tmp/torget-vibepulse-grok-<state>.bmp` for
-`xai`, `manual`, `bots`, `empty`, `stale`, and `disabled`.
+The fixtures produce `/tmp/torget-vibepulse-grok-<state>.bmp` for
+`empty`, `xai`, `manual`, `bots`, `stale`, `disabled` and `live` (API spend
+plus four bots), followed by `offline` (91 s without a read) and `retained`
+(a payload without numbers after real readings). `test/test_grok_render.py`
+builds the 2.16 variant in the host gate and checks those transitions.
 Set `TORGET_CAPTURE_DIR` to an existing directory to retain captures from
 multiple board builds. QA returns nonzero with a clear message if Grok was
 not compiled in. Empty is rendered first to verify the initial dash;

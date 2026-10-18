@@ -1805,6 +1805,14 @@ static int run_vibepulse_grok_qa(void) {
     lv_refr_now(NULL);
     dump_frame(frame);
   }
+  /* Host gone: 91 s without a read dims the bot rows and says CACHED. */
+  usage_screen_tick(torget_now_us() + 91000000LL);
+  lv_refr_now(NULL);
+  dump_frame("vibepulse-grok-offline");
+  /* Then a payload without numbers: the retained spend keeps its own label. */
+  apply_grok_file("grok-empty.json");
+  lv_refr_now(NULL);
+  dump_frame("vibepulse-grok-retained");
   return capture_failures ? 1:0;
 }
 

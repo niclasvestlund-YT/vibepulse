@@ -411,6 +411,7 @@ cd ..
 "$PYTHON_BIN" tools/vibepulse_studio/design.py --check
 "$PYTHON_BIN" test/test_vibepulse_studio_wiring.py
 "$PYTHON_BIN" test/test_vibepulse_visual_landmarks.py
+"$PYTHON_BIN" test/test_grok_render.py
 "$PYTHON_BIN" test/test_labs_render.py
 "$PYTHON_BIN" test/test_openpulse_labs.py
 "$PYTHON_BIN" test/test_docs_frame_drift.py

@@ -859,10 +859,19 @@ static void refresh_lovable_age(int64_t now_us) {
 static struct {
   lv_obj_t *tile, *provenance, *caption, *hero, *sub, *empty;
   lv_obj_t *dot[4], *name[4], *activity[4], *state[4];
-  tk_grok_status status;
-  int64_t applied_at_us;
+  tk_grok_status status;   /* latest feed: enabled flag + bot rows */
+  tk_grok_status shown;    /* the reading behind the hero: source, age, reset */
+  int64_t applied_at_us;   /* latest successful feed */
+  int64_t shown_at_us;     /* when `shown` arrived */
   bool has_data, has_snapshot;
+  bool rendered_stale, rendered_rows_stale;
+  char rendered_provenance[48];
+  char rendered_reset[48];
 } grok_page;
+
+/* The panel polls every 15 s; after 90 s without a successful read the bot
+ * rows and the provenance say so instead of presenting old states as live. */
+#define GROK_FEED_STALE_S 90
 
 static void create_grok_page(void) {
   memset(&grok_page,0,sizeof grok_page);
@@ -962,24 +971,51 @@ static void grok_dollars(char *out, size_t cap, int32_t cents, bool full_precisi
 }
 static void refresh_grok_age(int64_t now_us) {
   if (!grok_page.tile || !grok_page.has_snapshot) return;
-  const tk_grok_status *s=&grok_page.status;
-  int64_t elapsed=now_us>grok_page.applied_at_us ? (now_us-grok_page.applied_at_us)/1000000 : 0;
-  bool stale=s->stale || elapsed>600 || (s->has_age && s->age_seconds+elapsed>600) || !s->enabled ||
+  const tk_grok_status *feed=&grok_page.status;
+  const tk_grok_status *s=&grok_page.shown;
+  int64_t feed_age=now_us>grok_page.applied_at_us ? (now_us-grok_page.applied_at_us)/1000000 : 0;
+  int64_t elapsed=now_us>grok_page.shown_at_us ? (now_us-grok_page.shown_at_us)/1000000 : 0;
+  bool feed_stale=feed_age>GROK_FEED_STALE_S;
+  /* A retained reading the latest feed no longer carries is cached. */
+  bool superseded=grok_page.shown_at_us!=grok_page.applied_at_us;
+  bool stale=feed_stale || superseded || s->stale || elapsed>600 ||
+    (s->has_age && s->age_seconds+elapsed>600) || !feed->enabled ||
     (!strcmp(s->source,"xai") && !s->has_spent) ||
     (!strcmp(s->source,"manual") && !s->has_used) || !strcmp(s->source,"none");
-  char text[96];
-  if (!s->enabled) snprintf(text,sizeof text,"OFF ON COMPUTER");
+  char text[48];
+  if (!feed->enabled) snprintf(text,sizeof text,"OFF ON COMPUTER");
   else if (!strcmp(s->source,"xai")) snprintf(text,sizeof text,"XAI API · %s",stale ? "CACHED":"LIVE");
   else if (!strcmp(s->source,"manual")) {
-    if (s->has_age) snprintf(text,sizeof text,"MANUAL · %lld MIN",(long long)((s->age_seconds+elapsed)/60));
+    if (s->has_age) snprintf(text,sizeof text,"MANUAL · %lld MIN%s",(long long)((s->age_seconds+elapsed)/60),feed_stale ? " · CACHED":"");
     else snprintf(text,sizeof text,"MANUAL · AGE UNKNOWN");
-  } else snprintf(text,sizeof text,"%s",!strcmp(s->source,"bots") ? "BOT ACTIVITY":"WAITING");
-  lv_label_set_text(grok_page.provenance,text);
-  lv_obj_set_style_text_opa(grok_page.hero,stale ? LV_OPA_50:LV_OPA_COVER,0);
-  if (s->enabled && !strcmp(s->source,"manual") && s->has_reset) {
+  } else if (!strcmp(s->source,"bots")) snprintf(text,sizeof text,"BOT ACTIVITY%s",feed_stale ? " · CACHED":"");
+  else snprintf(text,sizeof text,"%s",feed_stale ? "NO CONNECTION":"WAITING");
+  /* Only touch LVGL when the rendered text actually changes (100 ms tick). */
+  if (strcmp(text,grok_page.rendered_provenance)) {
+    snprintf(grok_page.rendered_provenance,sizeof grok_page.rendered_provenance,"%s",text);
+    lv_label_set_text(grok_page.provenance,text);
+  }
+  if (stale!=grok_page.rendered_stale) {
+    grok_page.rendered_stale=stale;
+    lv_obj_set_style_text_opa(grok_page.hero,stale ? LV_OPA_50:LV_OPA_COVER,0);
+  }
+  if (feed_stale!=grok_page.rendered_rows_stale) {
+    grok_page.rendered_rows_stale=feed_stale;
+    for (unsigned i=0;i<4;i++) {
+      lv_obj_t *objects[]={grok_page.dot[i],grok_page.name[i],grok_page.state[i],grok_page.activity[i]};
+      for (unsigned j=0;j<4;j++) {
+        if (j==0) lv_obj_set_style_bg_opa(objects[j],feed_stale ? LV_OPA_40:LV_OPA_COVER,0);
+        else lv_obj_set_style_text_opa(objects[j],feed_stale ? LV_OPA_40:LV_OPA_COVER,0);
+      }
+    }
+  }
+  if (grok_page.has_data && !strcmp(s->source,"manual") && s->has_reset) {
     int64_t left=s->reset_seconds>elapsed ? s->reset_seconds-elapsed:0;
     snprintf(text,sizeof text,"RESETS IN %lld D %lld H",(long long)(left/86400),(long long)(left/3600%24));
-    lv_label_set_text(grok_page.sub,text);
+    if (strcmp(text,grok_page.rendered_reset)) {
+      snprintf(grok_page.rendered_reset,sizeof grok_page.rendered_reset,"%s",text);
+      lv_label_set_text(grok_page.sub,text);
+    }
   }
 }
 static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
@@ -990,6 +1026,11 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   grok_page.status=*s;
   grok_page.applied_at_us=now_us;
   if (data || !grok_page.has_data) {
+    /* The hero's provenance, age and reset travel with the reading itself;
+     * a later payload without numbers never relabels a retained value. */
+    grok_page.shown=*s;
+    grok_page.shown_at_us=now_us;
+    grok_page.rendered_reset[0]='\0';
     lv_label_set_text(grok_page.caption,xai ? "API SPEND THIS MONTH":manual ? (s->label[0] ? s->label:"WEEKLY POOL USED"):bots ? "BOTS ACTIVE":"NO USAGE SOURCE");
     const lv_font_t *font=xai ? &plex_money_118:&plex_num_118;
 #ifdef TORGET_BOARD_191_TOUCH
