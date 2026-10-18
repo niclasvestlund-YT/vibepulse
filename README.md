@@ -25,7 +25,8 @@ only the encrypted interaction/status relay adds the pinned Python
 `cryptography` dependency.
 
 A build-time opt-in [Grok page](docs/grok-pulse.md#panel-page-build-time-opt-in)
-shows explicitly sourced API spend, manual quota, or local bot activity.
+shows percent of budget with dollars below, manual quota, or local bot activity.
+Without a positive budget limit, the hero shows dollars instead.
 
 An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
 The current MCP response omits balances despite the documentation; an opt-in
@@ -162,12 +163,14 @@ acceptance remain pending; see the linked checkpoint for the tested build.*
 ## Grok quota and bot activity (build-time preview)
 
 The opt-in **GROK** page uses VibePulse's quota header, gauge and stat widgets.
+Money sources show percent of budget with dollars below; without a positive
+limit, the hero shows dollars instead.
 Square and rectangular profiles show up to three bot rows; round 1.75 uses the
 quota edge ring and one priority bot line. Sources and cached readings remain
 explicit. Enable `-DTORGET_GROK=ON` and the host's `--grok` option; both are off
 by default. [Setup and source limits](docs/grok-pulse.md#panel-page-build-time-opt-in).
 
-![Grok monthly spend and bot activity, native 480 × 480 simulator capture](docs/img/grok-216-spend.png)
+![Grok budget percentage and bot activity, native 480 × 480 simulator capture](docs/img/grok-216-spend.png)
 ![Grok bot activity, native 600 × 450 simulator capture](docs/img/grok-241-bots.png)
 
 *Shared LVGL captures with synthetic readings. Grok has no physical panel acceptance.*
@@ -817,12 +820,13 @@ official API without changing the display contract.
 
 ## Grok usage and bot activity (experimental)
 
-The default-off **GROK** page shows xAI monthly API spend, a manually copied
+The default-off **GROK** page shows xAI or OpenRouter percent of budget with
+dollars below (a dollar hero without a positive limit), a manually copied
 Grok quota, or bot activity. Source and freshness stay visible; missing values
 show dashes, and unavailable updates retain the last real reading. Waiting
 bots show **NEEDS YOU**, without an approval action.
 
-![Grok API spend: native 480×480 simulator example](docs/img/grok-216-spend.png)
+![Grok budget percentage: native 480×480 simulator example](docs/img/grok-216-spend.png)
 
 ![Grok bots: native 600×450 simulator example](docs/img/grok-241-bots.png)
 

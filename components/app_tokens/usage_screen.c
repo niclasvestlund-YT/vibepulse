@@ -1285,14 +1285,15 @@ static int grok_pace(int32_t reset_seconds, int window, int span) {
   if (pace>span) pace=span;
   return (int)pace;
 }
-static const char *grok_openrouter_caption(const tk_grok_status *s) {
+static const char *grok_money_caption(const tk_grok_status *s, bool budget) {
+  if (!strcmp(s->source,"xai")) return budget ? "MONTHLY BUDGET":"SPEND · MONTH";
   if (s->has_window) {
-    if (s->window_seconds==86400) return "OPENROUTER · DAY";
-    if (s->window_seconds==604800) return "OPENROUTER · WEEK";
+    if (s->window_seconds==86400) return budget ? "DAILY BUDGET":"SPEND · DAY";
+    if (s->window_seconds==604800) return budget ? "WEEKLY BUDGET":"SPEND · WEEK";
     if (s->window_seconds>=28*86400 && s->window_seconds<=31*86400)
-      return "OPENROUTER · MONTH";
+      return budget ? "MONTHLY BUDGET":"SPEND · MONTH";
   }
-  return "OPENROUTER · SPEND";
+  return budget ? "BUDGET":"SPEND";
 }
 #ifdef TORGET_BOARD_175
 static void grok_ring_draw(lv_event_t *event) {
@@ -1381,15 +1382,14 @@ static void create_grok_page(void) {
   lv_obj_set_style_text_font(grok_page.hero,&plex_money_35,0);
   grok_visible(grok_page.left,false); grok_visible(grok_page.left_caption,false);
   grok_visible(grok_page.reset,false); grok_visible(grok_page.reset_caption,false);
-  grok_visible(grok_page.sub,false);
+  lv_obj_set_pos(grok_page.sub,22,174); lv_obj_set_width(grok_page.sub,260);
   lv_obj_set_pos(grok_page.provenance,22,208);
   lv_obj_set_pos(grok_page.empty,286,100); lv_obj_set_width(grok_page.empty,172);
 #else
   /* Keep the native quota bar's construction and width, compact its rhythm. */
-  grok_visible(grok_page.sub,false);
-  lv_obj_set_y(g->track,238); lv_obj_set_y(g->marker,234);
-  lv_obj_set_y(grok_page.left,274); lv_obj_set_y(grok_page.reset,274);
-  lv_obj_set_y(grok_page.left_caption,313); lv_obj_set_y(grok_page.reset_caption,313);
+  lv_obj_set_y(g->track,258); lv_obj_set_y(g->marker,254);
+  lv_obj_set_y(grok_page.left,286); lv_obj_set_y(grok_page.reset,286);
+  lv_obj_set_y(grok_page.left_caption,323); lv_obj_set_y(grok_page.reset_caption,323);
   create_hairline(tile,340);
 #endif
   create_pager(tile,VIEW_GROK);
@@ -1471,6 +1471,9 @@ static void refresh_grok_age(int64_t now_us) {
   if (stale!=grok_page.rendered_stale) {
     grok_page.rendered_stale=stale;
     lv_obj_set_style_text_opa(grok_page.hero,stale ? LV_OPA_50:LV_OPA_COVER,0);
+#ifdef TORGET_BOARD_175
+    lv_obj_set_style_text_opa(grok_page.gauge.percent_unit,stale ? LV_OPA_50:LV_OPA_COVER,0);
+#endif
   }
   if (feed_stale!=grok_page.rendered_rows_stale) {
 #ifdef TORGET_BOARD_175
@@ -1518,54 +1521,76 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
       strcmp(s->source,grok_page.shown.source);
 #endif
     grok_page.shown=*s; grok_page.shown_at_us=now_us;
-    const char *money_caption=!strcmp(s->source,"openrouter") ? grok_openrouter_caption(s):"API SPEND · MONTH";
-#ifdef TORGET_BOARD_175
-    money_caption=!strcmp(s->source,"openrouter") ? grok_openrouter_caption(s):"API SPEND · USD";
-#endif
-    grok_text(grok_page.caption,money ? money_caption:manual ? (s->label[0] ? s->label:"WEEKLY POOL"):bots ? "BOTS · TODAY":"GROK");
+    bool budget=money && s->has_limit && s->limit_cents>0;
+    bool percent=manual || budget;
+    int64_t basis_points=manual && data ? (int64_t)s->used_pct*100:
+      budget && data ? (int64_t)s->spent_cents*10000/s->limit_cents:-1;
+    int64_t pct=basis_points<0 ? -1:(basis_points+50)/100;
+    grok_text(grok_page.caption,money ? grok_money_caption(s,budget):manual ? (s->label[0] ? s->label:"WEEKLY USAGE"):bots ? "BOTS · TODAY":"GROK");
     if (!data) snprintf(text,sizeof text,"–");
+    else if (percent) snprintf(text,sizeof text,"%lld%%",(long long)pct);
     else if (money) grok_dollars(text,sizeof text,s->spent_cents,true);
-    else snprintf(text,sizeof text,"%ld%s",(long)(manual ? s->used_pct:s->active),manual ? "%":"");
+    else snprintf(text,sizeof text,"%ld",(long)s->active);
+    const lv_font_t *font=money && !percent ? &plex_money_118:&plex_num_118;
+    int spacing=0;
 #ifdef TORGET_BOARD_175
-    if (money && data) memmove(text,text+1,strlen(text));
-    if(manual && data) text[strlen(text)-1]=0;
+    if (money && !percent && data) memmove(text,text+1,strlen(text));
+    if(percent && data) text[strlen(text)-1]=0;
+#else
+    if(percent) { font=&plex_num_164; spacing=-9; }
+    lv_obj_set_y(grok_page.hero,105);
+    lv_obj_set_height(grok_page.hero,percent ? 150:130);
 #endif
-    const lv_font_t *font=money ? &plex_money_118:&plex_num_118;
 #ifdef TORGET_BOARD_191_TOUCH
     font=&plex_quota_84;
-    bool currency=money && data && s->spent_cents<100000;
+    spacing=percent ? -4:0;
+    lv_obj_set_y(grok_page.hero,VP_PERCENT_Y);
+    lv_obj_set_height(grok_page.hero,90);
+    bool currency=money && !percent && data && s->spent_cents<100000;
     if(currency) memmove(text,text+1,strlen(text));
     grok_visible(grok_page.currency,currency);
     if(lv_obj_get_style_x(grok_page.hero,0)!=(currency ? 40:16)) lv_obj_set_x(grok_page.hero,currency ? 40:16);
     if(lv_obj_get_style_width(grok_page.hero,0)!=(currency ? 242:266)) lv_obj_set_width(grok_page.hero,currency ? 242:266);
 #endif
+    lv_obj_set_style_text_letter_space(grok_page.hero,spacing,0);
     lv_point_t size;
-    lv_text_get_size(&size,text,font,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    lv_text_get_size(&size,text,font,spacing,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
     if (size.x>
 #ifdef TORGET_BOARD_175
         340
 #else
         lv_obj_get_style_width(grok_page.hero,0)
 #endif
-        ) font=money ? &plex_money_35:&plex_num_38;
+        ) {
+      font=money && !percent ? &plex_money_35:percent ? &plex_stat_35:&plex_num_38;
+      spacing=0;
+      lv_obj_set_style_text_letter_space(grok_page.hero,spacing,0);
+      lv_text_get_size(&size,text,font,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+      if(size.x>
+#ifdef TORGET_BOARD_175
+          300
+#else
+          lv_obj_get_style_width(grok_page.hero,0)
+#endif
+          ) font=&plex_ui_21;
+    }
     if (lv_obj_get_style_text_font(grok_page.hero,0)!=font) lv_obj_set_style_text_font(grok_page.hero,font,0);
     grok_text(grok_page.hero,text);
 #ifdef TORGET_BOARD_175
-    grok_visible(grok_page.gauge.percent_unit,manual && data);
-    if(manual && data) {
-      lv_text_get_size(&size,text,font,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    grok_visible(grok_page.gauge.percent_unit,percent && data);
+    if(percent && data) {
+      lv_text_get_size(&size,text,font,spacing,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
       int x=(480-size.x-40)/2;
       if(lv_obj_get_style_width(grok_page.hero,0)!=size.x) lv_obj_set_width(grok_page.hero,size.x);
       if(lv_obj_get_style_x(grok_page.hero,0)!=x) lv_obj_set_x(grok_page.hero,x);
       if(lv_obj_get_style_x(grok_page.gauge.percent_unit,0)!=x+size.x+3) lv_obj_set_x(grok_page.gauge.percent_unit,x+size.x+3);
-      if(lv_obj_get_style_y(grok_page.gauge.percent_unit,0)!=VP_ROUND_PERCENT_Y+60) lv_obj_set_y(grok_page.gauge.percent_unit,VP_ROUND_PERCENT_Y+60);
+      int unit_y=VP_ROUND_PERCENT_Y+(font==&plex_num_118 ? 60:0);
+      if(lv_obj_get_style_y(grok_page.gauge.percent_unit,0)!=unit_y) lv_obj_set_y(grok_page.gauge.percent_unit,unit_y);
     } else {
       if(lv_obj_get_style_x(grok_page.hero,0)!=70) lv_obj_set_x(grok_page.hero,70);
       if(lv_obj_get_style_width(grok_page.hero,0)!=340) lv_obj_set_width(grok_page.hero,340);
     }
 #endif
-    int64_t basis_points=manual && data ? s->used_pct*100:money && data && s->has_limit && s->limit_cents>0 ? (int64_t)s->spent_cents*10000/s->limit_cents:-1;
-    int64_t pct=basis_points<0 ? -1:(basis_points+50)/100;
     int fill=basis_points<0 ? 0:basis_points>10000 ? 10000:(int)basis_points;
     amount[0]=0;
     if(money && data && s->has_limit) grok_dollars(amount,sizeof amount,s->limit_cents,false);
@@ -1589,7 +1614,11 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     grok_text(grok_page.reset_caption,"TO RESET");
 #endif
     text[0]=0;
-    if (pct>=0 && money) snprintf(text,sizeof text,"%lld%% of %s limit",(long long)pct,amount);
+    if (budget && data) {
+      char spent[32]; grok_dollars(spent,sizeof spent,s->spent_cents,true);
+      snprintf(text,sizeof text,"%s of %s",spent,amount);
+    }
+    grok_visible(grok_page.sub,budget && data);
     grok_text(grok_page.sub,text);
     quota_page *g=&grok_page.gauge;
 #ifdef TORGET_BOARD_175

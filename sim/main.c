@@ -1844,6 +1844,10 @@ static int run_vibepulse_grok_qa(void) {
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-wide");
   wide.spent_cents=4718;
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-wide-left");
+  wide.spent_cents=INT32_MAX; wide.limit_cents=1;
+  tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-huge-percent");
+  wide.spent_cents=4718; wide.has_limit=false;
+  tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-unlimited");
   return capture_failures ? 1:0;
 }
 

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRAMES = ("startup", "empty", "xai", "openrouter", "manual", "bots", "stale", "disabled", "live",
           "offline", "retained", "bots-live", "bots-retained",
           "manual-live", "manual-retained", "manual-unknown-age-live",
-          "manual-unknown-age-retained", "wide", "wide-left")
+          "manual-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited")
 
 
 def brightness(image, box):
@@ -60,7 +60,7 @@ class GrokRenderTests(unittest.TestCase):
 
     def test_startup_has_no_bar_or_bot_rows(self):
         with self.frame("startup") as startup:
-            self.assertEqual(brightness(startup, (22, 234, 458, 266)), 0)
+            self.assertEqual(brightness(startup, (22, 254, 458, 282)), 0)
             self.assertEqual(brightness(startup, (22, 375, 458, 425)), 0)
             self.assertEqual(brightness(startup, (220, 24, 408, 48)), 0)
             self.assertGreater(brightness(startup, (16, 105, 464, 235)), 0)
@@ -86,10 +86,27 @@ class GrokRenderTests(unittest.TestCase):
 
     def test_native_quota_bar_uses_silver_fill_and_white_pace_tick(self):
         with self.frame("live") as live, self.frame("manual") as manual:
-            self.assertEqual(live.convert("RGB").getpixel((40, 250)), (201, 212, 232))
-            self.assertEqual(live.convert("RGB").getpixel((200, 250)), (48, 50, 56))
-            self.assertEqual(live.convert("RGB").getpixel((268, 236)), (255, 255, 255))
-            self.assertEqual(manual.convert("RGB").getpixel((180, 250)), (201, 212, 232))
+            self.assertEqual(live.convert("RGB").getpixel((40, 270)), (201, 212, 232))
+            self.assertEqual(live.convert("RGB").getpixel((200, 270)), (48, 50, 56))
+            self.assertEqual(live.convert("RGB").getpixel((268, 256)), (255, 255, 255))
+            self.assertEqual(manual.convert("RGB").getpixel((180, 270)), (201, 212, 232))
+
+    def test_budget_details_and_unlimited_fallback(self):
+        detail = (22, 232, 458, 252)
+        with self.frame("live") as budget, self.frame("unlimited") as unlimited, self.frame("manual") as manual:
+            self.assertGreater(brightness(budget, detail), 0)
+            self.assertEqual(brightness(unlimited, detail), 0)
+            self.assertEqual(brightness(manual, detail), 0)
+            self.assertEqual(brightness(unlimited, (22, 254, 458, 282)), 0)
+            self.assertGreater(brightness(unlimited, (16, 105, 464, 232)), 0)
+
+    def test_maximum_percent_fits_and_bar_stays_clamped(self):
+        with self.frame("huge-percent") as huge, self.frame("wide") as full:
+            self.assertGreater(brightness(huge, (16, 105, 464, 160)), 0)
+            self.assertEqual(brightness(huge, (16, 160, 464, 232)), 0)
+            self.assertIsNone(ImageChops.difference(
+                huge.crop((22, 258, 458, 282)).convert("RGB"),
+                full.crop((22, 258, 458, 282)).convert("RGB")).getbbox())
 
     def test_bot_divider_and_status_dot_landmarks(self):
         with self.frame("live") as live:

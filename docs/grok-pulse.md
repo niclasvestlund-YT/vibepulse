@@ -153,7 +153,9 @@ sensitive task descriptions. Neither prompts nor chat history are collected.
 
 ## Panel page (build-time opt-in)
 
-The optional **GROK** page displays xAI or OpenRouter monthly API spend, a manually observed
+The optional **GROK** page displays xAI or OpenRouter percent of budget with
+spent and limit dollars below. Without a positive limit, the hero shows dollars.
+It also supports a manually observed
 quota percentage, or bot activity, with explicit source and freshness. Unknown
 numbers show a dash; a later unavailable reading retains the last real value.
 Stale values dim. If the panel gets no successful `/api/grok` read for 90
@@ -189,10 +191,12 @@ SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software ./sim/build-grok/torget-sim --v
 On a desktop, the SDL environment variables can be omitted. Offline builds can add
 `-DFETCHCONTENT_SOURCE_DIR_LVGL=/path/to/cached/lvgl-src` to CMake.
 The fixtures produce `/tmp/torget-vibepulse-grok-<state>.bmp` for
-`startup` (before any Grok payload), `empty`, `xai`, `openrouter`, `manual`, `bots`, `stale`, `disabled` and `live` (API spend
+`startup` (before any Grok payload), `empty`, `xai`, `openrouter`, `manual`, `bots`, `stale`, `disabled` and `live` (budget percentage
 plus four bots), followed by `offline` (91 s without a read) and `retained`
 (a payload without numbers after real readings). Additional captures cover
-retained bot/manual readings, manual age unknown, and maximum wire values.
+retained bot/manual readings, manual age unknown, maximum wire values,
+`huge-percent` (INT32_MAX cents against a one-cent budget), and `unlimited`
+(the dollar-hero fallback with no limit).
 `test/test_grok_render.py`
 builds the 2.16 variant in the host gate and checks those transitions.
 Set `TORGET_CAPTURE_DIR` to an existing directory to retain captures from
@@ -210,7 +214,9 @@ physical AMOLED rendering.
 Before the first successful poll, every profile shows a dash and WAITING, with
 bot rows and the usage bar hidden. No snapshot is recorded by initialization.
 OpenRouter captions use DAY, WEEK or MONTH for reported 1-day, 7-day or
-28–31-day windows; other or missing windows show SPEND. Optional `windowSeconds`
+28–31-day windows: DAILY/WEEKLY/MONTHLY BUDGET with a limit,
+SPEND · DAY/WEEK/MONTH without one. Other or missing windows show BUDGET
+or SPEND respectively. Optional `windowSeconds`
 is an integer from 1 to 2678400. Pace uses this window when supplied, otherwise
 xAI uses 30 days and manual uses 7 days. OpenRouter without a window has no
 pace marker, including on the round ring.
