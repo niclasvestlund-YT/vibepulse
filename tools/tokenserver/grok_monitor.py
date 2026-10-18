@@ -7,6 +7,7 @@ import threading
 import time
 import unicodedata
 from datetime import datetime, timezone, timedelta
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -53,39 +54,48 @@ def number(value):
 
 
 class JsonFile:
-    """Read only changed files; malformed input never leaks into logs."""
+    """Validate only changed content; malformed input never leaks into logs."""
     def __init__(self, path):
         self.path = path
         self.signature = None
         self.data = None
         self.mtime = None
         self.warned = False
+        self.invalid = False
+        self.generation = 0
 
     def read(self, validate):
         try:
             stat = self.path.stat()
-            signature = (stat.st_mtime_ns, stat.st_size)
+            if stat.st_size > 65536:
+                self.signature = None
+                raise ValueError('oversized file')
+            raw = self.path.read_bytes()
+            if len(raw) > 65536:
+                self.signature = None
+                raise ValueError('oversized file')
+            signature = raw
             if signature == self.signature:
                 return self.data
-            if stat.st_size > 65536:
-                self.signature = signature
-                raise ValueError('oversized file')
-            raw = self.path.read_text(encoding='utf-8')
             # Only content is cached by signature. A transient I/O error
             # (locked file, permissions) must be retried on the next poll.
             self.signature = signature
-            data = validate(json.loads(raw))
+            data = validate(json.loads(raw.decode('utf-8')))
             self.data, self.mtime = data, stat.st_mtime
+            self.invalid = False
+            self.generation += 1
         except FileNotFoundError:
             self.signature = self.data = self.mtime = None
+            self.invalid = False
         except OSError:
-            self.signature = self.data = None
+            self.signature = None
+            self.invalid = True
             if not self.warned:
                 log.warning('%s: could not be read; retrying', self.path.name)
                 self.warned = True
         except (ValueError, TypeError, KeyError, RecursionError, OverflowError,
                 UnicodeDecodeError):
-            self.data = None
+            self.invalid = True
             if not self.warned:
                 log.warning('%s: invalid input ignored', self.path.name)
                 self.warned = True
@@ -164,8 +174,8 @@ class GrokBotStore:
                 raise ValueError('duplicate bot names')
             return records
         records = self._file.read(validate)
-        if records is not None and self._file.signature != self._loaded:
-            self._loaded = self._file.signature
+        if records is not None and self._file.generation != self._loaded:
+            self._loaded = self._file.generation
             for name, bot in records:
                 self._put(name, bot, file=True)
         now = self.clock()
@@ -243,11 +253,11 @@ class PlanQuotaSource:
             if data is None:
                 return None
             live = data.get('estimateFrom') == 'bots'
-            result = {'source': 'plan', 'stale': False,
+            result = {'source': 'plan', 'stale': self._file.invalid,
                       'estimated': 'usedPct' not in data}
             if not live:
                 age = bounded(self.clock() - self._file.mtime)
-                result.update(ageSeconds=age, stale=age > 600)
+                result.update(ageSeconds=age, stale=self._file.invalid or age > 600)
             if 'usedPct' in data:
                 result['usedPct'] = data['usedPct']
             else:
@@ -259,6 +269,7 @@ class PlanQuotaSource:
                 result['windowSeconds'] = 86400 if window == 'daily' else 604800
             if 'resetAt' in data:
                 result['resetSeconds'] = bounded(data['resetAt'] - self.clock())
+                result['stale'] |= data['resetAt'] <= self.clock()
             elif window == 'daily':
                 tomorrow = datetime.fromtimestamp(self.clock()).date() + timedelta(days=1)
                 midnight = datetime.combine(tomorrow, datetime.min.time()).timestamp()
@@ -288,6 +299,33 @@ class XaiApiUsageSource:
         self._data = None
         self._success = None
         self._failed = False
+        self._failures = 0
+        self._retry_after = 0
+
+    def _record_failure(self, error):
+        self._failed = True
+        self._failures += 1
+        self._retry_after = 0
+        status = error.code if isinstance(error, HTTPError) else getattr(error, 'status', None)
+        retry = (error.headers.get('Retry-After') if isinstance(error, HTTPError)
+                 and error.headers else getattr(error, 'retry_after', None))
+        if status in (429, 503):
+            try:
+                seconds = float(retry)
+                if math.isfinite(seconds) and seconds >= 0:
+                    self._retry_after = seconds
+            except (ValueError, TypeError):
+                pass
+
+    def _poll_delay(self):
+        with self._lock:
+            backoff = min(3600, 300 * 2 ** min(max(0, self._failures - 1), 4))
+            return min(21600, max(backoff, self._retry_after))
+
+    def _record_success(self):
+        self._failed = False
+        self._failures = 0
+        self._retry_after = 0
 
     def _request(self):
         # Never follow redirects: urllib would forward the explicitly set
@@ -328,19 +366,20 @@ class XaiApiUsageSource:
                     result['limitCents'] = bounded(int(value))
             if not result:
                 raise ValueError('missing billing values')
-        except Exception:
+        except Exception as error:
             # Exception messages/HTTP bodies can contain credentials. Never log them.
             log.warning('xAI billing poll failed; retaining last good reading')
             with self._lock:
-                self._failed = True
+                self._record_failure(error)
             return
         with self._lock:
-            self._data, self._success, self._failed = result, self.clock(), False
+            self._data, self._success = result, self.clock()
+            self._record_success()
 
     def _run(self):
         while not self._stop.is_set():
             self.poll()
-            if self._stop.wait(300):
+            if self._stop.wait(self._poll_delay()):
                 break
 
     def start(self):
@@ -359,7 +398,9 @@ class XaiApiUsageSource:
         if not self.configured:
             return None
         with self._lock:
-            result = {'source': 'xai', 'stale': True}
+            if self._data is None:
+                return None
+            result = {'source': 'xai', 'label': 'XAI POSTPAID', 'stale': True}
             if self._data is not None:
                 age = bounded(self.clock() - self._success)
                 result.update(self._data, ageSeconds=age,
@@ -455,10 +496,10 @@ class OpenRouterUsageSource(XaiApiUsageSource):
                     result['windowSeconds'] = self._window(window)
             if not any(name in result for name in ('spentCents', 'limitCents')):
                 raise ValueError('missing billing values')
-        except Exception:
+        except Exception as error:
             log.warning('OpenRouter billing poll failed; retaining last good reading')
             with self._lock:
-                self._failed = True
+                self._record_failure(error)
             return
         # Account credits are optional: their failure must not discard key spend.
         failed = False
@@ -466,15 +507,23 @@ class OpenRouterUsageSource(XaiApiUsageSource):
             try:
                 credits = self._client.get('credits', self._management_key)
                 total, used = credits.get('total_credits'), credits.get('total_usage')
-                remaining = number(total) - number(used)
+                total, used = number(total), number(used)
+                if total < 0 or used < 0:
+                    raise ValueError('negative credits operand')
+                remaining = total - used
                 if remaining < 0:
                     raise ValueError('negative balance')
                 result['prepaidCents'] = self._cents(remaining)
-            except Exception:
+            except Exception as error:
+                failure = error
                 log.warning('OpenRouter credits poll failed; omitting account credits')
                 failed = True
         with self._lock:
-            self._data, self._success, self._failed = result, self.clock(), failed
+            self._data, self._success = result, self.clock()
+            if failed:
+                self._record_failure(failure)
+            else:
+                self._record_success()
 
     def snapshot(self):
         if not self.configured:
@@ -487,7 +536,9 @@ class OpenRouterUsageSource(XaiApiUsageSource):
                       'stale': self._failed or age > 600, 'ageSeconds': age,
                       **self._data}
             if 'resetAt' in result:
-                result['resetSeconds'] = bounded(result.pop('resetAt') - self.clock())
+                reset = result.pop('resetAt')
+                result['resetSeconds'] = bounded(reset - self.clock())
+                result['stale'] |= reset <= self.clock()
             return result
 
 
@@ -531,9 +582,6 @@ class GrokMonitor:
                 # mode an empty bot store supplies no reading.
                 data = (source.snapshot(allow_empty=self.source == 'bots')
                         if name == 'bots' else source.snapshot())
-                if (self.source == 'auto' and name == 'xai' and
-                        'ageSeconds' not in (data or {})):
-                    data = None
                 if data is not None:
                     break
             result = {'v': 1, 'enabled': True, **(data or {'source': 'none', 'stale': True})}

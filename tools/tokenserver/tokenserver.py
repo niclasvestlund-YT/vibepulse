@@ -3655,7 +3655,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/api/tokens", "/api/agent-status",
-                         "/api/max-tracker", "/api/github", "/api/lovable", "/api/grok"):
+                         "/api/max-tracker", "/api/github", "/api/lovable"):
             self._record_panel_poll()
         if self.path == "/api/tokens":
             self._reply(self._tokens_payload)

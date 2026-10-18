@@ -9,7 +9,10 @@ import urllib.request
 
 
 class SourceError(Exception):
-    pass
+    def __init__(self, message, status=None, retry_after=None):
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -41,8 +44,10 @@ class Client:
             return payload["data"]
         except urllib.error.HTTPError as error:
             code = "auth" if error.code in (401, 403) else "rate_limited" if error.code == 429 else "upstream"
+            retry = error.headers.get('Retry-After') if error.headers else None
+            status = error.code
             error.close()
-            raise SourceError(code) from None
+            raise SourceError(code, status, retry) from None
         except (urllib.error.URLError, OSError, TimeoutError):
             raise SourceError("connection") from None
         except (ValueError, UnicodeError):

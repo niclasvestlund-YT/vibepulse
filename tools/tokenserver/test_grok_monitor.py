@@ -35,6 +35,101 @@ class GrokFixture(unittest.TestCase):
 
 
 class GrokTests(GrokFixture):
+    def test_same_stat_rewrite_and_unchanged_content_validation(self):
+        path = self.write('grok.json', {'v': 1, 'usedPct': 10})
+        reader = grok.JsonFile(path)
+        validate = Mock(side_effect=lambda data: data)
+        self.assertEqual(reader.read(validate)['usedPct'], 10)
+        stamp = path.stat().st_mtime_ns
+        self.write('grok.json', {'v': 1, 'usedPct': 20})
+        os.utime(path, ns=(stamp, stamp))
+        self.assertEqual(reader.read(validate)['usedPct'], 20)
+        os.utime(path, ns=(stamp + 1, stamp + 1))
+        reader.read(validate)
+        self.assertEqual(validate.call_count, 2)
+
+    def test_invalid_plan_retains_stale_reading_and_recovers(self):
+        monitor = grok.GrokMonitor(clock=self.clock)
+        path = self.write('grok.json', {'v': 1, 'usedPct': 12})
+        self.assertFalse(monitor.snapshot()['stale'])
+        for invalid in ('{bad', '{"v":1,"usedPct":101}'):
+            path.write_text(invalid)
+            with patch.object(grok.log, 'warning'):
+                data = monitor.snapshot()
+            self.assertEqual((data['source'], data['usedPct'], data['stale']),
+                             ('plan', 12, True))
+        self.write('grok.json', {'v': 1, 'usedPct': 13})
+        self.assertFalse(monitor.snapshot()['stale'])
+        path.unlink()
+        self.assertEqual(monitor.snapshot()['source'], 'none')
+
+    def test_invalid_bot_file_does_not_reapply_retained_records(self):
+        path = self.write('grok-bots.json', {'v': 1, 'bots': [
+            {'bot': 'filebot', 'state': 'done', 'updatedAt': self.now}]})
+        self.assertEqual(self.store.snapshot()['doneToday'], 1)
+        generation = self.store._file.generation
+        path.write_text('{bad')
+        with patch.object(self.store, '_put') as put, patch.object(grok.log, 'warning'):
+            self.assertEqual(self.store.snapshot()['doneToday'], 1)
+            self.store.snapshot()
+        put.assert_not_called()
+        self.assertEqual(self.store._file.generation, generation)
+
+    def test_expired_plan_observations_are_stale(self):
+        source = grok.PlanQuotaSource(self.clock)
+        for form in ({'usedPct': 25}, {'window': 'daily', 'used': 1, 'limit': 4}):
+            with self.subTest(form=form):
+                self.write('grok.json', {'v': 1, **form, 'resetAt': self.now + 1})
+                self.assertFalse(source.snapshot()['stale'])
+                self.now += 1
+                data = source.snapshot()
+                self.assertTrue(data['stale'])
+                self.assertEqual((data['resetSeconds'], data['usedPct']), (0, 25))
+
+    def test_explicit_xai_first_failure_has_no_reading(self):
+        os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
+        monitor = grok.GrokMonitor('xai', self.clock, Mock(side_effect=RuntimeError('secret')))
+        with self.assertLogs('tokenserver.grok'):
+            monitor.xai.poll()
+        data = monitor.snapshot()
+        self.assertEqual((data['source'], data['stale']), ('none', True))
+        for field in ('spentCents', 'limitCents', 'prepaidCents'):
+            self.assertNotIn(field, data)
+
+    def test_xai_backoff_retry_after_and_success_reset(self):
+        from urllib.error import HTTPError
+        os.environ.update(XAI_MANAGEMENT_KEY='secret', XAI_TEAM_ID='team')
+        fetch = Mock(side_effect=ValueError('secret'))
+        source = grok.XaiApiUsageSource(fetch, self.clock)
+        with patch.object(grok.log, 'warning'):
+            for expected in (300, 600, 1200, 2400, 3600, 3600):
+                source.poll()
+                self.assertEqual(source._poll_delay(), expected)
+            for status, retry, expected in ((429, '7200', 7200), (503, '99999', 21600),
+                                             (500, '99999', 3600), (429, 'invalid', 3600),
+                                             (503, '60', 3600)):
+                fetch.side_effect = HTTPError('https://example.com', status, 'secret',
+                                              {'Retry-After': retry}, None)
+                source.poll()
+                self.assertEqual(source._poll_delay(), expected)
+        fetch.side_effect = None
+        fetch.return_value = {'coreInvoice': {'amountAfterVat': '0'}}
+        source.poll()
+        self.assertEqual(source._poll_delay(), 300)
+        self.assertEqual(source._failures, 0)
+        label = source.snapshot()['label']
+        self.assertEqual(label, 'XAI POSTPAID')
+        self.assertLessEqual(len(label), 16)
+        self.assertTrue(all(' ' <= char <= '~' for char in label))
+        source._stop = Mock()
+        source._stop.is_set.return_value = False
+        source._stop.wait.return_value = True
+        fetch.side_effect = RuntimeError('secret')
+        with patch.object(grok.log, 'warning'):
+            source.poll()
+            source._run()
+        source._stop.wait.assert_called_once_with(600)
+
     def test_validation_and_display(self):
         self.post(bot='Re\x00search', activity='é' * 32)
         bot = self.store.snapshot()['bots'][0]
@@ -229,7 +324,10 @@ class GrokTests(GrokFixture):
             self.now += 1
             self.write('grok.json', {'v': 1, 'usedPct': bad})
             with self.assertLogs('tokenserver.grok') if not monitor.plan._file.warned else patch.object(grok.log, 'warning'):
-                self.assertEqual(monitor.snapshot()['source'], 'none')
+                retained = monitor.snapshot()
+                self.assertEqual(retained['source'], 'plan')
+                self.assertEqual(retained['usedPct'], 42)
+                self.assertTrue(retained['stale'])
         # A valid plan wins over bot activity.
         self.now += 1
         self.write('grok.json', {'v': 1, 'usedPct': 10})
@@ -520,11 +618,11 @@ class GrokTests(GrokFixture):
     def test_transient_read_error_is_retried_without_file_change(self):
         self.write('grok-bots.json', {'v': 1, 'bots': [
             {'bot': 'filebot', 'state': 'working', 'updatedAt': self.now}]})
-        real = Path.read_text
-        with patch.object(Path, 'read_text', side_effect=PermissionError('locked')), \
+        real = Path.read_bytes
+        with patch.object(Path, 'read_bytes', side_effect=PermissionError('locked')), \
                 self.assertLogs('tokenserver.grok'):
             self.assertEqual(self.store.snapshot()['bots'], [])
-        with patch.object(Path, 'read_text', real):
+        with patch.object(Path, 'read_bytes', real):
             self.assertEqual(self.store.snapshot()['bots'][0]['name'], 'filebot')
 
     def test_billing_request_refuses_redirects(self):
@@ -552,6 +650,38 @@ class OpenRouterTests(GrokFixture):
             response.read.return_value = json.dumps({'data': item}).encode()
             responses.append(response)
         self.opener.open.side_effect = responses
+
+    def test_reset_boundary_marks_cached_window_stale_until_poll(self):
+        self.reply({'usage_daily': 1, 'limit': 10, 'limit_reset': 'daily'})
+        self.source.poll()
+        self.now += self.source.snapshot()['resetSeconds']
+        data = self.source.snapshot()
+        self.assertEqual(data['resetSeconds'], 0)
+        self.assertTrue(data['stale'])
+        self.reply({'usage_daily': 0, 'limit': 10, 'limit_reset': 'daily'})
+        self.source.poll()
+        self.assertFalse(self.source.snapshot()['stale'])
+
+    def test_wrapped_http_retry_after_applies_to_billing_and_credits(self):
+        from urllib.error import HTTPError
+        for endpoint in ('key', 'credits'):
+            with self.subTest(endpoint=endpoint):
+                self.source._management_key = 'management' if endpoint == 'credits' else None
+                error = HTTPError('https://openrouter.ai', 503, 'secret',
+                                  {'Retry-After': '7200'}, None)
+                if endpoint == 'credits':
+                    self.reply({'usage_monthly': 1})
+                    self.opener.open.side_effect = list(self.opener.open.side_effect) + [error]
+                else:
+                    self.opener.open.side_effect = error
+                with self.assertLogs('tokenserver.grok') as logs:
+                    self.source.poll()
+                self.assertEqual(self.source._poll_delay(), 7200)
+                self.assertNotIn('secret', ''.join(logs.output))
+                self.source._management_key = None
+                self.reply({'usage_monthly': 1})
+                self.source.poll()
+                self.assertEqual(self.source._poll_delay(), 300)
 
     def test_key_credits_budget_and_age(self):
         self.source._management_key = 'fake-management-secret'
@@ -583,7 +713,10 @@ class OpenRouterTests(GrokFixture):
     def test_invalid_credits_keep_key_spend_but_mark_stale(self):
         self.source._management_key = 'fake-management-secret'
         invalid = [{}, {'total_credits': 80}, {'total_usage': 12},
-                   {'total_credits': 10, 'total_usage': 12}]
+                   {'total_credits': 10, 'total_usage': 12},
+                   {'total_credits': -1, 'total_usage': -2},
+                   {'total_credits': 10, 'total_usage': -2},
+                   {'total_credits': -1, 'total_usage': 2}]
         for field in ('total_credits', 'total_usage'):
             for value in (None, True, 'fake-management-secret', [], {},
                           float('nan'), float('inf')):

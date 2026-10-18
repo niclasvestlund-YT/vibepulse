@@ -1,5 +1,15 @@
 # Lessons log
 
+## 2026-10-18 · File identity and accounting windows are not freshness
+
+Grok files could change within an unchanged mtime/size pair, and invalid
+replacements discarded the last good observation. Read bounded content each
+time, validate only changed bytes, and track successful parse generations so
+retained bot records never replay. Retained invalid observations and expired
+accounting windows must be stale. API failure streaks need bounded backoff,
+including sanitized HTTP retry metadata; host previews cannot prove panel
+contact. Focused Grok and HTTP regressions cover these review findings.
+
 ## 2026-09-30 · Empty key states must not retain another key's severity
 
 OpenPulse cleared its data-valid flag when switching API keys, but the accent

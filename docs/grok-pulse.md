@@ -69,9 +69,13 @@ local daylight-saving changes). Weekly windows omit an unknown reset.
 Forms 2 and 3 include `planUsed` and `planLimit`.
 
 Unknown keys, mixed forms and invalid numbers are rejected with one sanitized
-warning. Files use the existing modification-time/size cache; replace them
-atomically to avoid partial reads. Copied observations and user counts become
-stale after 600 seconds. No automatic grok.com access is implied.
+warning. Files are capped at 64 KiB and read on each check; only changed content is
+validated and applied. Replace them atomically to avoid partial reads. Invalid
+replacements retain the last valid reading marked stale; a successful parse
+clears that invalid state, and deleting the file clears its reading. Bot file
+records are applied only after a new valid parse, preventing retained records
+from being replayed. Copied observations and user counts become stale after
+600 seconds or when their declared resetAt is reached. No automatic grok.com access is implied.
 
 ### Source selection
 
@@ -104,11 +108,19 @@ export XAI_TEAM_ID='<team ID>'
 A terminal export alone does not update an already running launchd or Windows
 Task Scheduler process. Use your service's environment configuration; keep the
 key out of command-line arguments, source control and shared logs. The source
-polls immediately at startup, then every 300 seconds, with a 15-second timeout.
+polls immediately at startup, then every 300 seconds after success, with a
+15-second timeout. Failures back off exponentially from 300 seconds to one hour.
+For HTTP 429/503, a numeric Retry-After can extend that delay up to six hours
+(the larger of the backoff and Retry-After, capped at six hours). Success resets
+the backoff.
 It reads `coreInvoice.totalWithCorr.val` (falling back to `amountAfterVat`),
 negates `prepaidCredits.val` for the available credit balance, and uses a
-positive `effectiveSpendingLimit` only. Credits are reported in `/api/grok` as
-`prepaidCents` for host consumers and are not drawn on the panel page.
+positive postpaid `effectiveSpendingLimit` only. The label is `XAI POSTPAID`:
+`spentCents` is the postpaid invoice amount due for the current billing month,
+paired with that postpaid spending limit. Usage paid from prepaid credits is
+not included, so the amount due stays zero while prepaid credits cover usage.
+Credits are reported in `/api/grok` as `prepaidCents` for host consumers and
+are not drawn on the panel page.
 No limit is inferred from a plan.
 
 ### OpenRouter (optional secondary source)
@@ -119,7 +131,8 @@ Select `--grok-source openrouter` explicitly, or use `auto`. Optionally set
 cannot read that endpoint. Credentials come only from these environment
 variables; this source does not read Keychain or credential files.
 
-The source polls immediately, then every five minutes, using fixed read-only
+The source polls immediately, then every five minutes after success, with the
+same failure backoff and HTTP 429/503 Retry-After handling as xAI above, using fixed read-only
 [key and credits endpoints](https://openrouter.ai/docs/api-reference/limits),
 with redirects refused, bounded responses and an eight-second timeout per
 request. The label is `OPENROUTER`. Spend and limit always come from the same window:
@@ -137,10 +150,12 @@ request. The label is `OPENROUTER`. Spend and limit always come from the same wi
 Readings with a daily, weekly or monthly window also carry `windowSeconds`, so
 the panel can name the window and place its pace marker; lifetime budgets and
 never-resetting limits omit it. This is per-key spend, not account-wide spend. Credits are optional
-account-wide remaining credits (`total_credits - total_usage`), reported in
-`/api/grok` as `prepaidCents` for host consumers only with the management key.
-They are not drawn on the panel page. A credits failure omits credits and marks the reading
-stale. Unknown countdowns and missing numbers are omitted. All monetary values
+account-wide remaining credits (`total_credits - total_usage`), requiring
+non-negative operands and a non-negative balance, reported in `/api/grok` as
+`prepaidCents` for host consumers only with the management key. They are not
+drawn on the panel page. A credits failure omits credits and marks the reading
+stale. Once a cached accounting window reaches its reset instant, its reading
+is stale with resetSeconds zero until a new poll succeeds. Unknown countdowns and missing numbers are omitted. All monetary values
 are rounded to USD cents. No limit is inferred from a plan.
 
 ## Grok Bot status and local scripts
@@ -187,6 +202,8 @@ memory and restart with the service; file input is not a durable history.
 `GET /api/grok` supplies the small flat panel payload on the existing LAN
 server. When disabled it returns `{"v":1,"enabled":false}`; posting returns
 404. Root diagnostics expose only enabled/source/stale and bot count.
+LAN reads of the host preview endpoint `/api/grok` do not count as physical-panel
+contact; the route remains listed in diagnostics.
 The POST receiver accepts only loopback clients with a valid loopback Host,
 no Origin header, JSON content type, known fields and bodies up to 1024 bytes.
 It offers no browser CORS access. Local processes can submit statuses.

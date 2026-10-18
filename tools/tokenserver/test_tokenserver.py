@@ -3561,6 +3561,17 @@ class PanelStartupHealthTests(unittest.TestCase):
         handler.headers.get_all.return_value = []
         return handler
 
+    def test_two_lan_grok_previews_do_not_mark_panel_ready(self):
+        handler = self._handler("192.0.2.40")
+        handler.path = "/api/grok"
+        handler.grok_monitor = None
+        with mock.patch.object(handler, "_reply") as reply:
+            handler.do_GET()
+            handler.do_GET()
+        self.assertEqual(reply.call_count, 2)
+        self.assertEqual(handler._panel_health_snapshot(), {"status": "waiting"})
+        self.assertEqual(self.cls.panel_poll_candidate_count, 0)
+
     def test_two_close_panel_polls_turn_health_ready_without_exposing_ip(self):
         handler = self._handler("192.0.2.40")
         with mock.patch.object(tokenserver.time, "monotonic",
@@ -5578,7 +5589,7 @@ class GrokEndpointTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(data['bots'][0]['state'], 'waiting')
         self.assertEqual(data['active'], 1)
-        self.record.assert_called_once()
+        self.record.assert_not_called()
         self.handler.grok_monitor = None
         self.assertEqual(self.request(), (200, {'v': 1, 'enabled': False}))
         self.assertEqual(self.post()[0], 404)
