@@ -1784,6 +1784,23 @@ static int run_vibepulse_needs_you_render_qa(void) {
   return 0;
 }
 
+#ifdef TORGET_BOARD_191_TOUCH
+/* Check the rendered hero's actual font, including punctuation and height. */
+static bool grok_dollar_hero_readable(lv_obj_t *root) {
+  if(lv_obj_check_type(root,&lv_label_class) &&
+     !strcmp(lv_label_get_text(root),"$1,234")) {
+    const lv_font_t *font=lv_obj_get_style_text_font(root,0);
+    lv_font_glyph_dsc_t glyph;
+    return font->line_height<=lv_obj_get_height(root) &&
+      lv_font_get_glyph_dsc(font,&glyph,'$',0) &&
+      lv_font_get_glyph_dsc(font,&glyph,',',0);
+  }
+  for(uint32_t i=0;i<lv_obj_get_child_count(root);i++)
+    if(grok_dollar_hero_readable(lv_obj_get_child(root,i))) return true;
+  return false;
+}
+#endif
+
 /* Grok build-time opt-in captures; no persisted Labs choice. */
 static int run_vibepulse_grok_qa(void) {
   capture_failures = 0;
@@ -1848,6 +1865,14 @@ static int run_vibepulse_grok_qa(void) {
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-huge-percent");
   wide.spent_cents=4718; wide.has_limit=false;
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-unlimited");
+  wide.spent_cents=123456;
+  tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-dollar-thousands");
+#ifdef TORGET_BOARD_191_TOUCH
+  if(!grok_dollar_hero_readable(lv_screen_active())) {
+    fprintf(stderr,"grok: dollar hero font lacks punctuation or exceeds its box\n");
+    capture_failures++;
+  }
+#endif
   apply_grok_file("grok-plan-nowindow.json");
   lv_refr_now(NULL); dump_frame("vibepulse-grok-plan-nowindow");
   return capture_failures ? 1:0;

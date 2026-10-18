@@ -209,6 +209,8 @@ CONNECTION`), so old WORKING/NEEDS YOU states never look live. A retained
 number that the latest payload no longer carries keeps its own source label
 and is shown dimmed. Plan resets count down locally. Bot states include
 WORKING, NEEDS YOU, DONE, IDLE and ERROR; this page cannot approve actions.
+Aggregate ACTIVE counts include both working and waiting bots, even when the
+host truncates the displayed bot rows.
 
 Enable `#define TK_GROK_SCREEN_ENABLED 1` in `secrets.h`, or configure firmware
 with `-D TORGET_GROK=ON`. The default is **0**. An optional `TK_GROK_URL`

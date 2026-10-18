@@ -1576,7 +1576,8 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     lv_obj_set_height(grok_page.hero,percent ? 150:130);
 #endif
 #ifdef TORGET_BOARD_191_TOUCH
-    font=&plex_quota_84;
+    /* Quota glyphs omit dollars/commas; the 118 px money font is too tall. */
+    font=money && !percent && s->spent_cents>=100000 ? &plex_money_35:&plex_quota_84;
     spacing=percent ? -4:0;
     lv_obj_set_y(grok_page.hero,VP_PERCENT_Y);
     lv_obj_set_height(grok_page.hero,90);
@@ -1685,7 +1686,7 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   int priority=-1;
   for(unsigned i=0;i<count;i++) if(!strcmp(s->bots[i].state,"waiting")) {waiting++; if(priority<0) priority=(int)i;}
   if(waiting) snprintf(text,sizeof text,"%u NEEDS YOU",waiting);
-  else if(s->enabled && s->active) snprintf(text,sizeof text,"%ld BOTS WORKING",(long)s->active);
+  else if(s->enabled && s->active) snprintf(text,sizeof text,"%ld BOTS ACTIVE",(long)s->active);
   else snprintf(text,sizeof text,"NO BOTS");
 #ifndef TORGET_BOARD_175
   grok_text(grok_page.context,text);
@@ -1697,13 +1698,13 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
   max_rows=0;
   bool shown_plan=!strcmp(grok_page.shown.source,"plan");
   grok_visible(grok_page.bot_counts,shown_plan && grok_page.has_data);
-  snprintf(text,sizeof text,"%ld WORKING · %u NEEDS YOU",(long)(s->enabled ? s->active:0),waiting);
+  snprintf(text,sizeof text,"%ld ACTIVE · %u NEEDS YOU",(long)(s->enabled ? s->active:0),waiting);
   grok_text(grok_page.bot_counts,text);
   if(shown_plan) {
     lv_obj_set_style_text_font(grok_page.reset,&plex_stat_35,0);
     lv_obj_set_style_text_color(grok_page.reset,COL_WHITE,0);
   } else {
-    grok_text(grok_page.left_caption,"WORKING");
+    grok_text(grok_page.left_caption,"ACTIVE");
     if(s->enabled && strcmp(s->source,"none")) snprintf(text,sizeof text,"%ld",(long)s->active);
     else snprintf(text,sizeof text,"–");
     grok_text(grok_page.left,text);

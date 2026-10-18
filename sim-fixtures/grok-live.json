@@ -3,7 +3,7 @@
   "enabled": true,
   "source": "plan",
   "stale": false,
-  "active": 1,
+  "active": 2,
   "doneToday": 12,
   "bots": [
     {

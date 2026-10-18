@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRAMES = ("startup", "empty", "xai", "openrouter", "plan", "plan-est", "plan-bots", "bots", "stale", "disabled", "live",
           "offline", "retained", "bots-live", "bots-retained",
           "plan-live", "plan-retained", "plan-unknown-age-live",
-          "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited", "plan-nowindow")
+          "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited", "dollar-thousands", "plan-nowindow")
 
 
 def brightness(image, box):
@@ -144,6 +144,38 @@ class GrokRenderTests(unittest.TestCase):
                 self.assertGreater(brightness(retained, footer), brightness(live, footer))
                 self.assertLess(brightness(retained, (16, 112, 464, 242)),
                                 0.8 * brightness(live, (16, 112, 464, 242)))
+
+
+class GrokFixtureTests(unittest.TestCase):
+    def test_191_dollar_thousands_font_and_capture(self):
+        build = ROOT / "sim/build-grok-waveshare_191_touch"
+        configure = ["cmake", "-S", "sim", "-B", str(build), "-G", "Ninja",
+                     "-DTORGET_BOARD=waveshare_191_touch", "-DTORGET_GROK=ON",
+                     "-DTORGET_SOLELKOLLEN_DIR=/nonexistent", "-DTORGET_WITH_BUDDY=OFF"]
+        lvgl = ROOT / "sim/build/_deps/lvgl-src"
+        if lvgl.is_dir():
+            configure.append(f"-DFETCHCONTENT_SOURCE_DIR_LVGL={lvgl}")
+        for command in (configure, ["cmake", "--build", str(build)]):
+            subprocess.run(command, cwd=ROOT, check=True, capture_output=True)
+        with tempfile.TemporaryDirectory() as directory:
+            # QA also checks the actual hero font's dollar/comma glyphs and height.
+            subprocess.run([str(build / "torget-sim"), "--vibepulse-grok-qa"],
+                           cwd=ROOT, check=True, capture_output=True,
+                           env={**os.environ, "TORGET_CAPTURE_DIR": directory})
+            with Image.open(Path(directory) / "torget-vibepulse-grok-dollar-thousands.bmp") as image:
+                self.assertEqual(image.size, (536, 240))
+                self.assertGreater(brightness(image, (16, 40, 282, 130)), 0)
+
+    def test_active_includes_working_and_waiting(self):
+        import json
+
+        for path in sorted((ROOT / "sim-fixtures").glob("*.json")):
+            payload = json.loads(path.read_text())
+            if "active" in payload:
+                with self.subTest(fixture=path.name):
+                    self.assertEqual(payload["active"], sum(
+                        bot["state"] in ("working", "waiting")
+                        for bot in payload.get("bots", [])))
 
 
 class GrokDocsTests(unittest.TestCase):
