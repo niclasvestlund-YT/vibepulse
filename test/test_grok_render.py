@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRAMES = ("startup", "empty", "xai", "openrouter", "plan", "plan-est", "plan-bots", "bots", "stale", "disabled", "live",
           "offline", "retained", "bots-live", "bots-retained",
           "plan-live", "plan-retained", "plan-unknown-age-live",
-          "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited", "dollar-thousands", "plan-nowindow")
+          "plan-unknown-age-retained", "wide", "wide-left", "huge-percent", "unlimited", "zero-limit", "dollar-thousands", "plan-nowindow")
 
 
 def brightness(image, box):

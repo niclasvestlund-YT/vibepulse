@@ -1628,9 +1628,8 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
 #endif
     int fill=basis_points<0 ? 0:basis_points>10000 ? 10000:(int)basis_points;
     amount[0]=0;
-    if(money && data && s->has_limit) grok_dollars(amount,sizeof amount,s->limit_cents,false);
-    if (money && data && s->has_limit) {
-      grok_dollars(amount,sizeof amount,s->limit_cents,false);
+    if(money && data && budget) grok_dollars(amount,sizeof amount,s->limit_cents,false);
+    if (money && data && budget) {
       snprintf(text,sizeof text,"LEFT OF %s",amount); grok_text(grok_page.left_caption,text);
       grok_dollars(text,sizeof text,s->spent_cents<s->limit_cents ? s->limit_cents-s->spent_cents:0,false);
     } else if (plan && data && s->has_plan_used && s->has_plan_limit) {

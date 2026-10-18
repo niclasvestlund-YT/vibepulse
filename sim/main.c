@@ -1865,6 +1865,9 @@ static int run_vibepulse_grok_qa(void) {
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-huge-percent");
   wide.spent_cents=4718; wide.has_limit=false;
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-unlimited");
+  wide.has_limit=true; wide.limit_cents=0;
+  tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-zero-limit");
+  wide.has_limit=false;
   wide.spent_cents=123456;
   tokens_apply_grok(&wide); lv_refr_now(NULL); dump_frame("vibepulse-grok-dollar-thousands");
 #ifdef TORGET_BOARD_191_TOUCH
