@@ -1276,6 +1276,15 @@ static int grok_window_seconds(const tk_grok_status *s) {
   if (!strcmp(s->source,"xai")) return 30*86400;
   return 0;
 }
+static int grok_pace(int32_t reset_seconds, int window, int span) {
+  /* Elapsed share of the window in [0, span]; computed in 64 bits so a long
+     reset against a short window cannot wrap when narrowed. */
+  if (window<=0) return 0;
+  int64_t pace=(int64_t)span-(int64_t)reset_seconds*span/window;
+  if (pace<0) pace=0;
+  if (pace>span) pace=span;
+  return (int)pace;
+}
 static const char *grok_openrouter_caption(const tk_grok_status *s) {
   if (s->has_window) {
     if (s->window_seconds==86400) return "OPENROUTER · DAY";
@@ -1301,9 +1310,7 @@ static void grok_ring_draw(lv_event_t *event) {
   tick.radius=VP_ROUND_RING_SIZE/2;
   tick.width=13;
   tick.color=COL_WHITE;
-  int pace=360-(int)((int64_t)s->reset_seconds*360/window);
-  if (pace<0) pace=0;
-  if (pace>360) pace=360;
+  int pace=grok_pace(s->reset_seconds,window,360);
   tick.start_angle=269+pace; tick.end_angle=270+pace;
   lv_draw_arc(lv_event_get_layer(event),&tick);
 }
@@ -1596,9 +1603,7 @@ static void apply_grok_page(const tk_grok_status *s, int64_t now_us) {
     if (lv_obj_get_style_width(g->baseline_fill,0)!=width) lv_obj_set_width(g->baseline_fill,width);
     int window=grok_window_seconds(s);
     grok_visible(g->marker,pct>=0 && s->has_reset && window>0);
-    int pace=window ? VP_CONTENT_W-(int)((int64_t)s->reset_seconds*VP_CONTENT_W/window):0;
-    if(pace<0) pace=0;
-    if(pace>VP_CONTENT_W) pace=VP_CONTENT_W;
+    int pace=grok_pace(s->reset_seconds,window,VP_CONTENT_W);
     if (lv_obj_get_style_x(g->marker,0)!=VP_SAFE_X+pace) lv_obj_set_x(g->marker,VP_SAFE_X+pace);
 #endif
     grok_page.has_data=data;
