@@ -358,6 +358,11 @@ class OpenRouterTests(GrokFixture):
         self.assertEqual(self.source.snapshot()['limitCents'], 5000)
         self.assertEqual(self.source.snapshot()['spentCents'], 700)
         self.assertNotIn('resetSeconds', self.source.snapshot())
+        self.assertNotIn('windowSeconds', self.source.snapshot())
+        self.reply({'effective_budget': {'limit_usd': 50, 'spend_usd': 7, 'reset_interval': 'weekly',
+                                         'resets_at': '2027-01-04T00:00:00Z'}})
+        self.source.poll()
+        self.assertEqual(self.source.snapshot()['windowSeconds'], 604800)
 
     def test_byok_counts_against_key_limit_only_when_flagged(self):
         for flag, spent in ((True, 900), (False, 100)):
@@ -380,6 +385,8 @@ class OpenRouterTests(GrokFixture):
                 self.source.poll()
                 data = self.source.snapshot()
                 self.assertEqual((data['spentCents'], data['limitCents']), (spent, 10000))
+                self.assertEqual(data.get('windowSeconds'),
+                                 {'daily': 86400, 'weekly': 604800, 'monthly': 31 * 86400}.get(window))
                 if reset is None:
                     self.assertNotIn('resetSeconds', data)
                 else:

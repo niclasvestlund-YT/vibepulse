@@ -335,6 +335,17 @@ class OpenRouterUsageSource(XaiApiUsageSource):
         return datetime(now.year + (now.month == 12), now.month % 12 + 1, 1,
                         tzinfo=timezone.utc).timestamp()
 
+    def _window(self, window):
+        # Length of the spend window, so the panel can label it and place
+        # its pace marker; the month is the current UTC calendar month.
+        if window == 'daily':
+            return 86400
+        if window == 'weekly':
+            return 7 * 86400
+        now = datetime.fromtimestamp(self.clock(), timezone.utc)
+        start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+        return int(self._next_utc('monthly') - start)
+
     def poll(self):
         if not self.configured:
             return
@@ -356,9 +367,11 @@ class OpenRouterUsageSource(XaiApiUsageSource):
                     if stamp.tzinfo is None:
                         raise ValueError('invalid reset')
                     result['resetAt'] = stamp.timestamp()
+                if budget.get('reset_interval') in ('daily', 'weekly', 'monthly'):
+                    result['windowSeconds'] = self._window(budget['reset_interval'])
             else:
                 # No budget: compare the key limit with spend from the same
-                # UTC window (usage_daily/weekly/monthly) keys show
+                # UTC window (usage_daily/weekly/monthly); unlimited keys show
                 # month-to-date spend.
                 limit, window = key.get('limit'), key.get('limit_reset')
                 if limit is None:
@@ -379,6 +392,7 @@ class OpenRouterUsageSource(XaiApiUsageSource):
                     result['limitCents'] = self._cents(limit)
                 if window is not None:
                     result['resetAt'] = self._next_utc(window)
+                    result['windowSeconds'] = self._window(window)
             if not any(name in result for name in ('spentCents', 'limitCents')):
                 raise ValueError('missing billing values')
         except Exception:

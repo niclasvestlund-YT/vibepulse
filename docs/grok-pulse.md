@@ -76,7 +76,9 @@ request. The label is `OPENROUTER`. Spend and limit always come from the same wi
 - An unlimited key shows **UTC calendar-month spend for that key**
   (`usage_monthly`), with no limit, counting down to the next month.
 
-This is per-key spend, not account-wide spend. Credits are optional
+Readings with a daily, weekly or monthly window also carry `windowSeconds`, so
+the panel can name the window and place its pace marker; lifetime budgets and
+never-resetting limits omit it. This is per-key spend, not account-wide spend. Credits are optional
 account-wide remaining credits (`total_credits - total_usage`), shown only with
 the management key. A credits failure omits credits and marks the reading
 stale. Unknown countdowns and missing numbers are omitted. All monetary values
