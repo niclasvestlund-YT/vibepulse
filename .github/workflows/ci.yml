@@ -264,3 +264,44 @@ jobs:
             idf.py -B build-175 -D TORGET_BOARD=waveshare_175
             -D SDKCONFIG=sdkconfig.175 -D TORGET_OPENPULSE=ON
             -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build
+      # Prove the default-off GROK page compiles on every board.
+      - name: Build the 2.16 profile with the GROK page opt-in
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: idf.py -B build-216-grok -D TORGET_GROK=ON build
+      - name: Build the 1.8 V2 profile with the GROK page opt-in
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-18-v2-grok -D TORGET_BOARD=waveshare_18_v2
+            -D SDKCONFIG=sdkconfig.waveshare_18_v2
+            -D TORGET_SOLELKOLLEN_DIR=no-companion -D TORGET_GROK=ON build
+      - name: Build the 2.41 V2 profile with the GROK page opt-in
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-241-grok -D TORGET_BOARD=waveshare_241_v2
+            -D SDKCONFIG=sdkconfig.241-v2 -D TORGET_GROK=ON build
+      - name: Build the 1.91 Touch profile with the GROK page opt-in
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-191-grok -D TORGET_BOARD=waveshare_191_touch
+            -D SDKCONFIG=sdkconfig.191 -D TORGET_GROK=ON build
+      - name: Build the round 1.75 profile with the GROK page opt-in
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          command: >-
+            idf.py -B build-175-grok -D TORGET_BOARD=waveshare_175
+            -D SDKCONFIG=sdkconfig.175 -D TORGET_GROK=ON
+            -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build
