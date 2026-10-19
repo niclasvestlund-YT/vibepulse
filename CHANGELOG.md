@@ -5,20 +5,31 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
-- Make subscription plans the primary Grok host source: strict copied-percentage, user-counted and daily bot-estimate files, honest estimate/age labels, and optional secondary xAI/OpenRouter billing sources. `manual` remains a compatibility alias for `subscription`.
+## v1.4.0 — 2026-10-19
 
-- Add OpenRouter to the optional Grok host sources: spend and limit from the same window (effective budget, or key limit with matching daily/weekly/monthly usage, or UTC month spend for unlimited keys) and optional management-key account credits; auto selection is subscription plan → xAI → OpenRouter → bots.
-
-- Add an optional, default-off Grok preview: subscription plan observations/estimates, optional xAI API billing and local bot status with bounded LAN payloads. Adds a build-time opt-in GROK firmware/simulator page for all five board profiles, strict payload validation, source/freshness and bot states. The hero is a percentage (plan or budget) with dollars as secondary text, falling back to a dollar hero without a positive limit. See [Grok setup](docs/grok-pulse.md); simulator/build evidence only, no physical panel verification.
-
-- OpenPulse now appears as the optional OPENROUTER switch in Labs; existing provider choices are preserved on upgrade.
+Release notes: [Grok preview, OpenRouter and 1.8 V2](docs/releases/2026-10-19-grok-openrouter-and-18-v2.md).
 
 ### Added
 
+- Optional, default-off **GROK** host source and firmware/simulator page on
+  all five board profiles. Subscription plan observations and estimates are
+  primary, with explicit age and EST labels; optional xAI postpaid billing,
+  OpenRouter spend/budgets and local bot status are separate sources.
+  `manual` remains a compatibility alias for `subscription`. Enable the
+  host with `--grok` and the firmware with `-DTORGET_GROK=ON`.
+  [Setup and source limits](docs/grok-pulse.md). Simulator/build evidence
+  only; Grok has no physical panel verification.
+
+- CI firmware builds exercise Grok both off and on for all five profiles;
+  shared LVGL tests cover missing, retained, expired and restored readings,
+  money glyphs and precision, and truncated bot counts.
+
 - Experimental OpenPulse: isolated Mac OpenRouter service, local Keychain setup,
   per-key USD spend/budget/allowance, optional account credits, explicit demo and
-  round 1.75 native LVGL spend/details pages. Physical acceptance is tracked
-  separately; no release is published. See [OpenPulse](docs/openpulse/README.md).
+  native LVGL spend/details pages for round 1.75 and square 2.16.
+  The optional **OPENROUTER** Labs switch preserves existing provider choices
+  on upgrade. A round owner checkpoint exists; complete physical acceptance
+  remains separate. See [OpenPulse](docs/openpulse/README.md).
 
 - **Waveshare ESP32-S3-Touch-AMOLED-1.8 V2 development profile**, selected with
   `TORGET_BOARD=waveshare_18_v2`: CO5300 QSPI at native 368×448 portrait,

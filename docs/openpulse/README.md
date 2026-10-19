@@ -13,9 +13,9 @@ unit. Full touch-grid, swipe and menu acceptance remain pending.
 
 ## Install for OpenRouter only
 
-**Current scope:** a source-build preview in `main` on macOS, first physically
-checked on the round **Waveshare ESP32-S3-Touch-AMOLED-1.75**. It is not included in the
-v1.3.0 release. Square 2.16 has bench checks, not physical OpenRouter acceptance;
+**Current scope:** a macOS source-build preview included in v1.4.0, first physically
+checked on the round **Waveshare ESP32-S3-Touch-AMOLED-1.75**.
+Square 2.16 has bench checks, not physical OpenRouter acceptance;
 the other board profiles cannot enable this preview. You do not need Claude
 Code, Codex or Lovable accounts to use OpenRouter.
 
@@ -29,11 +29,11 @@ relay or automatic service startup.
 
 ### 1. Get a separate checkout
 
-Keep existing VibePulse installations untouched. OpenPulse is merged into
-`main` but is not in the v1.3.0 download. Use a separate checkout of `main`:
+Keep existing VibePulse installations untouched. Use a separate checkout of the
+v1.4.0 release source (older v1.3.0 downloads do not contain OpenPulse):
 
 ```sh
-git clone --branch main --single-branch \
+git clone --branch v1.4.0 --single-branch \
   https://github.com/niclasvestlund-YT/vibepulse.git openpulse-panel
 cd openpulse-panel
 python3.12 -m venv .venv
@@ -175,7 +175,7 @@ summaries, never the OpenRouter key.
 | STALE / old update age | Data is at least 180 seconds old, or the current UTC period needs a refresh. Check Mac sleep, stopped service and provider/network errors. Retained values are last known, not current live spend. |
 | 0 USD with UPDATED | This key's current-period usage can be zero. A new/unused key does not show usage incurred by other keys. |
 | Account credits absent or error | Account view is optional and needs a management key; key spend/allowance can work without it. A key limit, display budget and account balance are different values. |
-| OPENROUTER absent in Labs | v1.3.0 does not contain this preview. Use the preview source, supported board and `TORGET_OPENPULSE=ON`; installation is a separate, user-authorized USB step. |
+| OPENROUTER absent in Labs | Use v1.4.0 or newer source, a supported board and `TORGET_OPENPULSE=ON`; v1.3.0 does not contain this preview. Installation is a separate, user-authorized USB step. |
 
 A Wi-Fi icon only shows network association, not OpenRouter source health.
 No OpenRouter browser session is required. A successful HTTP response still
@@ -359,7 +359,7 @@ OpenPulse data transport.
 Physical installation requires explicit authorization, exact ROM identity and
 a verified full backup. USB-down display orientation, touch alignment, memory/network
 soak and the whole physical data path need their separate acceptance. Existing VibePulse physical
-verification is not inherited by OpenPulse. No release or Windows support claim.
+verification is not inherited by OpenPulse. Windows support is not claimed.
 
 The integrated round Labs test is `python test/test_openpulse_labs.py`. It drives
 ON/OFF, the restart action, the existing Codex page and both OpenPulse pages
@@ -380,7 +380,7 @@ The authorized installation and its acceptance limits are recorded in the
 | 2.16 square, 480 × 480 | Native LVGL bench checks; firmware compiled in CI. No physical OpenRouter acceptance yet. |
 | 2.41 V2, 1.91 Touch, 1.8 V2 | Existing VibePulse builds remain covered by CI. OpenRouter is not enabled: these need their own layout and physical acceptance. |
 
-OpenRouter remains a source-build preview, not part of the v1.3.0 release.
+OpenRouter remains a source-build preview, included in the v1.4.0 release.
 Its optional host service is currently documented and connected on macOS only.
 The Labs switch does not install firmware or configure the host automatically.
 
