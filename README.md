@@ -190,6 +190,8 @@ coverage, with physical panel acceptance still pending.
 1.75 and square 2.16. The release also includes the USB-only **1.8 V2**
 development profile. Existing board and host verification limits still apply;
 see the illustrated notes for the source, setup and physical evidence.
+A release tag does not perform a physical flash of every final image;
+board-specific installation and touch acceptance remain separate.
 
 [Illustrated v1.4.0 notes](docs/releases/2026-10-19-grok-openrouter-and-18-v2.md)
 · [Full changelog](CHANGELOG.md)
