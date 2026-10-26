@@ -707,7 +707,7 @@ class RepositoryRegistryTests(unittest.TestCase):
         self.assertIn("import PIL", script)
         self.assertRegex(
             script,
-            r"PIL\.__version__\s*==\s*['\"]12\.3\.0['\"]",
+            r"PIL\.__version__\s*==\s*['\"]13\.0\.0['\"]",
         )
         self.assertLess(script.index("sys.version_info"), script.index("\ncc "))
 
