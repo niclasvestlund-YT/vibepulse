@@ -260,7 +260,7 @@ class PreviewWiringTests(unittest.TestCase):
         self.assertIn("import PIL", self.runner)
         self.assertRegex(
             self.runner,
-            r"PIL\.__version__\s*==\s*['\"]12\.3\.0['\"]",
+            r"PIL\.__version__\s*==\s*['\"]13\.0\.0['\"]",
         )
         self.assertIn('"$PYTHON_BIN" test_preview_ui.py', self.runner)
 
