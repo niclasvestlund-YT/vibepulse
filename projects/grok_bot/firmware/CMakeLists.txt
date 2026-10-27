@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.24)
+set(IDF_TARGET esp32p4 CACHE STRING "Exact target for the 7B")
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../../components/app_grok")
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(grok_panel VERSION 0.1.0)

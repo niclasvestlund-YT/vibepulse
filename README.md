@@ -1269,3 +1269,12 @@ is native LVGL output with sample data, useful for exact layout review.
 ![Real round 1.75 VibePulse display showing a momentary Codex 18 percent reading](docs/img/175-round/glass-codex-held.jpg)
 
 ![Round 1.75 native LVGL design preview, sample Codex quota](docs/img/round-175-codex.png)
+
+## Voice: Ask my bot team
+
+The optional [P4 7B-C voice project](projects/grok_bot/README.md) adds tap-to-talk,
+local Swedish/English transcription, a configured Grok Bot routine webhook,
+and local Piper playback. It uses the existing Windows/macOS tokenserver with
+`--grok-voice`; it does not automate the Grok Bot app or use private call APIs.
+The guide covers setup, authentication, callback routing, latency and the
+hardware acceptance boundary. Local preview installation is documented separately.

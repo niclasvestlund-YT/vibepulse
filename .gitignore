@@ -46,3 +46,9 @@ docs/img/mockups/*.svg
 openpulse_panel_config.h
 .openpulse/
 sdkconfig.openpulse.*
+
+# Local voice provisioning and optional speech models are never PR inputs.
+projects/grok_bot/.env
+projects/grok_bot/*.private.csv
+projects/grok_bot/*.private.bin
+projects/grok_bot/models/

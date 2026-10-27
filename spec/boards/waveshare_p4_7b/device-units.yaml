@@ -1,0 +1,15 @@
+schema_version: 1
+units:
+- id: grok-p4-7b-c-01
+  friendly_name: Grok Bot 7B-C development unit
+  board: waveshare-esp32-p4-wifi6-touch-lcd-7b-c
+  sku_evidence: 'Owner photograph: SKU 32511, 7B-C'
+  board_revision: P4 silicon 3.2; PCB revision unknown
+  installed_firmware: Owner-authorized Grok UI development preview, 2026-10-27
+  last_physical_verification: Owner confirms upright image at rotation 180; touch currently fails acceptance. Audio and Wi-Fi remain unverified.
+  secrets: false
+  enclosure: unknown
+  speaker: unknown
+  battery: unknown
+  microsd: unknown
+  antenna: unknown
