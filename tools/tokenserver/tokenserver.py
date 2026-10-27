@@ -4250,7 +4250,10 @@ def main():
                  "(stargazers: %s)", args.github_repo,
                  "auth" if github_token else "anonymous — the name becomes "
                  "'someone'")
-    Handler.panel_feed = PanelFeed(token=_read_github_token())
+    # A private status repo needs a read-only token with access to it.
+    Handler.panel_feed = PanelFeed(
+        token=(os.environ.get("VIBEPULSE_PANEL_TOKEN") or "").strip()
+        or _read_github_token())
     Handler.github_monitor = github_monitor
 
     grok_monitor = GrokMonitor(args.grok_source) if args.grok else None

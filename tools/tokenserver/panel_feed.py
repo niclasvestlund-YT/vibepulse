@@ -25,8 +25,10 @@ def encode(payload):
 
 
 def validate_inbox(payload):
-    if not isinstance(payload, dict) or set(payload) != {'cards'}:
+    if not isinstance(payload, dict) or 'cards' not in payload or not set(payload) <= {'v', 'cards'}:
         raise ValueError('invalid inbox')
+    if 'v' in payload and payload['v'] != 1:
+        raise ValueError('invalid version')
     cards = payload['cards']
     if not isinstance(cards, list) or len(cards) > 100:
         raise ValueError('invalid cards')
@@ -121,6 +123,8 @@ class PanelFeed:
                 failed = True
                 cards.append(card('prs', 'Open PRs', 'Unavailable'))
             try:
+                # A private repo answers 404 without access; never report the lock as free then.
+                fetch(base)
                 try:
                     fetch(base + '/branches/deploy-prebuilt-lock')
                     held = True

@@ -140,7 +140,7 @@ class PanelTests(unittest.TestCase):
             self.assertNotIn('secret', json.dumps(cards))
             now[0] = 20
             feed.snapshot()
-        self.assertEqual(self.fetch.call_count, 10)
+        self.assertEqual(self.fetch.call_count, 12)
 
     def test_gist_auth_failure_retries_without_credentials(self):
         for code in (401, 403, 404, 500):
@@ -176,6 +176,21 @@ class PanelTests(unittest.TestCase):
         self.fetch.side_effect = lambda url: ({'files': {'panel.json': {'content': json.dumps({'cards': [dict(INBOX, body='secret-token')]})}}} if '/gists/' in url else github(url))
         with patch.dict(os.environ, {'GIST_ID': 'abc'}):
             self.assertNotIn('secret-token', json.dumps(panel.PanelFeed(token='secret-token').snapshot()))
+
+    def test_inbox_accepts_version_and_rejects_other_versions(self):
+        card = {'id': 'x-followers', 'title': 'X followers', 'body': '31', 'status': 'info', 'updated_at': '2026-10-27T23:43:13Z'}
+        self.assertEqual(panel.validate_inbox({'v': 1, 'cards': [card]}), [card])
+        with self.assertRaises(ValueError):
+            panel.validate_inbox({'v': 2, 'cards': [card]})
+
+    def test_inaccessible_repo_never_reports_lock_free(self):
+        import urllib.error
+        def fetch(url):
+            raise urllib.error.HTTPError(url, 404, 'Not Found', None, None)
+        self.fetch.side_effect = fetch
+        cards = panel.PanelFeed().snapshot()['cards']
+        lock = next(c for c in cards if c['id'] == 'deploy')
+        self.assertEqual(lock['body'], 'Unavailable')
 
     def test_http_endpoint(self):
         class TestHandler(Handler):
