@@ -127,6 +127,12 @@ prints only pass/fail and timing; it does not claim device acceptance.
 
 This capture is rendered by the same LVGL UI sources as the firmware; it is not physical-panel acceptance.
 
+The following **offline Speaking fixture** checks long-text clipping. It is not
+a live call or routine reply. The simulator accepts explicit fixture arguments
+as `grok-sim output.ppm Speaking "transcript" "reply"`; firmware never reads these.
+
+![Offline Speaking fixture with long transcript and reply](docs/native-speaking-fixture.png)
+
 Host tests use fake STT/TTS and a fake webhook; they exercise real HTTP routing and authentication without cloud credentials:
 
 ```sh
