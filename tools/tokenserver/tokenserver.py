@@ -2903,6 +2903,12 @@ def get_snapshot(projects_dir: Path, history=None, now_ts=None,
     return result
 
 
+try:
+    from .panel_feed import PanelFeed
+except ImportError:
+    from panel_feed import PanelFeed
+
+
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     """Thread-per-request HTTP with a fixed resource ceiling."""
 
@@ -2973,6 +2979,7 @@ class Handler(BaseHTTPRequestHandler):
     projects_dir = None  # set in main
     agent_status = None  # background service, set in main
     max_tracker_store = None  # set in main
+    panel_feed = PanelFeed()
     github_monitor = None  # optional public repo monitor, set in main
     grok_monitor = None  # optional local Grok source, default off
     lovable_monitor = None  # optional read-only Lovable credits, set in main
@@ -3667,6 +3674,11 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(lambda: (self.github_monitor.snapshot()
                                  if self.github_monitor is not None
                                  else disabled_snapshot()))
+        elif self.path == "/api/panel":
+            if not self._is_loopback() or not self._has_valid_loopback_host():
+                self._send(403, {"error": "loopback only"})
+                return
+            self._reply(self.panel_feed.snapshot)
         elif self.path == "/api/grok":
             self._reply(lambda: grok_snapshot(self.grok_monitor))
         elif self.path == "/api/lovable":
@@ -4238,6 +4250,7 @@ def main():
                  "(stargazers: %s)", args.github_repo,
                  "auth" if github_token else "anonymous — the name becomes "
                  "'someone'")
+    Handler.panel_feed = PanelFeed(token=_read_github_token())
     Handler.github_monitor = github_monitor
 
     grok_monitor = GrokMonitor(args.grok_source) if args.grok else None
