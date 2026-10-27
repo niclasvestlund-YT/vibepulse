@@ -82,34 +82,45 @@ class PanelFeed:
             def card(key, title, body, status='info'):
                 return dict(id=key, title=title, body=body, status=status, updated_at=stamp)
 
+            repo = os.environ.get('VIBEPULSE_PANEL_REPO', 'niclasvestlund-YT/personal-agent-guide')
+            github = GitHubMonitor(repo, token=self.token)
+            fetch = github._fetch_json
+            base = f'https://api.github.com/repos/{github.repo}'
+            cards = []
+            failed = False
             try:
-                repo = os.environ.get('VIBEPULSE_PANEL_REPO', 'niclasvestlund-YT/personal-agent-guide')
-                github = GitHubMonitor(repo, token=self.token)
-                fetch = github._fetch_json
-                base = f'https://api.github.com/repos/{github.repo}'
                 runs = fetch(base + '/actions/runs?branch=main&per_page=1')['workflow_runs']
                 if runs:
                     run = runs[0]
                     state = run.get('conclusion') or run['status']
                     severity = 'ok' if state == 'success' else ('info' if state in ('queued', 'in_progress', 'waiting', 'pending', 'requested') else 'fail')
-                    cards = [card('ci', 'Main CI', state, severity)]
+                    cards.append(card('ci', 'Main CI', state, severity))
                 else:
-                    cards = [card('ci', 'Main CI', 'No runs on main')]
-                try:
-                    runners = fetch(base + '/actions/runners?per_page=100')['runners']
-                    runner = next((r for r in runners if r['name'] == 'lac-pc'), None)
-                    if runner:
-                        online = runner['status'] == 'online'
-                        cards.append(card('runner', 'lac-pc', ('Online' if online else 'Offline') + (' · Busy' if runner['busy'] else ' · Idle'), 'ok' if online else 'warn'))
-                    else:
-                        cards.append(card('runner', 'lac-pc', 'Runner status unavailable'))
-                except Exception:
+                    cards.append(card('ci', 'Main CI', 'No runs on main'))
+            except Exception:
+                failed = True
+                cards.append(card('ci', 'Main CI', 'Unavailable'))
+            try:
+                runners = fetch(base + '/actions/runners?per_page=100')['runners']
+                runner = next((r for r in runners if r['name'] == 'lac-pc'), None)
+                if runner:
+                    online = runner['status'] == 'online'
+                    cards.append(card('runner', 'lac-pc', ('Online' if online else 'Offline') + (' · Busy' if runner['busy'] else ' · Idle'), 'ok' if online else 'warn'))
+                else:
                     cards.append(card('runner', 'lac-pc', 'Runner status unavailable'))
+            except Exception:
+                failed = True
+                cards.append(card('runner', 'lac-pc', 'Runner status unavailable'))
+            try:
                 search = fetch('https://api.github.com/search/issues?q=repo:' + github.repo + '+is:pr+is:open&per_page=1')
                 count = search['total_count']
                 if type(count) is not int or count < 0:
                     raise ValueError('invalid count')
                 cards.append(card('prs', 'Open PRs', str(count), 'info'))
+            except Exception:
+                failed = True
+                cards.append(card('prs', 'Open PRs', 'Unavailable'))
+            try:
                 try:
                     fetch(base + '/branches/deploy-prebuilt-lock')
                     held = True
@@ -118,28 +129,37 @@ class PanelFeed:
                         raise
                     held = False
                 cards.append(card('deploy', 'Deploy lock', 'Held' if held else 'Free', 'warn' if held else 'ok'))
-                gist = os.environ.get('GIST_ID')
-                if gist:
-                    try:
-                        if not re.fullmatch(r'[a-fA-F0-9]{1,64}', gist):
-                            raise ValueError('invalid gist')
-                        file = fetch('https://api.github.com/gists/' + gist)['files']['panel.json']
-                        if file.get('truncated') or len(file['content'].encode('utf-8')) > 65536:
-                            raise ValueError('invalid gist file')
-                        inbox = validate_inbox(json.loads(file['content']))
-                        # Inbox IDs cannot impersonate built-in cards.
-                        if any(c['id'] in {c['id'] for c in cards} for c in inbox):
-                            raise ValueError('duplicate id')
-                        cards.extend(inbox)
-                    except Exception:
-                        cards.append(card('inbox-error', 'Inbox', 'Panel inbox unavailable'))
-                # Never echo the configured credential even if supplied as inbox text.
-                if self.token:
-                    for item in cards:
-                        for field in ('title', 'body', 'id', 'updated_at'):
-                            item[field] = item[field].replace(self.token, '[redacted]')
-                self.cached = bounded(cards)
             except Exception:
-                self.cached = bounded([card('panel-error', 'Panel', 'GitHub status unavailable')])
-            self.expires = self.clock() + 60
+                failed = True
+                cards.append(card('deploy', 'Deploy lock', 'Unavailable'))
+            gist = os.environ.get('GIST_ID')
+            if gist:
+                try:
+                    if not re.fullmatch(r'[a-fA-F0-9]{1,64}', gist):
+                        raise ValueError('invalid gist')
+                    url = 'https://api.github.com/gists/' + gist
+                    try:
+                        payload = fetch(url)
+                    except urllib.error.HTTPError as exc:
+                        if exc.code not in (401, 403, 404):
+                            raise
+                        payload = GitHubMonitor(repo, token=None)._fetch_json(url)
+                    file = payload['files']['panel.json']
+                    if file.get('truncated') or len(file['content'].encode('utf-8')) > 65536:
+                        raise ValueError('invalid gist file')
+                    inbox = validate_inbox(json.loads(file['content']))
+                    # Inbox IDs cannot impersonate built-in cards.
+                    if any(c['id'] in {c['id'] for c in cards} for c in inbox):
+                        raise ValueError('duplicate id')
+                    cards.extend(inbox)
+                except Exception:
+                    failed = True
+                    cards.append(card('inbox-error', 'Inbox', 'Panel inbox unavailable'))
+            # Never echo the configured credential even if supplied as inbox text.
+            if self.token:
+                for item in cards:
+                    for field in ('title', 'body', 'id', 'updated_at'):
+                        item[field] = item[field].replace(self.token, '[redacted]')
+            self.cached = bounded(cards)
+            self.expires = self.clock() + (20 if failed else 60)
             return self.cached

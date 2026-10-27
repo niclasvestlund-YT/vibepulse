@@ -88,14 +88,76 @@ class PanelTests(unittest.TestCase):
 
     def test_failures_never_expose_secrets_and_are_cached(self):
         self.fetch.side_effect = RuntimeError('Authorization Bearer secret-token raw body')
-        feed = panel.PanelFeed(token='secret-token')
+        now = [0]
+        feed = panel.PanelFeed(token='secret-token', clock=lambda: now[0])
         with patch.object(panel, 'bounded', wraps=panel.bounded):
             payload = feed.snapshot()
             feed.snapshot()
-        self.assertEqual(len(payload['cards']), 1)
+        self.assertEqual(len(payload['cards']), 4)
         self.assertEqual(payload['cards'][0]['status'], 'info')
         self.assertNotIn('secret-token', json.dumps(payload))
-        self.assertEqual(self.fetch.call_count, 1)
+        self.assertEqual(self.fetch.call_count, 4)
+        now[0] = 19
+        feed.snapshot()
+        self.assertEqual(self.fetch.call_count, 4)
+        now[0] = 20
+        feed.snapshot()
+        self.assertEqual(self.fetch.call_count, 8)
+
+    def test_repo_failures_preserve_bounded_inbox(self):
+        many = [dict(INBOX, id='note' + str(i)) for i in range(10)]
+
+        def fetch(url):
+            if '/gists/' in url:
+                return {'files': {'panel.json': {'content': json.dumps({'cards': many})}}}
+            raise RuntimeError('secret repo failure')
+
+        self.fetch.side_effect = fetch
+        with patch.dict(os.environ, {'GIST_ID': 'abc123'}):
+            payload = panel.PanelFeed().snapshot()
+        cards = payload['cards']
+        self.assertEqual([c['id'] for c in cards], ['ci', 'runner', 'prs', 'deploy', 'note0', 'note1'])
+        self.assertEqual([c['body'] for c in cards[:4]],
+                         ['Unavailable', 'Runner status unavailable', 'Unavailable', 'Unavailable'])
+        self.assertTrue(all(c['status'] == 'info' for c in cards[:4]))
+        self.assertLessEqual(len(panel.encode(payload)), 8192)
+        self.assertEqual(self.fetch.call_count, 5)
+
+    def test_gist_failure_preserves_builtin_cards(self):
+        def fetch(url):
+            if '/gists/' in url:
+                raise RuntimeError('secret gist failure')
+            return github(url)
+
+        self.fetch.side_effect = fetch
+        now = [0]
+        feed = panel.PanelFeed(clock=lambda: now[0])
+        with patch.dict(os.environ, {'GIST_ID': 'abc123'}):
+            cards = feed.snapshot()['cards']
+            self.assertEqual([c['status'] for c in cards[:4]], ['ok', 'ok', 'info', 'warn'])
+            self.assertEqual(cards[-1]['id'], 'inbox-error')
+            self.assertEqual(cards[-1]['body'], 'Panel inbox unavailable')
+            self.assertNotIn('secret', json.dumps(cards))
+            now[0] = 20
+            feed.snapshot()
+        self.assertEqual(self.fetch.call_count, 10)
+
+    def test_gist_auth_failure_retries_without_credentials(self):
+        for code in (401, 403, 404, 500):
+            with self.subTest(code=code):
+                seen = []
+
+                def fetch(monitor, url):
+                    if '/gists/' in url:
+                        seen.append(monitor._token)
+                        if monitor._token:
+                            raise urllib.error.HTTPError(url, code, 'secret', {}, None)
+                    return github(url)
+
+                with patch.object(panel.GitHubMonitor, '_fetch_json', new=fetch), patch.dict(os.environ, {'GIST_ID': 'abc123'}):
+                    cards = panel.PanelFeed(token='secret-token').snapshot()['cards']
+                self.assertEqual(seen, ['secret-token', None] if code != 500 else ['secret-token'])
+                self.assertEqual(cards[-1]['id'], 'note' if code != 500 else 'inbox-error')
 
     def test_runner_permission_and_absent_lock(self):
         def fetch(url):
