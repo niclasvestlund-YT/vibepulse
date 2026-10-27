@@ -105,6 +105,24 @@ Defaults: 10 admitted attempts/hour across devices, two active sessions, four re
 
 Budget roughly 0.9 s for end-of-speech detection, plus local STT, routine execution, and local TTS. Model loading happens in a bounded subprocess per utterance, which favors isolation over warm-model speed. Initial model downloads and cold starts can be slow; pre-download models before a demo. These are design expectations, **not measured physical latency**. The acknowledgement plays before STT finishes. If synthesis fails, the reply remains visible with Error rather than claiming successful speech.
 
+A Windows CPU smoke test with a synthetic Swedish sentence passed using the
+actual Piper and faster-whisper adapters: Piper took 8–11 seconds to produce
+about 4 seconds of audio; Whisper `small` took 13 seconds and recovered the
+sentence exactly. These include subprocess/model startup and exclude the
+display, microphone and routine. They are not conversational quality or device
+latency measurements. The optional requirements pin the tested speech engines
+and PyAV 16.1.0: PyAV 19 removed a decoder argument used by faster-whisper 1.2.1.
+
+Repeat this check before configuring a routine, with downloaded local models:
+
+```sh
+python projects/grok_bot/verify_local_speech.py --piper-model /path/sv_SE-nst-medium.onnx --stt-model /path/whisper-small
+```
+
+It synthesizes a fixed test sentence and checks the transcribed words without
+opening a microphone, calling a webhook, or reading service credentials. It
+prints only pass/fail and timing; it does not claim device acceptance.
+
 ![Native 1024x600 idle view](docs/native-idle.png)
 
 This capture is rendered by the same LVGL UI sources as the firmware; it is not physical-panel acceptance.

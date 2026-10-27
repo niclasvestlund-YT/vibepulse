@@ -1,11 +1,15 @@
 import http.client
 import json
+import os
 import struct
+import subprocess
+import sys
 import threading
 import unittest
+import wave
 from unittest.mock import patch
 
-from .grok_voice import VoiceConfig, VoiceError, VoiceService, chime_pcm, post_webhook
+from .grok_voice import LocalSpeech, VoiceConfig, VoiceError, VoiceService, chime_pcm, post_webhook
 from .tokenserver import BoundedThreadingHTTPServer, Handler, _build_arg_parser
 
 
@@ -23,6 +27,35 @@ class Speech:
 
     def synthesize(self, text):
         return b"\0\0" * 160
+
+
+class SpeechEncodingTests(unittest.TestCase):
+    def test_piper_receives_swedish_with_non_utf8_parent(self):
+        original_run = subprocess.run
+        received = []
+
+        def fake_piper(command, **kwargs):
+            # Exercise a real Python stdin decoder, as Piper uses sys.stdin.
+            result = original_run([sys.executable, "-c",
+                "import sys,json; print(json.dumps(sys.stdin.read(), ensure_ascii=True))"],
+                **kwargs)
+            received.append(json.loads(result.stdout))
+            with wave.open(command[command.index("--output-file") + 1], "wb") as w:
+                # Deliberately invalid TTS format exits before optional NumPy.
+                w.setnchannels(2)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes(b"\0" * 8)
+            return result
+
+        config = VoiceConfig("https://example.invalid", "unused", "unused", "unused",
+                             piper_model="test-model.onnx")
+        phrase = "Vilka uppgifter behöver min uppmärksamhet?"
+        with patch.dict(os.environ, {"PYTHONIOENCODING": "cp1252"}), \
+             patch("tools.tokenserver.grok_voice.subprocess.run", side_effect=fake_piper):
+            with self.assertRaises(VoiceError):
+                LocalSpeech(config).synthesize(phrase)
+        self.assertEqual(received, [phrase])
 
 
 class VoiceTests(unittest.TestCase):

@@ -154,7 +154,8 @@ class LocalSpeech:
             path = Path(directory) / "output.wav"
             subprocess.run([sys.executable, "-m", "piper", "--model",
                             self.config.piper_model, "--output-file", str(path)],
-                           input=text.encode("utf-8"), capture_output=True, timeout=45, check=True)
+                           input=text.encode("utf-8"), capture_output=True, timeout=45, check=True,
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             with wave.open(str(path), "rb") as w:
                 if w.getnchannels() != 1 or w.getsampwidth() != 2 or w.getnframes() > w.getframerate() * 120:
                     raise VoiceError(502, "invalid_tts_audio")
