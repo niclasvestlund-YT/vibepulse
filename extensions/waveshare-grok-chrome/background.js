@@ -50,3 +50,35 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   readUsage().then(reply,()=>reply(VibePulseUsage.unknown('Unavailable')));
   return true;
 });
+
+let panelCache = null, panelAt = 0, panelPending = null;
+const panelOffline = () => ({v:1,cards:[{id:'offline',title:'Bridge offline',body:'',status:'info',updated_at:new Date().toISOString()}]});
+async function readPanel() {
+  if (panelCache && Date.now()-panelAt<15000) return panelCache;
+  if (panelPending) return panelPending;
+  panelPending=(async()=>{
+    for (const port of [8737,8741]) {
+      try {
+        const response=await fetch(`http://127.0.0.1:${port}/api/panel`,{cache:'no-store',credentials:'omit',redirect:'error',signal:AbortSignal.timeout(2500)});
+        if(!response.ok) continue;
+        const text=await response.text();
+        if(new TextEncoder().encode(text).length>8192) continue;
+        const payload=JSON.parse(text);
+        if(payload.v!==1 || !Array.isArray(payload.cards) || payload.cards.length>6) continue;
+        if(!payload.cards.every(c=>c && ['id','title','body','updated_at'].every(k=>typeof c[k]==='string') && ['ok','warn','fail','info'].includes(c.status))) continue;
+        return payload;
+      } catch { /* Deliberately omit credentials, bodies and error details. */ }
+    }
+    return panelOffline();
+  })();
+  try { panelCache=await panelPending; panelAt=Date.now(); return panelCache; }
+  finally { panelPending=null; }
+}
+chrome.runtime.onMessage.addListener((message,sender,reply)=>{
+  if(message?.type!=='vp-panel' || !sender.tab?.id) return;
+  try {
+    if(new URL(sender.url).origin!=='https://grok.com' || new URL(sender.tab.url).origin!=='https://grok.com') return;
+  } catch { return; }
+  readPanel().then(reply,()=>reply(panelOffline()));
+  return true;
+});

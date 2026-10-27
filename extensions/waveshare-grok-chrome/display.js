@@ -24,7 +24,74 @@
   status.setAttribute('aria-live','polite');
   const hint = host.querySelector('#vp-hint');
   const usage = host.querySelector('footer > span');
-  let usageTimer;
+  const strip = document.createElement('div');
+  strip.id = 'vp-panel';
+  host.querySelector('#vp-copy').append(strip);
+  const panelCards = new Map();
+  function renderPanel(payload) {
+    const seen = new Set();
+    let previous = null;
+    for (const [index, card] of payload.cards.slice(0,6).entries()) {
+      if (typeof card.id !== 'string' || seen.has(card.id)) continue;
+      seen.add(card.id);
+      let entry = panelCards.get(card.id);
+      const isNew = !entry;
+      if (isNew) {
+        const row = document.createElement('div'); row.className = 'vp-card';
+        const title = document.createElement('strong');
+        const body = document.createElement('span');
+        row.append(title,body);
+        entry = {row,title,body,removalTimer:null};
+        panelCards.set(card.id,entry);
+        row.addEventListener('animationend', event => {
+          if (event.target !== row) return;
+          if (['vp-card-enter','vp-card-opacity'].includes(event.animationName)) row.classList.remove('vp-enter');
+          if (event.animationName === 'vp-card-pulse') row.classList.remove('vp-pulse');
+        });
+      }
+      const {row,title,body} = entry;
+      clearTimeout(entry.removalTimer);
+      entry.removalTimer = null;
+      row.classList.remove('vp-leaving');
+      row.style.setProperty('--vp-i',String(index));
+      const nextStatus = ['ok','warn','fail','info'].includes(card.status) ? card.status : 'info';
+      const changedStatus = !isNew && row.dataset.status !== nextStatus;
+      row.dataset.status = nextStatus;
+      row.classList.toggle('vp-offline',card.id === '__vp-bridge-offline');
+      title.textContent = card.title;
+      body.textContent = card.body;
+      row.title = [card.title,card.body,card.updated_at].join(' · ');
+      if (isNew) row.classList.add('vp-enter');
+      if (changedStatus && !row.classList.contains('vp-offline')) {
+        row.classList.remove('vp-pulse');
+        void row.offsetWidth; // Restart the one-shot highlight for the latest status.
+        row.classList.add('vp-pulse');
+      }
+      const anchor = previous ? previous.nextSibling : strip.firstChild;
+      if (anchor !== row) strip.insertBefore(row,anchor);
+      previous = row;
+    }
+    for (const [id, entry] of panelCards) {
+      if (seen.has(id) || entry.removalTimer !== null) continue;
+      entry.row.classList.remove('vp-enter','vp-pulse');
+      entry.row.classList.add('vp-leaving');
+      entry.removalTimer = setTimeout(() => {
+        entry.row.remove();
+        panelCards.delete(id);
+      },200);
+    }
+  }
+  async function updatePanel() {
+    if (stopped) return;
+    try {
+      const payload = await chrome.runtime.sendMessage({type:'vp-panel'});
+      if (!payload || payload.v !== 1 || !Array.isArray(payload.cards)) throw new Error('Unavailable');
+      if (!stopped) renderPanel(payload);
+    } catch {
+      if (!stopped) renderPanel({cards:[{id:'__vp-bridge-offline',title:'Bridge offline',body:'',status:'info',updated_at:''}]});
+    }
+  }
+  let usageTimer, panelTimer;
   async function updateUsage() {
     if (stopped) return;
     try {
@@ -56,6 +123,9 @@
     clearTimeout(startupTimer);
     clearTimeout(transitionTimer);
     clearInterval(usageTimer);
+    clearInterval(panelTimer);
+    for (const entry of panelCards.values()) clearTimeout(entry.removalTimer);
+    panelCards.clear();
     root.removeAttribute('data-vp-mode');
     root.removeAttribute('data-vp-pending');
     document.removeEventListener('keydown', escape);
@@ -170,6 +240,8 @@
     queued = true; requestAnimationFrame(sync);
   });
   globalThis[key] = {stop};
+  updatePanel();
+  panelTimer = setInterval(updatePanel,20000);
   updateUsage();
   usageTimer = setInterval(updateUsage,30000);
   startupTimer = setTimeout(sync,20100);

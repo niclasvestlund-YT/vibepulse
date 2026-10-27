@@ -28,3 +28,35 @@ Session storage contains only presentation on/off plus the selected bot page pat
 Local fixture tests passed at 1024x576 and 1024x393: delayed call startup, native mic/end handlers, interruption display, native Resume, return to idle, and all four live controls inside the viewport and hit-testable. No carousel remains. JS syntax checks pass. Fixture simulations do not prove the real service cannot fail.
 
 The original animated avatar was previously verified during a real user-started Grok call in the custom layout. The polished 0.3.0 release still needs the user to reload the installed extension and check on Waveshare.
+
+## Panel cards (0.3.0)
+
+Below the bot status, a text-only strip shows main CI, `lac-pc` runner state,
+open PR count and the deploy lock from the local tokenserver's `/api/panel`.
+It polls every 20 seconds, with a 15-second service-worker cache and a
+2.5-second timeout per port (8737, then 8741). Unreachable bridges show
+**Bridge offline**. During calls the strip becomes a compact single line;
+status dots distinguish ok, warning, failure and information cards.
+
+The existing `http://127.0.0.1/*` host permission is unchanged. Feed values
+are rendered with `textContent`; the page never fetches GitHub or credentials.
+Configure `VIBEPULSE_PANEL_REPO` on the tokenserver (default
+`niclasvestlund-YT/personal-agent-guide`), and optionally `GIST_ID` for a
+`panel.json` inbox. Its format is:
+
+```json
+{"cards":[{"id":"note","title":"Review","body":"Ready for review","status":"info","updated_at":"2026-10-28T12:00:00Z"}]}
+```
+
+See the tokenserver README for strict validation and size limits. Reload the
+extension after installing this version. Browser layout and physical USB
+screen acceptance still require manual verification.
+
+## Card strip
+
+Arial/system-font pills enter with a gentle 8px slide and fade over 340ms,
+staggered by 70ms. Cards retain their identity across polls; only new cards
+enter, removed cards fade out over 200ms, and status changes give a single
+900ms glow with a smoothly changing dot. Bridge offline stays muted. During
+calls, smaller pills stay in one row with delays capped at 40ms. Reduced
+motion uses simple opacity fades without movement or status pulses.
