@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VibePulse \u2014 Waveshare Grok",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Opt-in touch layout for Grok Bot. Keeps original call controls and audio.",
   "permissions": [
     "activeTab",

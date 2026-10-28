@@ -23,33 +23,6 @@
   ).join('\n');
   document.head.append(fontStyle);
   host.innerHTML = '<header><span>Grok Bot</span><button type="button" id="vp-exit">Original view</button></header><div id="vp-idle-art" aria-hidden="true"></div><section id="vp-copy"><h1></h1><div id="vp-state-card" role="status" aria-live="polite" aria-hidden="true"></div><p id="vp-status"></p></section><div id="vp-pill" aria-hidden="true"></div><footer><span>Grok usage <b>Not connected</b></span><span id="vp-hint"></span></footer>';
-  const constellation = document.createElement('div');
-  constellation.id = 'vp-constellation';
-  constellation.setAttribute('aria-hidden','true');
-  // Fixed positions leave the main avatar and the call controls clear.
-  const companions = [
-    [5,19,14,.14,24], [23,13,20,.18,32], [43,22,12,.12,28],
-    [3,74,18,.16,36], [19,84,10,.10,22], [43,79,26,.22,40],
-    [64,16,16,.15,30], [89,26,22,.19,34], [85,81,12,.12,26]
-  ];
-  companions.forEach(([left,top,size,alpha,duration],i) => {
-    const bot = document.createElement('div');
-    bot.className = 'vp-small-bot';
-    bot.style.left = `${left}%`;
-    bot.style.top = `${top}%`;
-    bot.style.setProperty('--vp-size',`${size}px`);
-    bot.style.setProperty('--vp-alpha',alpha);
-    bot.style.setProperty('--vp-duration',`${duration}s`);
-    bot.style.setProperty('--vp-delay',`${-i * 3}s`);
-    bot.style.setProperty('--vp-drift',`vp-drift-${['a','b','c'][i % 3]}`);
-    for (let eye = 0; eye < 2; eye++) {
-      const dot = document.createElement('div');
-      dot.className = 'vp-small-bot-eye';
-      bot.append(dot);
-    }
-    constellation.append(bot);
-  });
-  host.prepend(constellation);
   document.body.append(host);
   const frame = document.createElement('div');
   frame.id = 'vp-avatar-frame';
@@ -67,27 +40,15 @@
   const hint = host.querySelector('#vp-hint');
   const usage = host.querySelector('footer > span');
   const stateCard = host.querySelector('#vp-state-card');
-  let cardState, cardTimer, quietSince = Date.now();
+  let cardState;
+  stateCard.textContent = 'Grok Bot · Speaking';
   function setState(state) {
     root.setAttribute('data-vp-state',state);
     if (state === cardState) return;
-    if (!['idle','thinking'].includes(cardState)) quietSince = Date.now();
     cardState = state;
-    clearTimeout(cardTimer);
-    if (state === 'speaking' || state === 'listening') {
-      stateCard.textContent = state === 'speaking' ? 'Grok Bot · Speaking' : 'Listening';
-      stateCard.classList.add('vp-visible');
-      stateCard.setAttribute('aria-hidden','false');
-    } else {
-      const hide = () => {
-        stateCard.classList.remove('vp-visible');
-        stateCard.setAttribute('aria-hidden','true');
-      };
-      // Idle/thinking share one grace period, even if native state alternates.
-      if (state === 'idle' || state === 'thinking') {
-        cardTimer = setTimeout(hide, Math.max(0,4000 - (Date.now() - quietSince)));
-      } else hide();
-    }
+    const speaking = state === 'speaking';
+    stateCard.classList.toggle('vp-visible',speaking);
+    stateCard.setAttribute('aria-hidden',String(!speaking));
   }
   const strip = SHOW_PANEL ? document.createElement('div') : null;
   if (SHOW_PANEL) {
@@ -189,7 +150,6 @@
   }
   function stop(navigating = false) {
     stopped = true; observer?.disconnect(); clearMarks(); host.remove(); fontStyle.remove();
-    clearTimeout(cardTimer);
     clearTimeout(startupTimer);
     clearTimeout(transitionTimer);
     clearInterval(usageTimer);
