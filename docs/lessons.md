@@ -1,5 +1,17 @@
 # Lessons log
 
+## 2026-10-28 · E-paper ACKs can succeed with the panel rail off
+
+The simple 3.97 vendor example omitted factory ALDO3 power control: CRC/USB
+ACKs succeeded but the owner saw no image. Read the schematic and factory
+power path together; use only the panel rail, preserving charger settings.
+Physical visibility remains a separate gate. The follow-up host also skipped
+its first source read when the Mac monotonic clock began near zero: initialize
+unsampled time to negative infinity. Regression: `test_epaper397.py` drives
+monotonic zero and verifies the first raster contains a quota. New sample
+clock alone must not trigger full e-paper refresh; content keys and heartbeats
+guard that boundary. Physical evidence: `docs/reviews/2026-10-28-epaper397.md`.
+
 ## 2026-10-18 · File identity and accounting windows are not freshness
 
 Grok files could change within an unchanged mtime/size pair, and invalid

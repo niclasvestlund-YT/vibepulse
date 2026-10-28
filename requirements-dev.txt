@@ -2,3 +2,4 @@ PyYAML==6.0.3
 Pillow==13.0.0
 zeroconf==0.150.0
 ruff==0.15.8
+pyserial==3.5

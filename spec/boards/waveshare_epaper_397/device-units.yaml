@@ -1,0 +1,15 @@
+schema_version: 1
+units:
+- id: epaper-397-01
+  friendly_name: Owner 3.97 e-paper USB checkpoint
+  board: waveshare-esp32-s3-epaper-3.97
+  sku_evidence: Owner package photograph SKU 33811 and matching original app descriptor
+  board_revision: unknown
+  enclosure: bare board
+  speaker: kit includes speaker; connection and playback unverified
+  battery: kit includes battery; charging and runtime unqualified
+  microsd: unverified
+  antenna: onboard; USB edition does not use radio
+  installed_firmware: paper-0.2.0; application write hash verified
+  last_physical_verification: '2026-10-28'
+  secrets: false

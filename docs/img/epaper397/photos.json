@@ -1,0 +1,20 @@
+[
+  {
+    "file": "glass-quota.jpg",
+    "source_sha256": "9f440bede4f1dda7c0a5ff7097c0fbda5e390bacdae0aa747be20fc49c7e146c",
+    "published_sha256": "6d601c396aaade599cd38dc16f58862cb98f30bc81f5dffbcba197742c3f12d9",
+    "treatment": "JPEG metadata removed; compressed image data and decoded pixels unchanged",
+    "captured": "2026-10-28",
+    "firmware": "paper-0.1.1",
+    "content": "Real owner hardware photograph; displayed quota is a historical reading"
+  },
+  {
+    "file": "glass-detail.jpg",
+    "source_sha256": "a7480c31a51752f9cd2ad2faacc801aade505cbd5e6e92a3017e2383c940a0ba",
+    "published_sha256": "c9428a9f67862d68709cfca2b18c766253e2712c6a5f97b15bdf894171bfd178",
+    "treatment": "JPEG metadata removed; compressed image data and decoded pixels unchanged",
+    "captured": "2026-10-28",
+    "firmware": "paper-0.1.1",
+    "content": "Real owner hardware photograph; displayed quota is a historical reading"
+  }
+]

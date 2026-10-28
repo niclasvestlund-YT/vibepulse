@@ -1,0 +1,18 @@
+Panel source: https://github.com/waveshareteam/ESP32-S3-ePaper-3.97
+Exact upstream revision: 9b12d40731a80213b927ee8a421cae4082952819
+File: ESP-IDF/01_E-Paper_Example/components/epaper_port/epaper_port.c
+Changes: minimal standalone header; BUSY wait bounded at 30 seconds.
+Pin mapping and waveform commands are retained from the vendor example.
+Panel-only PMU: factory ALDO3 rail, 3300mV, register 0x94 low 5 bits=28,
+0x90 bit2 enable. PMU ID 0x4a and voltage/enable are readback-checked.
+No charger, Wi-Fi, microphone, audio or eFuse configuration is performed.
+Factory source: ESP-IDF/08_ESP32-S3_e-Paper-3.97/components/axpPower.
+The simpler 01 example omits PMU power; it gave USB ACKs without an image
+on this unit. User rejected the physical picture for paper-0.1.0.
+This standalone bring-up project is not the full Torget firmware port.
+
+Public paper-0.2.0 derivative retains only mono/full/partial paths, adds a
+no-redraw heartbeat, and keeps panel baseline RAM/power between partial
+updates. Full cleanup follows ten partial changes. The MIT notice from the
+corresponding Waveshare Arduino EPD_3in97 driver is retained in the source.
+Fonts are IBM Plex under the bundled OFL license, pinned in sources.json.

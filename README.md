@@ -554,6 +554,21 @@ Flashing the firmware currently also needs
 on the computer — see [Setup](#setup-the-vibecoder-way). A browser-based
 installer is planned so that this step disappears.
 
+### Paper USB edition — 3.97-inch e-paper
+
+A quiet, light **800 × 480 e-paper USB edition** is now available in source.
+It reads the existing VibePulse tokenserver: Claude/Codex weekly quota, reset
+time and agent activity. Unchanged values send a heartbeat instead of flashing
+the display; content changes use partial refresh, with periodic full cleanup.
+
+<img src="docs/img/epaper397/codex.png" width="640" alt="Native 800 by 480 synthetic VibePulse Paper quota screen">
+
+The owner has checked live Codex data, navigation and the quieter update on
+one Waveshare ESP32-S3-ePaper-3.97-Kit (SKU 33811). This is a dedicated USB
+firmware/host target, not the full AMOLED feature set. Battery, audio, Wi-Fi,
+OTA and remote decisions are not qualified. [Build/setup guide](docs/waveshare-397-epaper.md)
+· [Real owner photographs and evidence](docs/reviews/2026-10-28-epaper397.md).
+
 ### Supported screens
 
 **Affiliate disclosure:** Product links marked **affiliate** may earn Niclas
@@ -567,6 +582,7 @@ The support status below reflects our own verification of each model.
 | [Waveshare ESP32-S3-Touch-AMOLED-1.91](https://www.waveshare.com/esp32-s3-amoled-1.91.htm?sku=28596&aff_id=179337) (affiliate), **touch variant** | 536×240 AMOLED in fixed landscape; BOOT opens settings | **USB-installed development port in current source.** Four touch corners, phone Wi-Fi setup, saved-network reconnect and visible Codex usage checked on one real unit. [Install guide](docs/waveshare-191-touch.md) · [physical report](docs/superpowers/reviews/2026-09-23-waveshare-191-touch.md). Needs You decisions stay on the computer until a safe compact button layout is verified. Menu navigation, OTA and rotation remain unverified. |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm?&aff_id=179337) (affiliate), marking **1.75** only | 466×466 round AMOLED; PCB revision unknown | **USB-installed round quota profile in current source.** A real unit boots, joins Wi-Fi and displays Codex usage, USED TODAY and reset countdown in [owner photographs](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md). [Bring-up guide](docs/waveshare-175-preview.md). Needs You decisions remain on the computer and OTA is disabled in current source; use USB updates. Fixed USB-down orientation, touch and the latest portal scan still need final on-unit checks; automatic rotation is unverified. |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=179337) (affiliate), **V2 only** | 368×448 portrait CO5300 AMOLED, CST820 touch; BOOT opens settings | **USB-only development profile.** Owner reports display, touch, Wi-Fi/data path and settings working on one unit. [Install guide](docs/waveshare-amoled-18-v2.md) · [physical review](docs/superpowers/reviews/2026-09-25-waveshare-amoled-18-v2-physical.md). V1, OTA, Windows, audio, IMU, RTC, battery and microSD are not verified. Four-corner touch and transform-memory stress remain unverified. iPhone Wi-Fi onboarding still needs UX work. |
+| [Waveshare ESP32-S3-ePaper-3.97](https://docs.waveshare.com/ESP32-S3-ePaper-3.97), SKU 33811 kit | 800×480 monochrome e-paper; three-way switch | **USB development edition.** Owner-confirmed Codex data, navigation and quieter partial refresh on one Mac-connected unit. [Guide](docs/waveshare-397-epaper.md). Dedicated `firmware/epaper_397` target; battery, audio, Wi-Fi/OTA and decisions remain unqualified. |
 
 The v1.2.0 tag includes the 2.41, 1.91 and 1.75 ports; v1.4.0 also includes the
 1.8 V2 development profile. Check the exact model and explicitly

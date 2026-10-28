@@ -58,6 +58,10 @@ if ! "$PYTHON_BIN" -m ruff --version >/dev/null 2>&1; then
 fi
 (cd .. && "$PYTHON_BIN" -m ruff check .)
 echo "OK: ruff hittade inget"
+
+"$PYTHON_BIN" -m unittest discover -s . -p test_epaper397.py -v
+"$PYTHON_BIN" ../tools/hardware_registry.py ../spec/boards/waveshare_epaper_397
+
 (cd .. && "$PYTHON_BIN" -m unittest tools.openpulse.test_openpulse)
 cc -std=c11 -Wall -Wextra -Werror -O1 \
   ../components/app_openpulse/model.c ../third_party/cjson/cJSON.c \

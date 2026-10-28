@@ -1,0 +1,277 @@
+schema_version: 1
+board: waveshare-esp32-s3-epaper-3.97
+capabilities:
+- id: display.epaper
+  name: 800x480 monochrome e-paper
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - SPI3 SCK11 MOSI12 CS10 DC9 RST46 BUSY3
+  - 48000-byte one-bit frame
+  constraints:
+  - Dedicated USB edition; physical qualification is feature-specific
+  conflicts: []
+  opportunities: []
+  sources:
+  - vendor397
+  - vendor397-source
+  - paper397-source
+  - paper397-physical
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: vendor397-source
+  - field: board_wired
+    value: 'yes'
+    source: vendor397-source
+  - field: bsp_support
+    value: 'yes'
+    source: vendor397-source
+  - field: firmware_enabled
+    value: 'yes'
+    source: paper397-source
+  - field: unit_verified
+    value: 'yes'
+    source: paper397-physical
+  last_verified: '2026-10-28'
+  verification:
+    unit: epaper-397-01
+    test: quieter-partial-refresh
+- id: power.panel-aldo3
+  name: TG28 compatible ALDO3 panel rail
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - I2C SDA41 SCL42 address0x34
+  - ALDO3 3.3V; charging settings untouched
+  constraints:
+  - Dedicated USB edition; physical qualification is feature-specific
+  conflicts: []
+  opportunities: []
+  sources:
+  - vendor397
+  - vendor397-source
+  - paper397-source
+  - paper397-physical
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: vendor397-source
+  - field: board_wired
+    value: 'yes'
+    source: vendor397-source
+  - field: bsp_support
+    value: 'yes'
+    source: vendor397-source
+  - field: firmware_enabled
+    value: 'yes'
+    source: paper397-source
+  - field: unit_verified
+    value: 'yes'
+    source: paper397-physical
+  last_verified: '2026-10-28'
+  verification:
+    unit: epaper-397-01
+    test: live-codex
+- id: input.three-way
+  name: Active-low three-way switch
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - GPIO4 up / GPIO5 press / GPIO6 down
+  constraints:
+  - Dedicated USB edition; physical qualification is feature-specific
+  conflicts: []
+  opportunities: []
+  sources:
+  - vendor397
+  - vendor397-source
+  - paper397-source
+  - paper397-physical
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: vendor397-source
+  - field: board_wired
+    value: 'yes'
+    source: vendor397-source
+  - field: bsp_support
+    value: 'yes'
+    source: vendor397-source
+  - field: firmware_enabled
+    value: 'yes'
+    source: paper397-source
+  - field: unit_verified
+    value: 'yes'
+    source: paper397-physical
+  last_verified: '2026-10-28'
+  verification:
+    unit: epaper-397-01
+    test: switch-navigation
+- id: usb.raster
+  name: USB Serial/JTAG raster transport
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'yes'
+  confidence: measured
+  resources:
+  - VPP1 frame length/CRC/sequence
+  - no-redraw heartbeat
+  constraints:
+  - Dedicated USB edition; physical qualification is feature-specific
+  conflicts: []
+  opportunities: []
+  sources:
+  - vendor397
+  - vendor397-source
+  - paper397-source
+  - paper397-physical
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: vendor397-source
+  - field: board_wired
+    value: 'yes'
+    source: vendor397-source
+  - field: bsp_support
+    value: 'yes'
+    source: vendor397-source
+  - field: firmware_enabled
+    value: 'yes'
+    source: paper397-source
+  - field: unit_verified
+    value: 'yes'
+    source: paper397-physical
+  last_verified: '2026-10-28'
+  verification:
+    unit: epaper-397-01
+    test: live-codex
+- id: power.battery
+  name: Battery charging and endurance
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'no'
+    unit_verified: unknown
+  confidence: source_inspected
+  resources:
+  - TG28 and kit lithium cell
+  constraints:
+  - Dedicated USB edition; physical qualification is feature-specific
+  conflicts: []
+  opportunities: []
+  sources:
+  - vendor397
+  - vendor397-source
+  - paper397-source
+  - paper397-physical
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: vendor397-source
+  - field: board_wired
+    value: 'yes'
+    source: vendor397-source
+  - field: bsp_support
+    value: 'yes'
+    source: vendor397-source
+  - field: firmware_enabled
+    value: 'no'
+    source: paper397-source
+  - field: unit_verified
+    value: unknown
+    source: vendor397-source
+  last_verified: '2026-10-28'
+- id: audio.codec
+  name: Microphone and speaker
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'no'
+    unit_verified: unknown
+  confidence: source_inspected
+  resources:
+  - ES8311 / NS4150B
+  constraints:
+  - Dedicated USB edition; physical qualification is feature-specific
+  conflicts: []
+  opportunities: []
+  sources:
+  - vendor397
+  - vendor397-source
+  - paper397-source
+  - paper397-physical
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: vendor397-source
+  - field: board_wired
+    value: 'yes'
+    source: vendor397-source
+  - field: bsp_support
+    value: 'yes'
+    source: vendor397-source
+  - field: firmware_enabled
+    value: 'no'
+    source: paper397-source
+  - field: unit_verified
+    value: unknown
+    source: vendor397-source
+  last_verified: '2026-10-28'
+- id: radio.wifi
+  name: Wi-Fi/BLE
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'no'
+    unit_verified: unknown
+  confidence: source_inspected
+  resources:
+  - ESP32-S3 onboard radio
+  constraints:
+  - Dedicated USB edition; physical qualification is feature-specific
+  conflicts: []
+  opportunities: []
+  sources:
+  - vendor397
+  - vendor397-source
+  - paper397-source
+  - paper397-physical
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: vendor397-source
+  - field: board_wired
+    value: 'yes'
+    source: vendor397-source
+  - field: bsp_support
+    value: 'yes'
+    source: vendor397-source
+  - field: firmware_enabled
+    value: 'no'
+    source: paper397-source
+  - field: unit_verified
+    value: unknown
+    source: vendor397-source
+  last_verified: '2026-10-28'

@@ -1,0 +1,40 @@
+schema_version: 1
+sources:
+- id: vendor397
+  kind: vendor-documentation
+  rank: 4
+  title: Waveshare ESP32-S3-ePaper-3.97
+  publisher: Waveshare
+  locator: https://docs.waveshare.com/ESP32-S3-ePaper-3.97
+  revision: accessed-2026-10-28
+  accessed: '2026-10-28'
+- id: vendor397-source
+  kind: source-code
+  rank: 3
+  title: Waveshare factory panel and PMU source
+  publisher: Waveshare
+  locator: https://github.com/waveshareteam/ESP32-S3-ePaper-3.97
+  revision: 9b12d40731a80213b927ee8a421cae4082952819
+  accessed: '2026-10-28'
+- id: paper397-source
+  kind: source-code
+  rank: 3
+  title: Dedicated VibePulse Paper target
+  publisher: VibePulse
+  locator: firmware/epaper_397
+  revision: paper-0.2.0
+  accessed: '2026-10-28'
+- id: paper397-physical
+  kind: physical-test
+  rank: 1
+  title: Owner-confirmed USB e-paper checkpoint
+  publisher: VibePulse
+  locator: docs/reviews/2026-10-28-epaper397.md
+  revision: paper-0.2.0
+  accessed: '2026-10-28'
+  unit: epaper-397-01
+  tests:
+  - native-image
+  - live-codex
+  - switch-navigation
+  - quieter-partial-refresh
