@@ -23,7 +23,9 @@ Regressions cover an hour-old reading, a later render and a refreshed countdown.
 A firmware restart also destroys the host's assumption about stored pixels.
 A new verified HELLO must invalidate the raster cache, even on the constant
 Device page. A greeting during an in-flight transfer requires a new identity
-handshake. The regression drives a real bridge loop through two identical
+handshake. Send only one identity query per handshake: retries on startup or
+old ACK lines queue extra greetings that falsely resemble in-flight resets.
+The regression drives a real bridge loop through two identical
 Device rasters around a boot greeting, rather than checking a flag in isolation.
 
 Pillow's optional RAQM support differs across platform wheels. Pin BASIC text

@@ -255,7 +255,8 @@ def main():
             if HELLO in line:
                 identified = True
                 break
-            usb.write(b"?")
+            # One query per handshake. Repeating it for startup/old ACK lines
+            # queues extra HELLO replies that look like restarts during a frame.
         if not identified:
             raise RuntimeError("Firmware identity handshake failed; no image sent")
         print("IDENTIFIED VPP1 waveshare_epaper_397 paper-0.2.0", flush=True)

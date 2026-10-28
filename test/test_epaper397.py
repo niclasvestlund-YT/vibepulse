@@ -190,6 +190,32 @@ class LiveBridge(unittest.TestCase):
         self.assertEqual(len(usb.frames), 1)
         self.assertTrue(usb.closed)
 
+    def test_startup_noise_does_not_queue_duplicate_identity_replies(self):
+        class NoisyHandshake(FakeUSB):
+            queries = 0
+            def write(self, packet):
+                if packet == b"?":
+                    self.queries += 1
+                    if self.queries > 1:
+                        raise AssertionError("Repeated identity query queued a false boot greeting")
+                return super().write(packet)
+        usb = NoisyHandshake()
+        usb.lines = [b"ACK old-frame\n", b"PMU ready\n", b""]
+        with (
+            tempfile.TemporaryDirectory() as state,
+            contextlib.redirect_stdout(io.StringIO()),
+            patch.object(sys, "argv", ["paper", "--once", "--state-dir", state]),
+            patch.object(host, "check_identity", return_value="/dev/synthetic"),
+            patch.object(host.serial, "Serial", return_value=usb),
+            patch.object(host.time, "monotonic", return_value=0.0),
+            patch.object(host.time, "time", return_value=NOW),
+            patch.object(host, "snapshot", return_value=source()),
+        ):
+            host.main()
+        self.assertEqual(usb.queries, 1)
+        self.assertEqual(len(usb.frames), 1)
+        self.assertTrue(usb.closed)
+
     def test_first_transfer_reads_source_even_when_monotonic_starts_at_zero(self):
         usb = FakeUSB()
         with (
