@@ -51,9 +51,11 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   return true;
 });
 
+const SHOW_PANEL = false;
 let panelCache = null, panelAt = 0, panelPending = null;
-const panelOffline = () => ({v:1,cards:[{id:'offline',title:'Bridge offline',body:'',status:'info',updated_at:new Date().toISOString()}]});
+const panelOffline = () => ({v:1,cards:[]});
 async function readPanel() {
+  if (!SHOW_PANEL) return panelOffline();
   if (panelCache && Date.now()-panelAt<15000) return panelCache;
   if (panelPending) return panelPending;
   panelPending=(async()=>{
@@ -75,7 +77,7 @@ async function readPanel() {
   finally { panelPending=null; }
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
-  if(message?.type!=='vp-panel' || !sender.tab?.id) return;
+  if(!SHOW_PANEL || message?.type!=='vp-panel' || !sender.tab?.id) return;
   try {
     if(new URL(sender.url).origin!=='https://grok.com' || new URL(sender.tab.url).origin!=='https://grok.com') return;
   } catch { return; }

@@ -1,6 +1,7 @@
 (() => {
   'use strict';
   // Isolated extension world. Never access credentials, network, audio or app internals.
+  const SHOW_PANEL = false;
   const key = '__vibepulseDisplay';
   if (globalThis[key]) return;
   try { if (sessionStorage.getItem('vibepulse.layout.v1') !== 'on') return; } catch { return; }
@@ -18,10 +19,10 @@
   host.id = 'vp-display';
   const fontStyle = document.createElement('style');
   fontStyle.textContent = [400,500,700].map(weight =>
-    `@font-face { font-family:"Space Grotesk"; font-style:normal; font-weight:${weight}; font-display:swap; src:url("${chrome.runtime.getURL(`fonts/space-grotesk-latin-${weight}.woff2`)}") format("woff2"); }`
+    `@font-face { font-family:"Geist"; font-style:normal; font-weight:${weight}; font-display:swap; src:url("${chrome.runtime.getURL(`fonts/geist-latin-${weight}.woff2`)}") format("woff2"); }`
   ).join('\n');
   document.head.append(fontStyle);
-  host.innerHTML = '<header><span>Grok Bot</span><button type="button" id="vp-exit">Original view</button></header><div id="vp-idle-art" aria-hidden="true"></div><section id="vp-copy"><h1></h1><p id="vp-status"></p></section><div id="vp-pill" aria-hidden="true"></div><footer><span>Grok usage <b>Not connected</b></span><span id="vp-hint"></span></footer>';
+  host.innerHTML = '<header><span>Grok Bot</span><button type="button" id="vp-exit">Original view</button></header><div id="vp-idle-art" aria-hidden="true"></div><section id="vp-copy"><h1></h1><div id="vp-state-card" role="status" aria-live="polite" aria-hidden="true"></div><p id="vp-status"></p></section><div id="vp-pill" aria-hidden="true"></div><footer><span>Grok usage <b>Not connected</b></span><span id="vp-hint"></span></footer>';
   document.body.append(host);
   const frame = document.createElement('div');
   frame.id = 'vp-avatar-frame';
@@ -38,11 +39,37 @@
   status.setAttribute('aria-live','polite');
   const hint = host.querySelector('#vp-hint');
   const usage = host.querySelector('footer > span');
-  const strip = document.createElement('div');
-  strip.id = 'vp-panel';
-  host.querySelector('#vp-copy').append(strip);
+  const stateCard = host.querySelector('#vp-state-card');
+  let cardState, cardTimer, quietSince = Date.now();
+  function setState(state) {
+    root.setAttribute('data-vp-state',state);
+    if (state === cardState) return;
+    if (!['idle','thinking'].includes(cardState)) quietSince = Date.now();
+    cardState = state;
+    clearTimeout(cardTimer);
+    if (state === 'speaking' || state === 'listening') {
+      stateCard.textContent = state === 'speaking' ? 'Grok Bot · Speaking' : 'Listening';
+      stateCard.classList.add('vp-visible');
+      stateCard.setAttribute('aria-hidden','false');
+    } else {
+      const hide = () => {
+        stateCard.classList.remove('vp-visible');
+        stateCard.setAttribute('aria-hidden','true');
+      };
+      // Idle/thinking share one grace period, even if native state alternates.
+      if (state === 'idle' || state === 'thinking') {
+        cardTimer = setTimeout(hide, Math.max(0,4000 - (Date.now() - quietSince)));
+      } else hide();
+    }
+  }
+  const strip = SHOW_PANEL ? document.createElement('div') : null;
+  if (SHOW_PANEL) {
+    strip.id = 'vp-panel';
+    host.querySelector('#vp-copy').append(strip);
+  }
   const panelCards = new Map();
   function renderPanel(payload) {
+    if (!SHOW_PANEL) return;
     const seen = new Set();
     let previous = null;
     for (const [index, card] of payload.cards.slice(0,6).entries()) {
@@ -71,12 +98,11 @@
       const nextStatus = ['ok','warn','fail','info'].includes(card.status) ? card.status : 'info';
       const changedStatus = !isNew && row.dataset.status !== nextStatus;
       row.dataset.status = nextStatus;
-      row.classList.toggle('vp-offline',card.id === '__vp-bridge-offline');
       title.textContent = card.title;
       body.textContent = card.body;
       row.title = [card.title,card.body,card.updated_at].join(' · ');
       if (isNew) row.classList.add('vp-enter');
-      if (changedStatus && !row.classList.contains('vp-offline')) {
+      if (changedStatus) {
         row.classList.remove('vp-pulse');
         void row.offsetWidth; // Restart the one-shot highlight for the latest status.
         row.classList.add('vp-pulse');
@@ -96,14 +122,12 @@
     }
   }
   async function updatePanel() {
-    if (stopped) return;
+    if (!SHOW_PANEL || stopped) return;
     try {
       const payload = await chrome.runtime.sendMessage({type:'vp-panel'});
       if (!payload || payload.v !== 1 || !Array.isArray(payload.cards)) throw new Error('Unavailable');
       if (!stopped) renderPanel(payload);
-    } catch {
-      if (!stopped) renderPanel({cards:[{id:'__vp-bridge-offline',title:'Bridge offline',body:'',status:'info',updated_at:''}]});
-    }
+    } catch { /* Keep the optional strip empty when unavailable. */ }
   }
   let usageTimer, panelTimer;
   async function updateUsage() {
@@ -138,6 +162,7 @@
   }
   function stop(navigating = false) {
     stopped = true; observer?.disconnect(); clearMarks(); host.remove(); fontStyle.remove();
+    clearTimeout(cardTimer);
     clearTimeout(startupTimer);
     clearTimeout(transitionTimer);
     clearInterval(usageTimer);
@@ -191,7 +216,7 @@
     // Keep observing during that transition instead of permanently disabling.
     clearMarks();
     if (rendered) {
-      root.setAttribute('data-vp-state','connecting');
+      setState('connecting');
       root.setAttribute('data-vp-mode','waiting');
       status.textContent = 'Opening voice chat…';
       hint.textContent = 'One moment';
@@ -240,7 +265,7 @@
     const links = [...new Map([...document.querySelectorAll('a[href^="/bot/"]')].filter(a => !host.contains(a) && a.querySelector('svg.grok-bot-mark')).map(a=>[a.getAttribute('href'),a])).values()];
 
     if (!panel || failure) {
-      root.setAttribute('data-vp-state','idle');
+      setState('idle');
       root.setAttribute('data-vp-mode',failure ? 'error' : 'idle');
       status.textContent = failure ? 'The call was interrupted.' : 'Here when you need me.';
       hint.textContent = failure ? 'Resume, or open Original view' : 'Tap to talk';
@@ -270,7 +295,7 @@
       lift(panel); mark(panel,'call-panel'); mark(art,'live-art');
       const raw = bot.getAttribute('data-state');
       const labels = {idle:'Voice chat',listening:'Listening',speaking:'Speaking',thinking:'Thinking',connecting:'Connecting…'};
-      root.setAttribute('data-vp-state',Object.hasOwn(labels,raw) ? raw : 'idle');
+      setState(Object.hasOwn(labels,raw) ? raw : 'idle');
       status.textContent = mic.getAttribute('aria-pressed') === 'true' ? 'Microphone muted' : (labels[raw] || 'Voice chat');
       hint.textContent = 'Voice chat';
       // Geometry metadata only: never acquire a context or inspect canvas pixels.
@@ -280,6 +305,8 @@
         stop(); return; // Unknown waveform structure: leave native controls usable.
       }
       unit.setAttribute('data-vp-wave-unit',''); marked.add(unit);
+      // Native DOM order assumption: first branch is bot/output (wave-0),
+      // second is user/mic input (wave-1). Keep both native branches mounted.
       waves.forEach((canvas,i) => {
         if (!waveRatios.has(canvas) && canvas.width > 0 && canvas.height > 0) {
           waveRatios.set(canvas,`${canvas.width} / ${canvas.height}`);
@@ -305,8 +332,10 @@
     queued = true; queueMicrotask(sync);
   });
   globalThis[key] = {stop};
-  updatePanel();
-  panelTimer = setInterval(updatePanel,20000);
+  if (SHOW_PANEL) {
+    updatePanel();
+    panelTimer = setInterval(updatePanel,20000);
+  }
   updateUsage();
   usageTimer = setInterval(updateUsage,30000);
   startupTimer = setTimeout(sync,20100);
