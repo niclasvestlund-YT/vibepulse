@@ -8,6 +8,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 import zlib
 
@@ -98,6 +99,14 @@ class SourcesAndRaster(unittest.TestCase):
                             host.quota(later, "codex", NOW + 40)[2])
         missing = host.retain_reset_deadlines(source(reset_minutes=None), later)
         self.assertIsNone(host.quota(missing, "codex", NOW)[2])
+        retained = {}
+        keys = set()
+        for offset in (0, 30, 60, 90):
+            sample = source(observed=NOW - 3600, snapshot_at=NOW + offset,
+                            reset_minutes=round((1793200000 - NOW - offset) / 60))
+            retained = host.retain_reset_deadlines(sample, retained)
+            keys.add(host.content_key(retained, "codex", NOW + offset))
+        self.assertEqual(len(keys), 1)
 
     def test_four_pages_and_extremes_fit_native_geometry(self):
         for value in [None, 0, 14, 100]:
@@ -107,6 +116,18 @@ class SourcesAndRaster(unittest.TestCase):
                     self.assertEqual(im.size, (800, 480))
                     self.assertEqual(im.mode, "1")
                     self.assertEqual(len(im.tobytes()), 48000)
+
+    def test_warming_volume_totals_do_not_hide_independent_weekly_quota(self):
+        payload = source()["tokens"] | {"usageTotals": {"state": "placeholders"}}
+        def warming_server(request, timeout):
+            accepts = (request.get_header("X-vibepulse-accepts")
+                       if hasattr(request, "get_header") else None)
+            if accepts != "usage-totals":
+                raise urllib.error.HTTPError("http://127.0.0.1/api/tokens", 503,
+                                             "legacy totals unavailable", {}, None)
+            return io.BytesIO(json.dumps(payload).encode())
+        with patch.object(host.urllib.request, "urlopen", side_effect=warming_server):
+            self.assertEqual(host.get_json("http://127.0.0.1/api/tokens"), payload)
 
     def test_http_errors_and_wrong_schema_are_unknown(self):
         for data in [b"[]", b'{"v":1}', b"not json", b"x" * 262145]:

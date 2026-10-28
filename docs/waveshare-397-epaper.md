@@ -48,7 +48,9 @@ selects a single Espressif candidate; several candidates require an explicit
 choice. The host also requires the exact firmware/model/protocol greeting
 before sending any raster. The default source is `http://127.0.0.1:8737`;
 `--url` selects an existing tokenserver. No API keys, external provider calls,
-network listener or login startup are added. The Mac must remain awake.
+network listener or login startup are added. The reader accepts usage-total-aware snapshots and ignores volume counters,
+so a warming history scan does not hide independently available weekly quotas.
+The Mac must remain awake.
 `Ctrl-C` stops an interactive bridge. Preview/status files go to
 `~/.vibepulse-paper`, or a directory supplied with `--state-dir`.
 

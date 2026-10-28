@@ -33,7 +33,10 @@ RESET_TOLERANCE = 60 + 2 * SOURCE_HTTP_TIMEOUT
 
 def get_json(url):
     try:
-        with urllib.request.urlopen(url, timeout=SOURCE_HTTP_TIMEOUT) as r:
+        request = urllib.request.Request(
+            url, headers={"X-VibePulse-Accepts": "usage-totals"}
+        )
+        with urllib.request.urlopen(request, timeout=SOURCE_HTTP_TIMEOUT) as r:
             raw = r.read(262145)
             if len(raw) > 262144:
                 return None

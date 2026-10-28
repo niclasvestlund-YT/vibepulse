@@ -36,6 +36,11 @@ Pillow's optional RAQM support differs across platform wheels. Pin BASIC text
 layout explicitly; reproduce all six native publication images on Mac, Linux
 and Windows instead of assuming the same font file gives identical pixels.
 
+The quota-only reader declares `X-VibePulse-Accepts: usage-totals`. Otherwise
+startup placeholder volume totals can make the server reject a request even
+when independent weekly quotas are available. The reader never consumes those
+volume counters; the regression exercises the warming-server acceptance gate.
+
 ## 2026-10-18 · File identity and accounting windows are not freshness
 
 Grok files could change within an unchanged mtime/size pair, and invalid
