@@ -536,7 +536,8 @@ class RepositoryRegistryTests(unittest.TestCase):
                     | {"spec/boards/waveshare_241_v2/",
                        "spec/boards/waveshare_18_v2/",
                        "spec/boards/waveshare_191_touch/",
-                       "spec/boards/waveshare_175/"}
+                       "spec/boards/waveshare_175/",
+                       "spec/boards/waveshare_epaper_397/"}
                 )
 
     def test_root_docs_match_registered_app_set(self):

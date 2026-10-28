@@ -97,6 +97,13 @@ physically verified on the named unit. Mention a relevant
 unused onboard capability when it materially improves the request.
 Never copy secrets or turn an opportunity into authorized implementation work.
 
+
+For the **3.97 e-paper USB edition**, use the five files under
+`spec/boards/waveshare_epaper_397/` and `docs/waveshare-397-epaper.md`.
+It is a dedicated `firmware/epaper_397` project, not an AMOLED/LVGL profile.
+Keep content-driven refresh/heartbeats and the PMU panel rail separate from
+battery/charging. Do not transfer touchscreen or remote-approval claims.
+
 ## Releases and the README
 
 Two rules, learned 2026-08-16, not optional:
