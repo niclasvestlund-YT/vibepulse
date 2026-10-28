@@ -732,3 +732,35 @@ python3 tools/tokenserver/smoke.py
   swaps the label). Dashes appear in a different case: when the panel never
   got data at all, since `stale` requires `has_data`. Both are correct
   behaviour.
+
+### Browser panel feed
+
+`GET http://127.0.0.1:8737/api/panel` (or the configured port) serves
+`{"v":1,"cards":[{"id":"ci","title":"Main CI","body":"success","status":"ok","updated_at":"2026-10-28T12:00:00Z"}]}`.
+Only loopback clients with a loopback Host are accepted. Results, including
+failures, cache for 60 seconds. Responses contain at most six cards and 8192
+UTF-8 bytes; long titles and bodies are truncated safely.
+
+`VIBEPULSE_PANEL_REPO` defaults to `niclasvestlund-YT/personal-agent-guide`.
+Cards show the latest Actions run on main, repository runner `lac-pc`, open PR
+count and existence of the `deploy-prebuilt-lock` branch (held is a warning).
+An unavailable runner permission produces an informational card. GitHub uses
+the existing token lookup (`GITHUB_TOKEN`, `TG_GITHUB_TOKEN`, then existing
+local credential sources); grant only the repository read permissions needed
+for Actions, pull requests, contents and optionally self-hosted runners.
+No token or raw GitHub error is returned or logged by this feed.
+
+Optional `GIST_ID` adds an inbox from that gist's `panel.json` file:
+
+```json
+{"cards":[{"id":"note","title":"Review","body":"Ready for review","status":"info","updated_at":"2026-10-28T12:00:00Z"}]}
+```
+
+All five fields are required strings; status is `ok`, `warn`, `fail` or `info`.
+IDs use 1–64 ASCII letters, digits, underscores or hyphens, must be unique,
+and cannot collide with built-in IDs. Timestamps need an ISO 8601 timezone.
+Unknown fields, invalid cards, truncated gist files and files over 64 KiB
+are rejected as one informational inbox error. Inbox cards fill remaining
+slots after built-in cards. GitHub failures become one informational card.
+Restart the host service after installing code changes, following the existing
+platform-specific restart instructions; no live service was restarted here.

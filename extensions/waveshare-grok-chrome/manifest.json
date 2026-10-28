@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "VibePulse \u2014 Waveshare Grok",
+  "version": "0.5.1",
+  "description": "Opt-in touch layout for Grok Bot. Keeps original call controls and audio.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_title": "Toggle Waveshare layout"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "run_at": "document_start",
+      "css": [
+        "display.css"
+      ],
+      "matches": [
+        "https://grok.com/bot/*"
+      ],
+      "js": [
+        "bootstrap.js"
+      ]
+    },
+    {
+      "run_at": "document_idle",
+      "matches": [
+        "https://grok.com/bot/*"
+      ],
+      "js": [
+        "display.js"
+      ]
+    }
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/*.woff2"
+      ],
+      "matches": [
+        "https://grok.com/*"
+      ]
+    }
+  ]
+}
