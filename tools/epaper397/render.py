@@ -18,7 +18,10 @@ def font(size, serif=False, bold=False):
         if serif
         else ("IBMPlexSans-SemiBold.ttf" if bold else "IBMPlexSans-Regular.ttf")
     )
-    return ImageFont.truetype(str(FONT / name), size)
+    # Pillow wheels differ in optional RAQM support. Explicit BASIC keeps the
+    # same one-bit glyph positions on macOS, Linux and Windows.
+    return ImageFont.truetype(str(FONT / name), size,
+                              layout_engine=ImageFont.Layout.BASIC)
 
 
 def base(label):
