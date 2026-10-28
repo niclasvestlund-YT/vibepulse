@@ -179,6 +179,11 @@ Pillow 13.0.0 security update for development tooling.
 · [Compare v1.4.0...v1.5.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.4.0...v1.5.0)
 · [Previous v1.4.0 release](docs/releases/2026-10-19-grok-openrouter-and-18-v2.md)
 
+This is a source release; a tag does not perform a physical flash of every final image.
+Earlier releases retain their dated evidence: v1.1.0 added SETTINGS, with
+CI-built firmware and physical-review limits recorded in its
+[release notes](docs/releases/2026-09-10-settings-and-evidence.md).
+
 Contributing or validating another host? Read
 [CONTRIBUTING.md](CONTRIBUTING.md), the
 [host support matrix](docs/platform-support.md), and

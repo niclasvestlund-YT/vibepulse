@@ -1788,8 +1788,8 @@ class PluginPackageTests(unittest.TestCase):
         self.assertNotIn("eventual `v0.7.1` tag", release)
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("## Latest release: v1.4.0", readme)
-        self.assertIn("Compare v1.3.0...v1.4.0", readme)
+        self.assertIn("## Latest release: v1.5.0", readme)
+        self.assertIn("Compare v1.4.0...v1.5.0", readme)
         self.assertIn("physical flash of every final image", readme)
         self.assertNotIn(
             "latest sanitized checkpoint is explicitly\n"
@@ -1864,7 +1864,7 @@ class PluginPackageTests(unittest.TestCase):
         self.assertIn("## v1.2.0 — 2026-09-24", changelog)
         self.assertLess(changelog.index("## Unreleased"),
                         changelog.index("## v1.2.0 — 2026-09-24"))
-        self.assertIn("## Latest release: v1.4.0", readme)
+        self.assertIn("## Latest release: v1.5.0", readme)
         for image in (
                 "241-v2/glass-codex.jpg",
                 "191-touch/glass-codex-held.jpg",
