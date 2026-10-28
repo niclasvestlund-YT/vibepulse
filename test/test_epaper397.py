@@ -167,14 +167,14 @@ class LiveBridge(unittest.TestCase):
         self.assertEqual(usb.frames[0], usb.frames[1])
         self.assertTrue(usb.closed)
 
-    def test_restart_during_transfer_requires_a_new_identity_handshake(self):
-        class RestartDuringTransfer(FakeUSB):
+    def test_queued_identity_reply_does_not_discard_a_valid_raster_ack(self):
+        class QueuedIdentityReply(FakeUSB):
             def write(self, packet):
                 count = super().write(packet)
                 if packet.startswith(b"VPP1"):
-                    self.lines = [(host.HELLO + "\n").encode()]
+                    self.lines.insert(0, (host.HELLO + "\n").encode())
                 return count
-        usb = RestartDuringTransfer()
+        usb = QueuedIdentityReply()
         with (
             tempfile.TemporaryDirectory() as state,
             contextlib.redirect_stdout(io.StringIO()),
@@ -184,9 +184,10 @@ class LiveBridge(unittest.TestCase):
             patch.object(host.time, "monotonic", return_value=0.0),
             patch.object(host.time, "time", return_value=NOW),
             patch.object(host, "snapshot", return_value=source()),
-            self.assertRaisesRegex(RuntimeError, "restarted during transfer"),
         ):
             host.main()
+            saved = json.loads((Path(state) / "usb-status.json").read_text())
+            self.assertEqual(saved["sequence"], 1)
         self.assertEqual(len(usb.frames), 1)
         self.assertTrue(usb.closed)
 

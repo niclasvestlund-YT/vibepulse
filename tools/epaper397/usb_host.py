@@ -298,8 +298,11 @@ def main():
                         acked = True
                         print(line, flush=True)
                         break
-                    if line.startswith("HELLO "):
-                        raise RuntimeError("Device restarted during transfer; repeat identity handshake")
+                    if line.startswith("HELLO ") and line != HELLO:
+                        raise RuntimeError("Firmware identity changed during transfer")
+                    # A known HELLO can be a queued reply to the startup query.
+                    # The matching ACK below proves this raster reached glass;
+                    # without an ACK, the bounded timeout repeats the handshake.
                     if line.startswith("ERROR "):
                         raise RuntimeError(line)
                 if not acked:
