@@ -19,6 +19,9 @@ server computes the minutes at HTTP snapshot time while an observation may
 be cached for hours. Capture the token response time separately (before the
 agent request), retain it between reads and anchor the countdown there.
 Regressions cover an hour-old reading, a later render and a refreshed countdown.
+Minute-rounded remaining times also introduce sub-minute reconstruction jitter;
+retain the deadline across adjacent estimates within the rounding/HTTP-latency
+uncertainty, and clear it when the source no longer supplies a deadline.
 
 A firmware restart also destroys the host's assumption about stored pixels.
 A new verified HELLO must invalidate the raster cache, even on the constant

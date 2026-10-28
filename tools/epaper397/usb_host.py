@@ -27,11 +27,13 @@ ROOT = Path(__file__).resolve().parent
 STATE = Path.home() / ".vibepulse-paper"
 PAGES = ("codex", "claude", "projects", "device")
 HELLO = "HELLO VPP1 waveshare_epaper_397 paper-0.2.0 800 480"
+SOURCE_HTTP_TIMEOUT = 4
+RESET_TOLERANCE = 60 + 2 * SOURCE_HTTP_TIMEOUT
 
 
 def get_json(url):
     try:
-        with urllib.request.urlopen(url, timeout=4) as r:
+        with urllib.request.urlopen(url, timeout=SOURCE_HTTP_TIMEOUT) as r:
             raw = r.read(262145)
             if len(raw) > 262144:
                 return None
@@ -78,12 +80,34 @@ def quota(data, provider, now):
         if number(anchor) and number(minutes) and minutes >= 0
         else None
     )
+    retained = (data.get("reset_deadlines") or {}).get(provider)
+    if number(reset) and number(retained) and abs(retained - reset) <= RESET_TOLERANCE:
+        reset = retained
     stale = tokens.get(prefix + "Stale") is not False
     if not number(value) or not 0 <= value <= 100:
         value = None
     if not number(observed) or not 0 <= now - observed <= 180:
         stale = True
     return value, observed, reset, window, stale
+
+
+def retain_reset_deadlines(current, previous):
+    # Minute-rounded counters can reconstruct slightly different timestamps on
+    # adjacent polls. Keep the original estimate within that quantization and
+    # bounded HTTP-latency uncertainty, without retaining missing deadlines.
+    data = dict(current)
+    data.pop("reset_deadlines", None)
+    old = previous.get("reset_deadlines") or {}
+    deadlines = {}
+    for provider in ("codex", "claude"):
+        candidate = quota(data, provider, time.time())[2]
+        prior = old.get(provider)
+        deadlines[provider] = (
+            prior if number(candidate) and number(prior)
+            and abs(candidate - prior) <= RESET_TOLERANCE else candidate
+        )
+    data["reset_deadlines"] = deadlines
+    return data
 
 
 def fit(d, x, y, value, max_width, size=24, bold=False):
@@ -270,7 +294,7 @@ def main():
             now = time.monotonic()
             if now >= refresh:
                 if now - last_source > 10:
-                    data = snapshot(args.url)
+                    data = retain_reset_deadlines(snapshot(args.url), data)
                     last_source = time.monotonic()
                 key = content_key(data, PAGES[page], time.time())
                 if key == last_key:

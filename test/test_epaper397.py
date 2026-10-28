@@ -82,6 +82,23 @@ class SourcesAndRaster(unittest.TestCase):
         self.assertEqual(data["tokens_snapshot_at"], NOW)
         self.assertEqual(clock[0], NOW + 4)
 
+    def test_minute_rounding_alone_does_not_repaint_a_cached_reading(self):
+        first = host.retain_reset_deadlines(source(observed=NOW - 3600), {})
+        # The server rounds remaining minutes: forty seconds later the same
+        # real deadline is represented by 999 rather than 1000 minutes.
+        raw = source(observed=NOW - 3600, snapshot_at=NOW + 40, reset_minutes=999)
+        self.assertNotEqual(host.content_key(first, "codex", NOW),
+                            host.content_key(raw, "codex", NOW + 40))
+        later = host.retain_reset_deadlines(raw, first)
+        self.assertEqual(host.content_key(first, "codex", NOW),
+                         host.content_key(later, "codex", NOW + 40))
+        changed = host.retain_reset_deadlines(
+            source(snapshot_at=NOW + 40, reset_minutes=2000), later)
+        self.assertNotEqual(host.quota(changed, "codex", NOW + 40)[2],
+                            host.quota(later, "codex", NOW + 40)[2])
+        missing = host.retain_reset_deadlines(source(reset_minutes=None), later)
+        self.assertIsNone(host.quota(missing, "codex", NOW)[2])
+
     def test_four_pages_and_extremes_fit_native_geometry(self):
         for value in [None, 0, 14, 100]:
             for page in host.PAGES:

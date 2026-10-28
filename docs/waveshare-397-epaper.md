@@ -78,7 +78,9 @@ unchanged Device page. An interrupted transfer without a matching ACK repeats
 the firmware identity handshake; queued startup greetings do not discard a
 valid raster ACK. Reset minutes are anchored to the token HTTP snapshot,
 which is retained between reads; the age of a cached quota observation does
-not move its reset deadline.
+not move its reset deadline. Reset times are inferred from minute-rounded
+fields. Adjacent estimates within that rounding and bounded HTTP latency keep
+the previous deadline, preventing rounding-only refreshes.
 
 ## Build and installation
 
