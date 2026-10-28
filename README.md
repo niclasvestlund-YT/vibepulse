@@ -4,54 +4,49 @@
 
 ![VibePulse: quota, a NEEDS YOU alert, and the Max Tracker heatmap](docs/img/hero.png)
 
-**A little always-on screen for your shelf that shows what your AI coding
-agents are doing — taps you on the shoulder when one is stuck waiting for
-you, and (if you want) lets you answer it with a tap on the glass. It packs
-too: one command moves it onto whatever WiFi you are on today, and one
-button-hold on the panel opens its own settings on the glass.**
+**Your coding agents, at a glance.** Claude Code and Codex quotas, live agent
+activity and a clear signal when something needs you — on a small display
+beside your keyboard.
 
-Claude Code and Codex usage, live agent activity, and a full-screen
-**NEEDS YOU** alert you can answer with a tap. A three-second hold on the
-panel's one user button opens **SETTINGS** on the glass — update the firmware,
-teach it a new network, choose Labs displays, or read its address. A ~$30 ESP32-S3 panel plus a
-core, pure-stdlib Python service on your Mac or Windows PC. Local mode needs no
-VibePulse account and keeps agent activity on your LAN. The optional
-numbers-only relay can carry quota data across isolated WiFi; a separate,
-default-off encrypted interaction relay can carry supported Needs You
-decisions without requiring the panel and computer to share a LAN. A third,
-independent **Live agent status relay** can keep the Claude/Codex activity rows
-current across ordinary internet WiFi. Every cloud feature is off by default;
-only the encrypted interaction/status relay adds the pinned Python
-`cryptography` dependency.
+Choose a colorful AMOLED panel or the new **Paper USB edition**: a light,
+800 × 480 e-paper view with large numbers, calm typography and a physical
+page switch. A local Python service supplies the readings. Local operation
+needs no VibePulse account; cloud relays and extra integrations are optional.
 
-A build-time opt-in [Grok page](docs/grok-pulse.md#panel-page-build-time-opt-in)
-defaults to subscription plan percentage, with EST for estimates and local bot activity.
-Optional xAI/OpenRouter billing sources show dollars when no positive budget
-limit is available.
+[Get started](#start-here) · [Paper USB edition](#paper-usb-edition--397-inch-e-paper)
+· [Choose your board](#supported-screens) · [What's on screen](#whats-on-screen)
+· [Latest release](#latest-release-v150) · [Privacy](#privacy)
 
-An optional [Lovable credits page](docs/lovable-pulse.md) is available in Labs.
-The current MCP response omits balances despite the documentation; an opt-in
-local Chrome extension can read the visible balance while a Lovable project is
-open. Setup and freshness limits are documented in the linked guide.
+| Start with | Add when you need it |
+| --- | --- |
+| Claude Code and Codex quota, reset time and agent activity | Supported AMOLED panels can show NEEDS YOU and answer supported prompts on the glass |
+| Local service on your computer; board-specific setup | Optional quota, encrypted interaction and agent-status relays for internet Wi-Fi |
+| A display profile matched to your exact board | Optional Labs integrations: OpenRouter, Lovable and the build-time Grok preview |
 
-**OpenRouter spend and budgets** are also available as an optional Labs page.
-OpenPulse shows API-key spend, a monthly display budget, remaining
-key allowance and optional account credits. A separate Mac service keeps API
-keys in Keychain and sends only summaries to the panel.
-[See the OpenRouter page and setup](#openrouter-spend-and-budget).
+Paper currently uses USB from a Mac and has its own firmware and feature limits.
+The AMOLED family includes 2.16 square, 2.41 V2, 1.91 Touch, round 1.75 and
+1.8 V2 development profiles. Each needs its own build; support is tied to the
+[recorded hardware evidence](#hardware-knowledge).
 
-Current source includes the original **2.16-inch square panel**, the
-**Waveshare 2.41 V2**, a USB-installed **1.91 Touch** development port and
-the round **1.75** profile, and the USB-only **1.8 V2** development profile
-([guide](docs/waveshare-amoled-18-v2.md)).
-Each needs its own build profile. Start with the [2.41 V2 guide](docs/waveshare-241-v2.md)
-or the [1.91 Touch guide](docs/waveshare-191-touch.md) for the landscape boards.
+## Paper USB edition — 3.97-inch e-paper
 
-The round **1.75-inch model has a [physical quota checkpoint](docs/superpowers/reviews/2026-09-24-waveshare-175-round.md)**
-and a [board-specific bring-up guide](docs/waveshare-175-preview.md).
-Its USB-installed profile shows a Codex quota ring, USED TODAY and D:H:M
-countdown on a real unit. Touch alignment, the fixed USB-down mounting and
-the latest Wi-Fi scan change still need final on-unit review.
+A quiet, light **800 × 480 e-paper USB edition** is now available in source.
+It reads the existing VibePulse tokenserver: Claude/Codex weekly quota, reset
+time and agent activity. Unchanged values send a heartbeat instead of flashing
+the display; content changes use partial refresh, with periodic full cleanup.
+
+<p align="center"><img src="docs/img/epaper397/glass-quota.jpg" width="640" alt="Real owner photograph of VibePulse Paper showing a historical Codex quota"></p>
+
+*Physical pilot photograph (`paper-0.1.1`), with a historical reading.*
+
+<img src="docs/img/epaper397/codex.png" width="800" height="480" alt="Native 800 by 480 synthetic VibePulse Paper quota screen">
+
+The owner has checked live Codex data, navigation and the quieter update on
+one Waveshare ESP32-S3-ePaper-3.97-Kit (SKU 33811). This is a dedicated USB
+firmware/host target, not the full AMOLED feature set. Battery, audio, Wi-Fi,
+OTA and remote decisions are not qualified. [Build/setup guide](docs/waveshare-397-epaper.md)
+· [Real owner photographs and evidence](docs/reviews/2026-10-28-epaper397.md).
+
 
 ## Watch it on the desk
 
@@ -75,23 +70,10 @@ Both answers already exist, buried in a terminal you're not looking at.
 VibePulse moves them onto a screen you can't miss: one glance from across
 the room, no window to switch to, no menu bar to squint at.
 
-> **Status:** latest release v1.4.0 includes the optional Grok preview,
-> OpenRouter source-build preview and 1.8 V2 development profile.
-> The core shelf-screen loop is real and physically
-> exercised on macOS and Windows: see quota, see an agent waiting, and answer
-> a supported prompt on the glass. The Windows core, physical answer loop and
-> persistent sign-in/sleep/reboot lifecycle were verified at the v1.0.0 host
-> runtime and are not re-claimed for a later one. v1.2.0 adds three
-> board-specific AMOLED builds with different physical verification limits;
-> the original 2.16 build remains. v1.1.0 added SETTINGS on
-> the glass, an honest warm-up, and crash evidence in the firmware. The
-> v1.1.0 SETTINGS menu has been on `torget-home-01` since the 2026-09-06 USB
-> flash of `v1.0.0-67-ge51b79f`, with its static on-panel review still unrun;
-> the warm-up, coredump, ledger and backoff changes and the later LABS
-> addition landed after that build and are CI-built, waiting for the next
-> flash session. Optional
-> integrations remain opt-in, and every platform claim stays tied to its
-> recorded evidence.
+> **Current release: v1.5.0.** Paper joins the project as a USB development
+> edition, physically checked on one Mac-connected unit. Existing AMOLED
+> capabilities and platform claims keep their own verification limits.
+> [Read the illustrated release notes](docs/releases/2026-10-28-paper-usb.md).
 
 ## Start here
 
@@ -111,7 +93,7 @@ Codex. You do not need to read this whole page:
    LABS choices are saved and apply after restart. Sound has no verified
    backend yet.
 4. **Choose what to add later:** [Vibe Labs](docs/labs/README.md) lists the
-   the base installation, optional analytics/integrations and future ideas. GitHub Stars is available; standalone reset clocks and coding quotes
+   base installation, optional analytics/integrations and future ideas. GitHub Stars is available; standalone reset clocks and coding quotes
    are concepts. New installs start with quotas and activity; analytics are
    optional in SETTINGS → LABS.
 
@@ -179,24 +161,23 @@ by default. [Setup and source limits](docs/grok-pulse.md#panel-page-build-time-o
 
 *Shared LVGL captures with synthetic readings. Grok has no physical panel acceptance.*
 
-## Latest release: v1.4.0
+## Latest release: v1.5.0
 
-The optional **GROK** page adds subscription plan observations, clearly marked
-estimates and local bot activity on all five board profiles. It requires both
-the firmware build option and host opt-in; it has simulator and firmware-build
-coverage, with physical panel acceptance still pending.
+**VibePulse, on paper.** The new 3.97-inch USB edition brings a light,
+black-and-white desk display to the project: Codex and Claude pages, agent
+activity, a three-way page switch and updates that leave unchanged pixels alone.
+Your real hardware photos sit beside reproducible native screen fixtures.
 
-**OPENROUTER** joins Labs through the separate macOS OpenPulse service on round
-1.75 and square 2.16. The release also includes the USB-only **1.8 V2**
-development profile. Existing board and host verification limits still apply;
-see the illustrated notes for the source, setup and physical evidence.
-A release tag does not perform a physical flash of every final image;
-board-specific installation and touch acceptance remain separate.
+One Mac-connected unit has owner-confirmed live Codex data, orientation,
+navigation and quieter partial refresh. Claude needs a working local source;
+missing readings show a dash. Battery, audio, Wi-Fi/OTA and remote answers
+remain outside the Paper support claim. The release also includes the pinned
+Pillow 13.0.0 security update for development tooling.
 
-[Illustrated v1.4.0 notes](docs/releases/2026-10-19-grok-openrouter-and-18-v2.md)
+[Illustrated v1.5.0 notes](docs/releases/2026-10-28-paper-usb.md)
 · [Full changelog](CHANGELOG.md)
-· [Compare v1.3.0...v1.4.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.3.0...v1.4.0)
-· [Previous v1.3.0 release](docs/releases/2026-09-25-lovable-and-labs.md)
+· [Compare v1.4.0...v1.5.0](https://github.com/niclasvestlund-YT/vibepulse/compare/v1.4.0...v1.5.0)
+· [Previous v1.4.0 release](docs/releases/2026-10-19-grok-openrouter-and-18-v2.md)
 
 Contributing or validating another host? Read
 [CONTRIBUTING.md](CONTRIBUTING.md), the
@@ -554,20 +535,6 @@ Flashing the firmware currently also needs
 on the computer — see [Setup](#setup-the-vibecoder-way). A browser-based
 installer is planned so that this step disappears.
 
-### Paper USB edition — 3.97-inch e-paper
-
-A quiet, light **800 × 480 e-paper USB edition** is now available in source.
-It reads the existing VibePulse tokenserver: Claude/Codex weekly quota, reset
-time and agent activity. Unchanged values send a heartbeat instead of flashing
-the display; content changes use partial refresh, with periodic full cleanup.
-
-<img src="docs/img/epaper397/codex.png" width="640" alt="Native 800 by 480 synthetic VibePulse Paper quota screen">
-
-The owner has checked live Codex data, navigation and the quieter update on
-one Waveshare ESP32-S3-ePaper-3.97-Kit (SKU 33811). This is a dedicated USB
-firmware/host target, not the full AMOLED feature set. Battery, audio, Wi-Fi,
-OTA and remote decisions are not qualified. [Build/setup guide](docs/waveshare-397-epaper.md)
-· [Real owner photographs and evidence](docs/reviews/2026-10-28-epaper397.md).
 
 ### Supported screens
 

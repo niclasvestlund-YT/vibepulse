@@ -5,6 +5,10 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+## v1.5.0 — 2026-10-28
+
+Release notes: [Paper USB edition](docs/releases/2026-10-28-paper-usb.md).
+
 ### Added
 
 - VibePulse Paper: a dedicated 800×480 Waveshare 3.97-inch e-paper USB
@@ -15,7 +19,11 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
   USB heartbeats preserve pixels. Partial updates retain panel power/baseline,
   with full cleanup after ten partial changes. Owner confirmed quieter changes;
   extended ghosting/stability and non-USB capabilities remain unqualified.
+### Changed
 
+- Reworked the README around getting started, board choice and the Paper USB
+  edition, with real owner photographs and reproducible native images.
+- Pinned development-tool Pillow to 13.0.0 for the security update.
 
 ## v1.4.0 — 2026-10-19
 

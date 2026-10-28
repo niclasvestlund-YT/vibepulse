@@ -86,6 +86,7 @@ from PIL import Image, ImageChops
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 # The page-shell authority remains --vibepulse-static-qa, the flow that runs
 # capture_global_wifi_matrix() and therefore the only one whose captures show
@@ -232,7 +233,13 @@ BOARD_191_FRAMES = {
     "191-touch/wifi-setup-qr.png": "wifi-setup-qr.png",
 }
 
+EPAPER_FRAMES = {f"epaper397/{name}.png" for name in
+                 ("boot", "offline", "codex", "claude", "projects", "device")}
+
 NOT_FRAMES = {
+    "epaper397/glass-quota.jpg": "owner photograph of the physical Paper quota page",
+    "epaper397/glass-detail.jpg": "owner photograph of the physical Paper detail",
+    "epaper397/photos.json": "provenance and pixel-preservation record for the two owner photographs",
     "openpulse/round-photo.jpg": "owner photograph of the physical round OpenRouter Labs view",
     "175-round/glass-codex-angle.jpg": "owner photograph of the physical round 1.75 panel at an angle",
     "175-round/glass-codex-front.jpg": "owner photograph of the physical round 1.75 Codex quota page",
@@ -284,7 +291,7 @@ def docs_frames():
     missed by hand.
     """
     for name, path in docs_images():
-        if name in GROK_FRAMES or name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
+        if name in EPAPER_FRAMES or name in GROK_FRAMES or name in NOT_FRAMES or name in BOARD_241_FRAMES or name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES or name in BOARD_191_FRAMES or path.suffix != ".png":
             continue
         yield name, path
 
@@ -579,7 +586,8 @@ class DocsFrameDriftTests(unittest.TestCase):
             if name in NOT_FRAMES or path.suffix != ".png":
                 continue  # a non-PNG is reported by its own test above
             with Image.open(path) as im:
-                expected = (GROK_FRAMES[name][2] if name in GROK_FRAMES else
+                expected = ((800, 480) if name in EPAPER_FRAMES else
+                            GROK_FRAMES[name][2] if name in GROK_FRAMES else
                             (600, 450) if name in BOARD_241_FRAMES else
                             (466, 466) if name in BOARD_175_FRAMES or name in OPENPULSE_FRAMES else
                             (536, 240) if name in BOARD_191_FRAMES else (480, 480))
@@ -606,6 +614,26 @@ class DocsFrameDriftTests(unittest.TestCase):
                              if frame not in PINNED
                              and frame not in STALE_CHROME)
         self.assertEqual(unaccounted, [])
+
+
+class EpaperFrameTests(unittest.TestCase):
+    def test_native_docs_and_embedded_rasters_match_renderer(self):
+        from tools.epaper397.fixtures import frames
+        for name, expected in frames().items():
+            document = f"epaper397/{name}.png"
+            self.assertIn(document, EPAPER_FRAMES)
+            with self.subTest(document=document):
+                with Image.open(ROOT / "docs/img" / document) as actual:
+                    self.assertEqual(actual.size, (800, 480))
+                    self.assertEqual(actual.mode, "1")
+                    self.assertEqual(actual.tobytes(), expected.tobytes())
+                    self.assertEqual(getattr(actual, "n_frames", 1), 1)
+                    for metadata in DISPLAY_METADATA:
+                        self.assertNotIn(metadata, actual.info)
+                if name in ("boot", "offline"):
+                    raster = ROOT / "firmware/epaper_397/main" / f"{name}.raw"
+                    self.assertEqual(raster.read_bytes(), expected.tobytes())
+        self.assertEqual(len(EPAPER_FRAMES), len(frames()))
 
 
 class OpenPulseFrameTests(unittest.TestCase):

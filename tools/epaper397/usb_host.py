@@ -86,7 +86,7 @@ def fit(d, x, y, value, max_width, size=24, bold=False):
     ui.text(d, x, y, value, size, bold=bold)
 
 
-def render_page(data, page="codex", now=None, comparison=False):
+def render_page(data, page="codex", now=None, comparison=False, timezone=None):
     now = time.time() if now is None else now
     im, d = ui.base(page)
     ui.header(d, "PAPER 0.2  /  USB")
@@ -135,7 +135,7 @@ def render_page(data, page="codex", now=None, comparison=False):
                 d,
                 419,
                 299,
-                dt.datetime.fromtimestamp(reset).strftime("%d %b  %H:%M"),
+                dt.datetime.fromtimestamp(reset, tz=timezone).strftime("%d %b  %H:%M"),
                 28,
                 serif=True,
             )
@@ -151,7 +151,7 @@ def render_page(data, page="codex", now=None, comparison=False):
             20,
         )
         stamp = (
-            dt.datetime.fromtimestamp(observed).strftime("%d %b %H:%M")
+            dt.datetime.fromtimestamp(observed, tz=timezone).strftime("%d %b %H:%M")
             if number(observed)
             else "UNKNOWN"
         )
@@ -186,7 +186,7 @@ def render_page(data, page="codex", now=None, comparison=False):
             d,
             "TURN: PAGE  /  PRESS: CODEX"
             if comparison
-            else dt.datetime.fromtimestamp(now).strftime("READ %d %b %H:%M")
+            else dt.datetime.fromtimestamp(now, tz=timezone).strftime("READ %d %b %H:%M")
             + "  /  TURN: PAGE  /  PRESS: CODEX",
         )
     else:
