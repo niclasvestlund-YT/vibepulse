@@ -16,16 +16,41 @@ from test_docs_frame_drift import BOARD_175_FRAMES, ROOT
 class RoundPreviewTests(unittest.TestCase):
     def test_ci_round_build_passes_both_sdk_defaults_through_action_shell(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
-        command = next(step['with']['command']
-                       for step in workflow['jobs']['firmware']['steps']
-                       if step.get('name', '').startswith('Build the round 1.75'))
-        # The Espressif action embeds this command inside /bin/bash -c '...'.
-        # A quoted semicolon escaped only for the inner shell breaks that wrapper.
-        probe = command.replace('idf.py ', 'printf "<%s>\\n" ', 1)
-        result = subprocess.run(['bash', '-c', "/bin/bash -c '" + probe + "'"],
-                                cwd=ROOT, text=True, capture_output=True, check=True)
-        self.assertIn('<SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.175>',
-                      result.stdout)
+        entry = next(row for row in workflow['jobs']['firmware-profiles']['strategy']['matrix']['include']
+                     if row['board'] == 'waveshare_175')
+        # The action wraps each command in bash -c; both variants must preserve
+        # the two SDK defaults as a single literal argument.
+        for field in ('build', 'grok_build'):
+            with self.subTest(field=field):
+                probe = entry[field].replace('idf.py ', 'printf "<%s>\\n" ', 1)
+                result = subprocess.run(['bash', '-c', "/bin/bash -c '" + probe + "'"],
+                                        cwd=ROOT, text=True, capture_output=True, check=True)
+                self.assertIn('<SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.175>',
+                              result.stdout)
+
+    def test_required_firmware_gate_never_accepts_a_failed_or_skipped_matrix(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
+        profiles = workflow['jobs']['firmware-profiles']
+        entries = profiles['strategy']['matrix']['include']
+        self.assertEqual({row['board'] for row in entries}, {
+            'waveshare_216', 'waveshare_18_v2', 'waveshare_241_v2',
+            'waveshare_191_touch', 'waveshare_175'})
+        self.assertFalse(profiles['strategy']['fail-fast'])
+        for row in entries:
+            self.assertIn('idf.py ', row['build'])
+            self.assertNotIn('TORGET_GROK=ON', row['build'])
+            self.assertIn('TORGET_GROK=ON', row['grok_build'])
+        gate = workflow['jobs']['firmware']
+        self.assertEqual(gate['name'], 'ESP32-S3 firmware build')
+        self.assertEqual(gate['needs'], 'firmware-profiles')
+        self.assertEqual(gate['if'], '${{ always() }}')
+        step = gate['steps'][0]
+        self.assertEqual(step['env']['MATRIX_RESULT'],
+                         "${{ needs['firmware-profiles'].result }}")
+        for status in ('success', 'failure', 'cancelled', 'skipped', ''):
+            result = subprocess.run(['bash', '-c', step['run']],
+                                    env={**os.environ, 'MATRIX_RESULT': status})
+            self.assertEqual(result.returncode == 0, status == 'success')
 
     def test_round_needs_you_hands_decisions_to_computer(self):
         """The real renderer's approve attempts must never send a round verdict."""

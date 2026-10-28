@@ -26,6 +26,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parent
 STATE = Path.home() / ".vibepulse-paper"
 PAGES = ("codex", "claude", "projects", "device")
+HELLO = "HELLO VPP1 waveshare_epaper_397 paper-0.2.0 800 480"
 
 
 def get_json(url):
@@ -52,8 +53,14 @@ def number(value):
 
 def snapshot(base_url="http://127.0.0.1:8737"):
     # Read VibePulse itself; no dependency on the separate Codex Usage Pulse plugin.
+    tokens = get_json(base_url + "/api/tokens")
+    # ResetMin is relative to this HTTP snapshot, not ObservedAt (which can
+    # be hours older for cached quota). Capture before the second HTTP read
+    # and retain this anchor until the next token snapshot.
+    tokens_snapshot_at = time.time()
     return dict(
-        tokens=get_json(base_url + "/api/tokens"),
+        tokens=tokens,
+        tokens_snapshot_at=tokens_snapshot_at,
         agents=get_json(base_url + "/api/agent-status"),
     )
 
@@ -65,9 +72,10 @@ def quota(data, provider, now):
     observed = tokens.get(prefix + "ObservedAt")
     minutes = tokens.get(prefix + "ResetMin")
     window = 10080  # These explicit tokenserver fields are weekly quotas.
+    anchor = data.get("tokens_snapshot_at")
     reset = (
-        observed + minutes * 60
-        if number(observed) and number(minutes) and minutes >= 0
+        anchor + minutes * 60
+        if number(anchor) and number(minutes) and minutes >= 0
         else None
     )
     stale = tokens.get(prefix + "Stale") is not False
@@ -244,7 +252,7 @@ def main():
         identified = False
         while time.monotonic() < deadline:
             line = usb.readline().decode("ascii", "replace").strip()
-            if "HELLO VPP1 waveshare_epaper_397 paper-0.2.0 800 480" in line:
+            if HELLO in line:
                 identified = True
                 break
             usb.write(b"?")
@@ -289,6 +297,8 @@ def main():
                         acked = True
                         print(line, flush=True)
                         break
+                    if line.startswith("HELLO "):
+                        raise RuntimeError("Device restarted during transfer; repeat identity handshake")
                     if line.startswith("ERROR "):
                         raise RuntimeError(line)
                 if not acked:
@@ -328,7 +338,10 @@ def main():
                     )
                     refresh = 0
             line = usb.readline().decode("ascii", "replace").strip()
-            if line.startswith("OFFLINE ") or line == "PONG repaint-required":
+            if line.startswith("HELLO ") and line != HELLO:
+                raise RuntimeError("Firmware identity changed; repeat identity handshake")
+            if (line.startswith("OFFLINE ") or line == "PONG repaint-required"
+                    or line == HELLO):
                 last_key = None
                 refresh = 0
             if line.startswith("BUTTON "):

@@ -17,8 +17,9 @@ from tools.epaper397 import usb_host as host
 NOW = 1793196000
 
 
-def source(value=14, observed=NOW, reset_minutes=1000, stale=False):
+def source(value=14, observed=NOW, reset_minutes=1000, stale=False, snapshot_at=NOW):
     return {
+        "tokens_snapshot_at": snapshot_at,
         "tokens": {
             "v": 2,
             "codexWeekPct": value,
@@ -50,11 +51,36 @@ class SourcesAndRaster(unittest.TestCase):
         first = host.content_key(source(), "codex", NOW)
         # Same reading/reset, observed one minute later: no panel redraw.
         second = host.content_key(
-            source(observed=NOW + 60, reset_minutes=999), "codex", NOW + 60
+            source(observed=NOW + 60, reset_minutes=999, snapshot_at=NOW + 60), "codex", NOW + 60
         )
         self.assertEqual(first, second)
         self.assertNotEqual(first, host.content_key(source(15), "codex", NOW))
         self.assertNotEqual(first, host.content_key(source(stale=True), "codex", NOW))
+
+    def test_cached_quota_reset_uses_retained_snapshot_time(self):
+        data = source(observed=NOW - 3600, snapshot_at=NOW)
+        expected = NOW + 1000 * 60
+        self.assertEqual(host.quota(data, "codex", NOW)[2], expected)
+        # Turning pages / rendering later must not move the cached deadline.
+        self.assertEqual(host.quota(data, "codex", NOW + 120)[2], expected)
+        later = source(observed=NOW - 3600, reset_minutes=999,
+                       snapshot_at=NOW + 60)
+        self.assertEqual(host.quota(later, "codex", NOW + 60)[2], expected)
+        self.assertEqual(host.content_key(data, "codex", NOW),
+                         host.content_key(later, "codex", NOW + 60))
+
+    def test_snapshot_anchor_precedes_the_agent_http_read(self):
+        clock = [NOW]
+        def read(url):
+            if url.endswith("/api/tokens"):
+                return source()["tokens"]
+            clock[0] += 4
+            return {"v": 2}
+        with patch.object(host, "get_json", side_effect=read), \
+             patch.object(host.time, "time", side_effect=lambda: clock[0]):
+            data = host.snapshot()
+        self.assertEqual(data["tokens_snapshot_at"], NOW)
+        self.assertEqual(clock[0], NOW + 4)
 
     def test_four_pages_and_extremes_fit_native_geometry(self):
         for value in [None, 0, 14, 100]:
@@ -105,7 +131,65 @@ class FakeUSB:
         return self.lines.pop(0) if self.lines else b""
 
 
+class RestartingUSB(FakeUSB):
+    def write(self, packet):
+        count = super().write(packet)
+        if packet.startswith(b"VPP1"):
+            if len(self.frames) == 1:
+                self.lines.append((host.HELLO + "\n").encode())
+            else:
+                raise StopIteration("second raster transferred")
+        return count
+
+    def readline(self):
+        if self.frames and not self.lines:
+            raise AssertionError("Boot greeting did not trigger an unchanged-page repaint")
+        return super().readline()
+
+
 class LiveBridge(unittest.TestCase):
+    def test_device_restart_repaints_even_the_constant_device_page(self):
+        usb = RestartingUSB()
+        with (
+            tempfile.TemporaryDirectory() as state,
+            contextlib.redirect_stdout(io.StringIO()),
+            patch.object(sys, "argv", ["paper", "--state-dir", state]),
+            patch.object(host, "PAGES", ("device",)),
+            patch.object(host, "check_identity", return_value="/dev/synthetic"),
+            patch.object(host.serial, "Serial", return_value=usb),
+            patch.object(host.time, "monotonic", return_value=0.0),
+            patch.object(host.time, "time", return_value=NOW),
+            patch.object(host, "snapshot", return_value=source()),
+            self.assertRaises(StopIteration),
+        ):
+            host.main()
+        self.assertEqual(len(usb.frames), 2)
+        self.assertEqual(usb.frames[0], usb.frames[1])
+        self.assertTrue(usb.closed)
+
+    def test_restart_during_transfer_requires_a_new_identity_handshake(self):
+        class RestartDuringTransfer(FakeUSB):
+            def write(self, packet):
+                count = super().write(packet)
+                if packet.startswith(b"VPP1"):
+                    self.lines = [(host.HELLO + "\n").encode()]
+                return count
+        usb = RestartDuringTransfer()
+        with (
+            tempfile.TemporaryDirectory() as state,
+            contextlib.redirect_stdout(io.StringIO()),
+            patch.object(sys, "argv", ["paper", "--once", "--state-dir", state]),
+            patch.object(host, "check_identity", return_value="/dev/synthetic"),
+            patch.object(host.serial, "Serial", return_value=usb),
+            patch.object(host.time, "monotonic", return_value=0.0),
+            patch.object(host.time, "time", return_value=NOW),
+            patch.object(host, "snapshot", return_value=source()),
+            self.assertRaisesRegex(RuntimeError, "restarted during transfer"),
+        ):
+            host.main()
+        self.assertEqual(len(usb.frames), 1)
+        self.assertTrue(usb.closed)
+
     def test_first_transfer_reads_source_even_when_monotonic_starts_at_zero(self):
         usb = FakeUSB()
         with (

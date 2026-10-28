@@ -73,6 +73,12 @@ page. Unplugging all power may leave the previous image indefinitely: e-paper
 pixels are not a proof of liveness. Unknown quota is a dash, not zero; cached
 values older than 180 seconds are labeled stale.
 
+A board restart invalidates the host's cached raster and repaints even an
+unchanged Device page. A restart during a transfer repeats the firmware
+identity handshake. Reset minutes are anchored to the token HTTP snapshot,
+which is retained between reads; the age of a cached quota observation does
+not move its reset deadline.
+
 ## Build and installation
 
 Use ESP-IDF **v5.5.2** (the CI version) and this explicit target. It does not

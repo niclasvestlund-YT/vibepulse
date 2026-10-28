@@ -22,6 +22,12 @@ still reviews external contributions before merging and records the decision
 on the PR. This policy does not claim that GitHub enforces an independent human
 review. Revisit the approval count when a second active maintainer joins.
 
+The required `ESP32-S3 firmware build` check aggregates five parallel board
+jobs. Each board executes its original Grok-off and Grok-on build commands.
+The aggregate always runs and rejects any matrix result other than `success`,
+including failure, cancellation and skipped jobs. The required check name and
+GitHub Actions integration remain unchanged.
+
 ## Applying or updating the rules
 
 The existing repository ruleset ID is `20918258`. After reviewing changes to the

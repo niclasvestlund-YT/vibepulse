@@ -12,6 +12,24 @@ monotonic zero and verifies the first raster contains a quota. New sample
 clock alone must not trigger full e-paper refresh; content keys and heartbeats
 guard that boundary. Physical evidence: `docs/reviews/2026-10-28-epaper397.md`.
 
+## 2026-10-28 · A quota observation is not the countdown epoch
+
+The e-paper reader combined `WeekObservedAt` with `WeekResetMin`, but the
+server computes the minutes at HTTP snapshot time while an observation may
+be cached for hours. Capture the token response time separately (before the
+agent request), retain it between reads and anchor the countdown there.
+Regressions cover an hour-old reading, a later render and a refreshed countdown.
+
+A firmware restart also destroys the host's assumption about stored pixels.
+A new verified HELLO must invalidate the raster cache, even on the constant
+Device page. A greeting during an in-flight transfer requires a new identity
+handshake. The regression drives a real bridge loop through two identical
+Device rasters around a boot greeting, rather than checking a flag in isolation.
+
+Pillow's optional RAQM support differs across platform wheels. Pin BASIC text
+layout explicitly; reproduce all six native publication images on Mac, Linux
+and Windows instead of assuming the same font file gives identical pixels.
+
 ## 2026-10-18 · File identity and accounting windows are not freshness
 
 Grok files could change within an unchanged mtime/size pair, and invalid

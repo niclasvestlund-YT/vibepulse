@@ -210,13 +210,31 @@ jobs:
           fi
           shellcheck --severity=warning tools/snapshot.sh
 
-  firmware:
-    name: ESP32-S3 firmware build
+  firmware-profiles:
+    name: Firmware (${{ matrix.board }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - board: waveshare_216
+            build: 'idf.py -D TORGET_OPENPULSE=ON build'
+            grok_build: 'idf.py -B build-216-grok -D TORGET_OPENPULSE=ON -D TORGET_GROK=ON build'
+          - board: waveshare_18_v2
+            build: 'idf.py -B build-18-v2 -D TORGET_BOARD=waveshare_18_v2 -D SDKCONFIG=sdkconfig.waveshare_18_v2 -D TORGET_SOLELKOLLEN_DIR=no-companion build'
+            grok_build: 'idf.py -B build-18-v2-grok -D TORGET_BOARD=waveshare_18_v2 -D SDKCONFIG=sdkconfig.waveshare_18_v2 -D TORGET_SOLELKOLLEN_DIR=no-companion -D TORGET_GROK=ON build'
+          - board: waveshare_241_v2
+            build: 'idf.py -B build-241 -D TORGET_BOARD=waveshare_241_v2 -D SDKCONFIG=sdkconfig.241-v2 build'
+            grok_build: 'idf.py -B build-241-grok -D TORGET_BOARD=waveshare_241_v2 -D SDKCONFIG=sdkconfig.241-v2 -D TORGET_GROK=ON build'
+          - board: waveshare_191_touch
+            build: 'idf.py -B build-191 -D TORGET_BOARD=waveshare_191_touch -D SDKCONFIG=sdkconfig.191 build'
+            grok_build: 'idf.py -B build-191-grok -D TORGET_BOARD=waveshare_191_touch -D SDKCONFIG=sdkconfig.191 -D TORGET_GROK=ON build'
+          - board: waveshare_175
+            build: 'idf.py -B build-175 -D TORGET_BOARD=waveshare_175 -D SDKCONFIG=sdkconfig.175 -D TORGET_OPENPULSE=ON -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build'
+            grok_build: 'idf.py -B build-175-grok -D TORGET_BOARD=waveshare_175 -D SDKCONFIG=sdkconfig.175 -D TORGET_OPENPULSE=ON -D TORGET_GROK=ON -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build'
     steps:
       - uses: actions/checkout@v4
-      # CI has no real WiFi or LAN service. Build the opt-in path anyway so
-      # GitHub UI/network code cannot rot behind its default-off switches.
       - name: Create CI secrets.h with optional GitHub module enabled
         run: |
           cp secrets.h.example secrets.h
@@ -224,87 +242,30 @@ jobs:
           sed -i 's/TK_GITHUB_SCREEN_ENABLED 0/TK_GITHUB_SCREEN_ENABLED 1/' secrets.h
           sed -i 's/TK_GITHUB_NOTIFICATIONS_ENABLED 0/TK_GITHUB_NOTIFICATIONS_ENABLED 1/' secrets.h
           sed -i 's/TK_GITHUB_SOUND_ENABLED 0/TK_GITHUB_SOUND_ENABLED 1/' secrets.h
-      - name: Build the 1.8 V2 profile with its own SDK config
+      - name: Build profile with Grok off
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
-          command: >-
-            idf.py -B build-18-v2 -D TORGET_BOARD=waveshare_18_v2
-            -D SDKCONFIG=sdkconfig.waveshare_18_v2
-            -D TORGET_SOLELKOLLEN_DIR=no-companion build
-      - name: Build with ESP-IDF 5.5
+          command: ${{ matrix.build }}
+      - name: Build profile with Grok on
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
-          command: idf.py -D TORGET_OPENPULSE=ON build
-      - name: Build the 2.41 V2 profile with its own SDK config
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-241 -D TORGET_BOARD=waveshare_241_v2
-            -D SDKCONFIG=sdkconfig.241-v2 build
-      - name: Build the 1.91 Touch profile with its own SDK config
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-191 -D TORGET_BOARD=waveshare_191_touch
-            -D SDKCONFIG=sdkconfig.191 build
-      - name: Build the round 1.75 profile with its own SDK config
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-175 -D TORGET_BOARD=waveshare_175
-            -D SDKCONFIG=sdkconfig.175 -D TORGET_OPENPULSE=ON
-            -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build
-      # Prove the default-off GROK page compiles on every board.
-      - name: Build the 2.16 profile with the GROK page opt-in
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: idf.py -B build-216-grok -D TORGET_OPENPULSE=ON -D TORGET_GROK=ON build
-      - name: Build the 1.8 V2 profile with the GROK page opt-in
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-18-v2-grok -D TORGET_BOARD=waveshare_18_v2
-            -D SDKCONFIG=sdkconfig.waveshare_18_v2
-            -D TORGET_SOLELKOLLEN_DIR=no-companion -D TORGET_GROK=ON build
-      - name: Build the 2.41 V2 profile with the GROK page opt-in
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-241-grok -D TORGET_BOARD=waveshare_241_v2
-            -D SDKCONFIG=sdkconfig.241-v2 -D TORGET_GROK=ON build
-      - name: Build the 1.91 Touch profile with the GROK page opt-in
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-191-grok -D TORGET_BOARD=waveshare_191_touch
-            -D SDKCONFIG=sdkconfig.191 -D TORGET_GROK=ON build
-      - name: Build the round 1.75 profile with the GROK page opt-in
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: ${{ env.IDF_VERSION }}
-          target: esp32s3
-          command: >-
-            idf.py -B build-175-grok -D TORGET_BOARD=waveshare_175
-            -D SDKCONFIG=sdkconfig.175 -D TORGET_OPENPULSE=ON -D TORGET_GROK=ON
-            -D SDKCONFIG_DEFAULTS=sdkconfig.defaults\;sdkconfig.defaults.175 build
+          command: ${{ matrix.grok_build }}
+
+  firmware:
+    # Preserve the exact required check name. Every profile must succeed.
+    name: ESP32-S3 firmware build
+    needs: firmware-profiles
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every board and both Grok configurations
+        env:
+          MATRIX_RESULT: ${{ needs['firmware-profiles'].result }}
+        run: test "$MATRIX_RESULT" = success
 
   epaper-host:
     name: E-paper USB host (${{ matrix.os }})

@@ -11,6 +11,7 @@ NOW = 1793196000
 
 def frames():
     data = {
+        "tokens_snapshot_at": NOW,
         "tokens": {
             "v": 2,
             "codexWeekPct": 38,

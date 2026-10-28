@@ -19,8 +19,15 @@ Release notes: [Paper USB edition](docs/releases/2026-10-28-paper-usb.md).
   USB heartbeats preserve pixels. Partial updates retain panel power/baseline,
   with full cleanup after ten partial changes. Owner confirmed quieter changes;
   extended ghosting/stability and non-USB capabilities remain unqualified.
+### Fixed
+
+- Anchor Paper reset countdowns to the token snapshot, including cached quota
+  observations, and repaint unchanged pages after a firmware restart.
+
 ### Changed
 
+- Run the same ten AMOLED firmware configurations in five parallel board jobs;
+  the required firmware check rejects failed, cancelled or skipped matrix runs.
 - Reworked the README around getting started, board choice and the Paper USB
   edition, with real owner photographs and reproducible native images.
 - Pinned development-tool Pillow to 13.0.0 for the security update.
