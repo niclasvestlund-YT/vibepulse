@@ -1,14 +1,14 @@
-# VibePulse — Waveshare Grok 0.4.1
+# VibePulse — Waveshare Grok 0.5.0
 
 Single-bot touch presentation for the real Grok Bot website. Open your Grok Bot page and activate BOT. No bot carousel, swipe navigation or camera integration. The layout stays attached to the bot page where it was enabled.
 
 ## Update
 
-In chrome://extensions reload VibePulse and confirm version 0.4.1. Then reload the Grok tab once (with no active call) and click BOT. F11 is optional; full screen uses the Waveshare display most effectively. The extension has content scripts only on https://grok.com/bot/* and uses activeTab + scripting for its toolbar toggle.
+In chrome://extensions reload VibePulse and confirm version 0.5.0. Then reload the Grok tab once (with no active call) and click BOT. F11 is optional; full screen uses the Waveshare display most effectively. The extension has content scripts only on https://grok.com/bot/* and uses activeTab + scripting for its toolbar toggle.
 
 ## Design
 
-Larger warm-white avatar, softer light and shadows, quiet background, one Call Grok action. During calls the original Grok SVG animation and audio waveform canvases remain mounted. Decorative motion follows only Grok’s textual call state; there is no extension speech/audio processing; Swedish and English are handled by Grok itself. The interface text stays English.
+Charcoal call view (#141416), dark surfaces (#1c1d21), hairline borders, near-white text and a dark microphone control; hang-up stays red. The main avatar remains largest above a quiet constellation, with one Call Grok action. During calls the original Grok SVG animation and audio waveform canvases remain mounted. Decorative motion follows only Grok’s textual call state; there is no extension speech/audio processing; Swedish and English are handled by Grok itself. The interface text stays English.
 
 ## State handling
 
@@ -27,29 +27,38 @@ Session storage contains only presentation on/off plus the selected bot page pat
 
 Local fixture tests passed at 1024x576 and 1024x393: delayed call startup, native mic/end handlers, interruption display, native Resume, return to idle, and all four live controls inside the viewport and hit-testable. No carousel remains. JS syntax checks pass. Fixture simulations do not prove the real service cannot fail.
 
-The original animated avatar was previously verified during a real user-started Grok call in the custom layout. Version 0.4.1 still needs a real Grok call and physical Waveshare acceptance after reloading the installed extension.
+The original animated avatar was previously verified during a real user-started Grok call in the custom layout. Version 0.5.0 still needs a real Grok call and physical Waveshare acceptance after reloading the installed extension.
 
 ## Panel cards
 
-The panel card strip is disabled in 0.4.1: no `#vp-panel` is created, no
+The panel card strip remains disabled in 0.5.0: no `#vp-panel` is created, no
 `/api/panel` request is made, and no bridge-offline card is shown. The optional
 renderer and service-worker handler remain gated by `SHOW_PANEL = false` in
 `display.js` and `background.js` for later re-enabling. Local usage polling is
 unchanged and still uses the existing localhost host permission.
 
-## Call view (0.4.1)
+## Call view (0.5.0)
 
-The two original waveform canvases are stacked in one box, centered horizontally
-and vertically in the call pill area left of the mic. Native DOM order is assumed
-to be bot/output first (`wave-0`), user/mic second (`wave-1`); confirm this mapping
-in a live call after native markup changes. Speaking selects the bot wave;
-listening selects the user wave. Idle/thinking show the bot wave at 45% opacity.
-Selection crossfades over 200ms. Canvas width/height metadata supplies
-`--vp-wave-ar`; contained canvases retain their aspect ratio without CSS filters
-or scale transforms. Both native nodes stay mounted and keep drawing themselves;
-no canvas contexts, pixels or audio are accessed.
+The two original waveform canvases share a slot left of the mic. Native DOM
+order is assumed to be bot/output first (`wave-0`), user/mic second (`wave-1`);
+confirm this mapping in a live call after native markup changes.
+`html[data-vp-state]` selects the bot wave when speaking and the user wave when
+listening. The active wave fills the slot width; the inactive wave remains below,
+centered at 35% width and 25% opacity. Idle/thinking/connecting keep both small
+and dim, with the bot above. Width and opacity transition over 250ms.
+Canvas width/height metadata supplies `--vp-wave-ar` to preserve aspect ratio.
+Canvas-only CSS inversion and brightness make native dark bars light, with a
+soft blue drop-shadow on the active wave. No blur or waveform scale transforms
+are used. Both native nodes stay mounted and draw themselves; no canvas
+contexts, pixels or audio are accessed.
 
-A small status card under the title shows “Grok Bot · Speaking” or “Listening”.
+Nine decorative circles (10–26px), each with two dark eyes, surround the main
+avatar without covering it. They are built with `createElement`, are hidden from
+assistive technology, and ignore pointer events. Three CSS drift paths use
+individual 20–40s durations and varied delays; only transform and opacity animate.
+Speaking raises their opacity by .08. Reduced motion disables drift.
+
+A dark glass (#1c1d21cc) status card with a hairline border under the title shows “Grok Bot · Speaking” or “Listening”.
 It fades/slides in on those states, holds through idle/thinking for four seconds,
 then fades out over 300ms. Reduced motion keeps the opacity fade without sliding.
 Text is assigned only through `textContent`.
@@ -57,7 +66,7 @@ Text is assigned only through `textContent`.
 `html[data-vp-state]` exposes Grok’s raw `idle`, `listening`, `thinking`,
 `speaking` or `connecting` state (unknown states fall back to idle). Idle art
 breathes slowly beneath a subtle rotating highlight. Listening adds two calm,
-cool rings; thinking uses an orbiting arc and dims the bot wave to 45%.
+cool rings; thinking uses an orbiting arc and keeps the bot wave small and dim.
 Speaking adds a small avatar bob and faster warm rings with the full-opacity bot wave.
 Frame layers crossfade over 320ms; Grok’s own SVG animation stays intact.
 These effects illustrate call state, never audio amplitude.
@@ -66,7 +75,8 @@ Touching the pill or native mic/end/start controls gives a 180ms spring press
 and a 450ms ripple at the touch point. Passive pointer listeners leave native
 click handling intact. Hover effects apply only to hover-capable devices.
 Reduced motion disables breathing, bobbing, rings and ripples, retaining opacity
-crossfades. Animations use only transform and opacity; no animation frame loop,
+crossfades. Decorative animations use only transform and opacity; waveform selection also
+transitions width. No animation frame loop,
 animated filters, new network fetches, internal APIs or permissions were added.
 
 ## Font
