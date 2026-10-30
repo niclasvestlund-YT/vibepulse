@@ -1,0 +1,10 @@
+menu "Grok panel diagnostics"
+
+config GROK_TOUCH_DIAGNOSTICS
+    bool "Log touch scans and coordinates over USB serial"
+    default n
+    help
+        Enable only during physical touch acceptance. Logs controller read
+        status and coordinates, never voice audio, transcripts or credentials.
+
+endmenu

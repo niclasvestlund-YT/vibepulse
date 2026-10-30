@@ -1,0 +1,6 @@
+# Optional local voice runtime, not needed by normal VibePulse or host unit tests.
+faster-whisper==1.2.1
+piper-tts==1.8.0
+# PyAV 19 removed metadata_errors, still used by faster-whisper 1.2.1.
+av==16.1.0
+numpy>=2,<3

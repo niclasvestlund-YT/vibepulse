@@ -81,6 +81,8 @@ if __package__:
     from .codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from .github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from .grok_monitor import GrokMonitor, grok_snapshot
+    from .grok_voice import VoiceConfig, VoiceService
+    from .grok_voice_http import handle_voice
     from .lovable_monitor import LovableMonitor
     from .lovable_browser import LovableBrowserBridge
     from .lovable_monitor import disabled_snapshot as lovable_disabled_snapshot
@@ -110,6 +112,8 @@ else:  # run directly: python3 tools/tokenserver/tokenserver.py
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from grok_monitor import GrokMonitor, grok_snapshot
+    from grok_voice import VoiceConfig, VoiceService
+    from grok_voice_http import handle_voice
     from lovable_monitor import LovableMonitor
     from lovable_browser import LovableBrowserBridge
     from lovable_monitor import disabled_snapshot as lovable_disabled_snapshot
@@ -2975,6 +2979,7 @@ class Handler(BaseHTTPRequestHandler):
     max_tracker_store = None  # set in main
     github_monitor = None  # optional public repo monitor, set in main
     grok_monitor = None  # optional local Grok source, default off
+    grok_voice = None  # authenticated voice routes; opt-in, no private app APIs
     lovable_monitor = None  # optional read-only Lovable credits, set in main
     lovable_browser = None  # separately configured local browser balance source
     plans = {"claude": None, "codex": None}  # set in main from --*-plan
@@ -3082,6 +3087,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if getattr(self, "path", "").startswith("/grokbot/"):
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -3599,6 +3606,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True})
 
     def do_POST(self):
+        if handle_voice(self, "POST"):
+            return
         if self.path == "/api/grok/bots":
             self._handle_grok_bots()
             return
@@ -3654,6 +3663,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_GET(self):
+        if handle_voice(self, "GET"):
+            return
         if self.path in ("/api/tokens", "/api/agent-status",
                          "/api/max-tracker", "/api/github", "/api/lovable"):
             self._record_panel_poll()
@@ -3755,6 +3766,9 @@ class Handler(BaseHTTPRequestHandler):
         pass  # 30 s polling must not fill the log
 
     def log_error(self, fmt, *args):
+        if getattr(self, "path", "").startswith("/grokbot/"):
+            log.warning("voice HTTP request failed")
+            return
         # BaseHTTPRequestHandler routes log_error through log_message, so
         # the silenced access log silenced the errors with it. The access
         # log must be quiet; the errors must not.
@@ -3763,6 +3777,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def _build_arg_parser():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--grok-voice", action="store_true",
+                    help="Enable authenticated Ask my bot team voice routes (env required)")
     ap.add_argument("--port", type=int, default=8737)
     ap.add_argument("--dir", default=os.path.expanduser("~/.claude/projects"))
     ap.add_argument(
@@ -4245,6 +4261,11 @@ def main():
         grok_monitor.start()
     Handler.grok_monitor = grok_monitor
 
+    voice_service = VoiceService(VoiceConfig.from_env()) if args.grok_voice else None
+    Handler.grok_voice = voice_service
+    if voice_service is not None:
+        voice_service.start()
+
     lovable_monitor = None
     if args.lovable:
         lovable_monitor = LovableMonitor()
@@ -4477,6 +4498,8 @@ def main():
         pass
     finally:
         discovery.stop()
+        if voice_service is not None:
+            voice_service.stop()
         if interaction_relay_adapter is not None:
             interaction_relay_adapter.stop()
         if relay_publisher is not None:

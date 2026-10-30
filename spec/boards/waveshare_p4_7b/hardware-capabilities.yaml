@@ -1,0 +1,183 @@
+schema_version: 1
+board: waveshare-esp32-p4-wifi6-touch-lcd-7b-c
+capabilities:
+- id: display.lcd
+  name: 1024x600 MIPI LCD
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'no'
+  confidence: source_inspected
+  resources:
+  - Waveshare BSP 3.0.1
+  constraints:
+  - Build-only port; no physical acceptance
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-7b-examples
+  - waveshare-7b-docs
+  - vibepulse-p4-voice
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-p4-voice
+  - field: unit_verified
+    value: 'no'
+    source: vibepulse-p4-voice
+  last_verified: null
+- id: input.touch
+  name: GT911 touch
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'no'
+  confidence: source_inspected
+  resources:
+  - Waveshare BSP 3.0.1
+  constraints:
+  - Build-only port; no physical acceptance
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-7b-examples
+  - waveshare-7b-docs
+  - vibepulse-p4-voice
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-p4-voice
+  - field: unit_verified
+    value: 'no'
+    source: vibepulse-p4-voice
+  last_verified: null
+- id: network.wifi
+  name: C6 ESP-Hosted SDIO
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'no'
+  confidence: source_inspected
+  resources:
+  - Waveshare BSP 3.0.1
+  constraints:
+  - Build-only port; no physical acceptance
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-7b-examples
+  - waveshare-7b-docs
+  - vibepulse-p4-voice
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-p4-voice
+  - field: unit_verified
+    value: 'no'
+    source: vibepulse-p4-voice
+  last_verified: null
+- id: audio.microphone
+  name: ES7210 input
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'no'
+  confidence: source_inspected
+  resources:
+  - Waveshare BSP 3.0.1
+  constraints:
+  - Build-only port; no physical acceptance
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-7b-examples
+  - waveshare-7b-docs
+  - vibepulse-p4-voice
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-p4-voice
+  - field: unit_verified
+    value: 'no'
+    source: vibepulse-p4-voice
+  last_verified: null
+- id: audio.speaker
+  name: ES8311 output
+  states:
+    soc_capable: 'yes'
+    board_wired: 'yes'
+    bsp_support: 'yes'
+    firmware_enabled: 'yes'
+    unit_verified: 'no'
+  confidence: source_inspected
+  resources:
+  - Waveshare BSP 3.0.1
+  constraints:
+  - Build-only port; no physical acceptance
+  conflicts: []
+  opportunities: []
+  sources:
+  - waveshare-7b-examples
+  - waveshare-7b-docs
+  - vibepulse-p4-voice
+  evidence:
+  - field: soc_capable
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: board_wired
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: bsp_support
+    value: 'yes'
+    source: waveshare-7b-examples
+  - field: firmware_enabled
+    value: 'yes'
+    source: vibepulse-p4-voice
+  - field: unit_verified
+    value: 'no'
+    source: vibepulse-p4-voice
+  last_verified: null
