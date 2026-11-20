@@ -5,6 +5,13 @@ on the [releases page](https://github.com/niclasvestlund-YT/vibepulse/releases).
 
 ## Unreleased
 
+### Fixed
+
+- Windows: the tokenserver scheduled task no longer opens a visible terminal
+  window on Windows 11, where Windows Terminal ignored `-WindowStyle Hidden`
+  and closing that window stopped the service. The task now runs under
+  `conhost.exe --headless`; reinstall the task to pick this up.
+
 ## v1.5.0 — 2026-10-28
 
 Release notes: [Paper USB edition](docs/releases/2026-10-28-paper-usb.md).

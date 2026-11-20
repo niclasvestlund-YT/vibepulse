@@ -258,6 +258,9 @@ assert "$LogTailBytes = 256KB" in windows_runner
 assert "Write-VibePulseLogLine" in windows_runner
 assert "run-windows-task.ps1" in windows_service
 assert "-MultipleInstances IgnoreNew" in windows_service
+# Windows Terminal ignores -WindowStyle Hidden; closing its window kills the service.
+assert "-Argument \"--headless `\"$PowerShell`\" $RunnerArgs\"" in windows_service
+assert "-Execute $Conhost" in windows_service
 assert "Stop-ScheduledTask -TaskName $TaskName" in windows_service
 assert "$RestartCount = 255" in windows_service
 assert "$WatchdogTrigger = New-ScheduledTaskTrigger -Once" in windows_service
