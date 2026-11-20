@@ -1,5 +1,14 @@
 # Lessons log
 
+## 2026-11-20 · A hidden PowerShell is not hidden under Windows Terminal
+
+On Windows 11 with the default terminal left on "Let Windows decide", the
+scheduled task's `powershell.exe -WindowStyle Hidden` opened a visible Windows
+Terminal tab with a blinking cursor. Closing it killed the tokenserver (task
+result 0xC000013A); the watchdog only revived it minutes later. The installer
+now runs the wrapper under `conhost.exe --headless`, which never creates a
+window regardless of the default-terminal delegation.
+
 ## 2026-10-28 · E-paper ACKs can succeed with the panel rail off
 
 The simple 3.97 vendor example omitted factory ALDO3 power control: CRC/USB

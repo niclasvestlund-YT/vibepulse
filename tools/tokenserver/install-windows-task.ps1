@@ -234,7 +234,12 @@ if ($PublishUrl) {
     if ($PublishName) { $RunnerArgs += " -PublishName `"$PublishName`"" }
 }
 
-$Action = New-ScheduledTaskAction -Execute $PowerShell -Argument $RunnerArgs `
+# Windows 11 hands console apps to Windows Terminal by default, which ignores
+# -WindowStyle Hidden: a visible window appears and closing it kills the
+# service (exit 0xC000013A). A headless conhost never creates a window.
+$Conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
+$Action = New-ScheduledTaskAction -Execute $Conhost `
+    -Argument "--headless `"$PowerShell`" $RunnerArgs" `
     -WorkingDirectory $RepoRoot
 
 # ValidateOnly deliberately constructs every ScheduledTasks object before it
